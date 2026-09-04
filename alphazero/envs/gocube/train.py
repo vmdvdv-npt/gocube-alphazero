@@ -53,6 +53,13 @@ def build_training_args(cli):
         process_batch_size=process_batch_size,
         compareWithBaseline=not cli.smoke,
         compareWithPast=not cli.smoke,
+        # A smoke run must actually exercise the optimizer once, even when the
+        # sample count is below the framework's default 1024-item train batch.
+        autoTrainSteps=not cli.smoke,
+        train_steps_per_iteration=1 if cli.smoke else 64,
+        # Fast games intentionally do not retain histories. Disable them in a
+        # smoke run so the single iteration is guaranteed to produce samples.
+        probFastSim=0.0 if cli.smoke else 0.75,
         nnet_type="graph",
         # No augmentation is allowed until a topology/action permutation is
         # explicitly proven for Torus/Cube Compatibility V1.
