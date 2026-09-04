@@ -43,10 +43,17 @@ class RunManifest:
         size: int,
         rule_set: str = "japanese",
         komi: float = 7.5,
-        terminal_adjudicator: str = JAPANESE_CLEANUP_ADJUDICATOR_V2,
+        terminal_adjudicator: str | None = None,
     ) -> "RunManifest":
+        if terminal_adjudicator is None:
+            terminal_adjudicator = (
+                CONSERVATIVE_AREA_ADJUDICATOR_V1
+                if rule_set == "chinese"
+                else JAPANESE_CLEANUP_ADJUDICATOR_V2
+            )
+        version = 1 if rule_set == "chinese" else RUN_MANIFEST_VERSION
         return cls(
-            version=RUN_MANIFEST_VERSION,
+            version=version,
             run_name=run_name,
             topology=topology,
             size=size,
