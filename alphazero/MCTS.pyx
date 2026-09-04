@@ -197,11 +197,15 @@ cdef class MCTS:
 
     cpdef void _add_root_noise(self):
         cdef int num_valid_moves = len(self._root._children)
-        cdef float[:] noise = np.array(np.random.dirichlet(
+        # NumPy's Dirichlet sampler already returns float64. Keep it in float64
+        # while iterating: casting extremely small components to float32 under
+        # np.seterr(under='raise') can raise FloatingPointError even though a
+        # component rounding to zero is harmless for exploration noise.
+        cdef double[:] noise = np.random.dirichlet(
             [NOISE_ALPHA_RATIO / num_valid_moves] * num_valid_moves
-        ), dtype=np.float32)
+        )
         cdef Node c
-        cdef float n
+        cdef double n
 
         for n, c in zip(noise, self._root._children):
             c.p = c.p * (1 - self.root_noise_frac) + self.root_noise_frac * n

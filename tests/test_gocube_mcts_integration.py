@@ -52,3 +52,26 @@ def test_cython_mcts_can_traverse_second_pass_and_backpropagate_terminal_result(
     probabilities = mcts.probs(game)
     assert np.isclose(probabilities.sum(), 1.0)
     assert probabilities[game.pass_action()] == 1.0
+
+
+def test_root_noise_accepts_values_below_float32_range(monkeypatch):
+    game = Torus9ChineseGame()
+    mcts = MCTS(mcts_args())
+    mcts.root_noise_frac = 0.1
+    mcts.find_leaf(game)
+
+    def subnormal_dirichlet(alpha):
+        # Reproduce the production failure deterministically: the old code
+        # cast these float64 subnormals to float32 while np.seterr(under='raise').
+        noise = np.full(len(alpha), 5e-324, dtype=np.float64)
+        noise[0] = 1.0
+        return noise
+
+    monkeypatch.setattr(np.random, "dirichlet", subnormal_dirichlet)
+
+    # Must not raise FloatingPointError during the root-noise application.
+    mcts._add_root_noise()
+
+    priors = np.asarray([child.p for child in mcts._root._children], dtype=np.float64)
+    assert np.isfinite(priors).all()
+    assert priors.max() > 0

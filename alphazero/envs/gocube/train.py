@@ -1,4 +1,5 @@
 import argparse
+import math
 
 import pyximport
 
@@ -16,18 +17,42 @@ def parse_args():
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--sims", type=int, default=100)
     parser.add_argument("--games-per-iteration", type=int, default=256)
+    parser.add_argument("--iterations", type=int, default=1000)
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run one bounded iteration and skip baseline/past arena comparisons",
+    )
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
 
 
 def build_training_args(cli):
+    if cli.workers < 1:
+        raise ValueError("workers must be at least 1")
+    if cli.games_per_iteration < 1:
+        raise ValueError("games-per-iteration must be at least 1")
+    if cli.iterations < 1:
+        raise ValueError("iterations must be at least 1")
+
     game_cls = game_class(cli.topology, cli.size)
     run_name = cli.run_name or f"gocube-{cli.topology}-{cli.size}-chinese75"
+
+    # process_batch_size is per worker. Keep the total number of concurrently
+    # simulated games close to gamesPerIteration instead of inheriting the
+    # generic framework default of 256 games *per worker*.
+    process_batch_size = max(1, math.ceil(cli.games_per_iteration / cli.workers))
+    iterations = 1 if cli.smoke else cli.iterations
+
     args = get_args(
         run_name=run_name,
         workers=cli.workers,
         gamesPerIteration=cli.games_per_iteration,
+        numIters=iterations,
         numMCTSSims=cli.sims,
+        process_batch_size=process_batch_size,
+        compareWithBaseline=not cli.smoke,
+        compareWithPast=not cli.smoke,
         nnet_type="graph",
         # No augmentation is allowed until a topology/action permutation is
         # explicitly proven for Torus/Cube Compatibility V1.
