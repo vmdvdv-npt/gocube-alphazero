@@ -1,8 +1,14 @@
 import argparse
 import math
+import os
+import pickle
+from glob import glob
+from math import ceil
 from time import time
 
 import pyximport
+import torch
+from torch.utils.data import ConcatDataset, DataLoader, TensorDataset
 
 pyximport.install()
 
@@ -12,34 +18,19 @@ from alphazero.envs.gocube.game import game_class
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
+from alphazero.utils import get_iter_file
 
 
 class GoCubeCoach(Coach):
-    """Coach variant for GoCube self-play model tracking and GPU batching."""
+    """Coach variant for GoCube batching and Japanese endgame targets."""
 
     def _save_model(self, model, iteration):
-        """Track the live self-play model when gating is disabled.
-
-        Base Coach uses ``self_play_iter == 0`` as a reason to keep workers in
-        random warmup mode. When model gating is disabled, self-play inference
-        uses ``train_net`` directly, so recording each newly saved checkpoint
-        makes iteration 2 leave warmup and keeps the logged self-play version
-        aligned with the network actually used.
-        """
         super()._save_model(model, iteration)
         if hasattr(self, "args") and not self.args.model_gating:
             self.self_play_iter = iteration
 
     @_set_state(TrainState.SELF_PLAY)
     def processSelfPlayBatches(self, iteration):
-        """Coalesce ready workers into larger neural-network inference calls.
-
-        The upstream Coach processes each ready worker independently. For
-        GoCube that can mean CUDA batches of only a few positions even when
-        many workers are waiting. A short coalescing window combines those
-        requests, runs one GraphNet call, splits the outputs, and then releases
-        all participating workers.
-        """
         sample_time = AverageMeter()
         inference_batch_size = AverageMeter()
         bar = Bar("Generating Samples", max=self.args.gamesPerIteration)
@@ -96,6 +87,144 @@ class GoCubeCoach(Coach):
         )
         print()
 
+    @_set_state(TrainState.SAVE_SAMPLES)
+    def saveIterationSamples(self, iteration):
+        """Persist policy/value plus score and ownership targets for GoCube V2."""
+        num_samples = self.file_queue.qsize()
+        print(f"Saving {num_samples} Japanese cleanup samples")
+
+        data_tensor = torch.zeros([num_samples, *self.game_cls.observation_size()])
+        policy_tensor = torch.zeros([num_samples, self.game_cls.action_size()])
+        value_tensor = torch.zeros([num_samples, self.game_cls.num_players() + 1])
+        score_tensor = torch.zeros([num_samples, 1])
+        ownership_tensor = torch.zeros([
+            num_samples,
+            self.game_cls.logical_topology().point_count,
+            3,
+        ])
+
+        for i in range(num_samples):
+            data, policy, value, score, ownership = self.file_queue.get()
+            data_tensor[i] = torch.from_numpy(data)
+            policy_tensor[i] = torch.from_numpy(policy)
+            value_tensor[i] = torch.from_numpy(value)
+            score_tensor[i] = torch.from_numpy(score)
+            ownership_tensor[i] = torch.from_numpy(ownership)
+
+        folder = os.path.join(self.args.data, self.args.run_name)
+        filename = os.path.join(folder, get_iter_file(iteration).replace('.pkl', ''))
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        torch.save(data_tensor, filename + '-data.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
+        torch.save(policy_tensor, filename + '-policy.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
+        torch.save(value_tensor, filename + '-value.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
+        torch.save(score_tensor, filename + '-score.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
+        torch.save(ownership_tensor, filename + '-ownership.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
+
+    @_set_state(TrainState.TRAIN)
+    def train(self, iteration):
+        """Train on V2 five-tensor datasets without mixing legacy Chinese data."""
+        num_train_steps = 0
+        sample_counter = 0
+
+        def add_tensor_dataset(train_iter, tensor_dataset_list, run_name=self.args.run_name):
+            filename = os.path.join(
+                os.path.join(self.args.data, run_name), get_iter_file(train_iter).replace('.pkl', '')
+            )
+            try:
+                data_tensor = torch.load(filename + '-data.pkl')
+                policy_tensor = torch.load(filename + '-policy.pkl')
+                value_tensor = torch.load(filename + '-value.pkl')
+                score_tensor = torch.load(filename + '-score.pkl')
+                ownership_tensor = torch.load(filename + '-ownership.pkl')
+            except FileNotFoundError as exc:
+                print('Warning: could not find V2 tensor data. ' + str(exc))
+                return
+
+            tensor_dataset_list.append(TensorDataset(
+                data_tensor,
+                policy_tensor,
+                value_tensor,
+                score_tensor,
+                ownership_tensor,
+            ))
+            nonlocal num_train_steps
+            if self.args.averageTrainSteps:
+                nonlocal sample_counter
+                num_train_steps += data_tensor.size(0)
+                sample_counter += 1
+            else:
+                num_train_steps = data_tensor.size(0)
+
+        def train_data(tensor_dataset_list, train_on_all=False):
+            if not tensor_dataset_list or sum(len(dataset) for dataset in tensor_dataset_list) == 0:
+                print('No valid scored samples in this window; skipping optimizer step.')
+                return self.train_net.l_pi, self.train_net.l_v
+
+            dataset = ConcatDataset(tensor_dataset_list)
+            dataloader = DataLoader(
+                dataset,
+                batch_size=self.args.train_batch_size,
+                shuffle=True,
+                num_workers=self.args.workers,
+                pin_memory=True,
+            )
+
+            if self.args.averageTrainSteps and sample_counter:
+                nonlocal num_train_steps
+                num_train_steps //= sample_counter
+
+            train_steps = len(dataset) // self.args.train_batch_size \
+                if train_on_all else (
+                    num_train_steps // self.args.train_batch_size
+                    if self.args.autoTrainSteps else self.args.train_steps_per_iteration
+                )
+            result = self.train_net.train(dataloader, train_steps)
+            del dataloader
+            del dataset
+            return result
+
+        if self.args.train_on_past_data and iteration == self.args.startIter:
+            next_start_iter = 1
+            total_iters = len(
+                glob(os.path.join(self.args.data, self.args.past_data_run_name, '*.pkl'))
+            ) // 5
+            num_chunks = ceil(total_iters / self.args.past_data_chunk_size)
+            print(
+                f'Training on V2 past data from run "{self.args.past_data_run_name}" '
+                f'in {num_chunks} chunks.'
+            )
+            for _ in range(num_chunks):
+                datasets = []
+                i = next_start_iter
+                for i in range(next_start_iter, min(
+                    next_start_iter + self.args.past_data_chunk_size,
+                    total_iters + 1,
+                )):
+                    add_tensor_dataset(i, datasets, run_name=self.args.past_data_run_name)
+                next_start_iter = i + 1
+                self.loss_pi, self.loss_v = train_data(datasets, train_on_all=True)
+        else:
+            datasets = []
+            current_history_size = min(
+                max(
+                    self.args.minTrainHistoryWindow,
+                    (iteration + self.args.minTrainHistoryWindow) // self.args.trainHistoryIncrementIters,
+                ),
+                self.args.maxTrainHistoryWindow,
+            )
+            for i in range(max(1, iteration - current_history_size), iteration + 1):
+                add_tensor_dataset(i, datasets)
+            self.loss_pi, self.loss_v = train_data(datasets)
+
+        self.writer.add_scalar('loss/policy', self.loss_pi, iteration)
+        self.writer.add_scalar('loss/value', self.loss_v, iteration)
+        self.writer.add_scalar('loss/ownership', self.train_net.l_ownership, iteration)
+        self.writer.add_scalar('loss/score', self.train_net.l_score, iteration)
+        self.writer.add_scalar('loss/total', self.train_net.l_total, iteration)
+        self._save_model(self.train_net, iteration)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train AlphaZero on a GoCube topology")
@@ -107,6 +236,7 @@ def parse_args():
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--train-batch-size", type=int, default=1024)
     parser.add_argument("--fast-game-prob", type=float, default=0.75)
+    parser.add_argument("--endgame-sample-weight", type=int, default=3)
     parser.add_argument(
         "--inference-batch-wait-ms",
         type=float,
@@ -146,13 +276,12 @@ def build_training_args(cli):
         raise ValueError("fast-game-prob must be between 0 and 1")
     if cli.inference_batch_wait_ms < 0:
         raise ValueError("inference-batch-wait-ms must be non-negative")
+    if cli.endgame_sample_weight < 1:
+        raise ValueError("endgame-sample-weight must be at least 1")
 
-    game_cls = game_class(cli.topology, cli.size)
-    run_name = cli.run_name or f"gocube-{cli.topology}-{cli.size}-chinese75"
+    game_cls = game_class(cli.topology, cli.size, "japanese")
+    run_name = cli.run_name or f"gocube-{cli.topology}-{cli.size}-japanese75-v2"
 
-    # process_batch_size is per worker. Keep the total number of concurrently
-    # simulated games close to gamesPerIteration instead of inheriting the
-    # generic framework default of 256 games *per worker*.
     process_batch_size = max(1, math.ceil(cli.games_per_iteration / cli.workers))
     iterations = 1 if cli.smoke else cli.iterations
     arena_enabled = not (cli.smoke or cli.no_arena)
@@ -168,26 +297,21 @@ def build_training_args(cli):
         inference_batch_wait_ms=cli.inference_batch_wait_ms,
         compareWithBaseline=arena_enabled,
         compareWithPast=arena_enabled,
-        # Gating only advances via compareToPast(). If arena comparisons are
-        # disabled, gating must also be disabled; GoCubeCoach then advances the
-        # live self-play model version whenever the train checkpoint is saved.
         model_gating=arena_enabled,
-        # A smoke run must actually exercise the optimizer once, even when the
-        # sample count is below the configured train batch size.
         autoTrainSteps=not cli.smoke,
         train_steps_per_iteration=1 if cli.smoke else 64,
-        # Fast games intentionally do not retain histories. Disable them in a
-        # smoke run so the single iteration is guaranteed to produce samples.
         probFastSim=0.0 if cli.smoke else cli.fast_game_prob,
         nnet_type="graph",
-        # No augmentation is allowed until a topology/action permutation is
-        # explicitly proven for Torus/Cube Compatibility V1.
         symmetricSamples=False,
         num_channels=64,
         depth=6,
         value_dense_layers=[128, 64],
-        policy_dense_layers=[128],  # retained in checkpoint args; GraphNet does not use it
-        # Immutable integration metadata is also persisted inside new checkpoint args.
+        policy_dense_layers=[128],
+        score_dense_layers=[64],
+        gocube_auxiliary_targets=True,
+        ownership_loss_weight=0.5,
+        score_loss_weight=0.5,
+        gocube_endgame_sample_weight=cli.endgame_sample_weight,
         gocube_topology=game_cls.topology_kind(),
         gocube_size=game_cls.board_size(),
         gocube_rule_set=game_cls.RULESET,
