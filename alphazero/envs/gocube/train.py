@@ -10,6 +10,23 @@ from alphazero.NNetWrapper import NNetWrapper
 from alphazero.envs.gocube.game import game_class
 
 
+class GoCubeCoach(Coach):
+    """Coach variant that tracks the live self-play model without gating.
+
+    Base Coach uses ``self_play_iter == 0`` as a reason to keep workers in
+    random warmup mode. When model gating is disabled, self-play inference
+    correctly uses ``train_net`` directly, but ``self_play_iter`` otherwise
+    never advances. Recording every newly saved train checkpoint here makes
+    iteration 2 leave warmup and keeps the logged self-play model version
+    aligned with the network actually used.
+    """
+
+    def _save_model(self, model, iteration):
+        super()._save_model(model, iteration)
+        if hasattr(self, "args") and not self.args.model_gating:
+            self.self_play_iter = iteration
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Train AlphaZero on a GoCube topology")
     parser.add_argument("--topology", choices=("torus", "cube"), default="torus")
@@ -70,8 +87,8 @@ def build_training_args(cli):
         compareWithBaseline=arena_enabled,
         compareWithPast=arena_enabled,
         # Gating only advances via compareToPast(). If arena comparisons are
-        # disabled, gating must also be disabled or self-play would remain on
-        # the initial checkpoint forever.
+        # disabled, gating must also be disabled; GoCubeCoach then advances the
+        # live self-play model version whenever the train checkpoint is saved.
         model_gating=arena_enabled,
         # A smoke run must actually exercise the optimizer once, even when the
         # sample count is below the configured train batch size.
@@ -96,7 +113,7 @@ def main():
     cli = parse_args()
     game_cls, args = build_training_args(cli)
     network = NNetWrapper(game_cls, args)
-    coach = Coach(game_cls, network, args)
+    coach = GoCubeCoach(game_cls, network, args)
     coach.learn()
 
 
