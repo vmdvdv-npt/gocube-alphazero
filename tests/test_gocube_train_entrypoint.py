@@ -16,6 +16,7 @@ def cli_args(**overrides):
         "iterations": 3,
         "train_batch_size": 1024,
         "fast_game_prob": 0.75,
+        "inference_batch_wait_ms": 1.0,
         "no_arena": False,
         "smoke": False,
         "run_name": "gocube-train-test",
@@ -31,6 +32,7 @@ def test_iterations_and_process_batch_size_are_forwarded():
     assert args.gamesPerIteration == 8
     assert args.process_batch_size == 4
     assert args.train_batch_size == 1024
+    assert args.inference_batch_wait_ms == 1.0
     assert args.compareWithBaseline is True
     assert args.compareWithPast is True
     assert args.model_gating is True
@@ -58,6 +60,7 @@ def test_no_arena_uses_latest_train_net_and_forwards_short_run_controls():
             no_arena=True,
             train_batch_size=256,
             fast_game_prob=0.0,
+            inference_batch_wait_ms=2.5,
             iterations=5,
             games_per_iteration=16,
         )
@@ -67,6 +70,7 @@ def test_no_arena_uses_latest_train_net_and_forwards_short_run_controls():
     assert args.gamesPerIteration == 16
     assert args.process_batch_size == 8
     assert args.train_batch_size == 256
+    assert args.inference_batch_wait_ms == 2.5
     assert args.compareWithBaseline is False
     assert args.compareWithPast is False
     assert args.model_gating is False
@@ -113,6 +117,7 @@ def test_gating_keeps_self_play_version_owned_by_arena(monkeypatch):
         ("train_batch_size", 0, "train-batch-size must be at least 1"),
         ("fast_game_prob", -0.1, "fast-game-prob must be between 0 and 1"),
         ("fast_game_prob", 1.1, "fast-game-prob must be between 0 and 1"),
+        ("inference_batch_wait_ms", -0.1, "inference-batch-wait-ms must be non-negative"),
     ],
 )
 def test_invalid_training_counts_fail_fast(field, value, message):
