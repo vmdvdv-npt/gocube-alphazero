@@ -24,8 +24,19 @@ from .core import (
     torus_topology,
     valid_moves,
 )
+from .endgame import (
+    ALIVE_ALGORITHM,
+    AUTOMATIC_DEAD_ALGORITHM,
+    AUTOMATIC_SEKI_ALGORITHM,
+    EndgameGroupProposal,
+    assisted_endgame_proposal,
+    proposal_point_ids,
+)
 
 __all__ = [
+    "ALIVE_ALGORITHM",
+    "AUTOMATIC_DEAD_ALGORITHM",
+    "AUTOMATIC_SEKI_ALGORITHM",
     "BLACK",
     "CUBE_FACES",
     "EMPTY",
@@ -33,6 +44,7 @@ __all__ = [
     "PLAYING",
     "TORUS_SIZES",
     "WHITE",
+    "EndgameGroupProposal",
     "FinalScore",
     "GoState",
     "GroupClassification",
@@ -42,9 +54,11 @@ __all__ = [
     "TerritoryPoints",
     "Topology",
     "apply_action",
+    "assisted_endgame_proposal",
     "cube_topology",
     "initial_state",
     "make_topology",
+    "proposal_point_ids",
     "score_position",
     "state_from_point_ids",
     "stone_groups",
