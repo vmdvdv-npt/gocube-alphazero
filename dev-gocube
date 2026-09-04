@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="$ROOT/.venv/bin/python"
+
+if [[ ! -x "$PYTHON" ]]; then
+  echo "GoCube AlphaZero launcher: missing executable $PYTHON" >&2
+  echo "Create the repository .venv and install requirements first." >&2
+  exit 2
+fi
+
+exec "$PYTHON" -m alphazero.envs.gocube.integration.dev_launcher \
+  --checkpoint-dir "$ROOT/checkpoint" \
+  "$@"
