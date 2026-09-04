@@ -4,7 +4,7 @@ import operator
 
 import numpy as np
 
-from alphazero.envs.gocube.core import BLACK, EMPTY, WHITE
+from alphazero.envs.gocube.core import BLACK, EMPTY, PLAYING, WHITE
 from alphazero.envs.gocube.evaluation import prepare_evaluation_args
 from alphazero.envs.gocube.game import game_class
 
@@ -33,12 +33,13 @@ def captured_point_ids(
     ]
 
 
-def serialize_terminal(terminal) -> dict[str, object]:
+def serialize_terminal(terminal, *, cleanup_move_count: int = 0) -> dict[str, object]:
     payload = {
         "winner": terminal.winner,
         "adjudicatorId": terminal.adjudicator_id,
         "fallbackCount": terminal.fallback_count,
         "unresolvedCount": terminal.unresolved_count,
+        "cleanupMoveCount": cleanup_move_count,
         "noResult": terminal.no_result,
         "score": None,
     }
@@ -108,6 +109,7 @@ class GameGenerator:
 
         game = game_cls()
         moves: list[dict[str, object]] = []
+        cleanup_move_count = 0
 
         while True:
             winstate = game.win_state()
@@ -136,6 +138,13 @@ class GameGenerator:
                 game.play_action(action)
             except Exception as exc:
                 raise GenerationFailed(f"GoGame.play_action({action}) failed: {exc}") from exc
+
+            # Cleanup is an internal proof phase for Japanese territory scoring,
+            # not part of the player-facing game record. Keep the two main-phase
+            # passes in replay, then suppress service cleanup placements/passes.
+            if pre_state.phase != PLAYING:
+                cleanup_move_count += 1
+                continue
 
             post_board = np.asarray(game.semantic_state.board)
             captured = (
@@ -166,5 +175,5 @@ class GameGenerator:
             "black": {"checkpointId": black.checkpoint_id},
             "white": {"checkpointId": white.checkpoint_id},
             "moves": moves,
-            "result": serialize_terminal(terminal),
+            "result": serialize_terminal(terminal, cleanup_move_count=cleanup_move_count),
         }
