@@ -32,7 +32,7 @@ The GoCube source of truth for this contract is:
 - `src/app/TorusGameController.ts`
 - `src/app/Cube2DGameController.ts`
 
-The AlphaZero framework source of truth is `alphazero/Game.py` and the existing MCTS/self-play code that consumes that class.
+The AlphaZero framework source of truth is `alphazero/Game.py` plus the existing MCTS/self-play code that consumes that class.
 
 Any future GoCube change that alters a rule, topology, point order, scoring rule, or terminal-adjudication meaning MUST trigger a compatibility review. A deliberately incompatible change requires a new specification version rather than silently changing V1.
 
@@ -47,7 +47,7 @@ V1 fixes:
 5. move legality, capture, suicide, simple ko, pass, and player switching;
 6. two-pass transition semantics;
 7. Chinese and Japanese scoring semantics;
-8. the automatic terminal-adjudication contract for self-play;
+8. the contract that a self-play terminal adjudicator must satisfy;
 9. the mapping to the existing AlphaZero `GameState` lifecycle.
 
 V1 intentionally does **not** fix the neural observation-plane layout, network architecture, symmetry augmentation, resign action, superko, handicap, or time controls. Those may be specified separately without changing the game semantics fixed here.
@@ -61,7 +61,10 @@ topology_kind ∈ {torus, cube}
 size          = N
 ruleset       ∈ {chinese, japanese}
 komi          = finite number
+terminal_adjudicator_id = versioned self-play adjudicator implementation
 ```
+
+`terminal_adjudicator_id` is training metadata, not a field in production GoCube `GameState`. It is required because terminal classification affects reward semantics. Changing the terminal adjudicator implementation or its decision rules is a training-semantics change and MUST produce a new identifier.
 
 This binding is important because `alphazero.Game.GameState.action_size()` and `observation_size()` are static methods. A single runtime `Game` class MUST NOT mix board sizes or topology kinds whose action spaces differ. Separate bound classes/configurations or separate training runs MAY be used.
 
@@ -72,7 +75,7 @@ Current production size constraints at the source anchor are:
 
 ## 4. Semantic state contract
 
-The minimum semantic state required by the training engine is:
+The minimum semantic game state required by the training engine is:
 
 ```text
 topology_kind
@@ -333,16 +336,19 @@ Production GoCube semantics are:
 playing
   -- PASS, PASS -->
 endgame
-  --> EndgameClassifier proposal
+  --> AssistedEndgameClassifier proposal
   --> alive / dead / seki / unresolved review state
+  --> user may resolve/override review statuses
   --> complete classification
   --> ruleset scoring
   --> finished
 ```
 
+Both current Torus and Cube production controllers instantiate `AssistedEndgameClassifier` and keep proposal statuses editable until endgame review is explicitly completed.
+
 The state immediately after the second pass therefore represents **end of normal play, pending adjudication**. It MUST NOT be treated as a normal already-scored terminal state.
 
-For training, the implementation MAY collapse the pending-adjudication lifecycle into the second-pass `play_action()` call for compatibility with the synchronous AlphaZero loop, but it MUST preserve the adjudication semantics in section 11.
+For training, the implementation MAY collapse the pending-adjudication lifecycle into the second-pass `play_action()` call for compatibility with the synchronous AlphaZero loop, but it MUST preserve the terminal-adjudication contract in section 11.
 
 ## 10. Scoring contract
 
@@ -397,11 +403,23 @@ margin = abs(black_score - white_score)
 
 ## 11. Automatic terminal adjudication contract for self-play
 
-This is a separate contract because production GoCube may hand unresolved groups to a human endgame review, while self-play has no human actor.
+This is a separate contract because production GoCube permits `unresolved` groups and hands them to human endgame review, while AlphaZero MCTS has no human actor and requires a terminal value for every terminal node it reaches.
 
-### 11.1 Input
+### 11.1 Why the self-play adjudicator must be total
 
-The automatic adjudicator receives the immutable state immediately after the second consecutive pass plus the bound environment configuration:
+In the current framework, MCTS reaches a leaf by calling `play_action()`, then uses `win_state()` to decide whether the node is terminal and to backpropagate its result. `win_state()` can represent only Black win, White win, draw, or “not terminal yet”.
+
+Therefore an `unresolved` two-pass position cannot be represented safely as an ordinary MCTS terminal node:
+
+- mapping it to draw fabricates a reward;
+- leaving `win_state()` all-zero while exposing no legal moves creates an invalid leaf;
+- discarding only the final played episode is insufficient because MCTS can encounter the same two-pass state inside search simulations before the real game reaches it.
+
+**Normative consequence:** the self-play terminal adjudicator MUST be **total for every two-pass state reachable by MCTS in an enabled training environment**. A normal self-play run may not expose `unresolved` as a terminal outcome to MCTS.
+
+### 11.2 Input
+
+The adjudicator receives the immutable state immediately after the second consecutive pass plus the bound environment configuration:
 
 ```text
 board
@@ -411,47 +429,58 @@ topology_kind
 size
 ruleset
 komi
+terminal_adjudicator_id
 ```
 
-The normal-play state MUST NOT be modified by classification.
+Classification MUST NOT mutate the played board or normal-play capture counters.
 
-### 11.2 Required classifier semantics
+### 11.3 Stage A — production-parity proposal
 
-The V1 automatic adjudicator MUST use semantics equivalent to the GoCube `AssistedEndgameClassifier` at the source anchor:
+The adjudicator MUST first reproduce semantics equivalent to GoCube `AssistedEndgameClassifier` at the source anchor:
 
 1. enumerate all complete logical stone groups using the topology graph;
 2. produce exactly one proposal per complete group;
 3. automatically prove only statuses supported by the conservative GoCube automatic proof logic;
-4. permit the explicit result `unresolved` for any group that is not proven `alive`, `dead`, or `seki`.
+4. preserve explicit `unresolved` for groups that the production automatic proof does not resolve.
 
-A Python implementation does not have to call TypeScript at runtime, but it MUST be behaviourally equivalent on the compatibility fixture suite. Re-implementing the classifier with a different heuristic and calling the result “compatible” is not permitted.
+A Python implementation does not have to call TypeScript at runtime, but Stage A MUST be behaviourally equivalent on the compatibility fixture suite. Replacing the production classifier with a different heuristic and calling it Stage-A-compatible is not permitted.
 
-### 11.3 Result type
+### 11.4 Stage B — total self-play resolver
 
-The semantic result is:
+If Stage A contains any `unresolved` group, self-play requires a second, training-specific resolver.
+
+The Stage B resolver MUST:
+
+- receive the complete Stage-A proposal and the same immutable end-of-play position;
+- leave every Stage-A status already proven `alive`, `dead`, or `seki` unchanged;
+- assign `alive`, `dead`, or `seki` to every remaining unresolved group;
+- operate on the logical topology graph, never on planar-edge assumptions or renderer coordinates;
+- be deterministic for a fixed position, configuration, and `terminal_adjudicator_id`;
+- return evidence/diagnostic data sufficient to reproduce or audit the decision;
+- never use a silent fallback such as “unresolved = alive”, “unresolved = seki”, or “unresolved = draw” unless such a rule is explicitly adopted as a separately reviewed adjudicator version.
+
+GoCube production currently does **not** define this automatic Stage-B decision: production uses human review for the remaining ambiguity. Consequently Stage B is a declared self-play policy, not something that can be inferred from the existing production engine.
+
+The exact Stage-B algorithm MUST be selected, versioned, implemented, and covered by fixtures before full self-play is enabled. Until then, the environment is implementation-incomplete even though the GoCube compatibility boundary is defined by this document.
+
+### 11.5 Successful result
+
+Normal self-play terminal adjudication returns only a complete resolved result:
 
 ```text
 RESOLVED {
-  classification: every group -> alive | dead | seki,
+  classification: every logical stone group -> alive | dead | seki,
   score: FinalScore,
-  winner: black | white | draw
-}
-
-or
-
-UNRESOLVED {
-  proposal: every group -> alive | dead | seki | unresolved,
-  unresolved_groups: non-empty set
+  winner: black | white | draw,
+  terminal_adjudicator_id,
+  evidence
 }
 ```
 
-### 11.4 Resolved path
+Then:
 
-If every group is automatically resolved:
-
-1. convert the proposal to a complete automatic classification;
-2. score with the bound `ruleset` and `komi` using section 10;
-3. expose the winner through AlphaZero `win_state()` as:
+1. score the position with section 10 and the bound `ruleset`/`komi`;
+2. expose the winner through AlphaZero `win_state()` as:
 
 ```text
 black win -> [1, 0, 0]
@@ -461,23 +490,41 @@ draw      -> [0, 0, 1]
 
 for the two-player framework value vector.
 
-### 11.5 Unresolved path — normative safety rule
+Every two-pass node that is allowed to behave as terminal inside MCTS MUST reach this resolved result.
 
-If at least one group is `unresolved`:
+### 11.6 Adjudication failure is a hard capability failure, not a game result
 
-- the adjudicator MUST NOT call normal scoring;
-- `unresolved` MUST NOT be silently converted to `alive`, `dead`, or `seki`;
-- the position MUST NOT be labelled a draw;
-- no win/loss/draw value target may be emitted for the episode;
-- all training samples accumulated from that episode MUST be discarded.
+An implementation MAY detect an exceptional condition in which its configured Stage-B resolver cannot produce a complete classification. That condition is:
 
-This is the V1 fail-closed rule. It preserves semantic correctness instead of injecting fabricated terminal labels.
+```text
+ADJUDICATION_FAILURE
+```
 
-The training orchestration MUST therefore provide an explicit **unresolved-episode abort/reset path** outside the existing `win_state()` value representation. The current upstream-style `GameState.win_state()` cannot encode “normal play is over but terminal reward is unknown”, and `SelfPlayAgent` currently assumes every completed episode has a win/draw target. The integration MUST handle this condition before samples are enqueued.
+It is **not** a fourth game result and MUST NOT be surfaced to MCTS as draw/non-terminal/zero-value.
 
-An unresolved episode SHOULD be counted in dedicated telemetry such as `terminal_adjudication_unresolved`, but MUST NOT be counted as a successfully scored training game. Implementations SHOULD include a run-level guard/threshold so a high unresolved rate fails visibly instead of causing an endless attempt loop.
+On such a failure:
 
-A future stronger **sound** automatic adjudicator may reduce the unresolved rate. Changing the fail-closed meaning of `unresolved` requires a compatibility review.
+- no score may be produced;
+- no win/loss/draw target may be produced;
+- no samples from the affected search/game may enter the training dataset;
+- the worker/run MUST abort or fail closed before continuing MCTS with that node;
+- the failure MUST be visible in telemetry/logging.
+
+The system SHOULD include a pre-training conformance gate that exercises terminal fixtures so adjudication failure is discovered before expensive self-play begins.
+
+### 11.7 Compatibility claim boundary
+
+Normal-play topology, move legality, ko, captures, passes, and scoring in this specification are direct GoCube parity requirements.
+
+Stage A is also direct production parity. Stage B is necessarily a self-play extension until GoCube itself has a total automatic endgame resolver. Therefore training artifacts SHOULD identify their rules semantics as, for example:
+
+```text
+GoCube Compatibility V1 + terminal_adjudicator_id=<id>
+```
+
+A training run MUST NOT claim bit-for-bit equivalence with the production human-review endgame unless its Stage-B outcomes have an independent basis for that stronger claim.
+
+This explicit boundary is preferable to hiding an arbitrary dead/alive convention inside scoring.
 
 ## 12. Mapping to `alphazero.Game.GameState`
 
@@ -491,14 +538,14 @@ The existing framework API remains authoritative. The Go environment maps onto i
 | `play_action(a)` | apply the exact transition in section 8; second pass invokes/enters adjudication |
 | `player` / `_player` | `0 = black`, `1 = white` |
 | `turns` / `_turns` | accepted action count / GoCube `moveNumber` |
-| `win_state()` | all-zero while normal play continues; resolved terminal vector only after successful adjudication |
+| `win_state()` | all-zero while normal play continues; resolved terminal vector only after successful total adjudication |
 | `clone()` | independent clone preserving all semantic state |
 | `__eq__` / MCTS state identity | must distinguish states whenever future legality or reward can differ |
 | `observation()` | encoding is outside V1, but must describe the bound game state consistently |
 
 `valid_moves()` for a playing state MUST always include `PASS`. Illegal stone placements are masked out for occupancy, suicide, and simple ko.
 
-No action may be presented to MCTS after a resolved terminal result. An unresolved terminal-adjudication outcome is intercepted by the self-play orchestration as specified above rather than exposed as a fake draw or a new neural action.
+No action may be presented to MCTS after a resolved terminal result. An adjudication failure is a hard integration error, not a state with zero valid moves and an all-zero `win_state()`.
 
 ## 13. Observation and symmetry constraints for Stage 2
 
@@ -517,7 +564,7 @@ The training environment is not “GoCube-compatible V1” until automated diffe
 
 For every supported training size:
 
-- `points` is byte-for-byte/element-for-element equivalent to GoCube `Topology.points()`;
+- `points` is element-for-element equivalent to GoCube `Topology.points()`;
 - PointId -> point index -> PointId round-trips;
 - point action indices equal point indices;
 - `PASS` is exactly the final action;
@@ -564,10 +611,13 @@ Golden fixtures MUST compare full score semantics for both rulesets, including:
 
 Fixtures MUST include:
 
-- fully automatically resolved endgame -> exact final score and `win_state()`;
-- at least one unresolved group -> `UNRESOLVED`, no score, no value target;
-- mixed automatic statuses plus unresolved groups -> still `UNRESOLVED`;
-- proof behaviour on topology seams so classification does not accidentally use planar-edge assumptions.
+- Stage-A fully resolved endgame -> exact production-equivalent classification and score;
+- Stage-A unresolved groups -> Stage B fills only unresolved statuses and returns a complete classification;
+- mixed automatic statuses plus unresolved groups -> proven Stage-A statuses remain unchanged;
+- repeated adjudication of the same state/config/id -> identical result;
+- topology-seam positions -> no planar-edge assumptions;
+- deliberately injected resolver failure -> hard abort/no samples, never draw;
+- MCTS integration -> a second-pass leaf never becomes “all-zero `win_state()` + zero valid moves”.
 
 ## 15. Compatibility invariants
 
@@ -583,19 +633,22 @@ The following are V1 invariants and should be treated as checkpoint/data compati
 8. Pass participates in accepted-action history and breaks immediate ko in the same way as GoCube.
 9. Two consecutive passes end normal play but do not by themselves produce reward.
 10. Scoring requires a complete `alive/dead/seki` classification.
-11. `unresolved` is a first-class adjudication failure and never a draw/default-alive shortcut.
-12. Chinese/Japanese scoring and capture accounting match GoCube exactly.
+11. Production `unresolved` is preserved by Stage A and is never silently coerced inside scoring.
+12. Self-play requires a versioned **total** Stage-B resolver before a two-pass state may be terminal in MCTS.
+13. Chinese/Japanese scoring and capture accounting match GoCube exactly.
 
 ## 16. Stage 2 implementation boundary
 
-With this specification fixed, Stage 2 may implement the Go environment inside `gocube-alphazero` without inventing game semantics. The next implementation work should be limited to:
+With this specification fixed, Stage 2 may implement the Go environment inside `gocube-alphazero` without inventing ordinary game semantics. The next implementation work is bounded to:
 
 - topology tables/mapping matching this V1 contract;
 - game-state transition logic;
 - `GameState` adapter methods required by the existing framework;
-- automatic endgame classifier/scoring parity or an equivalent verified bridge;
-- unresolved-episode orchestration support;
+- Stage-A `AssistedEndgameClassifier` parity;
+- selection and implementation of a versioned total Stage-B self-play resolver;
+- exact Chinese/Japanese scoring parity;
+- MCTS/self-play hard-failure handling for adjudication capability failures;
 - cross-engine conformance fixtures/tests;
 - a separately reviewed neural observation encoding.
 
-Until those conformance tests pass, generated self-play data MUST NOT be described as semantically equivalent to production GoCube.
+Full self-play MUST NOT be enabled until a configured terminal adjudicator is total on the conformance suite and MCTS never sees an unresolved two-pass node. Until all conformance tests pass, generated self-play data MUST NOT be described as semantically equivalent to production GoCube.
