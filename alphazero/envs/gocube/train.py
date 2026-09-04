@@ -9,6 +9,7 @@ pyximport.install()
 from alphazero.Coach import Coach, TrainState, _set_state, get_args
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.envs.gocube.game import game_class
+from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
 
@@ -186,6 +187,12 @@ def build_training_args(cli):
         depth=6,
         value_dense_layers=[128, 64],
         policy_dense_layers=[128],  # retained in checkpoint args; GraphNet does not use it
+        # Immutable integration metadata is also persisted inside new checkpoint args.
+        gocube_topology=game_cls.topology_kind(),
+        gocube_size=game_cls.board_size(),
+        gocube_rule_set=game_cls.RULESET,
+        gocube_komi=float(game_cls.KOMI),
+        gocube_terminal_adjudicator=game_cls.TERMINAL_ADJUDICATOR_ID,
     )
     return game_cls, args
 
@@ -193,6 +200,7 @@ def build_training_args(cli):
 def main():
     cli = parse_args()
     game_cls, args = build_training_args(cli)
+    ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
     network = NNetWrapper(game_cls, args)
     coach = GoCubeCoach(game_cls, network, args)
     coach.learn()
