@@ -175,25 +175,50 @@ class SelfPlayAgent(mp.Process):
 
             winstate = self.games[i].win_state()
             if winstate.any():
-                self.result_queue.put((self.games[i].clone(), winstate, self.id))
+                final_game = self.games[i].clone()
+                self.result_queue.put((final_game, winstate, self.id))
                 lock = self.games_played.get_lock()
                 lock.acquire()
                 if self.games_played.value < self.args.gamesPerIteration:
                     self.games_played.value += 1
                     lock.release()
                     if not self._is_arena:
-                        for hist in self.histories[i]:
-                            self._check_pause()
-                            if self.args.symmetricSamples:
-                                data = hist[0].symmetries(hist[1])
-                            else:
-                                data = ((hist[0], hist[1]),)
+                        training_valid = True
+                        if hasattr(final_game, "has_training_result"):
+                            training_valid = final_game.has_training_result()
 
-                            for state, pi in data:
+                        if training_valid:
+                            auxiliary = bool(getattr(self.args, "gocube_auxiliary_targets", False))
+                            if auxiliary:
+                                score_target, ownership_target = final_game.training_targets()
+
+                            for hist in self.histories[i]:
                                 self._check_pause()
-                                self.output_queue.put((
-                                    state.observation(), pi, np.array(winstate, dtype=np.float32)
-                                ))
+                                if self.args.symmetricSamples:
+                                    data = hist[0].symmetries(hist[1])
+                                else:
+                                    data = ((hist[0], hist[1]),)
+
+                                repeat = 1
+                                endgame_weight = int(getattr(self.args, "gocube_endgame_sample_weight", 1))
+                                if (
+                                    endgame_weight > 1
+                                    and hasattr(hist[0], "is_endgame_training_state")
+                                    and hist[0].is_endgame_training_state()
+                                ):
+                                    repeat = endgame_weight
+
+                                for state, pi in data:
+                                    self._check_pause()
+                                    sample = (
+                                        state.observation(),
+                                        pi,
+                                        np.array(winstate, dtype=np.float32),
+                                    )
+                                    if auxiliary:
+                                        sample = sample + (score_target, ownership_target)
+                                    for _ in range(repeat):
+                                        self.output_queue.put(sample)
                     self.games[i] = self.game_cls()
                     self.histories[i] = []
                     self.temps[i] = self.args.startTemp
