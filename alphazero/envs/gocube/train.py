@@ -18,6 +18,16 @@ def parse_args():
     parser.add_argument("--sims", type=int, default=100)
     parser.add_argument("--games-per-iteration", type=int, default=256)
     parser.add_argument("--iterations", type=int, default=1000)
+    parser.add_argument("--train-batch-size", type=int, default=1024)
+    parser.add_argument("--fast-game-prob", type=float, default=0.75)
+    parser.add_argument(
+        "--no-arena",
+        action="store_true",
+        help=(
+            "Skip baseline/past arena comparisons and disable model gating so "
+            "self-play immediately uses the latest trained network"
+        ),
+    )
     parser.add_argument(
         "--smoke",
         action="store_true",
@@ -34,6 +44,10 @@ def build_training_args(cli):
         raise ValueError("games-per-iteration must be at least 1")
     if cli.iterations < 1:
         raise ValueError("iterations must be at least 1")
+    if cli.train_batch_size < 1:
+        raise ValueError("train-batch-size must be at least 1")
+    if not 0.0 <= cli.fast_game_prob <= 1.0:
+        raise ValueError("fast-game-prob must be between 0 and 1")
 
     game_cls = game_class(cli.topology, cli.size)
     run_name = cli.run_name or f"gocube-{cli.topology}-{cli.size}-chinese75"
@@ -43,6 +57,7 @@ def build_training_args(cli):
     # generic framework default of 256 games *per worker*.
     process_batch_size = max(1, math.ceil(cli.games_per_iteration / cli.workers))
     iterations = 1 if cli.smoke else cli.iterations
+    arena_enabled = not (cli.smoke or cli.no_arena)
 
     args = get_args(
         run_name=run_name,
@@ -51,15 +66,20 @@ def build_training_args(cli):
         numIters=iterations,
         numMCTSSims=cli.sims,
         process_batch_size=process_batch_size,
-        compareWithBaseline=not cli.smoke,
-        compareWithPast=not cli.smoke,
+        train_batch_size=cli.train_batch_size,
+        compareWithBaseline=arena_enabled,
+        compareWithPast=arena_enabled,
+        # Gating only advances via compareToPast(). If arena comparisons are
+        # disabled, gating must also be disabled or self-play would remain on
+        # the initial checkpoint forever.
+        model_gating=arena_enabled,
         # A smoke run must actually exercise the optimizer once, even when the
-        # sample count is below the framework's default 1024-item train batch.
+        # sample count is below the configured train batch size.
         autoTrainSteps=not cli.smoke,
         train_steps_per_iteration=1 if cli.smoke else 64,
         # Fast games intentionally do not retain histories. Disable them in a
         # smoke run so the single iteration is guaranteed to produce samples.
-        probFastSim=0.0 if cli.smoke else 0.75,
+        probFastSim=0.0 if cli.smoke else cli.fast_game_prob,
         nnet_type="graph",
         # No augmentation is allowed until a topology/action permutation is
         # explicitly proven for Torus/Cube Compatibility V1.
