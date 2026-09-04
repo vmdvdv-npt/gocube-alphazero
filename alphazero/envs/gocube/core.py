@@ -10,6 +10,7 @@ BLACK = 1
 WHITE = 2
 
 PLAYING = "playing"
+CLEANUP = "cleanup"
 ENDGAME = "endgame"
 
 TORUS_SIZES = (9, 13, 19)
@@ -192,6 +193,7 @@ class GoState:
     captures: tuple[int, int]
     previous_board: np.ndarray | None
     phase: str = PLAYING
+    cleanup_stage: int = 0
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GoState):
@@ -202,6 +204,7 @@ class GoState:
             and self.consecutive_passes == other.consecutive_passes
             and self.captures == other.captures
             and self.phase == other.phase
+            and self.cleanup_stage == other.cleanup_stage
             and np.array_equal(self.board, other.board)
             and (
                 (self.previous_board is None and other.previous_board is None)
@@ -223,6 +226,7 @@ def initial_state(topology: Topology) -> GoState:
         captures=(0, 0),
         previous_board=None,
         phase=PLAYING,
+        cleanup_stage=0,
     )
 
 
@@ -237,6 +241,7 @@ def state_from_point_ids(
     captures: tuple[int, int] = (0, 0),
     previous_board: np.ndarray | None = None,
     phase: str = PLAYING,
+    cleanup_stage: int = 0,
 ) -> GoState:
     board = np.zeros(topology.point_count, dtype=np.uint8)
     for point_id in black:
@@ -258,6 +263,7 @@ def state_from_point_ids(
         captures=captures,
         previous_board=previous,
         phase=phase,
+        cleanup_stage=cleanup_stage,
     )
 
 
@@ -336,12 +342,39 @@ def _placement_candidate(state: GoState, action: int, topology: Topology) -> tup
     return board, len(captured)
 
 
-def apply_action(state: GoState, action: int, topology: Topology) -> GoState:
-    if state.phase != PLAYING:
+def apply_action(
+    state: GoState,
+    action: int,
+    topology: Topology,
+    *,
+    territory_cleanup: bool = False,
+) -> GoState:
+    """Apply one Go move.
+
+    Chinese/area callers keep the historical behavior: two passes end the game.
+    Japanese-like territory self-play opts into ``territory_cleanup``. In that
+    mode the first pair of passes freezes the scoring position and enters a
+    service cleanup phase; a pair of passes during cleanup ends that cleanup
+    phase. Cleanup moves are ordinary legal Go moves, but final territory is
+    scored from the frozen pre-cleanup position by the terminal adjudicator.
+    """
+    if state.phase not in (PLAYING, CLEANUP):
         raise IllegalMove("not-playing")
 
     if action == topology.pass_action:
         consecutive_passes = state.consecutive_passes + 1
+        if state.phase == PLAYING:
+            if consecutive_passes >= 2:
+                phase = CLEANUP if territory_cleanup else ENDGAME
+                consecutive_passes = 0 if territory_cleanup else consecutive_passes
+                cleanup_stage = 1 if territory_cleanup else state.cleanup_stage
+            else:
+                phase = PLAYING
+                cleanup_stage = state.cleanup_stage
+        else:
+            phase = ENDGAME if consecutive_passes >= 2 else CLEANUP
+            cleanup_stage = state.cleanup_stage
+
         return GoState(
             board=state.board,
             current_player=1 - state.current_player,
@@ -349,7 +382,8 @@ def apply_action(state: GoState, action: int, topology: Topology) -> GoState:
             consecutive_passes=consecutive_passes,
             captures=state.captures,
             previous_board=state.board,
-            phase=ENDGAME if consecutive_passes >= 2 else PLAYING,
+            phase=phase,
+            cleanup_stage=cleanup_stage,
         )
 
     board, captured = _placement_candidate(state, action, topology)
@@ -362,13 +396,14 @@ def apply_action(state: GoState, action: int, topology: Topology) -> GoState:
         consecutive_passes=0,
         captures=(captures[0], captures[1]),
         previous_board=state.board,
-        phase=PLAYING,
+        phase=state.phase,
+        cleanup_stage=state.cleanup_stage,
     )
 
 
 def valid_moves(state: GoState, topology: Topology) -> np.ndarray:
     result = np.zeros(topology.action_size, dtype=np.uint8)
-    if state.phase != PLAYING:
+    if state.phase not in (PLAYING, CLEANUP):
         return result
 
     for action in range(topology.point_count):
