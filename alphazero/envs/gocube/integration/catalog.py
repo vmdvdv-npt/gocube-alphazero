@@ -4,6 +4,8 @@ import os
 import re
 from dataclasses import dataclass
 
+from alphazero.utils import get_iter_file
+
 from .manifest import ManifestError, RunManifest, load_run_manifest
 
 _CHECKPOINT_RE = re.compile(r"^iteration-(\d{4,})\.pkl$")
@@ -32,7 +34,7 @@ class CheckpointDescriptor:
             topology=manifest.topology,
             size=manifest.size,
             rule_set=manifest.rule_set,
-            komi=manifest.komi,
+            komi=float(manifest.komi),
             terminal_adjudicator=manifest.terminal_adjudicator,
             path=path,
         )
@@ -59,7 +61,10 @@ class CheckpointCatalog:
         match = _CHECKPOINT_RE.fullmatch(filename)
         if not match:
             return None
-        return int(match.group(1))
+        iteration = int(match.group(1))
+        if filename != get_iter_file(iteration):
+            return None
+        return iteration
 
     @classmethod
     def checkpoint_files(cls, run_dir: str) -> list[tuple[int, str]]:
