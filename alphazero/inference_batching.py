@@ -22,6 +22,9 @@ def collect_ready_worker_ids(ready_queue, worker_count, wait_ms):
     except Empty:
         return []
 
+    if first_id < 0 or first_id >= worker_count:
+        raise RuntimeError(f"invalid inference worker id {first_id}")
+
     worker_ids = [first_id]
     seen = {first_id}
     deadline = monotonic() + wait_ms / 1000.0
