@@ -47,7 +47,7 @@ class RunManifest:
             topology=topology,
             size=size,
             rule_set=rule_set,
-            komi=float(komi),
+            komi=komi,
             terminal_adjudicator=terminal_adjudicator,
         ).validated()
 
@@ -69,23 +69,13 @@ class RunManifest:
         if missing:
             raise ManifestError(f"Run manifest is missing fields: {', '.join(missing)}")
 
-        version = data["version"]
-        size = data["size"]
-        komi = data["komi"]
-        if not isinstance(version, int) or isinstance(version, bool):
-            raise ManifestError("Run manifest version must be an integer")
-        if not isinstance(size, int) or isinstance(size, bool):
-            raise ManifestError("Run manifest size must be an integer")
-        if not isinstance(komi, (int, float)) or isinstance(komi, bool):
-            raise ManifestError("Run manifest komi must be a finite number")
-
         manifest = cls(
-            version=version,
+            version=data["version"],
             run_name=data["runName"],
             topology=data["topology"],
-            size=size,
+            size=data["size"],
             rule_set=data["ruleSet"],
-            komi=float(komi),
+            komi=data["komi"],
             terminal_adjudicator=data["terminalAdjudicator"],
         ).validated()
 
@@ -96,18 +86,30 @@ class RunManifest:
         return manifest
 
     def validated(self) -> "RunManifest":
+        if not isinstance(self.version, int) or isinstance(self.version, bool):
+            raise ManifestError("Run manifest version must be an integer")
         if self.version != RUN_MANIFEST_VERSION:
             raise ManifestError(f"Unsupported run manifest version: {self.version}")
         if not isinstance(self.run_name, str) or not self.run_name or self.run_name in {".", ".."}:
             raise ManifestError("Run manifest runName must be a non-empty directory name")
         if os.path.basename(self.run_name) != self.run_name:
             raise ManifestError("Run manifest runName must not contain path separators")
+        if not isinstance(self.topology, str):
+            raise ManifestError("Run manifest topology must be a string")
         if self.topology not in {"cube", "torus"}:
             raise ManifestError(f"Unsupported topology: {self.topology!r}")
+        if not isinstance(self.size, int) or isinstance(self.size, bool):
+            raise ManifestError("Run manifest size must be an integer")
+        if not isinstance(self.rule_set, str):
+            raise ManifestError("Run manifest ruleSet must be a string")
         if self.rule_set != "chinese":
             raise ManifestError(f"Unsupported ruleSet: {self.rule_set!r}")
+        if not isinstance(self.komi, (int, float)) or isinstance(self.komi, bool):
+            raise ManifestError("Run manifest komi must be a finite number")
         if not math.isfinite(self.komi):
             raise ManifestError("Run manifest komi must be finite")
+        if not isinstance(self.terminal_adjudicator, str):
+            raise ManifestError("Run manifest terminalAdjudicator must be a string")
         if self.terminal_adjudicator != CONSERVATIVE_AREA_ADJUDICATOR_V1:
             raise ManifestError(
                 f"Unsupported terminalAdjudicator: {self.terminal_adjudicator!r}"
@@ -122,7 +124,7 @@ class RunManifest:
             raise ManifestError(
                 f"Manifest ruleSet {self.rule_set!r} does not match game class {cls.RULESET!r}"
             )
-        if float(cls.KOMI) != self.komi:
+        if float(cls.KOMI) != float(self.komi):
             raise ManifestError(
                 f"Manifest komi {self.komi!r} does not match enabled game komi {float(cls.KOMI)!r}"
             )
@@ -137,7 +139,7 @@ class RunManifest:
             "topology": self.topology,
             "size": self.size,
             "ruleSet": self.rule_set,
-            "komi": self.komi,
+            "komi": float(self.komi),
             "terminalAdjudicator": self.terminal_adjudicator,
         }
 
