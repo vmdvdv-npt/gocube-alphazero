@@ -110,22 +110,32 @@ def test_sealed_single_liberty_group_is_dead_only_behind_pass_alive_boundary(
     assert alive.evidence["algorithm"] == "benson-pass-alive-v1"
 
 
-@pytest.mark.parametrize(
-    ("topology", "eye"),
-    (
-        (torus_topology(9), "4,4"),
-        (cube_topology(5), "front:2:2"),
-    ),
-)
-def test_single_eye_full_group_remains_unresolved(topology, eye):
-    state = make_state(topology, lambda point: "empty" if point == eye else "black")
+def test_sealed_atari_remains_unresolved_when_opponent_boundary_is_not_pass_alive():
+    topology = torus_topology(9)
+    target = {"4,4", "5,4"}
+    liberty = "3,4"
+    white = set()
+
+    for point_id in target:
+        for neighbor in topology.neighbor_ids(point_id):
+            if neighbor not in target and neighbor != liberty:
+                white.add(neighbor)
+    for neighbor in topology.neighbor_ids(liberty):
+        if neighbor not in target:
+            white.add(neighbor)
+
+    state = make_state(
+        topology,
+        lambda point: "black" if point in target else ("white" if point in white else "empty"),
+    )
 
     result = assisted_endgame_proposal(state, topology)
+    target_proposal = proposal_for_color(result, state, "black")
 
-    assert len(result) == 1
-    assert result[0].status == "unresolved"
-    assert result[0].source is None
-    assert result[0].evidence is None
+    assert target_proposal is not None
+    assert target_proposal.status == "unresolved"
+    assert target_proposal.source is None
+    assert target_proposal.evidence is None
 
 
 def test_closed_two_shared_liberty_mutual_life_is_seki_on_torus():
