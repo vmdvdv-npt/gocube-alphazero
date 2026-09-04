@@ -9,7 +9,7 @@ This project is still work-in-progress, so expect frequent fixes, updates, and m
 You may join the [Discord server](https://discord.gg/MVaHwGZpRC) if you wish to join the community and discuss this project, ask questions, or contribute to the framework's development.
 
 ### Current differences from the above repos
-1. **Cython:** The most computationally intensive components are written in Cython to be compiled for a runtime speedup of [up to 30x](https://towardsdatascience.com/use-cython-to-get-more-than-30x-speedup-on-your-python-code-f6cb337919b6) compared to pure python.
+1. **Cython:** The most computationally intensive components are written in Cython to be compiled for a runtime speedup of [up to 30x](https://towardsdatascience.com/use-cython-to-get-more-than-30x-speedup-of-f6cb337919b6) compared to pure python.
 2. **GUI:** Includes a graphical user interface for easier training and arena comparisons. It also allows for games to be played visually (agent-agent, agent-human, human-human) instead of through a command line interface (work-in-progress). Custom environments must implement their own GUI naturally.
 3. **Node-based MCTS:** Uses a better implementation of MCTS that uses nodes instead of dictionary lookups. This allows for a huge increase in performance and much less RAM usage than what the previous implementation used, about 30-50% speed increase and 95% less RAM usage from experimental data. The base code for this was provided by [bhandsconnect](https://github.com/bhansconnect).
 4. **Model Gating:** After each iteration, the model is compared to the previous iteration. The model that performs better continues forward based on an adjustable minimum winrate parameter.
@@ -18,6 +18,42 @@ You may join the [Discord server](https://discord.gg/MVaHwGZpRC) if you wish to 
 7. **Warmup Iterations:** A few self play iterations in the beginning of training can optionnally be done using random policy and value to speed up initial generation of training data instead of using a model that is initally random anyways. This makes these iterations purely CPU-bound.
 8. **Root Dirichlet Noise & Root Temperature, Discount:** Allows for better exploration and MCTS doesn't get stuck in local minima as often. Discount allows AlphaZero to "understand" the concept of time and chooses actions which lead to a win more quickly/efficiently as opposed to choosing a win that would occur later on in the game.
 9. **More Adjustable Parameters:** This implementation allows for the modification of numerous hyperparameters, allowing for substantial control over the training process. More on hyperparameters below where the usage of some are discussed.
+
+## GoCube Integration Service
+
+GoCube Protocol V1 is a local developer integration boundary between the Python/PyTorch AlphaZero implementation and the browser-based GoCube workspace. It is inference/evaluation-only and does not start or control training.
+
+Legacy runs must first receive an explicit run manifest. For the existing Cube 4 run:
+
+```bash
+python -m alphazero.envs.gocube.integration.register_run \
+  --checkpoint-dir checkpoint \
+  --run-name gocube-cube4-stage3-v1 \
+  --topology cube \
+  --size 4 \
+  --rule-set chinese \
+  --komi 7.5
+```
+
+Start the service on loopback:
+
+```bash
+python -m alphazero.envs.gocube.integration.server \
+  --checkpoint-dir checkpoint \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --device auto
+```
+
+The base URL is `http://127.0.0.1:8765`. Protocol V1 exposes `GET /v1/health`, `GET /v1/checkpoints`, and `POST /v1/games`. The health endpoint returns a small response such as:
+
+```json
+{"protocolVersion":1,"status":"ok","service":"gocube-alphazero","device":"cuda"}
+```
+
+Browser CORS is restricted to configured local origins; repeat `--allow-origin` to override the default localhost development origins. The service is intended for trusted local checkpoints and should not be exposed as a public checkpoint-loading service.
+
+Generated games use the existing evaluation MCTS path with root noise disabled, root temperature disabled, and move temperature set to zero. The existing MCTS implementation may still have tie randomness when multiple actions are exactly tied; the integration layer does not rewrite MCTS to remove that behavior.
 
 ## Getting Started
 ### Install required packages
