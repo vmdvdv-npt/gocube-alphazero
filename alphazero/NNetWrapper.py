@@ -126,6 +126,14 @@ class NNetWrapper(BaseWrapper):
 
     def train(self, batches, train_steps):
         self.total_steps = train_steps
+        self.current_step = 0
+        if train_steps <= 0:
+            # A tiny dataset can legitimately produce zero automatic train
+            # steps. Treat that as a no-op instead of constructing a progress
+            # bar with max=0 and stepping the LR scheduler without an optimizer
+            # step.
+            return self.l_pi, self.l_v
+
         self.nnet.train()
 
         data_time = AverageMeter()
@@ -137,7 +145,6 @@ class NNetWrapper(BaseWrapper):
             print(f'Current LR: {self.optimizer.param_groups[0]["lr"]}')
 
         bar = Bar(f'Training Net', max=train_steps)
-        self.current_step = 0
         while self.current_step < train_steps and not self.stop_train.is_set():
             for batch_idx, batch in enumerate(batches):
                 if self.current_step == train_steps or self.stop_train.is_set():
@@ -202,7 +209,7 @@ class NNetWrapper(BaseWrapper):
             (pi_losses.avg + v_losses.avg) if isinstance(
                 self.scheduler, optim.lr_scheduler.ReduceLROnPlateau) else None
         )
-        bar.update()  # TODO: division by zero when train steps is too small (0?)
+        bar.update()
         bar.finish()
         print()
 
