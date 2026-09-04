@@ -26,45 +26,51 @@ def captured_point_ids(
 ) -> list[str]:
     opponent_stone = WHITE if current_player == 0 else BLACK
     topology = game_cls.logical_topology()
-    captured = [
+    return [
         topology.point_id(index)
         for index in range(topology.point_count)
         if int(pre_board[index]) == opponent_stone and int(post_board[index]) == EMPTY
     ]
-    return captured
 
 
 def serialize_terminal(terminal) -> dict[str, object]:
-    score = terminal.score
-    return {
+    payload = {
         "winner": terminal.winner,
         "adjudicatorId": terminal.adjudicator_id,
         "fallbackCount": terminal.fallback_count,
-        "score": {
-            "ruleSet": score.ruleset,
-            "black": score.black,
-            "white": score.white,
-            "komi": score.komi,
-            "winner": score.winner,
-            "margin": score.margin,
-            "captures": list(score.captures),
-            "prisoners": None if score.prisoners is None else list(score.prisoners),
-            "territory": {
-                "black": score.territory.black,
-                "white": score.territory.white,
-                "neutral": score.territory.neutral,
-                "seki": score.territory.seki,
-            },
-            "stonesOnBoard": {
-                "black": score.stones_on_board.black,
-                "white": score.stones_on_board.white,
-            },
-            "deadStones": {
-                "black": score.dead_stones.black,
-                "white": score.dead_stones.white,
-            },
+        "unresolvedCount": terminal.unresolved_count,
+        "noResult": terminal.no_result,
+        "score": None,
+    }
+    score = terminal.score
+    if score is None:
+        return payload
+
+    payload["score"] = {
+        "ruleSet": score.ruleset,
+        "black": score.black,
+        "white": score.white,
+        "komi": score.komi,
+        "winner": score.winner,
+        "margin": score.margin,
+        "captures": list(score.captures),
+        "prisoners": None if score.prisoners is None else list(score.prisoners),
+        "territory": {
+            "black": score.territory.black,
+            "white": score.territory.white,
+            "neutral": score.territory.neutral,
+            "seki": score.territory.seki,
+        },
+        "stonesOnBoard": {
+            "black": score.stones_on_board.black,
+            "white": score.stones_on_board.white,
+        },
+        "deadStones": {
+            "black": score.dead_stones.black,
+            "white": score.dead_stones.white,
         },
     }
+    return payload
 
 
 def _default_player_factory(model, game_cls, args):
@@ -90,7 +96,7 @@ class GameGenerator:
         white_model,
         mcts_sims: int,
     ) -> dict[str, object]:
-        game_cls = self.game_cls_resolver(black.topology, black.size)
+        game_cls = self.game_cls_resolver(black.topology, black.size, black.rule_set)
         black_args = prepare_evaluation_args(black_model.args, game_cls, mcts_sims)
         white_args = prepare_evaluation_args(white_model.args, game_cls, mcts_sims)
         players = [
