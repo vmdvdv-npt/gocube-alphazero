@@ -2,7 +2,8 @@ from argparse import Namespace
 
 import pytest
 
-from alphazero.envs.gocube.train import build_training_args
+from alphazero.Coach import Coach
+from alphazero.envs.gocube.train import GoCubeCoach, build_training_args
 
 
 def cli_args(**overrides):
@@ -71,6 +72,36 @@ def test_no_arena_uses_latest_train_net_and_forwards_short_run_controls():
     assert args.model_gating is False
     assert args.autoTrainSteps is True
     assert args.probFastSim == 0.0
+
+
+def test_no_arena_advances_self_play_version_after_training_checkpoint(monkeypatch):
+    saved = []
+    monkeypatch.setattr(
+        Coach,
+        "_save_model",
+        lambda self, model, iteration: saved.append(iteration),
+    )
+
+    coach = object.__new__(GoCubeCoach)
+    coach.args = Namespace(model_gating=False)
+    coach.self_play_iter = 0
+
+    coach._save_model(object(), 1)
+
+    assert saved == [1]
+    assert coach.self_play_iter == 1
+
+
+def test_gating_keeps_self_play_version_owned_by_arena(monkeypatch):
+    monkeypatch.setattr(Coach, "_save_model", lambda self, model, iteration: None)
+
+    coach = object.__new__(GoCubeCoach)
+    coach.args = Namespace(model_gating=True)
+    coach.self_play_iter = 7
+
+    coach._save_model(object(), 8)
+
+    assert coach.self_play_iter == 7
 
 
 @pytest.mark.parametrize(
