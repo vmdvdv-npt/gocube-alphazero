@@ -60,6 +60,17 @@ def test_manifest_rejects_missing_fields_and_unsupported_version(tmp_path):
         load_run_manifest(str(run_dir))
 
 
+def test_manifest_rejects_wrong_json_field_types(tmp_path):
+    run_dir = tmp_path / "cube-run"
+    run_dir.mkdir()
+    payload = RunManifest.create(run_name=run_dir.name, topology="cube", size=4).to_dict()
+    payload["topology"] = []
+    (run_dir / MANIFEST_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError, match="topology must be a string"):
+        load_run_manifest(str(run_dir))
+
+
 @pytest.mark.parametrize(
     "field,value,match",
     [
@@ -106,6 +117,7 @@ def test_catalog_exposes_only_manifested_well_named_nonempty_checkpoints(tmp_pat
     (run_a / "checkpoint-latest.pkl").write_bytes(b"x")
     (run_a / "iteration-0003.pkl").write_bytes(b"")
     (run_a / "iteration-abc.pkl").write_bytes(b"x")
+    (run_a / "iteration-00002.pkl").write_bytes(b"x")
 
     catalog = CheckpointCatalog(str(tmp_path))
     items = catalog.list()
