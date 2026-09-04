@@ -28,6 +28,9 @@ def test_iterations_and_process_batch_size_are_forwarded():
     assert args.process_batch_size == 4
     assert args.compareWithBaseline is True
     assert args.compareWithPast is True
+    assert args.autoTrainSteps is True
+    assert args.train_steps_per_iteration == 64
+    assert args.probFastSim == 0.75
 
 
 def test_smoke_mode_is_one_iteration_without_arena_comparisons():
@@ -37,6 +40,9 @@ def test_smoke_mode_is_one_iteration_without_arena_comparisons():
     assert args.process_batch_size == 4
     assert args.compareWithBaseline is False
     assert args.compareWithPast is False
+    assert args.autoTrainSteps is False
+    assert args.train_steps_per_iteration == 1
+    assert args.probFastSim == 0.0
 
 
 @pytest.mark.parametrize(
