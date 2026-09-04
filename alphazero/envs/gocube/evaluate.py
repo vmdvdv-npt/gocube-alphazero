@@ -7,9 +7,11 @@ pyximport.install()
 
 from alphazero.Arena import Arena
 from alphazero.GenericPlayers import MCTSPlayer
-from alphazero.NNetWrapper import NNetWrapper
+from alphazero.envs.gocube.evaluation import (
+    load_evaluation_checkpoint,
+    prepare_evaluation_args,
+)
 from alphazero.envs.gocube.game import game_class
-from alphazero.utils import get_iter_file
 
 
 def parse_args():
@@ -37,24 +39,13 @@ def validate_cli(cli):
 
 
 def prepare_arena_args(saved_args, game_cls, sims):
-    args = saved_args.copy()
-    args.numMCTSSims = sims
-    args._num_players = game_cls.num_players() + game_cls.has_draw()
-
-    # Evaluation should measure model strength, not exploration randomness.
-    args.add_root_noise = False
-    args.add_root_temp = False
-    args.startTemp = 0.0
-    args.arenaTemp = 0.0
-    return args
+    """Backward-compatible name for the shared evaluation configuration."""
+    return prepare_evaluation_args(saved_args, game_cls, sims)
 
 
 def load_checkpoint(game_cls, folder, iteration):
-    return NNetWrapper.from_checkpoint(
-        game_cls,
-        folder=folder,
-        filename=get_iter_file(iteration),
-    )
+    """Backward-compatible evaluation checkpoint loader."""
+    return load_evaluation_checkpoint(game_cls, folder, iteration)
 
 
 def main():
