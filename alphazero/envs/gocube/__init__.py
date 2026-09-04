@@ -32,12 +32,20 @@ from .endgame import (
     assisted_endgame_proposal,
     proposal_point_ids,
 )
+from .terminal import (
+    CONSERVATIVE_AREA_ADJUDICATOR_V1,
+    TerminalAdjudication,
+    TerminalGroupResolution,
+    UnsupportedSelfPlayRuleset,
+    conservative_area_adjudicate,
+)
 
 __all__ = [
     "ALIVE_ALGORITHM",
     "AUTOMATIC_DEAD_ALGORITHM",
     "AUTOMATIC_SEKI_ALGORITHM",
     "BLACK",
+    "CONSERVATIVE_AREA_ADJUDICATOR_V1",
     "CUBE_FACES",
     "EMPTY",
     "ENDGAME",
@@ -50,11 +58,15 @@ __all__ = [
     "GroupClassification",
     "IllegalMove",
     "StoneBreakdown",
+    "TerminalAdjudication",
+    "TerminalGroupResolution",
     "TerritoryBreakdown",
     "TerritoryPoints",
     "Topology",
+    "UnsupportedSelfPlayRuleset",
     "apply_action",
     "assisted_endgame_proposal",
+    "conservative_area_adjudicate",
     "cube_topology",
     "initial_state",
     "make_topology",
