@@ -16,6 +16,7 @@ def cli_args(**overrides):
         "iterations": 3,
         "train_batch_size": 1024,
         "fast_game_prob": 0.75,
+        "endgame_sample_weight": 3,
         "inference_batch_wait_ms": 1.0,
         "no_arena": False,
         "smoke": False,
@@ -26,8 +27,10 @@ def cli_args(**overrides):
 
 
 def test_iterations_and_process_batch_size_are_forwarded():
-    _, args = build_training_args(cli_args())
+    game_cls, args = build_training_args(cli_args())
 
+    assert game_cls.RULESET == "japanese"
+    assert game_cls.TERMINAL_ADJUDICATOR_ID == "gocube-japanese-cleanup-v2"
     assert args.numIters == 3
     assert args.gamesPerIteration == 8
     assert args.process_batch_size == 4
@@ -39,6 +42,16 @@ def test_iterations_and_process_batch_size_are_forwarded():
     assert args.autoTrainSteps is True
     assert args.train_steps_per_iteration == 64
     assert args.probFastSim == 0.75
+    assert args.gocube_rule_set == "japanese"
+    assert args.gocube_auxiliary_targets is True
+    assert args.gocube_endgame_sample_weight == 3
+    assert args.ownership_loss_weight == 0.5
+    assert args.score_loss_weight == 0.5
+
+
+def test_default_run_name_is_fresh_japanese_v2_namespace():
+    _, args = build_training_args(cli_args(run_name=None))
+    assert args.run_name == "gocube-torus-9-japanese75-v2"
 
 
 def test_smoke_mode_is_one_iteration_without_arena_comparisons():
@@ -118,6 +131,7 @@ def test_gating_keeps_self_play_version_owned_by_arena(monkeypatch):
         ("fast_game_prob", -0.1, "fast-game-prob must be between 0 and 1"),
         ("fast_game_prob", 1.1, "fast-game-prob must be between 0 and 1"),
         ("inference_batch_wait_ms", -0.1, "inference-batch-wait-ms must be non-negative"),
+        ("endgame_sample_weight", 0, "endgame-sample-weight must be at least 1"),
     ],
 )
 def test_invalid_training_counts_fail_fast(field, value, message):
