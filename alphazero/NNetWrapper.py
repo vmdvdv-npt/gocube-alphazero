@@ -260,30 +260,51 @@ class NNetWrapper(BaseWrapper):
             'args': self.args
         }, filepath, pickle_protocol=pickle.HIGHEST_PROTOCOL)
 
-    def load_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar',
-                        use_saved_args=True) -> Optional[dotdict]:
+    def load_checkpoint(
+        self,
+        folder='checkpoint',
+        filename='checkpoint.pth.tar',
+        use_saved_args=True,
+        device=None,
+        load_training_state=True,
+    ) -> Optional[dotdict]:
+        """Load a checkpoint with an optional inference runtime device override.
+
+        ``device=None`` preserves the historical training/evaluation behavior.
+        Inference callers may pass ``cpu`` or ``cuda`` and skip optimizer and
+        scheduler state without changing existing callers.
+        """
         # https://github.com/pytorch/examples/blob/master/imagenet/main.py#L98
         filepath = os.path.join(folder, filename)
         if not os.path.exists(filepath):
             raise FileNotFoundError("No model in path {}".format(filepath))
 
-        checkpoint = torch.load(filepath)
+        if device not in (None, 'cpu', 'cuda'):
+            raise ValueError("device must be one of None, 'cpu', or 'cuda'")
+        if device == 'cuda' and not torch.cuda.is_available():
+            raise RuntimeError("CUDA was requested but is not available")
+
+        checkpoint = torch.load(filepath, map_location=device) if device else torch.load(filepath)
         args_saved = 'args' in checkpoint
         if use_saved_args and args_saved:
-            self.args = checkpoint['args']
+            saved_args = checkpoint['args']
+            if device is not None:
+                saved_args = saved_args.copy()
+                saved_args.cuda = device == 'cuda'
+            self.args = saved_args
             self.__init__(self.game_cls, self.args)
         elif use_saved_args and not args_saved:
             warnings.warn('No args were saved in the checkpoint file, therefore they were not loaded.')
 
         self.nnet.load_state_dict(checkpoint['state_dict'])
-        if 'opt_state' in checkpoint:
+        if load_training_state and 'opt_state' in checkpoint:
             self.optimizer.load_state_dict(checkpoint['opt_state'])
-        if 'sch_state' in checkpoint:
+        if load_training_state and 'sch_state' in checkpoint:
             self.scheduler.load_state_dict(checkpoint['sch_state'])
 
         self.__loaded = True
         if args_saved:
-            return checkpoint['args']
+            return self.args if use_saved_args else checkpoint['args']
 
     @classmethod
     def from_checkpoint(cls, game_cls, *args, **kwargs):

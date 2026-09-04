@@ -19,6 +19,42 @@ You may join the [Discord server](https://discord.gg/MVaHwGZpRC) if you wish to 
 8. **Root Dirichlet Noise & Root Temperature, Discount:** Allows for better exploration and MCTS doesn't get stuck in local minima as often. Discount allows AlphaZero to "understand" the concept of time and chooses actions which lead to a win more quickly/efficiently as opposed to choosing a win that would occur later on in the game.
 9. **More Adjustable Parameters:** This implementation allows for the modification of numerous hyperparameters, allowing for substantial control over the training process. More on hyperparameters below where the usage of some are discussed.
 
+## GoCube Integration Service
+
+GoCube Protocol V1 is a local developer integration boundary between the Python/PyTorch AlphaZero implementation and the browser-based GoCube workspace. It is inference/evaluation-only and does not start or control training.
+
+Legacy runs must first receive an explicit run manifest. For the existing Cube 4 run:
+
+```bash
+python -m alphazero.envs.gocube.integration.register_run \
+  --checkpoint-dir checkpoint \
+  --run-name gocube-cube4-stage3-v1 \
+  --topology cube \
+  --size 4 \
+  --rule-set chinese \
+  --komi 7.5
+```
+
+Start the service on loopback:
+
+```bash
+python -m alphazero.envs.gocube.integration.server \
+  --checkpoint-dir checkpoint \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --device auto
+```
+
+The base URL is `http://127.0.0.1:8765`. Protocol V1 exposes `GET /v1/health`, `GET /v1/checkpoints`, and `POST /v1/games`. The health endpoint returns a small response such as:
+
+```json
+{"protocolVersion":1,"status":"ok","service":"gocube-alphazero","device":"cuda"}
+```
+
+Browser CORS is restricted to configured local origins; repeat `--allow-origin` to override the default localhost development origins. The service is intended for trusted local checkpoints and should not be exposed as a public checkpoint-loading service.
+
+Generated games use the existing evaluation MCTS path with root noise disabled, root temperature disabled, and move temperature set to zero. The existing MCTS implementation may still have tie randomness when multiple actions are exactly tied; the integration layer does not rewrite MCTS to remove that behavior.
+
 ## Getting Started
 ### Install required packages
 Make sure you have Python 3 installed. Then run:

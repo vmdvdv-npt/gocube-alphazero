@@ -163,7 +163,7 @@ class Coach:
         train_iter = self.args.startIter
 
         if self.args.load_model:
-            networks = sorted(glob(self.args.checkpoint + '/' + self.args.run_name + '/*'))
+            networks = sorted(glob(self.args.checkpoint + '/' + self.args.run_name + '/iteration-*.pkl'))
             self.args.startIter = len(networks)
             if self.args.startIter == 0:
                 self._save_model(self.train_net, 0)
