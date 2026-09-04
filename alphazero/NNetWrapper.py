@@ -78,7 +78,8 @@ class BaseWrapper(ABC):
     @abstractmethod
     def load_checkpoint(self, folder, filename):
         """
-        Loads parameters of the neural network from folder/filename
+        Loads parameters of the neural network (with its parameters) in
+        folder/filename
         """
         pass
 
@@ -113,6 +114,9 @@ class NNetWrapper(BaseWrapper):
             self.nnet = ResNet(self.game_cls, args)
         elif args.nnet_type == 'fc':
             self.nnet = FullyConnected(self.game_cls, args)
+        elif args.nnet_type == 'graph':
+            from alphazero.envs.gocube.network import GraphNet
+            self.nnet = GraphNet(self.game_cls, args)
         else:
             raise ValueError(f'Unknown NNet type "{args.nnet_type}"')
 
