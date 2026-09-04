@@ -12,6 +12,7 @@ from libc.math cimport sqrt
 import numpy as np
 cimport numpy as np
 from alphazero.utils import dotdict
+from alphazero.mcts_policy import normalize_masked_policy
 
 
 DTYPE = np.float32
@@ -241,8 +242,7 @@ cdef class MCTS:
                 valids[c.a] = 1
 
             # mask invalid moves and rescale
-            pi *= np.array(valids, dtype=np.float32)
-            pi /= np.sum(pi)
+            pi = normalize_masked_policy(np.asarray(pi), np.asarray(valids))
 
             if self._curnode == self._root:
                 # add root temperature
