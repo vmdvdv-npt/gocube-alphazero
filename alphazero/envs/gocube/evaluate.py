@@ -27,6 +27,15 @@ def parse_args():
     return parser.parse_args()
 
 
+def validate_cli(cli):
+    if cli.candidate < 0 or cli.baseline < 0:
+        raise ValueError("checkpoint iterations must be non-negative")
+    if cli.games < 2 or cli.games % 2:
+        raise ValueError("games must be a positive even number of at least 2")
+    if cli.sims < 1:
+        raise ValueError("sims must be at least 1")
+
+
 def prepare_arena_args(saved_args, game_cls, sims):
     args = saved_args.copy()
     args.numMCTSSims = sims
@@ -50,12 +59,7 @@ def load_checkpoint(game_cls, folder, iteration):
 
 def main():
     cli = parse_args()
-    if cli.candidate < 0 or cli.baseline < 0:
-        raise ValueError("checkpoint iterations must be non-negative")
-    if cli.games < 2 or cli.games % 2:
-        raise ValueError("games must be a positive even number of at least 2")
-    if cli.sims < 1:
-        raise ValueError("sims must be at least 1")
+    validate_cli(cli)
 
     game_cls = game_class(cli.topology, cli.size)
     folder = os.path.join(cli.checkpoint_dir, cli.run_name)
