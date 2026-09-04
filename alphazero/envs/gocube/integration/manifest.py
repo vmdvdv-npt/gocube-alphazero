@@ -6,10 +6,14 @@ import os
 from dataclasses import dataclass
 
 from alphazero.envs.gocube.game import game_class
-from alphazero.envs.gocube.terminal import CONSERVATIVE_AREA_ADJUDICATOR_V1
+from alphazero.envs.gocube.terminal import (
+    CONSERVATIVE_AREA_ADJUDICATOR_V1,
+    JAPANESE_CLEANUP_ADJUDICATOR_V2,
+)
 
 MANIFEST_FILENAME = "gocube-run.json"
-RUN_MANIFEST_VERSION = 1
+RUN_MANIFEST_VERSION = 2
+SUPPORTED_MANIFEST_VERSIONS = (1, 2)
 
 
 class ManifestError(ValueError):
@@ -37,12 +41,19 @@ class RunManifest:
         run_name: str,
         topology: str,
         size: int,
-        rule_set: str = "chinese",
+        rule_set: str = "japanese",
         komi: float = 7.5,
-        terminal_adjudicator: str = CONSERVATIVE_AREA_ADJUDICATOR_V1,
+        terminal_adjudicator: str | None = None,
     ) -> "RunManifest":
+        if terminal_adjudicator is None:
+            terminal_adjudicator = (
+                CONSERVATIVE_AREA_ADJUDICATOR_V1
+                if rule_set == "chinese"
+                else JAPANESE_CLEANUP_ADJUDICATOR_V2
+            )
+        version = 1 if rule_set == "chinese" else RUN_MANIFEST_VERSION
         return cls(
-            version=RUN_MANIFEST_VERSION,
+            version=version,
             run_name=run_name,
             topology=topology,
             size=size,
@@ -88,7 +99,7 @@ class RunManifest:
     def validated(self) -> "RunManifest":
         if not isinstance(self.version, int) or isinstance(self.version, bool):
             raise ManifestError("Run manifest version must be an integer")
-        if self.version != RUN_MANIFEST_VERSION:
+        if self.version not in SUPPORTED_MANIFEST_VERSIONS:
             raise ManifestError(f"Unsupported run manifest version: {self.version}")
         if not isinstance(self.run_name, str) or not self.run_name or self.run_name in {".", ".."}:
             raise ManifestError("Run manifest runName must be a non-empty directory name")
@@ -102,7 +113,7 @@ class RunManifest:
             raise ManifestError("Run manifest size must be an integer")
         if not isinstance(self.rule_set, str):
             raise ManifestError("Run manifest ruleSet must be a string")
-        if self.rule_set != "chinese":
+        if self.rule_set not in {"chinese", "japanese"}:
             raise ManifestError(f"Unsupported ruleSet: {self.rule_set!r}")
         if not isinstance(self.komi, (int, float)) or isinstance(self.komi, bool):
             raise ManifestError("Run manifest komi must be a finite number")
@@ -110,13 +121,23 @@ class RunManifest:
             raise ManifestError("Run manifest komi must be finite")
         if not isinstance(self.terminal_adjudicator, str):
             raise ManifestError("Run manifest terminalAdjudicator must be a string")
-        if self.terminal_adjudicator != CONSERVATIVE_AREA_ADJUDICATOR_V1:
+
+        expected_adjudicator = (
+            CONSERVATIVE_AREA_ADJUDICATOR_V1
+            if self.rule_set == "chinese"
+            else JAPANESE_CLEANUP_ADJUDICATOR_V2
+        )
+        if self.terminal_adjudicator != expected_adjudicator:
             raise ManifestError(
-                f"Unsupported terminalAdjudicator: {self.terminal_adjudicator!r}"
+                f"Unsupported terminalAdjudicator for {self.rule_set}: {self.terminal_adjudicator!r}"
             )
+        if self.version == 1 and self.rule_set != "chinese":
+            raise ManifestError("Manifest version 1 is reserved for legacy Chinese V1 runs")
+        if self.version == 2 and self.rule_set != "japanese":
+            raise ManifestError("Manifest version 2 is reserved for Japanese cleanup V2 runs")
 
         try:
-            cls = game_class(self.topology, self.size)
+            cls = game_class(self.topology, self.size, self.rule_set)
         except ValueError as exc:
             raise ManifestError(str(exc)) from exc
 

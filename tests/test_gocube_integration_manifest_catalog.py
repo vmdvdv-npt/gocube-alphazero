@@ -36,7 +36,20 @@ def test_manifest_round_trip_and_directory_match(tmp_path):
     run_dir = tmp_path / "cube-run"
     run_dir.mkdir()
     expected = make_manifest(run_dir)
+    assert expected.version == 1
     assert load_run_manifest(str(run_dir)) == expected
+
+
+def test_new_japanese_manifest_uses_v2_contract(tmp_path):
+    run_dir = tmp_path / "japanese-run"
+    run_dir.mkdir()
+    manifest = RunManifest.create(run_name=run_dir.name, topology="cube", size=4)
+    write_run_manifest(str(run_dir), manifest)
+
+    loaded = load_run_manifest(str(run_dir))
+    assert loaded.version == 2
+    assert loaded.rule_set == "japanese"
+    assert loaded.terminal_adjudicator == "gocube-japanese-cleanup-v2"
 
 
 def test_manifest_rejects_missing_fields_and_unsupported_version(tmp_path):
@@ -47,13 +60,13 @@ def test_manifest_rejects_missing_fields_and_unsupported_version(tmp_path):
         load_run_manifest(str(run_dir))
 
     payload = {
-        "version": 2,
+        "version": 3,
         "runName": run_dir.name,
         "topology": "cube",
         "size": 4,
-        "ruleSet": "chinese",
+        "ruleSet": "japanese",
         "komi": 7.5,
-        "terminalAdjudicator": "gocube-conservative-area-v1",
+        "terminalAdjudicator": "gocube-japanese-cleanup-v2",
     }
     (run_dir / MANIFEST_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ManifestError, match="Unsupported run manifest version"):
@@ -75,9 +88,9 @@ def test_manifest_rejects_wrong_json_field_types(tmp_path):
     "field,value,match",
     [
         ("topology", "plane", "Unsupported topology"),
-        ("size", 1, "No enabled Chinese self-play game"),
+        ("size", 1, "No enabled chinese self-play game"),
         ("komi", float("nan"), "finite"),
-        ("rule_set", "japanese", "Unsupported ruleSet"),
+        ("rule_set", "korean", "Unsupported ruleSet"),
     ],
 )
 def test_manifest_validation(field, value, match):
@@ -91,6 +104,13 @@ def test_manifest_validation(field, value, match):
     kwargs[field] = value
     with pytest.raises(ManifestError, match=match):
         RunManifest.create(**kwargs)
+
+
+def test_manifest_rejects_cross_version_rule_contract():
+    payload = RunManifest.create(run_name="japanese", topology="cube", size=4).to_dict()
+    payload["version"] = 1
+    with pytest.raises(ManifestError, match="version 1"):
+        RunManifest.from_dict(payload)
 
 
 def test_manifest_rejects_run_directory_mismatch(tmp_path):
@@ -151,6 +171,7 @@ def test_legacy_registration_and_no_silent_incompatible_overwrite(tmp_path):
 
     write_run_manifest(str(run_dir), incompatible, force=True)
     assert load_run_manifest(str(run_dir)).size == 3
+    assert load_run_manifest(str(run_dir)).rule_set == "japanese"
 
 
 def test_registration_requires_existing_checkpoint(tmp_path):

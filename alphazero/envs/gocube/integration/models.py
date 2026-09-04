@@ -107,7 +107,7 @@ class CheckpointModelLoader:
 
         def load_uncached():
             try:
-                cls = game_class(descriptor.topology, descriptor.size)
+                cls = game_class(descriptor.topology, descriptor.size, descriptor.rule_set)
                 model = NNetWrapper.from_checkpoint(
                     cls,
                     folder="",

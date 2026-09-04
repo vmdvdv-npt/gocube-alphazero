@@ -17,14 +17,7 @@ import os
 
 
 class BaseWrapper(ABC):
-    """
-    This class specifies the base NeuralNet class. To define your own neural
-    network, subclass this class and implement the functions below. The neural
-    network does not consider the current player, and instead only deals with
-    the canonical form of the board.
-
-    See othello/NNet.py for an example implementation.
-    """
+    """Base neural-network wrapper."""
 
     def __init__(self, game_cls: GameState, args):
         self.game_cls = game_cls
@@ -37,50 +30,18 @@ class BaseWrapper(ABC):
 
     @abstractmethod
     def train(self, examples, num_steps: int) -> Tuple[float, float]:
-        """
-        This function trains the neural network with examples obtained from
-        self-play.
-
-        Input:
-            examples: a list of training examples, where each example is of form
-                      (board, pi, v). pi is the MCTS informed policy vector for
-                      the given board, and v is its value. The examples has
-                      board in its canonical form.
-            num_steps: the number of training steps to perform. Each step, a batch
-                       is fed through the network and backpropogated.
-        Returns:
-            pi_loss: the average loss of the policy head during the training as a float
-            val_loss: the average loss of the value head during the training as a float
-        """
         pass
 
     @abstractmethod
     def predict(self, board: np.ndarray) -> Tuple[np.ndarray, float]:
-        """
-        Input:
-            board: current board as a numpy array
-
-        Returns:
-            pi: a policy vector for the current board- a numpy array of length
-                game.action_size()
-            v: a float in float range [-1,1] that gives the value of the current board
-        """
         pass
 
     @abstractmethod
     def save_checkpoint(self, folder, filename):
-        """
-        Saves the current neural network (with its parameters) in
-        folder/filename
-        """
         pass
 
     @abstractmethod
     def load_checkpoint(self, folder, filename):
-        """
-        Loads parameters of the neural network (with its parameters) in
-        folder/filename
-        """
         pass
 
 
@@ -93,7 +54,6 @@ class NNetWrapper(BaseWrapper):
         self.optimizer = args.optimizer(self.nnet.parameters(), lr=args.lr, **args.optimizer_args)
 
         self.scheduler = args.scheduler(self.optimizer, **args.scheduler_args)
-        # self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, **args.scheduler_args)
         self.verbose = args.scheduler_args.get('verbose')
 
         if args.cuda:
@@ -103,6 +63,8 @@ class NNetWrapper(BaseWrapper):
         self.total_steps = 0
         self.l_pi = 0
         self.l_v = 0
+        self.l_ownership = 0
+        self.l_score = 0
         self.l_total = 0
         self.step_time = 0
         self.elapsed_time = 0
@@ -128,10 +90,6 @@ class NNetWrapper(BaseWrapper):
         self.total_steps = train_steps
         self.current_step = 0
         if train_steps <= 0:
-            # A tiny dataset can legitimately produce zero automatic train
-            # steps. Treat that as a no-op instead of constructing a progress
-            # bar with max=0 and stepping the LR scheduler without an optimizer
-            # step.
             return self.l_pi, self.l_v
 
         self.nnet.train()
@@ -140,6 +98,9 @@ class NNetWrapper(BaseWrapper):
         batch_time = AverageMeter()
         pi_losses = AverageMeter()
         v_losses = AverageMeter()
+        ownership_losses = AverageMeter()
+        score_losses = AverageMeter()
+        auxiliary = bool(getattr(self.args, 'gocube_auxiliary_targets', False))
 
         if self.verbose:
             print(f'Current LR: {self.optimizer.param_groups[0]["lr"]}')
@@ -155,45 +116,57 @@ class NNetWrapper(BaseWrapper):
 
                 start = time.time()
                 self.current_step += 1
-                boards, target_pis, target_vs = batch
+                if auxiliary:
+                    boards, target_pis, target_vs, target_scores, target_ownership = batch
+                else:
+                    boards, target_pis, target_vs = batch
 
-                # predict
                 if self.args.cuda:
-                    boards, target_pis, target_vs = (
-                        boards.contiguous().cuda(),
-                        target_pis.contiguous().cuda(),
-                        target_vs.contiguous().cuda()
-                    )
+                    boards = boards.contiguous().cuda()
+                    target_pis = target_pis.contiguous().cuda()
+                    target_vs = target_vs.contiguous().cuda()
+                    if auxiliary:
+                        target_scores = target_scores.contiguous().cuda()
+                        target_ownership = target_ownership.contiguous().cuda()
 
-                # measure data loading time
                 data_time.update(time.time() - start)
 
-                # compute output
-                out_pi, out_v = self.nnet(boards)
+                outputs = self.nnet(boards)
+                out_pi, out_v = outputs[0], outputs[1]
                 l_pi = self.loss_pi(target_pis, out_pi)
                 l_v = self.loss_v(target_vs, out_v)
                 total_loss = l_pi + l_v
-                # record loss
+
+                if auxiliary:
+                    out_ownership, out_score = outputs[2], outputs[3]
+                    l_ownership = self.loss_ownership(target_ownership, out_ownership)
+                    l_score = self.loss_score(target_scores, out_score)
+                    total_loss = total_loss + l_ownership + l_score
+                    ownership_losses.update(l_ownership.item(), boards.size(0))
+                    score_losses.update(l_score.item(), boards.size(0))
+
                 pi_losses.update(l_pi.item(), boards.size(0))
                 v_losses.update(l_v.item(), boards.size(0))
 
-                # compute gradient and do SGD step
                 self.optimizer.zero_grad()
                 total_loss.backward()
                 self.optimizer.step()
 
-                # measure elapsed time
                 batch_time.update(time.time() - start)
 
                 self.l_pi = pi_losses.avg
                 self.l_v = v_losses.avg
-                self.l_total = self.l_pi + self.l_v
+                self.l_ownership = ownership_losses.avg if auxiliary else 0
+                self.l_score = score_losses.avg if auxiliary else 0
+                self.l_total = self.l_pi + self.l_v + self.l_ownership + self.l_score
                 self.step_time = data_time.avg + batch_time.avg
                 self.elapsed_time = bar.elapsed_td
                 self.eta = bar.eta_td
 
-                # plot progress
-                bar.suffix = '({step}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss_pi: {lpi:.4f} | Loss_v: {lv:.3f}'.format(
+                suffix = (
+                    '({step}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | '
+                    'Total: {total:} | ETA: {eta:} | Loss_pi: {lpi:.4f} | Loss_v: {lv:.3f}'
+                ).format(
                     step=self.current_step,
                     size=train_steps,
                     data=data_time.avg,
@@ -203,10 +176,19 @@ class NNetWrapper(BaseWrapper):
                     lpi=pi_losses.avg,
                     lv=v_losses.avg,
                 )
+                if auxiliary:
+                    suffix += (
+                        f' | Loss_owner: {ownership_losses.avg:.3f}'
+                        f' | Loss_score: {score_losses.avg:.3f}'
+                    )
+                bar.suffix = suffix
                 bar.next()
 
+        scheduler_loss = pi_losses.avg + v_losses.avg
+        if auxiliary:
+            scheduler_loss += ownership_losses.avg + score_losses.avg
         self.scheduler.step(
-            (pi_losses.avg + v_losses.avg) if isinstance(
+            scheduler_loss if isinstance(
                 self.scheduler, optim.lr_scheduler.ReduceLROnPlateau) else None
         )
         bar.update()
@@ -216,21 +198,13 @@ class NNetWrapper(BaseWrapper):
         return pi_losses.avg, v_losses.avg
 
     def predict(self, board: np.ndarray):
-        """
-        board: np array with board
-        """
-        # timing
-        # start = time.time()
-
-        # preparing input
         board = torch.FloatTensor(board.astype(np.float64))
         if self.args.cuda:
             board = board.contiguous().cuda()
         with torch.no_grad():
             self.nnet.eval()
-            pi, v = self.nnet(board)
-
-            # print('PREDICTION TIME TAKEN : {0:03f}'.format(time.time()-start))
+            outputs = self.nnet(board)
+            pi, v = outputs[0], outputs[1]
             return torch.exp(pi).data.cpu().numpy()[0], torch.exp(v).data.cpu().numpy()[0]
 
     def process(self, batch: torch.Tensor):
@@ -239,7 +213,8 @@ class NNetWrapper(BaseWrapper):
             batch = batch.cuda()
         self.nnet.eval()
         with torch.no_grad():
-            pi, v = self.nnet(batch)
+            outputs = self.nnet(batch)
+            pi, v = outputs[0], outputs[1]
             return torch.exp(pi), torch.exp(v)
 
     def loss_pi(self, targets, outputs):
@@ -247,6 +222,14 @@ class NNetWrapper(BaseWrapper):
 
     def loss_v(self, targets, outputs):
         return -self.args.value_loss_weight * torch.sum(targets * outputs) / targets.size()[0]
+
+    def loss_ownership(self, targets, outputs):
+        weight = float(getattr(self.args, 'ownership_loss_weight', 0.5))
+        return -weight * torch.sum(targets * outputs) / (targets.size()[0] * targets.size()[1])
+
+    def loss_score(self, targets, outputs):
+        weight = float(getattr(self.args, 'score_loss_weight', 0.5))
+        return weight * torch.mean((targets - outputs) ** 2)
 
     def save_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar', make_dirs=True):
         filepath = os.path.join(folder, filename)
@@ -268,13 +251,6 @@ class NNetWrapper(BaseWrapper):
         device=None,
         load_training_state=True,
     ) -> Optional[dotdict]:
-        """Load a checkpoint with an optional inference runtime device override.
-
-        ``device=None`` preserves the historical training/evaluation behavior.
-        Inference callers may pass ``cpu`` or ``cuda`` and skip optimizer and
-        scheduler state without changing existing callers.
-        """
-        # https://github.com/pytorch/examples/blob/master/imagenet/main.py#L98
         filepath = os.path.join(folder, filename)
         if not os.path.exists(filepath):
             raise FileNotFoundError("No model in path {}".format(filepath))

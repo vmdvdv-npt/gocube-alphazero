@@ -18,7 +18,6 @@ class GraphMessageLayer(nn.Module):
         self.neighbor_linear = nn.Linear(hidden_size, hidden_size, bias=False)
 
     def forward(self, nodes: torch.Tensor) -> torch.Tensor:
-        # nodes: batch x points x hidden
         neighbor_nodes = nodes[:, self.neighbors, :]
         neighbor_mean = neighbor_nodes.mean(dim=2)
         return self.self_linear(nodes) + self.neighbor_linear(neighbor_mean)
@@ -50,11 +49,11 @@ def _mlp(input_size: int, hidden_sizes, output_size: int) -> nn.Sequential:
 
 
 class GraphNet(nn.Module):
-    """Policy/value network whose local receptive field is Topology.neighbors().
+    """Topology-aware GoCube policy/value network.
 
-    The stock framework ResNet assumes planar 3x3 adjacency and would therefore
-    be wrong at Torus wraps and Cube seams. This network uses the exact logical
-    four-neighbor graph supplied by the configured game class.
+    Japanese cleanup V2 training additionally predicts final point ownership and
+    signed normalized score. Old Chinese checkpoints omit these heads entirely,
+    so their saved state dictionaries remain loadable without relaxed matching.
     """
 
     def __init__(self, game_cls, args):
@@ -65,6 +64,7 @@ class GraphNet(nn.Module):
         self.channels = channels
         self.point_count = point_count
         self.action_size = game_cls.action_size()
+        self.auxiliary_targets = bool(getattr(args, "gocube_auxiliary_targets", False))
 
         neighbors = game_cls.graph_neighbors()
         if len(neighbors) != point_count:
@@ -86,8 +86,15 @@ class GraphNet(nn.Module):
             game_cls.num_players() + game_cls.has_draw(),
         )
 
+        if self.auxiliary_targets:
+            self.ownership_head = nn.Linear(hidden_size, 3)
+            self.score_head = _mlp(
+                hidden_size,
+                list(getattr(args, "score_dense_layers", [64])),
+                1,
+            )
+
     def forward(self, observation: torch.Tensor):
-        # Framework input: batch x channels x points x 1.
         observation = observation.view(-1, self.channels, self.point_count)
         nodes = observation.transpose(1, 2)
         nodes = self.input_linear(nodes)
@@ -103,4 +110,11 @@ class GraphNet(nn.Module):
             raise RuntimeError("Graph policy head action size mismatch")
 
         value_logits = self.value_head(pooled)
-        return F.log_softmax(policy_logits, dim=1), F.log_softmax(value_logits, dim=1)
+        policy = F.log_softmax(policy_logits, dim=1)
+        value = F.log_softmax(value_logits, dim=1)
+        if not self.auxiliary_targets:
+            return policy, value
+
+        ownership = F.log_softmax(self.ownership_head(nodes), dim=2)
+        score = torch.tanh(self.score_head(pooled))
+        return policy, value, ownership, score
