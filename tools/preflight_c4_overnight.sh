@@ -6,8 +6,11 @@ EXPECTED_HEAD=${GOCUBE_PREFLIGHT_EXPECTED_HEAD:-85c87a7cfd467a4d3f4b2844253fb63d
 EXPECTED_CHECKPOINT_SHA=${GOCUBE_PREFLIGHT_EXPECTED_CHECKPOINT_SHA:-64cf800460f6090880c7818cbeff80123257dcd14c79689f108cc5523fb58722}
 EXPECTED_MANIFEST_SHA=${GOCUBE_PREFLIGHT_EXPECTED_MANIFEST_SHA:-909252d5d793c446b163837019098cb60036a5fa6c18b390ee154bcb9ff3414a}
 EXPECTED_RECORDS=${GOCUBE_PREFLIGHT_EXPECTED_RECORDS:-256}
+EXPECTED_NEXT_GAME_ID=${GOCUBE_PREFLIGHT_EXPECTED_NEXT_GAME_ID:-519}
 WORKERS=${GOCUBE_PREFLIGHT_WORKERS:-16}
 MIN_FREE_GIB=${GOCUBE_PREFLIGHT_MIN_FREE_GIB:-10}
+SMOKE_GAMES=256
+SMOKE_SIMS=2
 
 fail() {
   echo "PREFLIGHT FAIL: $*" >&2
@@ -27,7 +30,7 @@ cd "$REPO_ROOT"
 PYTHON="$REPO_ROOT/.venv/bin/python"
 [[ -x "$PYTHON" ]] || fail "missing executable virtualenv Python: $PYTHON"
 
-for cmd in git sha256sum find sort awk cmp pgrep df xargs grep tee wc cp mktemp; do
+for cmd in git sha256sum find sort awk cmp pgrep df xargs grep tee wc cp mktemp systemd-run systemctl; do
   need_cmd "$cmd"
 done
 
@@ -51,21 +54,71 @@ git push --dry-run --quiet origin refs/remotes/origin/training-reports:refs/head
   || fail "terminal cannot authenticate/push to origin/training-reports"
 ok "GitHub training-reports push permission is available"
 
+# The real overnight launcher will use the user systemd manager so an SSH or
+# terminal disconnect cannot kill the experiment. Verify that path now.
+systemctl --user show-environment >/dev/null 2>&1 \
+  || fail "systemd user manager is unavailable"
+systemd-run --user --wait --collect --quiet /bin/true >/dev/null 2>&1 \
+  || fail "systemd user transient services cannot be started"
+ok "systemd user service path is available for detached overnight execution"
+
+# Under WSL, Linux inhibitors cannot prevent the Windows host from sleeping.
+# Fail closed unless AC sleep and AC hibernation are both disabled.
+if grep -qi microsoft /proc/sys/kernel/osrelease /proc/version 2>/dev/null; then
+  POWERCFG=$(command -v powercfg.exe || true)
+  [[ -n "$POWERCFG" ]] || fail "WSL detected but powercfg.exe is unavailable; cannot verify Windows host sleep policy"
+
+  read_ac_timeout() {
+    local setting=$1
+    local output hex idx
+    local -a values
+    output=$("$POWERCFG" /query SCHEME_CURRENT SUB_SLEEP "$setting" 2>/dev/null | tr -d '\r') \
+      || return 1
+    mapfile -t values < <(printf '%s\n' "$output" | grep -oE '0x[0-9A-Fa-f]{8}')
+    ((${#values[@]} >= 2)) || return 1
+    idx=$((${#values[@]} - 2))
+    hex=${values[$idx]#0x}
+    printf '%d\n' "$((16#$hex))"
+  }
+
+  AC_SLEEP=$(read_ac_timeout STANDBYIDLE) \
+    || fail "cannot determine Windows AC sleep timeout"
+  AC_HIBERNATE=$(read_ac_timeout HIBERNATEIDLE) \
+    || fail "cannot determine Windows AC hibernate timeout"
+  (( AC_SLEEP == 0 )) \
+    || fail "Windows AC sleep timeout is ${AC_SLEEP}s; set AC sleep to Never before overnight compute"
+  (( AC_HIBERNATE == 0 )) \
+    || fail "Windows AC hibernate timeout is ${AC_HIBERNATE}s; set AC hibernation to Never before overnight compute"
+  ok "WSL host power policy: AC sleep=Never, AC hibernate=Never"
+fi
+
 CHECKPOINT_DIR="checkpoint/$SOURCE_RUN"
 DATA_DIR="data/$SOURCE_RUN"
 ITER1_RECORD_DIR="$DATA_DIR/records/iteration-0001"
 CHECKPOINT1="$CHECKPOINT_DIR/iteration-0001.pkl"
 MANIFEST1="$ITER1_RECORD_DIR/iteration-manifest.json"
+GAME_ID_COUNTER="data/.gocube-game-ids/C4/game-id-counter.json"
 
 [[ -f "$CHECKPOINT_DIR/iteration-0000.pkl" ]] || fail "missing iteration-0000 checkpoint"
 [[ -f "$CHECKPOINT1" ]] || fail "missing iteration-0001 checkpoint"
 [[ -f "$CHECKPOINT_DIR/gocube-run.json" ]] || fail "missing source run manifest"
+[[ -f "$GAME_ID_COUNTER" ]] || fail "missing global C4 game-ID counter"
+
+CHECKPOINT_COUNT=$(find "$CHECKPOINT_DIR" -maxdepth 1 -type f -name 'iteration-*.pkl' | wc -l)
+[[ "$CHECKPOINT_COUNT" -eq 2 ]] \
+  || fail "source checkpoint directory contains $CHECKPOINT_COUNT iteration checkpoints; expected exactly 2 (0 and 1)"
 
 DATA_SUFFIXES=(data policy value score ownership ownership-mask)
 for suffix in "${DATA_SUFFIXES[@]}"; do
   [[ -f "$DATA_DIR/iteration-0001-$suffix.pkl" ]] || fail "missing iteration-0001-$suffix.pkl"
 done
+DATA_ITER_FILES=$(find "$DATA_DIR" -maxdepth 1 -type f -name 'iteration-*.pkl' | wc -l)
+[[ "$DATA_ITER_FILES" -eq 6 ]] \
+  || fail "source data directory contains $DATA_ITER_FILES iteration tensor files; expected exactly 6"
 [[ -f "$MANIFEST1" ]] || fail "missing iteration-0001 record manifest"
+RECORD_ITER_DIRS=$(find "$DATA_DIR/records" -mindepth 1 -maxdepth 1 -type d -name 'iteration-*' | wc -l)
+[[ "$RECORD_ITER_DIRS" -eq 1 ]] \
+  || fail "source records contain $RECORD_ITER_DIRS iteration directories; expected exactly iteration-0001"
 
 ACTUAL_CHECKPOINT_SHA=$(sha256sum "$CHECKPOINT1" | awk '{print $1}')
 [[ "$ACTUAL_CHECKPOINT_SHA" == "$EXPECTED_CHECKPOINT_SHA" ]] \
@@ -78,13 +131,17 @@ RECORD_COUNT=$(find "$ITER1_RECORD_DIR" -maxdepth 1 -type f -name '*.json' ! -na
 [[ "$RECORD_COUNT" -eq "$EXPECTED_RECORDS" ]] \
   || fail "iteration-0001 record count is $RECORD_COUNT, expected $EXPECTED_RECORDS"
 
-# Refuse to continue over any partial/unknown iteration 2 state.
-[[ ! -e "$CHECKPOINT_DIR/iteration-0002.pkl" ]] || fail "source run already has iteration-0002 checkpoint"
-if find "$DATA_DIR" -maxdepth 1 -type f -name 'iteration-0002-*.pkl' | grep -q .; then
-  fail "source run has partial iteration-0002 tensor data"
+# Refuse to continue over any partial/unknown later state.
+if find "$CHECKPOINT_DIR" -maxdepth 1 -type f -name 'iteration-*.pkl' ! -name 'iteration-0000.pkl' ! -name 'iteration-0001.pkl' | grep -q .; then
+  fail "source run has an unexpected checkpoint beyond iteration 1"
 fi
-[[ ! -d "$DATA_DIR/records/iteration-0002" ]] || fail "source run has partial iteration-0002 records"
-ok "published iteration-0001 artifacts match expected hashes/counts and iteration 2 is untouched"
+if find "$DATA_DIR" -maxdepth 1 -type f -name 'iteration-*.pkl' ! -name 'iteration-0001-*.pkl' | grep -q .; then
+  fail "source run has unexpected iteration tensor data"
+fi
+if find "$DATA_DIR/records" -mindepth 1 -maxdepth 1 -type d -name 'iteration-*' ! -name 'iteration-0001' | grep -q .; then
+  fail "source run has unexpected later record directories"
+fi
+ok "published iteration-0001 artifacts match expected hashes/counts and no later state exists"
 
 AVAILABLE_KB=$(df -Pk "$REPO_ROOT" | awk 'NR==2 {print $4}')
 REQUIRED_KB=$((MIN_FREE_GIB * 1024 * 1024))
@@ -98,7 +155,8 @@ if [[ "$NOFILE" =~ ^[0-9]+$ ]] && (( NOFILE < 1024 )); then
 fi
 ok "open-file limit: $NOFILE"
 
-"$PYTHON" - "$SOURCE_RUN" "$WORKERS" "$EXPECTED_RECORDS" <<'PY'
+"$PYTHON" - "$SOURCE_RUN" "$WORKERS" "$EXPECTED_RECORDS" "$EXPECTED_NEXT_GAME_ID" <<'PY'
+import hashlib
 import json
 import os
 import sys
@@ -108,6 +166,7 @@ import torch
 run_name = sys.argv[1]
 workers = int(sys.argv[2])
 expected_records = int(sys.argv[3])
+expected_next_game_id = int(sys.argv[4])
 
 cpu_count = os.cpu_count() or 0
 if cpu_count < workers:
@@ -147,6 +206,24 @@ for name, expected in expected_args.items():
     if actual != expected:
         raise SystemExit(f"PREFLIGHT FAIL: checkpoint arg {name}={actual!r}, expected {expected!r}")
 
+run_manifest_path = os.path.join("checkpoint", run_name, "gocube-run.json")
+with open(run_manifest_path, "r", encoding="utf-8") as handle:
+    run_manifest = json.load(handle)
+expected_manifest_fields = {
+    "version": 3,
+    "runName": run_name,
+    "topology": "cube",
+    "size": 4,
+    "ruleSet": "japanese",
+    "komi": 7.5,
+    "terminalAdjudicator": "gocube-katago-japanese-v3",
+}
+for name, expected in expected_manifest_fields.items():
+    if run_manifest.get(name) != expected:
+        raise SystemExit(
+            f"PREFLIGHT FAIL: run manifest {name}={run_manifest.get(name)!r}, expected {expected!r}"
+        )
+
 suffixes = ("data", "policy", "value", "score", "ownership", "ownership-mask")
 counts = []
 for suffix in suffixes:
@@ -164,12 +241,36 @@ with open(manifest_path, "r", encoding="utf-8") as handle:
     manifest = json.load(handle)
 if manifest.get("run_name") != run_name or int(manifest.get("iteration", -1)) != 1:
     raise SystemExit("PREFLIGHT FAIL: iteration manifest identity mismatch")
-if len(manifest.get("records", [])) != expected_records:
+records = manifest.get("records", [])
+if len(records) != expected_records:
     raise SystemExit("PREFLIGHT FAIL: iteration manifest record count mismatch")
+if int(manifest.get("aggregate_metrics", {}).get("games", -1)) != expected_records:
+    raise SystemExit("PREFLIGHT FAIL: aggregate game count mismatch")
+
+ids = [entry.get("game_id") for entry in records]
+if len(set(ids)) != expected_records:
+    raise SystemExit("PREFLIGHT FAIL: duplicate game IDs in iteration manifest")
+if ids[0] != "C4-000263" or ids[-1] != "C4-000518":
+    raise SystemExit(f"PREFLIGHT FAIL: unexpected game-ID range: {ids[0]}..{ids[-1]}")
+
+for entry in records:
+    record_path = entry.get("record_path")
+    if not record_path or not os.path.isfile(record_path):
+        raise SystemExit(f"PREFLIGHT FAIL: missing game record: {record_path!r}")
+    with open(record_path, "rb") as handle:
+        digest = hashlib.sha256(handle.read()).hexdigest()
+    if digest != entry.get("sha256"):
+        raise SystemExit(f"PREFLIGHT FAIL: game record SHA mismatch: {record_path}")
+
+counter_path = os.path.join("data", ".gocube-game-ids", "C4", "game-id-counter.json")
+with open(counter_path, "r", encoding="utf-8") as handle:
+    counter = json.load(handle)
+if counter.get("prefix") != "C4" or int(counter.get("next_number", -1)) != expected_next_game_id:
+    raise SystemExit(f"PREFLIGHT FAIL: unexpected C4 game-ID counter: {counter!r}")
 
 print(
-    "PREFLIGHT OK: Python/checkpoint/tensors valid; "
-    f"cpu_count={cpu_count}; tensor_rows={counts[0]}; baseline args verified"
+    "PREFLIGHT OK: Python/checkpoint/tensors/records valid; "
+    f"cpu_count={cpu_count}; tensor_rows={counts[0]}; baseline args and all record hashes verified"
 )
 PY
 
@@ -209,18 +310,18 @@ for suffix in "${DATA_SUFFIXES[@]}"; do
 done
 
 MICRO_LOG="$SANDBOX/micro-training.log"
-echo "PREFLIGHT: disposable resume test run=$CLONE_RUN, workers=$WORKERS"
+echo "PREFLIGHT: disposable resume test run=$CLONE_RUN, workers=$WORKERS, games=$SMOKE_GAMES, sims=$SMOKE_SIMS"
 (
   cd "$SANDBOX"
   PYTHONPATH="$REPO_ROOT" "$PYTHON" "$REPO_ROOT/alphazero/envs/gocube/train.py" \
     --topology cube \
     --size 4 \
     --workers "$WORKERS" \
-    --sims 2 \
-    --arena-sims 2 \
-    --games-per-iteration "$WORKERS" \
+    --sims "$SMOKE_SIMS" \
+    --arena-sims 100 \
+    --games-per-iteration "$SMOKE_GAMES" \
     --iterations 2 \
-    --train-batch-size "$WORKERS" \
+    --train-batch-size 256 \
     --train-steps-per-iteration 1 \
     --fast-game-prob 0 \
     --endgame-sample-weight 1 \
@@ -244,7 +345,7 @@ grep -Fq 'Arena: OFF' "$MICRO_LOG" \
 
 (
   cd "$SANDBOX"
-  PYTHONPATH="$REPO_ROOT" "$PYTHON" - "$CLONE_RUN" "$WORKERS" <<'PY'
+  PYTHONPATH="$REPO_ROOT" "$PYTHON" - "$CLONE_RUN" "$WORKERS" "$SMOKE_GAMES" "$SMOKE_SIMS" <<'PY'
 import json
 import os
 import sys
@@ -252,6 +353,8 @@ import torch
 
 run_name = sys.argv[1]
 workers = int(sys.argv[2])
+smoke_games = int(sys.argv[3])
+smoke_sims = int(sys.argv[4])
 checkpoint_path = os.path.join("checkpoint", run_name, "iteration-0002.pkl")
 try:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -278,19 +381,29 @@ with open(manifest_path, "r", encoding="utf-8") as handle:
     manifest = json.load(handle)
 if manifest.get("run_name") != run_name or int(manifest.get("iteration", -1)) != 2:
     raise SystemExit("PREFLIGHT FAIL: generated manifest identity mismatch")
-if len(manifest.get("records", [])) != workers:
-    raise SystemExit(f"PREFLIGHT FAIL: generated manifest has {len(manifest.get('records', []))} records, expected {workers}")
+if len(manifest.get("records", [])) != smoke_games:
+    raise SystemExit(
+        f"PREFLIGHT FAIL: generated manifest has {len(manifest.get('records', []))} records, expected {smoke_games}"
+    )
 params = manifest.get("effective_iteration_parameters", {})
 checks = {
     "workers": workers,
-    "gamesPerIteration": workers,
-    "numMCTSSims": 2,
+    "gamesPerIteration": smoke_games,
+    "process_batch_size": smoke_games // workers,
+    "train_batch_size": 256,
+    "numMCTSSims": smoke_sims,
+    "arenaMCTSSims": 100,
     "probFastSim": 0.0,
+    "compareWithBaseline": False,
+    "compareWithPast": False,
 }
 for key, expected in checks.items():
     if params.get(key) != expected:
         raise SystemExit(f"PREFLIGHT FAIL: generated manifest {key}={params.get(key)!r}, expected {expected!r}")
-print(f"PREFLIGHT OK: disposable iteration 2 is complete/readable with {workers} workers and {counts[0]} tensor rows")
+print(
+    f"PREFLIGHT OK: disposable iteration 2 complete/readable; workers={workers}; "
+    f"games={smoke_games}; process_batch_size={smoke_games // workers}; tensor_rows={counts[0]}"
+)
 PY
 )
 
@@ -301,11 +414,11 @@ PY
     --topology cube \
     --size 4 \
     --workers "$WORKERS" \
-    --sims 2 \
-    --arena-sims 2 \
-    --games-per-iteration "$WORKERS" \
+    --sims "$SMOKE_SIMS" \
+    --arena-sims 100 \
+    --games-per-iteration "$SMOKE_GAMES" \
     --iterations 2 \
-    --train-batch-size "$WORKERS" \
+    --train-batch-size 256 \
     --train-steps-per-iteration 1 \
     --fast-game-prob 0 \
     --endgame-sample-weight 1 \
@@ -328,6 +441,7 @@ echo "PREFLIGHT PASS"
 echo "Source run: $SOURCE_RUN"
 echo "Frozen source commit: $EXPECTED_HEAD"
 echo "Workers validated: $WORKERS"
+echo "Production batching geometry validated: $SMOKE_GAMES games / $WORKERS workers = $((SMOKE_GAMES / WORKERS)) process batch"
 echo "Disposable resume: iteration 1 -> 2 completed"
 echo "Arena during smoke: OFF"
 echo "Original training state modified: NO"
