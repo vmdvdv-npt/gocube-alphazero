@@ -35,13 +35,65 @@ jobs:
           python -m pip install -r requirements.txt pytest
 
       - name: Run focused V3 tests
-        run: python -m pytest -q tests/test_gocube_katago_v3_cleanup.py tests/test_gocube_katago_v3_scoring.py tests/test_gocube_katago_v3_benson_topology.py
+        run: |
+          python -m pytest -q \
+            tests/test_gocube_katago_v3_cleanup.py \
+            tests/test_gocube_katago_v3_scoring.py \
+            tests/test_gocube_katago_v3_benson_topology.py \
+            tests/test_gocube_train_entrypoint.py \
+            tests/test_gocube_training_budget_telemetry.py
 
       - name: Run full pytest
-        run: python -m pytest -q tests
+        run: python -m pytest -q
 
       - name: Run Cube 4 and Torus 9 V3 validation smoke
         run: python -m alphazero.envs.gocube.v3_smoke --games 32
+
+      - name: Run Cube 4 training accounting smoke
+        run: |
+          python -m alphazero.envs.gocube.train \
+            --topology cube --size 4 --workers 1 --sims 1 --arena-sims 1 \
+            --games-per-iteration 4 --iterations 1 --train-batch-size 256 \
+            --endgame-sample-weight 1 --smoke --run-name ci-cube4-v3-budget-smoke \
+            | tee /tmp/cube-training-smoke.log
+          grep -Eq 'Games:[[:space:]]+4' /tmp/cube-training-smoke.log
+          grep -Eq 'Regular decisions:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
+          grep -Eq 'Fast decisions:[[:space:]]+0' /tmp/cube-training-smoke.log
+          grep -Eq 'Saved samples:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
+          grep -Eq 'Optimizer steps actual:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
+          grep -Eq 'Examples seen:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
+          python - <<'PY'
+          import glob
+          import torch
+          files = sorted(glob.glob('data/ci-cube4-v3-budget-smoke/iteration-0001-*.pkl'))
+          assert len(files) == 6, files
+          rows = [int(torch.load(path).size(0)) for path in files]
+          assert len(set(rows)) == 1 and rows[0] > 0, rows
+          print('Cube 4 tensor rows:', rows[0])
+          PY
+
+      - name: Run Torus 9 training accounting smoke
+        run: |
+          python -m alphazero.envs.gocube.train \
+            --topology torus --size 9 --workers 1 --sims 1 --arena-sims 1 \
+            --games-per-iteration 4 --iterations 1 --train-batch-size 256 \
+            --endgame-sample-weight 1 --smoke --run-name ci-torus9-v3-budget-smoke \
+            | tee /tmp/torus-training-smoke.log
+          grep -Eq 'Games:[[:space:]]+4' /tmp/torus-training-smoke.log
+          grep -Eq 'Regular decisions:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
+          grep -Eq 'Fast decisions:[[:space:]]+0' /tmp/torus-training-smoke.log
+          grep -Eq 'Saved samples:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
+          grep -Eq 'Optimizer steps actual:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
+          grep -Eq 'Examples seen:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
+          python - <<'PY'
+          import glob
+          import torch
+          files = sorted(glob.glob('data/ci-torus9-v3-budget-smoke/iteration-0001-*.pkl'))
+          assert len(files) == 6, files
+          rows = [int(torch.load(path).size(0)) for path in files]
+          assert len(set(rows)) == 1 and rows[0] > 0, rows
+          print('Torus 9 tensor rows:', rows[0])
+          PY
 
       - name: Print rules fingerprints and git status
         run: |
@@ -57,5 +109,6 @@ jobs:
         run: |
           python - <<'PY'
           import alphazero.MCTS
-          print('Cython MCTS import OK')
+          import alphazero.SelfPlayAgent
+          print('Cython MCTS and SelfPlayAgent import OK')
           PY

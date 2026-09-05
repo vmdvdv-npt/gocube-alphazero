@@ -13,7 +13,8 @@ from alphazero.MCTS import MCTS
 class SelfPlayAgent(mp.Process):
     def __init__(self, id, game_cls, ready_queue, batch_ready, batch_tensor, policy_tensor,
                  value_tensor, output_queue, result_queue, complete_count, games_played,
-                 stop_event: mp.Event, pause_event: mp.Event(), args, _is_arena=False, _is_warmup=False):
+                 stop_event: mp.Event, pause_event: mp.Event(), args, _is_arena=False, _is_warmup=False,
+                 telemetry=None):
         super().__init__()
         self.id = id
         self.game_cls = game_cls
@@ -40,6 +41,7 @@ class SelfPlayAgent(mp.Process):
         self.args = args
         self._is_arena = _is_arena
         self._is_warmup = _is_warmup
+        self.telemetry = telemetry
         if _is_arena:
             self.player_to_index = list(range(game_cls.num_players()))
             np.random.shuffle(self.player_to_index)
@@ -71,6 +73,19 @@ class SelfPlayAgent(mp.Process):
     def _check_pause(self):
         while self.pause_event.is_set():
             time.sleep(.1)
+
+    def _telemetry_add(self, key, amount=1):
+        if self.telemetry is None:
+            return
+        counter = self.telemetry.get(key)
+        if counter is None:
+            return
+        lock = counter.get_lock()
+        lock.acquire()
+        try:
+            counter.value += amount
+        finally:
+            lock.release()
 
     def _select_search_sims(self):
         if self._is_arena:
@@ -157,6 +172,8 @@ class SelfPlayAgent(mp.Process):
             ) if not self._is_arena else self.args.arenaTemp
             policy = self._mcts(i).probs(self.games[i], self.temps[i])
             action = np.random.choice(self.games[i].action_size(), p=policy)
+            if not self._is_arena:
+                self._telemetry_add('fast_decisions' if self.fast else 'regular_decisions')
             if not self.fast and not self._is_arena:
                 self.histories[i].append((self.games[i].clone(), self._mcts(i).probs(self.games[i])))
             if self._is_arena:
@@ -191,11 +208,17 @@ class SelfPlayAgent(mp.Process):
                                     score_target, ownership_target = targets
                             for hist in self.histories[i]:
                                 self._check_pause()
+                                self._telemetry_add('base_positions')
+                                is_endgame = bool(
+                                    hasattr(hist[0], "is_endgame_training_state")
+                                    and hist[0].is_endgame_training_state()
+                                )
+                                if is_endgame:
+                                    self._telemetry_add('base_endgame_positions')
                                 data = hist[0].symmetries(hist[1]) if self.args.symmetricSamples else ((hist[0], hist[1]),)
                                 repeat = 1
                                 endgame_weight = int(getattr(self.args, "gocube_endgame_sample_weight", 1))
-                                if endgame_weight > 1 and hasattr(hist[0], "is_endgame_training_state") \
-                                        and hist[0].is_endgame_training_state():
+                                if endgame_weight > 1 and is_endgame:
                                     repeat = endgame_weight
                                 for state, pi in data:
                                     self._check_pause()
@@ -206,6 +229,8 @@ class SelfPlayAgent(mp.Process):
                                             sample = sample + (ownership_mask,)
                                     for _ in range(repeat):
                                         self.output_queue.put(sample)
+                                    if repeat > 1:
+                                        self._telemetry_add('endgame_extra_samples', repeat - 1)
                     self.games[i] = self.game_cls()
                     self.histories[i] = []
                     self.temps[i] = self.args.startTemp

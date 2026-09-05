@@ -18,6 +18,7 @@ def cli_args(**overrides):
         "topology": "torus", "size": 9, "workers": 2, "sims": 20,
         "arena_sims": 100,
         "games_per_iteration": 8, "iterations": 3, "train_batch_size": 1024,
+        "train_steps_per_iteration": None,
         "fast_game_prob": 0.75, "endgame_sample_weight": 3,
         "inference_batch_wait_ms": 1.0, "no_arena": False,
         "model_gating": False,
@@ -44,6 +45,7 @@ def test_v3_contract_and_training_controls_are_forwarded():
     assert args.compareWithPast is True
     assert args.model_gating is False
     assert args.autoTrainSteps is True
+    assert args.train_steps_per_iteration is None
     assert args.probFastSim == 0.75
     assert args.gocube_auxiliary_targets is True
     assert args.gocube_endgame_sample_weight == 3
@@ -54,9 +56,28 @@ def test_v3_contract_and_training_controls_are_forwarded():
     assert args.gocube_katago_reference_commit == KATAGO_REFERENCE_COMMIT
 
 
-def test_default_run_name_is_fresh_v3_namespace():
+def test_v3_cli_defaults_are_conservative_pilot_defaults(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["train.py"])
+    cli = parse_args()
+    game_cls, args = build_training_args(cli)
+    assert game_cls.topology_kind() == "torus"
+    assert args.numMCTSSims == 100
+    assert args.arenaMCTSSims == 100
+    assert args.gamesPerIteration == 256
+    assert args.train_batch_size == 256
+    assert args.probFastSim == 0.25
+    assert args.gocube_endgame_sample_weight == 1
+    assert args.arenaTemp == 0.0
+    assert args.compareWithBaseline is True
+    assert args.compareWithPast is True
+    assert args.model_gating is False
+    assert args.autoTrainSteps is True
+    assert args.train_steps_per_iteration is None
+
+
+def test_default_run_name_uses_new_pilot_methodology_namespace():
     _, args = build_training_args(cli_args(run_name=None))
-    assert args.run_name == "gocube-torus-9-japanese75-katago-v3"
+    assert args.run_name == "gocube-torus-9-japanese75-katago-v3-pilot"
 
 
 def test_smoke_mode_is_one_iteration_without_arena_comparisons():
@@ -68,6 +89,12 @@ def test_smoke_mode_is_one_iteration_without_arena_comparisons():
     assert args.autoTrainSteps is False
     assert args.train_steps_per_iteration == 1
     assert args.probFastSim == 0.0
+
+
+def test_fixed_train_steps_override_disables_auto_mode():
+    _, args = build_training_args(cli_args(train_steps_per_iteration=17))
+    assert args.autoTrainSteps is False
+    assert args.train_steps_per_iteration == 17
 
 
 def test_arena_on_gating_off_is_default_pilot_configuration():
@@ -101,19 +128,32 @@ def test_smoke_with_model_gating_fails_fast():
         build_training_args(cli_args(smoke=True, model_gating=True))
 
 
-def test_cli_exposes_arena_budget_and_model_gating(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["train.py", "--arena-sims", "77", "--model-gating"])
+def test_cli_exposes_arena_budget_model_gating_and_fixed_steps(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["train.py", "--arena-sims", "77", "--model-gating", "--train-steps-per-iteration", "17"],
+    )
     cli = parse_args()
     assert cli.arena_sims == 77
     assert cli.model_gating is True
     assert cli.no_arena is False
+    assert cli.train_steps_per_iteration == 17
 
 
-def test_training_configuration_reports_fixed_arena_and_gating(capsys):
+def test_training_configuration_reports_training_arena_and_gating(capsys):
     _, args = build_training_args(cli_args())
     print_training_configuration(args)
     output = capsys.readouterr().out
-    assert "Self-play: 20 sims, fast 20 @ 75%" in output
+    assert "Self-play:" in output
+    assert "regular sims = 20" in output
+    assert "fast sims = 20" in output
+    assert "fast probability = 75%" in output
+    assert "Training:" in output
+    assert "games/iteration = 8" in output
+    assert "batch size = 1024" in output
+    assert "step mode = auto" in output
+    assert "endgame weight = 3" in output
     assert "Arena: fixed 100 sims, fast OFF, root noise OFF, root temp OFF, action temp 0" in output
     assert "color-balanced scheduling" in output
     assert "Model gating: OFF" in output
@@ -167,6 +207,7 @@ def test_gating_keeps_self_play_version_owned_by_arena(monkeypatch):
         ("games_per_iteration", 0, "games-per-iteration must be at least 1"),
         ("iterations", 0, "iterations must be at least 1"),
         ("train_batch_size", 0, "train-batch-size must be at least 1"),
+        ("train_steps_per_iteration", 0, "train-steps-per-iteration must be at least 1"),
         ("sims", 0, "sims must be at least 1"),
         ("arena_sims", 0, "arena-sims must be at least 1"),
         ("fast_game_prob", -0.1, "fast-game-prob must be between 0 and 1"),

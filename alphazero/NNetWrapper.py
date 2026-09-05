@@ -57,6 +57,10 @@ class NNetWrapper(BaseWrapper):
             self.nnet.cuda()
         self.current_step = 0
         self.total_steps = 0
+        self.last_train_planned_steps = 0
+        self.last_train_actual_steps = 0
+        self.last_train_examples_seen = 0
+        self.last_train_learning_rate = float(self.optimizer.param_groups[0]['lr'])
         self.l_pi = 0
         self.l_v = 0
         self.l_ownership = 0
@@ -85,6 +89,10 @@ class NNetWrapper(BaseWrapper):
     def train(self, batches, train_steps):
         self.total_steps = train_steps
         self.current_step = 0
+        self.last_train_planned_steps = int(train_steps)
+        self.last_train_actual_steps = 0
+        self.last_train_examples_seen = 0
+        self.last_train_learning_rate = float(self.optimizer.param_groups[0]['lr'])
         if train_steps <= 0:
             return self.l_pi, self.l_v
         self.nnet.train()
@@ -143,6 +151,8 @@ class NNetWrapper(BaseWrapper):
                 self.optimizer.zero_grad()
                 total_loss.backward()
                 self.optimizer.step()
+                self.last_train_actual_steps += 1
+                self.last_train_examples_seen += int(boards.size(0))
                 batch_time.update(time.time() - start)
                 self.l_pi = pi_losses.avg
                 self.l_v = v_losses.avg
