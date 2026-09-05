@@ -27,20 +27,34 @@ def idxs(t, points):
 
 
 def test_exact_territory_captures_komi_and_winner():
-    t = rect_topology(5, 3)
-    black = idxs(t, ("0,0","1,0","2,0","0,1","2,1","0,2","1,2","2,2"))
-    white = idxs(t, ("4,0","4,1","4,2","3,0","3,2"))
+    # Under KataGo Tax=SEKI, territory counts only inside independent-life regions.
+    # Give each side two genuine eyes and no dame between the living groups.
+    t = rect_topology(6, 5)
+    black_eyes = {"1,1", "1,3"}
+    white_eyes = {"4,1", "4,3"}
+    black = tuple(
+        t.point_index(f"{x},{y}")
+        for y in range(5)
+        for x in range(3)
+        if f"{x},{y}" not in black_eyes
+    )
+    white = tuple(
+        t.point_index(f"{x},{y}")
+        for y in range(5)
+        for x in range(3, 6)
+        if f"{x},{y}" not in white_eyes
+    )
     state = v3_state_from_board(
         t, black=black, white=white, captures=(2, 1), phase=CLEANUP_2,
         second_cleanup_start_colors=None,
     )
     state = replace(state, second_cleanup_start_colors=bytes(state.board.tolist()))
     score, _, _ = final_v3_score(state, t, 0.5)
-    assert score.territory.black == 1
-    assert score.territory.white == 1
+    assert score.territory.black == 2
+    assert score.territory.white == 2
     assert score.captures == (2, 1)
-    assert score.black == 3.0
-    assert score.white == 2.5
+    assert score.black == 4.0
+    assert score.white == 3.5
     assert score.margin == 0.5
     assert score.winner == "black"
 
@@ -86,40 +100,55 @@ def test_same_fill_in_cleanup1_has_no_cleanup2_compensation():
     assert after_score.black == before_score.black - 1
 
 
-def test_issue_1158_new_stone_outside_independent_life_is_penalized_but_still_counted():
+def test_cleanup2_new_stone_inside_independent_life_is_counted_without_penalty():
+    # Formal Rules V3: on an otherwise empty board the maximal-non-white region
+    # contains no dame and the center stone is not in atari, so it is an
+    # independent-life region. Eight empty points plus the +1 cleanup2 move score.
     t = rect_topology(3, 3)
     start = v3_state_from_board(t, phase=CLEANUP_2)
     start = replace(start, second_cleanup_start_colors=bytes(start.board.tolist()))
     played = apply_v3_action(start, t.point_index("1,1"), t)
     score, _, _ = final_v3_score(played, t, 0.0)
     assert score.stones_on_board.black == 1
-    assert score.black == 0.0  # +1 cleanup move and -1 new stone outside independent life
+    assert score.territory.black == 8
+    assert score.black == 9.0
 
 
-def test_issue_1158_unassigned_single_color_empty_component_is_not_dropped():
+def test_upstream_1158_strict_rules_can_leave_single_eye_area_unscored():
+    # KataGo issue #1158 was closed as not-a-bug: strict computer rules require
+    # cleanup to finish. A one-eye group is in atari, so its eye is not in an
+    # independent-life region under Tax=SEKI and remains unscored.
     t = rect_topology(3, 3)
     center = t.point_index("1,1")
     black = tuple(p for p in range(t.point_count) if p != center)
     state = v3_state_from_board(t, black=black, phase=CLEANUP_2)
     state = replace(state, second_cleanup_start_colors=bytes(state.board.tolist()))
     score, _, _ = final_v3_score(state, t, 0.0)
-    assert score.territory.black == 1
-    assert score.black == 1.0
+    assert score.territory.black == 0
+    assert score.black == 0.0
 
 
 def test_cube_seam_and_torus_wrap_territory_score_by_logical_graph():
+    # Use two distinct eyes so the surrounding group is independent-life; one
+    # eye lies on a seam/wrap to verify graph topology rather than array edges.
     cube = cube_topology(4)
-    seam_eye = cube.point_index("front:0:0")
-    cube_black = tuple(p for p in range(cube.point_count) if p != seam_eye)
+    cube_eyes = {
+        cube.point_index("front:0:0"),
+        cube.point_index("back:2:2"),
+    }
+    cube_black = tuple(p for p in range(cube.point_count) if p not in cube_eyes)
     cs = v3_state_from_board(cube, black=cube_black, phase=CLEANUP_2)
     cs = replace(cs, second_cleanup_start_colors=bytes(cs.board.tolist()))
     cube_score, _, _ = final_v3_score(cs, cube, 0.0)
-    assert cube_score.territory.black == 1
+    assert cube_score.territory.black == 2
 
     torus = torus_topology(9)
-    wrap_eye = torus.point_index("0,0")
-    torus_black = tuple(p for p in range(torus.point_count) if p != wrap_eye)
+    torus_eyes = {
+        torus.point_index("0,0"),
+        torus.point_index("4,4"),
+    }
+    torus_black = tuple(p for p in range(torus.point_count) if p not in torus_eyes)
     ts = v3_state_from_board(torus, black=torus_black, phase=CLEANUP_2)
     ts = replace(ts, second_cleanup_start_colors=bytes(ts.board.tolist()))
     torus_score, _, _ = final_v3_score(ts, torus, 0.0)
-    assert torus_score.territory.black == 1
+    assert torus_score.territory.black == 2
