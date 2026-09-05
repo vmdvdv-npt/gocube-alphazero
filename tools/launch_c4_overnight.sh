@@ -23,16 +23,18 @@ if ! grep -qxF 'training_reports/' .git/info/exclude 2>/dev/null; then
   printf '\ntraining_reports/\n' >> .git/info/exclude
 fi
 
-if systemctl --user list-units --type=service --state=running --no-legend 2>/dev/null \
+if systemctl --user list-units --type=service --state=running,activating --no-legend 2>/dev/null \
   | grep -q 'gocube-c4-night-'; then
-  systemctl --user list-units --type=service --state=running --no-legend | grep 'gocube-c4-night-' >&2 || true
-  fail "another Cube 4 night experiment service is already running"
+  systemctl --user list-units --type=service --state=running,activating --no-legend \
+    | grep 'gocube-c4-night-' >&2 || true
+  fail "another Cube 4 night experiment service is active or restarting"
 fi
 
-if pgrep -af 'python[^ ]* .*alphazero/envs/gocube/train.py' >/tmp/gocube-night-running.$$ 2>/dev/null; then
+if pgrep -af 'alphazero/envs/gocube/train.py|c4_overnight_(experiment|hardened)\.py|evaluate_gocube_checkpoints\.py' \
+  >/tmp/gocube-night-running.$$ 2>/dev/null; then
   cat /tmp/gocube-night-running.$$ >&2 || true
   rm -f /tmp/gocube-night-running.$$
-  fail "another GoCube training process is already running"
+  fail "another GoCube night/training process is already running"
 fi
 rm -f /tmp/gocube-night-running.$$ 2>/dev/null || true
 
@@ -44,6 +46,7 @@ for tool in \
   run_with_github_reports.sh \
   preflight_c4_overnight.sh \
   c4_overnight_experiment.py \
+  c4_overnight_hardened.py \
   evaluate_gocube_checkpoints.py; do
   git show "origin/main:tools/$tool" > "$TMP_DIR/$tool"
 done
@@ -87,7 +90,7 @@ echo
 echo "===== STARTING DETACHED NIGHT SERVICE ====="
 SYSTEMD_COMMAND=$(printf '%q ' \
   bash "$TMP_DIR/run_with_github_reports.sh" "$EXP_ID" -- \
-  "$REPO_ROOT/.venv/bin/python" "$TMP_DIR/c4_overnight_experiment.py" \
+  "$REPO_ROOT/.venv/bin/python" "$TMP_DIR/c4_overnight_hardened.py" \
   --experiment-id "$EXP_ID" \
   --source-run "$SOURCE_RUN" \
   --frozen-commit "$FROZEN_COMMIT" \
@@ -103,6 +106,7 @@ systemd-run --user \
   --property="StartLimitBurst=3" \
   --setenv="PYTHONUNBUFFERED=1" \
   --setenv="PYTHONPATH=$REPO_ROOT" \
+  --setenv="GOCUBE_NIGHT_TOOLING_COMMIT=$TOOLING_COMMIT" \
   /bin/bash -lc "exec $SYSTEMD_COMMAND"
 
 sleep 2
@@ -118,6 +122,7 @@ Unit: $UNIT.service
 Max hours: $MAX_HOURS
 Frozen training commit: $FROZEN_COMMIT
 Tooling commit: $TOOLING_COMMIT
+Runner: hardened recovery wrapper
 Auto-restart: on-failure, 30s delay, max 3 starts per 10 minutes
 
 Status:
