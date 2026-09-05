@@ -54,6 +54,8 @@ def test_v3_contract_and_training_controls_are_forwarded():
     assert args.gocube_rules_fingerprint == game_cls.rules_fingerprint()
     assert args.gocube_katago_rules_version == KATAGO_RULES_VERSION
     assert args.gocube_katago_reference_commit == KATAGO_REFERENCE_COMMIT
+    assert args.gocube_game_id_registry == "data/.gocube-game-ids"
+    assert args.run_name not in args.gocube_game_id_registry
 
 
 def test_v3_cli_defaults_are_conservative_pilot_defaults(monkeypatch):

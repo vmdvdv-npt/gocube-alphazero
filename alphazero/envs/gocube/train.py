@@ -18,6 +18,13 @@ from alphazero.NNetWrapper import NNetWrapper
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube.game import game_class
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
+from alphazero.envs.gocube.records import (
+    build_game_record,
+    effective_parameter_snapshot,
+    game_id_prefix,
+    write_game_record,
+    write_iteration_manifest,
+)
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
 from alphazero.utils import get_iter_file
@@ -131,6 +138,7 @@ class GoCubeCoach(Coach):
     @_set_state(TrainState.INIT_AGENTS)
     def generateSelfPlayAgents(self):
         telemetry = self._reset_selfplay_telemetry()
+        self._iteration_record_context = self._build_iteration_record_context(self.model_iter)
         self.stop_agents = mp.Event()
         self.ready_queue = mp.Queue()
         for i in range(self.args.workers):
@@ -165,6 +173,25 @@ class GoCubeCoach(Coach):
             )
             self.agents[i].daemon = True
             self.agents[i].start()
+
+    def _build_iteration_record_context(self, iteration):
+        self_play_iteration = int(getattr(self, "self_play_iter", max(0, iteration - 1)))
+        checkpoint_path = os.path.join(
+            self.args.checkpoint,
+            self.args.run_name,
+            get_iter_file(self_play_iteration),
+        )
+        return {
+            "run_name": self.args.run_name,
+            "iteration": int(iteration),
+            "checkpoint": {
+                "id": f"{self.args.run_name}@{self_play_iteration}",
+                "iteration": self_play_iteration,
+                "path": os.path.relpath(os.path.abspath(checkpoint_path), os.getcwd()),
+                "model_role": "self_play",
+            },
+            "parameters": effective_parameter_snapshot(self.args),
+        }
 
     @_set_state(TrainState.SELF_PLAY)
     def processSelfPlayBatches(self, iteration):
@@ -285,8 +312,21 @@ class GoCubeCoach(Coach):
             "terminal/cycle_no_result": 0,
             "terminal/training_valid_fraction": 0.0,
         }
-        for _ in range(num_games):
-            state, winstate, _agent_id = self.result_queue.get()
+        record_entries = []
+        context = getattr(self, "_iteration_record_context", self._build_iteration_record_context(iteration))
+        record_dir = os.path.join(
+            self.args.data,
+            self.args.run_name,
+            "records",
+            f"iteration-{int(iteration):04d}",
+        )
+        for fallback_game_number in range(1, num_games + 1):
+            result = self.result_queue.get()
+            if len(result) == 4:
+                state, winstate, _agent_id, record_payload = result
+            else:
+                state, winstate, _agent_id = result
+                record_payload = None
             length_sum += state.turns
             if winstate[-1]:
                 draws += 1
@@ -296,6 +336,26 @@ class GoCubeCoach(Coach):
             if hasattr(state, "diagnostic_counters"):
                 for key, value in state.diagnostic_counters().items():
                     counters[key] += value
+            if record_payload is not None:
+                game_id = record_payload["game_id"]
+                target_path = os.path.join(record_dir, f"{game_id}.json")
+                record = build_game_record(
+                    game=state,
+                    game_id=game_id,
+                    run_name=context["run_name"],
+                    iteration=iteration,
+                    game_number=int(record_payload.get("game_number_inside_iteration", fallback_game_number)),
+                    checkpoint=context["checkpoint"],
+                    parameters=context["parameters"],
+                    moves=record_payload["moves"],
+                    start_time=record_payload["start_time"],
+                    end_time=record_payload["end_time"],
+                    winstate=winstate,
+                    record_path=os.path.relpath(os.path.abspath(target_path), os.getcwd()),
+                )
+                entry = write_game_record(record_dir, record)
+                entry["game_number_inside_iteration"] = record["game_number_inside_iteration"]
+                record_entries.append(entry)
         denominator = max(1, num_games)
         for i in range(len(wins)):
             self.writer.add_scalar(
@@ -309,6 +369,29 @@ class GoCubeCoach(Coach):
             if key == "terminal/training_valid_fraction":
                 value /= denominator
             self.writer.add_scalar(key, value, iteration)
+        if record_entries:
+            record_entries.sort(key=lambda entry: int(entry["game_number_inside_iteration"]))
+            aggregate_metrics = {
+                "games": int(num_games),
+                "black_wins": int(wins[0]) if wins else 0,
+                "white_wins": int(wins[1]) if len(wins) > 1 else 0,
+                "draws": int(draws),
+                "average_game_length": length_sum / denominator,
+                **counters,
+            }
+            aggregate_metrics["terminal/training_valid_fraction"] = (
+                counters["terminal/training_valid_fraction"] / denominator
+            )
+            manifest_path = write_iteration_manifest(
+                record_dir,
+                run_name=context["run_name"],
+                iteration=iteration,
+                checkpoint=context["checkpoint"],
+                parameters=context["parameters"],
+                records=record_entries,
+                aggregate_metrics=aggregate_metrics,
+            )
+            self._iteration_record_manifest_path = manifest_path
 
     def _record_training_metrics(self, iteration, *, history_iterations, window_samples,
                                  latest_iteration_samples, planned_steps):
@@ -572,6 +655,14 @@ def build_training_args(cli):
         gocube_rules_fingerprint=game_cls.rules_fingerprint(),
         gocube_katago_rules_version=game_cls.KATAGO_RULES_VERSION,
         gocube_katago_reference_commit=game_cls.KATAGO_REFERENCE_COMMIT,
+        # These are observability settings only.  They do not participate in
+        # game rules, training targets, or optimizer behavior.
+        gocube_recording_enabled=True,
+        gocube_record_root=os.path.join("data", run_name, "records"),
+        # One registry is shared by every run; reserve_game_id namespaces its
+        # persistent counter by the stable game ID prefix.
+        gocube_game_id_registry=os.path.join("data", ".gocube-game-ids"),
+        gocube_game_id_prefix=game_id_prefix(game_cls),
     )
     return game_cls, args
 
