@@ -11,7 +11,7 @@
 
 ## Decision status
 
-No strength evaluation has completed yet; throughput/training diagnostics alone are insufficient to choose a winner.
+Only common-parent evidence is available so far; branch A currently leads at score 0.458. Treat this as provisional until a same-depth A comparison completes.
 
 Primary ranking is based on fixed-Arena playing strength, with wall-clock cost shown alongside it. Training losses are diagnostics only.
 
@@ -45,7 +45,7 @@ Primary ranking is based on fixed-Arena playing strength, with wall-clock cost s
 
 | Candidate | Reference | Games | W-L-D-NR | Score | Approx. 95% CI | Eval wall |
 |---|---|---:|---|---:|---|---:|
-| — | — | — | — | — | — | — |
+| A@6 | parent@5 | 24 | 11-13-0-0 | 0.458 | 0.279-0.649 | 26.3 min |
 
 ## Axis readout after the first descendant iteration
 
