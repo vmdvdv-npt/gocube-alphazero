@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "tools" / "c4_overnight_experiment.py"
+HARDENED = ROOT / "tools" / "c4_overnight_hardened.py"
 EVALUATOR = ROOT / "tools" / "evaluate_gocube_checkpoints.py"
 LAUNCHER = ROOT / "tools" / "launch_c4_overnight.sh"
 RESUMER = ROOT / "tools" / "resume_c4_overnight.sh"
@@ -25,6 +26,7 @@ def load_runner_module():
 
 def test_tools_have_valid_python_and_bash_syntax():
     py_compile.compile(str(RUNNER), doraise=True)
+    py_compile.compile(str(HARDENED), doraise=True)
     py_compile.compile(str(EVALUATOR), doraise=True)
     subprocess.run(["bash", "-n", str(LAUNCHER)], check=True)
     subprocess.run(["bash", "-n", str(RESUMER)], check=True)
@@ -151,25 +153,47 @@ def test_reporter_watches_and_mirrors_structured_publish_directory():
         assert token in source
 
 
-def test_launcher_detaches_via_systemd_and_does_not_require_windows_power_api():
+def test_launcher_uses_hardened_detached_runner_and_import_path():
     source = LAUNCHER.read_text(encoding="utf-8")
     assert "systemd-run --user" in source
-    assert "powercfg" in source  # it removes this legacy block from the disposable preflight copy
+    assert "powercfg" in source  # removes the legacy block from disposable preflight only
     assert "temporary preflight still contains Windows power-policy checks" in source
     assert "training_reports/" in source
     assert 'setenv="PYTHONPATH=$REPO_ROOT"' in source
+    assert 'setenv="GOCUBE_NIGHT_TOOLING_COMMIT=$TOOLING_COMMIT"' in source
+    assert '"$TMP_DIR/c4_overnight_hardened.py"' in source
+    assert '--state=running,activating' in source
     assert "NIGHT LAUNCH PASS" in source
 
 
-def test_resume_script_reuses_existing_experiment_and_repairs_runner_import_path():
+def test_resume_script_is_transactional_and_uses_hardened_runner():
     source = RESUMER.read_text(encoding="utf-8")
-    for token in (
-        'STATE="training_reports/$EXP_ID/state-private.json"',
-        'state["status"] = "RUNNING"',
-        'state.pop("fatal_error", None)',
-        'state["resume_count"]',
-        '--experiment-id "$EXP_ID"',
-        'setenv="PYTHONPATH=$REPO_ROOT"',
-        "NIGHT RESUME PASS",
-    ):
+    assert 'STATE="training_reports/$EXP_ID/state-private.json"' in source
+    assert 'state["status"] = "RUNNING"' not in source
+    assert 'state.pop("fatal_error", None)' not in source
+    assert '--state=running,activating' in source
+    assert '"$TMP_DIR/c4_overnight_hardened.py"' in source
+    assert '--experiment-id "$EXP_ID"' in source
+    assert 'setenv="PYTHONPATH=$REPO_ROOT"' in source
+    assert 'setenv="GOCUBE_NIGHT_TOOLING_COMMIT=$TOOLING_COMMIT"' in source
+    assert "NIGHT RESUME PASS" in source
+
+
+def test_hardened_runner_covers_interruption_recovery_windows():
+    source = HARDENED.read_text(encoding="utf-8")
+    required = (
+        "iteration_quarantined",
+        "fork_quarantined",
+        "evaluation_recovered",
+        "evaluation_output_quarantined",
+        "_later_checkpoint_exists",
+        "_later_data_exists",
+        "_validate_existing_fork",
+        "games_effective",
+        "candidate SHA mismatch",
+        "reference SHA mismatch",
+        "tooling_history",
+        "GOCUBE_NIGHT_TOOLING_COMMIT",
+    )
+    for token in required:
         assert token in source
