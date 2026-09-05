@@ -74,8 +74,10 @@
   },
   "deadline_at": "2026-10-17T15:59:07+04:00",
   "deadline_epoch": 1792238347.3347416,
+  "ended_at": "2026-09-06T01:23:59+04:00",
   "evaluations": [],
   "experiment_id": "c4-hparam-night-20260906-005747",
+  "fatal_error": "ModuleNotFoundError: No module named 'alphazero'",
   "frozen_training_commit": "85c87a7cfd467a4d3f4b2844253fb63d746d672a",
   "max_hours": 999.0,
   "metrics": [],
@@ -120,14 +122,17 @@
         "--run-name",
         "c4-t001-c4-c001"
       ],
+      "elapsed_seconds": 1491.9401292800903,
+      "ended_at": "2026-09-06T01:23:59+04:00",
+      "error": "No module named 'alphazero'",
       "iteration": 2,
       "started_at": "2026-09-06T00:59:07+04:00",
-      "status": "RUNNING"
+      "status": "FAILED_VALIDATION"
     }
   },
   "started_at": "2026-09-06T00:59:07+04:00",
   "started_epoch": 1788641947.352856,
-  "status": "RUNNING",
+  "status": "FAILED",
   "tooling_commit": "2a8e15c796a8390aae6ed68c13c3688fcd1383eb",
   "workers": 16
 }

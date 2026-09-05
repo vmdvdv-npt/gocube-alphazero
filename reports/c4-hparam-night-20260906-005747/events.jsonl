@@ -1,2 +1,3 @@
 {"cpu_count": 16, "event": "environment_validated", "head": "85c87a7cfd467a4d3f4b2844253fb63d746d672a", "time": "2026-09-06T00:59:07+04:00"}
 {"branch": "PARENT", "event": "stage_started", "iteration": 2, "stage_id": "canonical_iter_2", "time": "2026-09-06T00:59:07+04:00"}
+{"error": "ModuleNotFoundError: No module named 'alphazero'", "event": "experiment_failed", "time": "2026-09-06T01:23:59+04:00"}
