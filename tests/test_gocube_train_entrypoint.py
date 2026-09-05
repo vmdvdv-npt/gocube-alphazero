@@ -128,6 +128,27 @@ def test_no_arena_advances_self_play_version_after_training_checkpoint(monkeypat
     assert coach.self_play_iter == 1
 
 
+def test_gating_off_arena_compares_candidate_to_previous_checkpoint(monkeypatch):
+    seen_past_iterations = []
+    monkeypatch.setattr(Coach, "_save_model", lambda self, model, iteration: None)
+    monkeypatch.setattr(
+        Coach,
+        "compareToPast",
+        lambda self, model_iter: seen_past_iterations.append((model_iter, self.self_play_iter)),
+    )
+    coach = object.__new__(GoCubeCoach)
+    coach.args = Namespace(model_gating=False)
+    coach.self_play_iter = 4
+
+    coach._save_model(object(), 5)
+    assert coach.self_play_iter == 5
+
+    coach.compareToPast(5)
+
+    assert seen_past_iterations == [(5, 4)]
+    assert coach.self_play_iter == 5
+
+
 def test_gating_keeps_self_play_version_owned_by_arena(monkeypatch):
     monkeypatch.setattr(Coach, "_save_model", lambda self, model, iteration: None)
     coach = object.__new__(GoCubeCoach)
