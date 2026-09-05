@@ -3,7 +3,7 @@ from alphazero.Game import GameState
 from alphazero.GenericPlayers import BasePlayer
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
-from alphazero.utils import dotdict, get_game_results
+from alphazero.utils import dotdict
 
 from typing import Callable, List, Tuple, Optional
 from enum import Enum
@@ -88,6 +88,19 @@ class Arena:
         self.game_cls = game_cls
         self.display = display
         self.args = args.copy()
+        if hasattr(self.args, 'get'):
+            arena_sims = self.args.get('arenaMCTSSims', self.args.numMCTSSims)
+            arena_temp = self.args.get('arenaTemp', 0.0)
+        else:
+            arena_sims = getattr(self.args, 'arenaMCTSSims', self.args.numMCTSSims)
+            arena_temp = getattr(self.args, 'arenaTemp', 0.0)
+        self.args.arenaMCTSSims = arena_sims
+        self.args.numMCTSSims = arena_sims
+        self.args.probFastSim = 0.0
+        self.args.add_root_noise = False
+        self.args.add_root_temp = False
+        self.args.arenaTemp = arena_temp
+        self.args.startTemp = arena_temp
         self.use_batched_mcts = use_batched_mcts
         self.__player_stats = None
         self.__players = None
@@ -99,6 +112,7 @@ class Arena:
         self.eta = 0
         self.game_state = None
         self.draws = 0
+        self.no_results = 0
         self._agents = []
         self.stop_event = mp.Event()
         self.pause_event = mp.Event()
@@ -110,6 +124,10 @@ class Arena:
     @players.setter
     def players(self, value: List[BasePlayer]):
         self.__players = value
+        for player in self.__players:
+            player.args = self.args
+            if hasattr(player, 'temp'):
+                player.temp = self.args.arenaTemp
         self.__player_stats = [_PlayerStats(i) for i in range(len(self.players))]
         self.__check_players_valid()
 
@@ -119,6 +137,7 @@ class Arena:
 
     def __reset_stats(self):
         self.draws = 0
+        self.no_results = 0
         [s.reset_wins() for s in self.__player_stats]
 
     def __update_winrates(self):
@@ -128,6 +147,25 @@ class Arena:
         [s.update(
             num_games, self.draws if self.args.use_draws_for_winrate else 0
         ) for s in self.__player_stats]
+
+    def __collect_batched_results(self, result_queue):
+        num_games = result_queue.qsize()
+        wins = [0] * self.game_cls.num_players()
+        draws = 0
+        no_results = 0
+        for _ in range(num_games):
+            state, winstate, agent_id = result_queue.get()
+            if winstate[-1]:
+                if getattr(state, 'terminal_kind', None) == 'no_result':
+                    no_results += 1
+                else:
+                    draws += 1
+                continue
+            for player, is_win in enumerate(winstate[:-1]):
+                if is_win:
+                    index = self._agents[agent_id].player_to_index[player]
+                    wins[index] += 1
+        return wins, draws, no_results
 
     def wins(self) -> List[int]:
         return [s.wins for s in self.__player_stats]
@@ -194,7 +232,9 @@ class Arena:
 
         Returns:
             wins: number of wins for each player in self.players
-            draws: number of draws that occurred in total
+            draws: number of true scored draws that occurred in total. Games
+                   exposing terminal_kind == 'no_result' are counted separately
+                   in self.no_results and excluded from win rates.
             winrates: the win rates for each player in self.players
         """
         self.total_games = num
@@ -288,20 +328,17 @@ class Arena:
                     n = size
                     end = time.time()
 
-                wins, draws, _ = get_game_results(
-                    result_queue,
-                    self.game_cls,
-                    _get_index=lambda p, i: self._agents[i].player_to_index[p]
-                )
+                wins, draws, no_results = self.__collect_batched_results(result_queue)
                 for i, w in enumerate(wins):
                     self.__player_stats[i].wins += w
                 self.draws += draws
+                self.no_results += no_results
                 self.__update_winrates()
 
-                bar.suffix = '({eps}/{maxeps}) Winrates: {wr} | Eps Time: {et:.3f}s | Total: {total:} | ETA: {eta:}' \
+                bar.suffix = '({eps}/{maxeps}) Winrates: {wr} | No-result: {nr} | Eps Time: {et:.3f}s | Total: {total:} | ETA: {eta:}' \
                     .format(
                         eps=size, maxeps=num, et=sample_time.avg, total=bar.elapsed_td, eta=bar.eta_td,
-                        wr=[round(w, 3) for w in self.winrates()]
+                        wr=[round(w, 3) for w in self.winrates()], nr=self.no_results
                     )
                 bar.goto(size)
 
@@ -344,7 +381,7 @@ class Arena:
                 get_player_order()
 
                 # Play a single game with the current player order
-                _, winstate = self.play_game(verbose, players)
+                final_state, winstate = self.play_game(verbose, players)
                 if self.stop_event.is_set():
                     break
 
@@ -352,17 +389,20 @@ class Arena:
                 for player, is_win in enumerate(winstate):
                     if is_win:
                         if player == len(winstate) - 1:
-                            self.draws += 1
+                            if getattr(final_state, 'terminal_kind', None) == 'no_result':
+                                self.no_results += 1
+                            else:
+                                self.draws += 1
                         else:
                             self.__player_stats[players[player]].add_win()
 
                 self.__update_winrates()
                 eps_time.update(time.time() - end)
                 end = time.time()
-                bar.suffix = '({eps}/{maxeps}) Winrates: {wr} | Eps Time: {et:.3f}s | Total: {total:} | ETA: {eta:}' \
+                bar.suffix = '({eps}/{maxeps}) Winrates: {wr} | No-result: {nr} | Eps Time: {et:.3f}s | Total: {total:} | ETA: {eta:}' \
                     .format(
                         eps=eps, maxeps=num, et=eps_time.avg, total=bar.elapsed_td, eta=bar.eta_td,
-                        wr=[round(w, 3) for w in self.winrates()]
+                        wr=[round(w, 3) for w in self.winrates()], nr=self.no_results
                     )
                 bar.next()
                 self.games_played = eps
