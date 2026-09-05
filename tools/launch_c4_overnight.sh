@@ -97,6 +97,10 @@ systemd-run --user \
   --unit="$UNIT" \
   --collect \
   --property="WorkingDirectory=$REPO_ROOT" \
+  --property="Restart=on-failure" \
+  --property="RestartSec=30s" \
+  --property="StartLimitIntervalSec=600" \
+  --property="StartLimitBurst=3" \
   --setenv="PYTHONUNBUFFERED=1" \
   /bin/bash -lc "exec $SYSTEMD_COMMAND"
 
@@ -113,6 +117,7 @@ Unit: $UNIT.service
 Max hours: $MAX_HOURS
 Frozen training commit: $FROZEN_COMMIT
 Tooling commit: $TOOLING_COMMIT
+Auto-restart: on-failure, 30s delay, max 3 starts per 10 minutes
 
 Status:
   systemctl --user status $UNIT.service
