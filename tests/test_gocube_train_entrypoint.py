@@ -1,18 +1,26 @@
+import sys
 from argparse import Namespace
 
 import pytest
 
 from alphazero.Coach import Coach
 from alphazero.envs.gocube.katago_v3 import KATAGO_REFERENCE_COMMIT, KATAGO_RULES_VERSION
-from alphazero.envs.gocube.train import GoCubeCoach, build_training_args
+from alphazero.envs.gocube.train import (
+    GoCubeCoach,
+    build_training_args,
+    parse_args,
+    print_training_configuration,
+)
 
 
 def cli_args(**overrides):
     values = {
         "topology": "torus", "size": 9, "workers": 2, "sims": 20,
+        "arena_sims": 100,
         "games_per_iteration": 8, "iterations": 3, "train_batch_size": 1024,
         "fast_game_prob": 0.75, "endgame_sample_weight": 3,
         "inference_batch_wait_ms": 1.0, "no_arena": False,
+        "model_gating": False,
         "smoke": False, "run_name": "gocube-train-test",
     }
     values.update(overrides)
@@ -28,9 +36,12 @@ def test_v3_contract_and_training_controls_are_forwarded():
     assert args.gamesPerIteration == 8
     assert args.process_batch_size == 4
     assert args.train_batch_size == 1024
+    assert args.numMCTSSims == 20
+    assert args.arenaMCTSSims == 100
+    assert args.arenaTemp == 0.0
     assert args.compareWithBaseline is True
     assert args.compareWithPast is True
-    assert args.model_gating is True
+    assert args.model_gating is False
     assert args.autoTrainSteps is True
     assert args.probFastSim == 0.75
     assert args.gocube_auxiliary_targets is True
@@ -56,6 +67,54 @@ def test_smoke_mode_is_one_iteration_without_arena_comparisons():
     assert args.autoTrainSteps is False
     assert args.train_steps_per_iteration == 1
     assert args.probFastSim == 0.0
+
+
+def test_arena_on_gating_off_is_default_pilot_configuration():
+    _, args = build_training_args(cli_args())
+    assert args.compareWithBaseline is True
+    assert args.compareWithPast is True
+    assert args.model_gating is False
+
+
+def test_arena_on_gating_on_is_explicit_opt_in():
+    _, args = build_training_args(cli_args(model_gating=True))
+    assert args.compareWithBaseline is True
+    assert args.compareWithPast is True
+    assert args.model_gating is True
+
+
+def test_arena_off_gating_off_is_supported():
+    _, args = build_training_args(cli_args(no_arena=True))
+    assert args.compareWithBaseline is False
+    assert args.compareWithPast is False
+    assert args.model_gating is False
+
+
+def test_arena_off_gating_on_fails_fast():
+    with pytest.raises(ValueError, match="model gating requires arena evaluation"):
+        build_training_args(cli_args(no_arena=True, model_gating=True))
+
+
+def test_smoke_with_model_gating_fails_fast():
+    with pytest.raises(ValueError, match="model gating requires arena evaluation"):
+        build_training_args(cli_args(smoke=True, model_gating=True))
+
+
+def test_cli_exposes_arena_budget_and_model_gating(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["train.py", "--arena-sims", "77", "--model-gating"])
+    cli = parse_args()
+    assert cli.arena_sims == 77
+    assert cli.model_gating is True
+    assert cli.no_arena is False
+
+
+def test_training_configuration_reports_fixed_arena_and_gating(capsys):
+    _, args = build_training_args(cli_args())
+    print_training_configuration(args)
+    output = capsys.readouterr().out
+    assert "Self-play: 20 sims, fast 20 @ 75%" in output
+    assert "Arena: fixed 100 sims, fast OFF, root noise OFF, root temp OFF, action temp 0" in output
+    assert "Model gating: OFF" in output
 
 
 def test_no_arena_advances_self_play_version_after_training_checkpoint(monkeypatch):
@@ -85,6 +144,8 @@ def test_gating_keeps_self_play_version_owned_by_arena(monkeypatch):
         ("games_per_iteration", 0, "games-per-iteration must be at least 1"),
         ("iterations", 0, "iterations must be at least 1"),
         ("train_batch_size", 0, "train-batch-size must be at least 1"),
+        ("sims", 0, "sims must be at least 1"),
+        ("arena_sims", 0, "arena-sims must be at least 1"),
         ("fast_game_prob", -0.1, "fast-game-prob must be between 0 and 1"),
         ("fast_game_prob", 1.1, "fast-game-prob must be between 0 and 1"),
         ("inference_batch_wait_ms", -0.1, "inference-batch-wait-ms must be non-negative"),
