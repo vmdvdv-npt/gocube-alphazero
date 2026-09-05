@@ -18,6 +18,7 @@ NO_RESULT = "no_result"
 KATAGO_JAPANESE_ADJUDICATOR_V3 = "gocube-katago-japanese-v3"
 OBSERVATION_SCHEMA_V3 = "gocube-observation-v3"
 KATAGO_RULES_VERSION = 3
+KATAGO_RULES_IMPLEMENTATION_VERSION = 2
 KATAGO_REFERENCE_COMMIT = "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
 KATAGO_REFERENCE_VERSION = "1.18.0+ Rules Version 3"
 
@@ -30,6 +31,7 @@ def rules_fingerprint(topology: Topology, komi: float = 7.5) -> str:
         "adjudicator": KATAGO_JAPANESE_ADJUDICATOR_V3,
         "observationSchema": OBSERVATION_SCHEMA_V3,
         "rulesVersion": KATAGO_RULES_VERSION,
+        "rulesImplementationVersion": KATAGO_RULES_IMPLEMENTATION_VERSION,
         "katagoCommit": KATAGO_REFERENCE_COMMIT,
         "koRule": "SIMPLE",
         "scoringRule": "TERRITORY",
@@ -516,26 +518,34 @@ def _benson_pass_alive_groups(board: np.ndarray, topology: Topology, color: int)
     for gi, group in enumerate(groups):
         for p in group:
             owner[p] = gi
+
+    # Benson regions are maximal connected components that contain no stone of
+    # the color being proved alive. They may therefore contain both EMPTY and
+    # opponent stones. This is the graph-topology form of the standard Benson
+    # construction and deliberately makes no planar edge/corner assumptions.
     regions: list[tuple[tuple[int, ...], set[int], set[int]]] = []
-    for region in _empty_regions(board, topology):
-        boundary: set[int] = set()
-        valid = True
-        for p in region:
-            for n in topology.neighbor_indices(p):
-                c = int(board[n])
-                if c == EMPTY:
-                    continue
-                if c != color:
-                    valid = False
-                elif n in owner:
-                    boundary.add(owner[n])
-        if not valid or not boundary:
+    for region in _components_matching(board, topology, lambda c, own=color: c != own):
+        boundary = {
+            owner[n]
+            for p in region
+            for n in topology.neighbor_indices(p)
+            if n in owner
+        }
+        if not boundary:
             continue
+
+        # A region is vital for a chain iff every EMPTY intersection in that
+        # region is a liberty of the chain. Opponent stones are part of the
+        # region but are not themselves intersections that must border the
+        # chain, and their presence does not invalidate the region.
         vital = set(boundary)
         for p in region:
+            if int(board[p]) != EMPTY:
+                continue
             adjacent = {owner[n] for n in topology.neighbor_indices(p) if n in owner}
             vital.intersection_update(adjacent)
         regions.append((region, boundary, vital))
+
     remaining_groups = set(range(len(groups)))
     remaining_regions = set(range(len(regions)))
     while True:

@@ -32,6 +32,9 @@ def run_smoke(topology: str, size: int, games: int, seed: int) -> dict[str, obje
         terminal = game.terminal_adjudication
         state = game.semantic_state
         score = None
+        score_target_generated = False
+        ownership_target_generated = False
+        ownership_mask_generated = False
         if terminal is not None and terminal.score is not None:
             score = {
                 "black": terminal.score.black,
@@ -39,11 +42,29 @@ def run_smoke(topology: str, size: int, games: int, seed: int) -> dict[str, obje
                 "margin": terminal.score.margin,
                 "winner": terminal.score.winner,
             }
+        if game.has_training_result():
+            score_target, ownership_target, ownership_mask = game.training_targets()
+            if score_target.shape != (1,) or not np.isfinite(score_target).all():
+                raise RuntimeError("invalid V3 score target in smoke game")
+            if ownership_target.shape != (game.logical_topology().point_count, 3):
+                raise RuntimeError("invalid V3 ownership target shape in smoke game")
+            if not np.isfinite(ownership_target).all():
+                raise RuntimeError("non-finite V3 ownership target in smoke game")
+            if ownership_mask.shape != (game.logical_topology().point_count,):
+                raise RuntimeError("invalid V3 ownership mask shape in smoke game")
+            if not np.isfinite(ownership_mask).all():
+                raise RuntimeError("non-finite V3 ownership mask in smoke game")
+            score_target_generated = True
+            ownership_target_generated = True
+            ownership_mask_generated = True
         results.append({
             "game": game_index,
             "terminal_kind": game.terminal_kind,
             "no_result_reason": state.no_result_reason,
             "training_valid": game.has_training_result(),
+            "score_target_generated": score_target_generated,
+            "ownership_target_generated": ownership_target_generated,
+            "ownership_mask_generated": ownership_mask_generated,
             "turns": game.turns,
             "score": score,
             "diagnostics": game.diagnostic_counters(),
@@ -73,6 +94,9 @@ def run_smoke(topology: str, size: int, games: int, seed: int) -> dict[str, obje
         "ko_unblock_actions": total("terminal/ko_unblock_actions"),
         "maximum_game_length": max(r["turns"] for r in results),
         "invalid_training_games": sum(not r["training_valid"] for r in results),
+        "score_targets_generated": sum(bool(r["score_target_generated"]) for r in results),
+        "ownership_targets_generated": sum(bool(r["ownership_target_generated"]) for r in results),
+        "ownership_masks_generated": sum(bool(r["ownership_mask_generated"]) for r in results),
         "exact_score_examples": [r["score"] for r in scored_rows[:5]],
         "no_result_cases": [
             {"game": r["game"], "reason": r["no_result_reason"], "turns": r["turns"]}
