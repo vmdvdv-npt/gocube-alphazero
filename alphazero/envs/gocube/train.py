@@ -66,51 +66,6 @@ def resolve_train_steps(*, dataset_size, sample_budget, batch_size, auto_train_s
     return int(fixed_steps)
 
 
-class _ObservedBatches:
-    def __init__(self, batches):
-        self.batches = batches
-        self.current_batch_size = 0
-
-    def __iter__(self):
-        for batch in self.batches:
-            self.current_batch_size = int(batch[0].size(0))
-            yield batch
-
-    def __len__(self):
-        return len(self.batches)
-
-
-class GoCubeNNetWrapper(NNetWrapper):
-    """NNet wrapper that exposes exact optimizer accounting for V3 telemetry."""
-
-    def __init__(self, game_cls, args):
-        super().__init__(game_cls, args)
-        self.last_train_planned_steps = 0
-        self.last_train_actual_steps = 0
-        self.last_train_examples_seen = 0
-        self.last_train_learning_rate = float(self.optimizer.param_groups[0]["lr"])
-
-    def train(self, batches, train_steps):
-        self.last_train_planned_steps = int(train_steps)
-        self.last_train_actual_steps = 0
-        self.last_train_examples_seen = 0
-        self.last_train_learning_rate = float(self.optimizer.param_groups[0]["lr"])
-        observed = _ObservedBatches(batches)
-        original_step = self.optimizer.step
-
-        def counted_step(*args, **kwargs):
-            result = original_step(*args, **kwargs)
-            self.last_train_actual_steps += 1
-            self.last_train_examples_seen += observed.current_batch_size
-            return result
-
-        self.optimizer.step = counted_step
-        try:
-            return super().train(observed, train_steps)
-        finally:
-            self.optimizer.step = original_step
-
-
 class GoCubeCoach(Coach):
     """Coach variant for GoCube V3 batching, targets, and budget diagnostics."""
 
@@ -654,7 +609,7 @@ def main():
     game_cls, args = build_training_args(cli)
     print_training_configuration(args)
     ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
-    network = GoCubeNNetWrapper(game_cls, args)
+    network = NNetWrapper(game_cls, args)
     coach = GoCubeCoach(game_cls, network, args)
     coach.learn()
 
