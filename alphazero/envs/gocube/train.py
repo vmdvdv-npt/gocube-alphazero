@@ -25,9 +25,23 @@ class GoCubeCoach(Coach):
     """Coach variant for GoCube V3 batching, targets, and terminal diagnostics."""
 
     def _save_model(self, model, iteration):
+        previous_self_play_iter = getattr(self, "self_play_iter", max(0, iteration - 1))
         super()._save_model(model, iteration)
         if hasattr(self, "args") and not self.args.model_gating:
+            self._arena_previous_iter = previous_self_play_iter
             self.self_play_iter = iteration
+
+    def compareToPast(self, model_iter):
+        if self.args.model_gating:
+            return super().compareToPast(model_iter)
+
+        current_self_play_iter = self.self_play_iter
+        previous_iter = getattr(self, "_arena_previous_iter", max(0, model_iter - 1))
+        self.self_play_iter = previous_iter
+        try:
+            return super().compareToPast(model_iter)
+        finally:
+            self.self_play_iter = current_self_play_iter
 
     @_set_state(TrainState.SELF_PLAY)
     def processSelfPlayBatches(self, iteration):
