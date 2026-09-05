@@ -11,8 +11,12 @@ Environment variables:
   GOCUBE_REPORT_WORKTREE     dedicated report worktree path
                              (default: ~/.cache/gocube-alphazero-training-reports)
   GOCUBE_REPORT_DIR          local full-log root (default: training_reports)
-  GOCUBE_REPORT_POLL_SECONDS manifest poll interval (default: 15)
+  GOCUBE_REPORT_POLL_SECONDS report poll interval (default: 15)
   GOCUBE_REPORT_TAIL_LINES   console lines published to GitHub (default: 2000)
+
+If training_reports/RUN_NAME/publish/ exists, every regular file below that
+folder is also mirrored into reports/RUN_NAME/ on the reports branch. Changes
+there trigger a sync while the wrapped command is still running.
 USAGE
 }
 
@@ -50,6 +54,7 @@ TAIL_LINES=${GOCUBE_REPORT_TAIL_LINES:-2000}
 RUN_DIR="$REPORT_ROOT/$RUN_NAME"
 LOG_FILE="$RUN_DIR/console.log"
 MD_FILE="$RUN_DIR/run.md"
+PUBLISH_DIR="$RUN_DIR/publish"
 MANIFEST_ROOT="data/$RUN_NAME/records"
 DEST_REL="reports/$RUN_NAME"
 
@@ -75,14 +80,14 @@ manifest_count() {
     | tr -cd '\0' | wc -c
 }
 
-manifest_signature() {
-  if [[ ! -d "$MANIFEST_ROOT" ]]; then
+file_tree_signature() {
+  local root=$1
+  if [[ ! -d "$root" ]]; then
     printf 'none\n'
     return
   fi
   local listing
-  listing=$(find "$MANIFEST_ROOT" -mindepth 2 -maxdepth 2 -type f -name 'iteration-manifest.json' \
-    -printf '%p\t%s\t%T@\n' 2>/dev/null | LC_ALL=C sort)
+  listing=$(find "$root" -type f -printf '%P\t%s\t%T@\n' 2>/dev/null | LC_ALL=C sort)
   if [[ -z "$listing" ]]; then
     printf 'none\n'
   else
@@ -90,9 +95,26 @@ manifest_signature() {
   fi
 }
 
+manifest_signature() {
+  file_tree_signature "$MANIFEST_ROOT"
+}
+
+publish_signature() {
+  file_tree_signature "$PUBLISH_DIR"
+}
+
+report_signature() {
+  printf '%s:%s\n' "$(manifest_signature)" "$(publish_signature)" | sha256sum | awk '{print $1}'
+}
+
 write_md() {
-  local completed
+  local completed structured
   completed=$(manifest_count)
+  if [[ -d "$PUBLISH_DIR" ]] && find "$PUBLISH_DIR" -type f -print -quit 2>/dev/null | grep -q .; then
+    structured="yes"
+  else
+    structured="no"
+  fi
   cat > "$MD_FILE" <<EOF_MD
 # Training run
 
@@ -103,6 +125,7 @@ write_md() {
 - Exit code: ${EXIT_CODE:-—}
 - Source commit: $SOURCE_COMMIT
 - Completed iteration manifests: $completed
+- Structured experiment artifacts: $structured
 - Reports branch: $REPORT_BRANCH
 
 ## Command
@@ -113,11 +136,16 @@ $COMMAND_Q
 
 ## Published to GitHub
 
-- run.md — this status summary
+- run.md — wrapper status summary
 - console-tail.log — last $TAIL_LINES console lines
-- manifests/ — compact completed iteration manifests
+- manifests/ — compact completed manifests for a normal training run
+- structured files from \`$PUBLISH_DIR/\`, when present
 
-Full console output remains local at \`$LOG_FILE\`.
+For overnight experiments, start with \`summary.md\`, then inspect \`metrics.csv\`,
+\`evaluations.csv\`, \`experiment.json\`, \`state.json\`, \`artifacts.json\`,
+\`events.jsonl\`, and per-stage log tails.
+
+Full wrapper console output remains local at \`$LOG_FILE\`.
 EOF_MD
 }
 
@@ -160,6 +188,13 @@ copy_manifests() {
   done < <(find "$MANIFEST_ROOT" -mindepth 2 -maxdepth 2 -type f -name 'iteration-manifest.json' -print0 2>/dev/null | sort -z)
 }
 
+copy_structured_publish() {
+  local dest="$REPORT_WORKTREE/$DEST_REL"
+  [[ -d "$PUBLISH_DIR" ]] || return 0
+  mkdir -p "$dest"
+  cp -a "$PUBLISH_DIR/." "$dest/"
+}
+
 sync_once() {
   local reason=${1:-update}
   [[ $REPORTING_READY -eq 1 ]] || return 1
@@ -178,6 +213,7 @@ sync_once() {
     cp "$MD_FILE" "$REPORT_WORKTREE/$DEST_REL/run.md"
     tail -n "$TAIL_LINES" "$LOG_FILE" > "$REPORT_WORKTREE/$DEST_REL/console-tail.log"
     copy_manifests
+    copy_structured_publish
 
     git -C "$REPORT_WORKTREE" add -- "$DEST_REL"
     if git -C "$REPORT_WORKTREE" diff --cached --quiet; then
@@ -213,7 +249,7 @@ if ensure_report_worktree; then
   if sync_once started; then
     echo "GitHub reporting: origin/$REPORT_BRANCH -> $DEST_REL"
   else
-    echo "WARNING: initial GitHub report sync failed; training will continue with local logs." >&2
+    echo "WARNING: initial GitHub report sync failed; command will continue with local logs." >&2
   fi
 else
   echo "Local logging only: $RUN_DIR"
@@ -221,16 +257,16 @@ fi
 
 echo "Local full log: $LOG_FILE"
 
-watch_manifests() {
+watch_reports() {
   local last current
-  last=$(manifest_signature)
+  last=$(report_signature)
   while true; do
     sleep "$POLL_SECONDS"
-    current=$(manifest_signature)
+    current=$(report_signature)
     if [[ "$current" != "$last" ]]; then
       write_md
-      if ! sync_once iteration; then
-        echo "WARNING: GitHub iteration report sync failed; will retry on the next completed iteration or at exit." >&2
+      if ! sync_once progress; then
+        echo "WARNING: GitHub report sync failed; will retry on the next report change or at exit." >&2
       fi
       last=$current
     fi
@@ -238,7 +274,7 @@ watch_manifests() {
 }
 
 if [[ $REPORTING_READY -eq 1 ]]; then
-  watch_manifests &
+  watch_reports &
   WATCH_PID=$!
 fi
 
