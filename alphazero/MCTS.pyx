@@ -266,6 +266,14 @@ cdef class MCTS:
         cdef float v
         cdef float discount
         cdef int i = 0
+
+        # Preserve the neural/terminal evaluation on every newly expanded node
+        # before FPU can use it. The root has an empty backup path on its first
+        # evaluation, so initializing v only inside the backup loop leaves
+        # root.v at the Node default of zero and can suppress all unvisited moves.
+        if self._curnode.n == 0:
+            self._curnode.v = self._get_value(value, self._curnode.player, num_players)
+
         while self._path:
             parent = self._path.pop()
             v = self._get_value(value, parent.player, num_players)
@@ -284,8 +292,6 @@ cdef class MCTS:
             # v = 2 * v * discount - 1
 
             self._curnode.q = (self._curnode.q * self._curnode.n + v * discount) / (self._curnode.n + 1)
-            if self._curnode.n == 0:
-                self._curnode.v = self._get_value(value, self._curnode.player, num_players)  # * 2 - 1
             self._curnode.n += 1
             self._curnode = parent
             i += 1
