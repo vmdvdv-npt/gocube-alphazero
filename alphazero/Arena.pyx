@@ -155,13 +155,14 @@ class Arena:
         no_results = 0
         for _ in range(num_games):
             state, winstate, agent_id = result_queue.get()
-            if winstate[-1]:
+            has_draw_slot = len(winstate) > self.game_cls.num_players()
+            if has_draw_slot and winstate[-1]:
                 if getattr(state, 'terminal_kind', None) == 'no_result':
                     no_results += 1
                 else:
                     draws += 1
                 continue
-            for player, is_win in enumerate(winstate[:-1]):
+            for player, is_win in enumerate(winstate[:self.game_cls.num_players()]):
                 if is_win:
                     index = self._agents[agent_id].player_to_index[player]
                     wins[index] += 1
@@ -388,7 +389,7 @@ class Arena:
                 # Bookkeeping + plot progress
                 for player, is_win in enumerate(winstate):
                     if is_win:
-                        if player == len(winstate) - 1:
+                        if player >= self.game_cls.num_players():
                             if getattr(final_state, 'terminal_kind', None) == 'no_result':
                                 self.no_results += 1
                             else:
