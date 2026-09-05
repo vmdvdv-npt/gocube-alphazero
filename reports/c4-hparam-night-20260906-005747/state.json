@@ -48,7 +48,7 @@
       "pfast": 0.0,
       "run_name": "c4-hparam-night-20260906-005747-b",
       "sims": 100,
-      "status": "PENDING"
+      "status": "FORKED"
     },
     "C": {
       "axis": "pfast",
@@ -58,7 +58,7 @@
       "pfast": 0.5,
       "run_name": "c4-hparam-night-20260906-005747-c",
       "sims": 100,
-      "status": "PENDING"
+      "status": "FORKED"
     },
     "D": {
       "axis": "sims",
@@ -68,7 +68,7 @@
       "pfast": 0.25,
       "run_name": "c4-hparam-night-20260906-005747-d",
       "sims": 50,
-      "status": "PENDING"
+      "status": "FORKED"
     },
     "E": {
       "axis": "sims",
@@ -78,7 +78,7 @@
       "pfast": 0.25,
       "run_name": "c4-hparam-night-20260906-005747-e",
       "sims": 200,
-      "status": "PENDING"
+      "status": "FORKED"
     },
     "F": {
       "axis": "games",
@@ -88,7 +88,7 @@
       "pfast": 0.25,
       "run_name": "c4-hparam-night-20260906-005747-f",
       "sims": 100,
-      "status": "PENDING"
+      "status": "FORKED"
     },
     "G": {
       "axis": "games",
@@ -98,7 +98,7 @@
       "pfast": 0.25,
       "run_name": "c4-hparam-night-20260906-005747-g",
       "sims": 100,
-      "status": "PENDING"
+      "status": "FORKED"
     }
   },
   "deadline_at": "2026-10-17T15:59:07+04:00",
@@ -439,6 +439,39 @@
       "iteration": 5,
       "started_at": "2026-09-06T02:35:15+04:00",
       "status": "COMPLETED"
+    },
+    "stage1_train_A_i6": {
+      "branch": "A",
+      "command": [
+        "/home/codex/projects/gocube-alphazero/.venv/bin/python",
+        "/home/codex/projects/gocube-alphazero/alphazero/envs/gocube/train.py",
+        "--topology",
+        "cube",
+        "--size",
+        "4",
+        "--workers",
+        "16",
+        "--sims",
+        "100",
+        "--arena-sims",
+        "100",
+        "--games-per-iteration",
+        "256",
+        "--iterations",
+        "6",
+        "--train-batch-size",
+        "256",
+        "--fast-game-prob",
+        "0.25",
+        "--endgame-sample-weight",
+        "1",
+        "--no-arena",
+        "--run-name",
+        "c4-hparam-night-20260906-005747-a"
+      ],
+      "iteration": 6,
+      "started_at": "2026-09-06T02:56:55+04:00",
+      "status": "RUNNING"
     }
   },
   "started_at": "2026-09-06T00:59:07+04:00",

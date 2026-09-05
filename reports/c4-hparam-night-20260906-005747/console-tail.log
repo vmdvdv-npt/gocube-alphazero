@@ -1,36 +1,3 @@
-[KGenerating Samples |#                               | (9/256) Sample Time: 74.616s | Infer Batch: 43.7 | Total: 0:11:11 | ETA: 0:00:05
-[KGenerating Samples |#                               | (9/256) Sample Time: 74.616s | Infer Batch: 43.7 | Total: 0:11:12 | ETA: 0:00:05
-[KGenerating Samples |#                               | (9/256) Sample Time: 74.616s | Infer Batch: 43.7 | Total: 0:11:13 | ETA: 0:00:05
-[KGenerating Samples |#                               | (9/256) Sample Time: 74.616s | Infer Batch: 43.7 | Total: 0:11:15 | ETA: 0:00:05
-[KGenerating Samples |#                               | (9/256) Sample Time: 74.616s | Infer Batch: 43.7 | Total: 0:11:16 | ETA: 0:00:05
-[KGenerating Samples |#                               | (9/256) Sample Time: 74.616s | Infer Batch: 43.7 | Total: 0:11:17 | ETA: 0:00:05
-[KGenerating Samples |#                               | (10/256) Sample Time: 67.739s | Infer Batch: 43.7 | Total: 0:11:18 | ETA: 0:00:05
-[KGenerating Samples |#                               | (12/256) Sample Time: 56.567s | Infer Batch: 43.7 | Total: 0:11:19 | ETA: 0:00:04
-[KGenerating Samples |#                               | (12/256) Sample Time: 56.567s | Infer Batch: 43.7 | Total: 0:11:20 | ETA: 0:00:04
-[KGenerating Samples |#                               | (12/256) Sample Time: 56.567s | Infer Batch: 43.7 | Total: 0:11:21 | ETA: 0:00:04
-[KGenerating Samples |#                               | (13/256) Sample Time: 52.422s | Infer Batch: 43.7 | Total: 0:11:22 | ETA: 0:00:04
-[KGenerating Samples |#                               | (13/256) Sample Time: 52.422s | Infer Batch: 43.7 | Total: 0:11:23 | ETA: 0:00:04
-[KGenerating Samples |#                               | (13/256) Sample Time: 52.422s | Infer Batch: 43.7 | Total: 0:11:24 | ETA: 0:00:04
-[KGenerating Samples |#                               | (13/256) Sample Time: 52.422s | Infer Batch: 43.7 | Total: 0:11:25 | ETA: 0:00:04
-[KGenerating Samples |#                               | (14/256) Sample Time: 48.979s | Infer Batch: 43.7 | Total: 0:11:26 | ETA: 0:00:03
-[KGenerating Samples |#                               | (15/256) Sample Time: 45.801s | Infer Batch: 43.7 | Total: 0:11:27 | ETA: 0:00:03
-[KGenerating Samples |##                              | (16/256) Sample Time: 42.949s | Infer Batch: 43.7 | Total: 0:11:28 | ETA: 0:00:04
-[KGenerating Samples |##                              | (16/256) Sample Time: 42.949s | Infer Batch: 43.7 | Total: 0:11:29 | ETA: 0:00:04
-[KGenerating Samples |##                              | (16/256) Sample Time: 42.949s | Infer Batch: 43.7 | Total: 0:11:30 | ETA: 0:00:04
-[KGenerating Samples |##                              | (17/256) Sample Time: 40.630s | Infer Batch: 43.7 | Total: 0:11:31 | ETA: 0:00:04
-[KGenerating Samples |##                              | (17/256) Sample Time: 40.630s | Infer Batch: 43.7 | Total: 0:11:32 | ETA: 0:00:04
-[KGenerating Samples |##                              | (18/256) Sample Time: 38.487s | Infer Batch: 43.7 | Total: 0:11:33 | ETA: 0:00:04
-[KGenerating Samples |##                              | (20/256) Sample Time: 34.683s | Infer Batch: 43.7 | Total: 0:11:34 | ETA: 0:00:04
-[KGenerating Samples |##                              | (20/256) Sample Time: 34.683s | Infer Batch: 43.7 | Total: 0:11:35 | ETA: 0:00:04
-[KGenerating Samples |##                              | (20/256) Sample Time: 34.683s | Infer Batch: 43.7 | Total: 0:11:36 | ETA: 0:00:04
-[KGenerating Samples |##                              | (21/256) Sample Time: 33.150s | Infer Batch: 43.7 | Total: 0:11:37 | ETA: 0:00:04
-[KGenerating Samples |##                              | (21/256) Sample Time: 33.150s | Infer Batch: 43.7 | Total: 0:11:38 | ETA: 0:00:04
-[KGenerating Samples |##                              | (21/256) Sample Time: 33.150s | Infer Batch: 43.7 | Total: 0:11:39 | ETA: 0:00:04
-[KGenerating Samples |##                              | (21/256) Sample Time: 33.150s | Infer Batch: 43.7 | Total: 0:11:40 | ETA: 0:00:04
-[KGenerating Samples |##                              | (21/256) Sample Time: 33.150s | Infer Batch: 43.7 | Total: 0:11:41 | ETA: 0:00:04
-[KGenerating Samples |###                             | (24/256) Sample Time: 29.228s | Infer Batch: 43.7 | Total: 0:11:42 | ETA: 0:00:03
-[KGenerating Samples |###                             | (25/256) Sample Time: 28.102s | Infer Batch: 43.7 | Total: 0:11:43 | ETA: 0:00:03
-[KGenerating Samples |###                             | (25/256) Sample Time: 28.102s | Infer Batch: 43.7 | Total: 0:11:44 | ETA: 0:00:03
 [KGenerating Samples |###                             | (26/256) Sample Time: 27.120s | Infer Batch: 43.7 | Total: 0:11:45 | ETA: 0:00:03
 [KGenerating Samples |###                             | (27/256) Sample Time: 26.120s | Infer Batch: 43.7 | Total: 0:11:46 | ETA: 0:00:03
 [KGenerating Samples |###                             | (27/256) Sample Time: 26.120s | Infer Batch: 43.7 | Total: 0:11:47 | ETA: 0:00:03
@@ -1998,3 +1965,36 @@ LR:                       0.01
 EXPERIMENT EVENT: stage_completed {'stage_id': 'canonical_iter_5', 'elapsed_seconds': 1294.8}
 EXPERIMENT EVENT: parent_frozen {'sha256': '28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4'}
 EXPERIMENT EVENT: branch_forked {'branch': 'A', 'run_name': 'c4-hparam-night-20260906-005747-a'}
+EXPERIMENT EVENT: branch_forked {'branch': 'B', 'run_name': 'c4-hparam-night-20260906-005747-b'}
+EXPERIMENT EVENT: branch_forked {'branch': 'C', 'run_name': 'c4-hparam-night-20260906-005747-c'}
+EXPERIMENT EVENT: branch_forked {'branch': 'D', 'run_name': 'c4-hparam-night-20260906-005747-d'}
+EXPERIMENT EVENT: branch_forked {'branch': 'E', 'run_name': 'c4-hparam-night-20260906-005747-e'}
+EXPERIMENT EVENT: branch_forked {'branch': 'F', 'run_name': 'c4-hparam-night-20260906-005747-f'}
+EXPERIMENT EVENT: branch_forked {'branch': 'G', 'run_name': 'c4-hparam-night-20260906-005747-g'}
+EXPERIMENT EVENT: deadline_check {'label': 'stage1 train A@6', 'remaining_seconds': 3589331.4, 'estimated_seconds': 1663.6, 'reserve_seconds': 2100.0, 'allowed': True}
+EXPERIMENT EVENT: stage_started {'stage_id': 'stage1_train_A_i6', 'branch': 'A', 'iteration': 6}
+Self-play:
+  regular sims = 100
+  fast sims = 20
+  fast probability = 25%
+Training:
+  games/iteration = 256
+  batch size = 256
+  step mode = auto
+  endgame weight = 1
+Arena: OFF
+Model gating: OFF
+/home/codex/projects/gocube-alphazero/alphazero/NNetWrapper.py:283: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  checkpoint = torch.load(filepath, map_location=device) if device else torch.load(filepath)
+Because of batching, it can take a long time before any games finish.
+------ITER 6------
+
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 52.1 | Total: 0:00:01 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 45.7 | Total: 0:00:02 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 44.4 | Total: 0:00:03 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 42.4 | Total: 0:00:04 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 42.7 | Total: 0:00:05 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 42.6 | Total: 0:00:06 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 42.5 | Total: 0:00:07 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 42.3 | Total: 0:00:08 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 41.8 | Total: 0:00:09 | ETA: 0:00:00
