@@ -73,11 +73,15 @@ def test_seki_is_not_converted_to_ordinary_territory():
 
 
 def test_benson_equivalent_shapes_work_on_cube_interior_seam_vertex_and_torus_wrap():
+    # Each fixture has two distinct eye regions. The first eye deliberately
+    # exercises an interior, seam, cube vertex, or torus-wrap location. The old
+    # seam/vertex fixture accidentally chose two graph-adjacent points, which is
+    # a single empty region and therefore only one eye.
     fixtures = [
         (cube_topology(5), ("front:2:2", "back:2:2")),
-        (cube_topology(5), ("front:0:2", "top:4:2")),
-        (cube_topology(5), ("front:0:0", "top:4:0")),
-        (torus_topology(9), ("0,0", "8,8")),
+        (cube_topology(5), ("front:0:2", "back:2:2")),
+        (cube_topology(5), ("front:0:0", "back:2:2")),
+        (torus_topology(9), ("0,0", "4,4")),
     ]
     for t, eyes in fixtures:
         eye_indices = idxs(t, eyes)
