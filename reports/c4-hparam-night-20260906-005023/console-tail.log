@@ -1,0 +1,13 @@
+EXPERIMENT EVENT: environment_validated {'head': '85c87a7cfd467a4d3f4b2844253fb63d746d672a', 'cpu_count': 16}
+EXPERIMENT EVENT: stage_started {'stage_id': 'canonical_iter_2', 'branch': 'PARENT', 'iteration': 2}
+Self-play:
+  regular sims = 100
+  fast sims = 20
+  fast probability = 25%
+Training:
+  games/iteration = 256
+  batch size = 256
+  step mode = auto
+  endgame weight = 1
+Arena: OFF
+Model gating: OFF

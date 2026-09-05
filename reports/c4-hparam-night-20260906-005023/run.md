@@ -1,13 +1,13 @@
 # Training run
 
 - Run: c4-hparam-night-20260906-005023
-- Status: RUNNING
+- Status: INTERRUPTED
 - Started: 2026-09-06T00:51:32+04:00
-- Ended: —
-- Exit code: —
+- Ended: 2026-09-06T00:51:40+04:00
+- Exit code: 130
 - Source commit: 85c87a7cfd467a4d3f4b2844253fb63d746d672a
 - Completed iteration manifests: 0
-- Structured experiment artifacts: no
+- Structured experiment artifacts: yes
 - Reports branch: training-reports
 
 ## Command
