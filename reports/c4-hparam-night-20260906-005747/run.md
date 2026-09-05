@@ -1,10 +1,10 @@
 # Training run
 
 - Run: c4-hparam-night-20260906-005747
-- Status: RUNNING
+- Status: FAILED
 - Started: 2026-09-06T01:25:51+04:00
-- Ended: —
-- Exit code: —
+- Ended: 2026-09-06T01:25:58+04:00
+- Exit code: 1
 - Source commit: 85c87a7cfd467a4d3f4b2844253fb63d746d672a
 - Completed iteration manifests: 0
 - Structured experiment artifacts: yes
