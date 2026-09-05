@@ -54,6 +54,37 @@ def test_cython_mcts_can_traverse_second_pass_and_backpropagate_terminal_result(
     assert probabilities[game.pass_action()] == 1.0
 
 
+def test_root_value_is_initialized_before_fpu_selects_unvisited_moves():
+    game = Torus9ChineseGame()
+    args = mcts_args()
+    args.fpu_reduction = 0.2
+    mcts = MCTS(args)
+
+    pass_action = game.pass_action()
+    policy = np.full(game.action_size(), (1.0 - 0.22) / (game.action_size() - 1), dtype=np.float32)
+    policy[pass_action] = 0.22
+    root_value = np.array([0.34, 0.66, 0.0], dtype=np.float32)
+
+    # First evaluation expands the root. FPU must use this neural value on the
+    # very next traversal; leaving root.v at the Node default of zero causes a
+    # high-prior bad move to suppress every unvisited alternative.
+    root_leaf = mcts.find_leaf(game)
+    mcts.process_results(root_leaf, root_value, policy, False, False)
+    assert np.isclose(mcts._root.v, 0.34)
+
+    # The high prior makes PASS the first explored child.
+    pass_leaf = mcts.find_leaf(game)
+    assert pass_leaf.last_action == pass_action
+
+    # Make that PASS clearly bad for Black. With the root value initialized,
+    # FPU for untouched placements stays above the now-known bad PASS Q-value.
+    bad_pass_value = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    mcts.process_results(pass_leaf, bad_pass_value, policy, False, False)
+
+    alternative_leaf = mcts.find_leaf(game)
+    assert alternative_leaf.last_action != pass_action
+
+
 def test_root_noise_accepts_values_below_float32_range(monkeypatch):
     game = Torus9ChineseGame()
     mcts = MCTS(mcts_args())
