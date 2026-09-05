@@ -39,6 +39,7 @@ def test_v3_contract_and_training_controls_are_forwarded():
     assert args.numMCTSSims == 20
     assert args.arenaMCTSSims == 100
     assert args.arenaTemp == 0.0
+    assert args.arenaBatched is False
     assert args.compareWithBaseline is True
     assert args.compareWithPast is True
     assert args.model_gating is False
@@ -114,6 +115,7 @@ def test_training_configuration_reports_fixed_arena_and_gating(capsys):
     output = capsys.readouterr().out
     assert "Self-play: 20 sims, fast 20 @ 75%" in output
     assert "Arena: fixed 100 sims, fast OFF, root noise OFF, root temp OFF, action temp 0" in output
+    assert "color-balanced scheduling" in output
     assert "Model gating: OFF" in output
 
 
