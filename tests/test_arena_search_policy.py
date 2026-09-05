@@ -5,8 +5,10 @@ import pytest
 import torch
 
 from alphazero.Arena import Arena
+from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.SelfPlayAgent import SelfPlayAgent
-from alphazero.utils import dotdict
+from alphazero.envs.gocube.game import Cube4JapaneseGame
+from alphazero.utils import const_temp_scaling, dotdict
 
 
 def _bare_agent(*, is_arena, prob_fast, arena_sims=100, include_arena_sims=True):
@@ -140,3 +142,63 @@ def test_deterministic_arena_policy_is_one_hot_at_zero_temperature():
     policy = np.zeros_like(visits)
     policy[max_index] = 1.0
     assert np.random.choice(len(policy), p=policy) == max_index
+
+
+class _UniformTechnicalNet:
+    def __init__(self, game_cls):
+        self.action_size = game_cls.action_size()
+        self.value_size = game_cls.num_players() + game_cls.has_draw()
+        self.calls = 0
+
+    def __call__(self, _observation):
+        self.calls += 1
+        policy = np.full(self.action_size, 1.0 / self.action_size, dtype=np.float32)
+        value = np.zeros(self.value_size, dtype=np.float32)
+        return policy, value
+
+
+def _functional_arena_args():
+    return dotdict({
+        "numMCTSSims": 1,
+        "arenaMCTSSims": 2,
+        "numFastSims": 1,
+        "probFastSim": 1.0,
+        "add_root_noise": True,
+        "add_root_temp": True,
+        "startTemp": 1.0,
+        "arenaTemp": 0.0,
+        "root_noise_frac": 0.1,
+        "root_policy_temp": 1.1,
+        "min_discount": 1.0,
+        "fpu_reduction": 0.2,
+        "cpuct": 1.25,
+        "_num_players": Cube4JapaneseGame.num_players() + Cube4JapaneseGame.has_draw(),
+        "use_draws_for_winrate": True,
+        "temp_scaling_fn": const_temp_scaling,
+    })
+
+
+def test_gocube_arena_functional_smoke_with_technical_mcts_models():
+    np.random.seed(7)
+    training_args = _functional_arena_args()
+    candidate_net = _UniformTechnicalNet(Cube4JapaneseGame)
+    baseline_net = _UniformTechnicalNet(Cube4JapaneseGame)
+    players = [
+        MCTSPlayer(candidate_net, Cube4JapaneseGame, training_args),
+        MCTSPlayer(baseline_net, Cube4JapaneseGame, training_args),
+    ]
+
+    arena = Arena(players, Cube4JapaneseGame, use_batched_mcts=False, args=training_args)
+    wins, draws, winrates = arena.play_games(2, shuffle_players=True)
+
+    assert arena.args.numMCTSSims == 2
+    assert arena.args.arenaMCTSSims == 2
+    assert arena.args.probFastSim == 0.0
+    assert arena.args.add_root_noise is False
+    assert arena.args.add_root_temp is False
+    assert arena.args.arenaTemp == 0.0
+    assert arena.games_played == 2
+    assert sum(wins) + draws + arena.no_results == 2
+    assert len(winrates) == 2
+    assert candidate_net.calls > 0
+    assert baseline_net.calls > 0
