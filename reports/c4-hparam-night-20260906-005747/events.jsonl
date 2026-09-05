@@ -13,3 +13,6 @@
 {"branch": "PARENT", "event": "stage_started", "iteration": 4, "stage_id": "canonical_iter_4", "time": "2026-09-06T02:13:14+04:00"}
 {"elapsed_seconds": 1320.9, "event": "stage_completed", "stage_id": "canonical_iter_4", "time": "2026-09-06T02:35:15+04:00"}
 {"branch": "PARENT", "event": "stage_started", "iteration": 5, "stage_id": "canonical_iter_5", "time": "2026-09-06T02:35:15+04:00"}
+{"elapsed_seconds": 1294.8, "event": "stage_completed", "stage_id": "canonical_iter_5", "time": "2026-09-06T02:56:50+04:00"}
+{"event": "parent_frozen", "sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4", "time": "2026-09-06T02:56:50+04:00"}
+{"branch": "A", "event": "branch_forked", "run_name": "c4-hparam-night-20260906-005747-a", "time": "2026-09-06T02:56:50+04:00"}

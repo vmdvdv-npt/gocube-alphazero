@@ -20,6 +20,13 @@
       "kind": "checkpoint",
       "path": "checkpoint/c4-t001-c4-c001/iteration-0004.pkl",
       "sha256": "4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+    },
+    {
+      "branch": "PARENT",
+      "iteration": 5,
+      "kind": "checkpoint",
+      "path": "checkpoint/c4-t001-c4-c001/iteration-0005.pkl",
+      "sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
     }
   ],
   "branches": {
@@ -31,7 +38,7 @@
       "pfast": 0.25,
       "run_name": "c4-hparam-night-20260906-005747-a",
       "sims": 100,
-      "status": "PENDING"
+      "status": "FORKED"
     },
     "B": {
       "axis": "pfast",
@@ -231,6 +238,49 @@
       "white_wins": 149,
       "window_samples": 102269,
       "workers": 16
+    },
+    {
+      "average_game_length": 127.24609375,
+      "base_endgame_positions": 5077,
+      "base_positions": 24416,
+      "batch_size": 256,
+      "black_wins": 119,
+      "branch": "PARENT",
+      "checkpoint_sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4",
+      "draws": 0,
+      "effective_passes": 0.192,
+      "examples_seen": 24320,
+      "fast_decisions": 12512,
+      "fast_sims": 20,
+      "games": 256,
+      "games_per_iteration": 256,
+      "history_datasets": 5,
+      "iteration": 5,
+      "last_reported_inference_batch": 41.7,
+      "latest_iteration_samples": 24416,
+      "learning_rate": 0.01,
+      "loss_ownership": 0.476,
+      "loss_policy": 3.0459,
+      "loss_score": 0.12,
+      "loss_value": 0.819,
+      "no_result_games": 0,
+      "optimizer_steps_actual": 95,
+      "optimizer_steps_planned": 95,
+      "pfast": 0.25,
+      "process_batch_size": 16,
+      "realized_fast_fraction": 0.2482,
+      "regular_decisions": 37904,
+      "run_name": "c4-t001-c4-c001",
+      "saved_samples": 24416,
+      "sims": 100,
+      "stage_id": "canonical_iter_5",
+      "tensor_rows": 24416,
+      "train_batch_size": 256,
+      "training_valid_fraction": 1.0,
+      "wall_seconds": 1294.8376400470734,
+      "white_wins": 137,
+      "window_samples": 126685,
+      "workers": 16
     }
   ],
   "notes": [
@@ -238,7 +288,7 @@
     "Losses are diagnostics, not the primary ranking metric.",
     "F/G are an end-to-end outer-loop configuration test: with 16 workers, games/iteration also changes process_batch_size (8/16/32)."
   ],
-  "parent_checkpoint_sha256": null,
+  "parent_checkpoint_sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4",
   "parent_iteration": 5,
   "reserve_minutes": 35.0,
   "resume_count": 1,
@@ -355,6 +405,7 @@
     },
     "canonical_iter_5": {
       "branch": "PARENT",
+      "checkpoint_sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4",
       "command": [
         "/home/codex/projects/gocube-alphazero/.venv/bin/python",
         "/home/codex/projects/gocube-alphazero/alphazero/envs/gocube/train.py",
@@ -382,9 +433,12 @@
         "--run-name",
         "c4-t001-c4-c001"
       ],
+      "elapsed_seconds": 1294.8376400470734,
+      "ended_at": "2026-09-06T02:56:50+04:00",
+      "exit_code": 0,
       "iteration": 5,
       "started_at": "2026-09-06T02:35:15+04:00",
-      "status": "RUNNING"
+      "status": "COMPLETED"
     }
   },
   "started_at": "2026-09-06T00:59:07+04:00",

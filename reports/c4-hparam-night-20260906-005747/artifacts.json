@@ -19,5 +19,12 @@
     "kind": "checkpoint",
     "path": "checkpoint/c4-t001-c4-c001/iteration-0004.pkl",
     "sha256": "4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+  },
+  {
+    "branch": "PARENT",
+    "iteration": 5,
+    "kind": "checkpoint",
+    "path": "checkpoint/c4-t001-c4-c001/iteration-0005.pkl",
+    "sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
   }
 ]

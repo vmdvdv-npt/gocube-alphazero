@@ -1,0 +1,7 @@
+{
+  "checkpoint": "checkpoint/c4-t001-c4-c001/iteration-0005.pkl",
+  "frozen_training_commit": "85c87a7cfd467a4d3f4b2844253fb63d746d672a",
+  "iteration": 5,
+  "run_name": "c4-t001-c4-c001",
+  "sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+}

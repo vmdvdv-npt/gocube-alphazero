@@ -6,7 +6,7 @@
 - Deadline: 2026-10-17T15:59:07+04:00
 - Frozen training commit: `85c87a7cfd467a4d3f4b2844253fb63d746d672a`
 - Parent: `c4-t001-c4-c001@5`
-- Parent checkpoint SHA256: `pending`
+- Parent checkpoint SHA256: `28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4`
 - Workers: **16** everywhere
 
 ## Decision status
@@ -33,7 +33,7 @@ Primary ranking is based on fixed-Arena playing strength, with wall-clock cost s
 
 | Branch | Latest iter | Train wall | Samples (latest) | Opt steps | Realized fast | No-result | Status |
 |---|---:|---:|---:|---:|---:|---:|---|
-| A | 5 | 0.00 h | — | — | — | — | PENDING |
+| A | 5 | 0.00 h | — | — | — | — | FORKED |
 | B | 5 | 0.00 h | — | — | — | — | PENDING |
 | C | 5 | 0.00 h | — | — | — | — | PENDING |
 | D | 5 | 0.00 h | — | — | — | — | PENDING |
