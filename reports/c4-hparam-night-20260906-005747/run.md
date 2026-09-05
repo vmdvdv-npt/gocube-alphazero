@@ -1,10 +1,10 @@
 # Training run
 
 - Run: c4-hparam-night-20260906-005747
-- Status: FAILED
-- Started: 2026-09-06T01:25:51+04:00
-- Ended: 2026-09-06T01:25:58+04:00
-- Exit code: 1
+- Status: RUNNING
+- Started: 2026-09-06T01:48:52+04:00
+- Ended: —
+- Exit code: —
 - Source commit: 85c87a7cfd467a4d3f4b2844253fb63d746d672a
 - Completed iteration manifests: 0
 - Structured experiment artifacts: yes
@@ -13,7 +13,7 @@
 ## Command
 
 ```bash
-/home/codex/projects/gocube-alphazero/.venv/bin/python /home/codex/.cache/gocube-night-tools-2a8e15c796a8390aae6ed68c13c3688fcd1383eb/c4_overnight_experiment.py --experiment-id c4-hparam-night-20260906-005747 --source-run c4-t001-c4-c001 --frozen-commit 85c87a7cfd467a4d3f4b2844253fb63d746d672a --max-hours 999
+/home/codex/projects/gocube-alphazero/.venv/bin/python /home/codex/.cache/gocube-night-tools-d1e63d0f6bd6fdecce5887af97bdb5e3cc166f89/c4_overnight_experiment.py --experiment-id c4-hparam-night-20260906-005747 --source-run c4-t001-c4-c001 --frozen-commit 85c87a7cfd467a4d3f4b2844253fb63d746d672a --max-hours 999
 ```
 
 ## Published to GitHub
