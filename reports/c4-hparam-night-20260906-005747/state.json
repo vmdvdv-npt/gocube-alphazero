@@ -74,7 +74,7 @@
   },
   "deadline_at": "2026-10-17T15:59:07+04:00",
   "deadline_epoch": 1792238347.3347416,
-  "ended_at": "2026-09-06T01:24:39+04:00",
+  "ended_at": "2026-09-06T01:25:18+04:00",
   "evaluations": [],
   "experiment_id": "c4-hparam-night-20260906-005747",
   "fatal_error": "RuntimeError: existing c4-t001-c4-c001@2 is incomplete/corrupt: No module named 'alphazero'",
