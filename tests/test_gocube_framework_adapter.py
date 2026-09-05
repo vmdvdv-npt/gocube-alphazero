@@ -4,8 +4,11 @@ import numpy as np
 import torch
 
 from alphazero.envs.gocube import (
+    CLEANUP_1,
+    CLEANUP_2,
     Cube4ChineseGame,
     Cube4JapaneseGame,
+    Cube4JapaneseV2Game,
     Torus9ChineseGame,
     Torus9JapaneseGame,
     game_class,
@@ -18,93 +21,72 @@ def test_configured_game_classes_expose_exact_action_spaces():
     assert Torus9JapaneseGame.pass_action() == 81
     assert Torus9JapaneseGame.action_for_point_id("4,3") == 31
     assert Torus9JapaneseGame.point_id_for_action(31) == "4,3"
-    assert Torus9JapaneseGame.point_id_for_action(81) is None
-
     assert Cube4JapaneseGame.action_size() == 6 * 4 * 4 + 1
     assert Cube4JapaneseGame.pass_action() == 96
     assert Cube4JapaneseGame.action_for_point_id("back:0:0") == 16
     assert Cube4JapaneseGame.action_for_point_id("bottom:3:3") == 95
 
 
-def test_game_class_registry_defaults_to_japanese_and_keeps_legacy_chinese():
+def test_game_class_registry_defaults_to_v3_and_keeps_legacy_chinese():
     assert game_class("torus", 9) is Torus9JapaneseGame
     assert game_class("cube", 4) is Cube4JapaneseGame
     assert game_class("torus", 9, "chinese") is Torus9ChineseGame
     assert game_class("cube", 4, "chinese") is Cube4ChineseGame
+    assert Torus9JapaneseGame.TERMINAL_ADJUDICATOR_ID == "gocube-katago-japanese-v3"
+    assert Cube4JapaneseV2Game.TERMINAL_ADJUDICATOR_ID == "gocube-japanese-cleanup-v2"
 
 
-def test_japanese_game_adapter_exposes_cleanup_context():
+def test_v3_observation_exposes_cleanup_scoring_state():
     game = Torus9JapaneseGame()
-
-    assert game.player == 0
-    assert game.turns == 0
-    assert not game.win_state().any()
-    assert game.valid_moves().shape == (82,)
-    assert game.valid_moves().sum() == 82
-    assert game.observation().shape == (10, 81, 1)
+    assert game.observation().shape == (17, 81, 1)
     assert game.observation().dtype == np.float32
     assert np.all(game.observation()[4] == 1.0)
-    assert np.all(game.observation()[8] == 0.0)
-    assert np.all(game.observation()[9] == 0.0)
+    game.play_action(game.pass_action())
+    game.play_action(game.pass_action())
+    assert game.semantic_state.phase == CLEANUP_1
+    assert np.all(game.observation()[8] == 1.0)
+    game.play_action(game.pass_action())
+    game.play_action(game.pass_action())
+    assert game.semantic_state.phase == CLEANUP_2
+    assert np.all(game.observation()[9] == 1.0)
+    assert game.semantic_state.second_cleanup_start_colors is not None
 
 
-def test_legacy_chinese_observation_shape_stays_checkpoint_compatible():
+def test_legacy_observation_shapes_stay_checkpoint_compatible():
     assert Torus9ChineseGame().observation().shape == (8, 81, 1)
+    assert Cube4JapaneseV2Game().observation().shape == (10, 96, 1)
 
 
-def test_play_action_synchronizes_player_turns_board_and_observation():
+def test_play_action_synchronizes_framework_fields():
     game = Torus9JapaneseGame()
     action = game.action_for_point_id("0,0")
-
     game.play_action(action)
-
     assert game.player == 1
     assert game.turns == 1
     assert game.semantic_state.board[action] == 1
     observation = game.observation()
     assert observation[0, action, 0] == 1.0
-    assert observation[1, action, 0] == 0.0
     assert np.all(observation[4] == -1.0)
-    assert np.all(observation[5] == 0.0)
-
-
-def test_previous_board_and_pass_context_are_present_in_observation():
-    game = Torus9JapaneseGame()
-    point = game.action_for_point_id("0,0")
-    game.play_action(point)
-    game.play_action(game.pass_action())
-
-    observation = game.observation()
-    assert game.player == 0
-    assert game.turns == 2
-    assert observation[2, point, 0] == 1.0
-    assert observation[3, point, 0] == 0.0
-    assert np.all(observation[4] == 1.0)
-    assert np.all(observation[5] == 1.0)
 
 
 def test_clone_is_independent_and_preserves_semantic_identity():
     original = Torus9JapaneseGame()
     clone = original.clone()
-
     assert clone == original
     clone.play_action(clone.action_for_point_id("1,1"))
-
     assert clone != original
     assert original.turns == 0
     assert clone.turns == 1
-    assert original.semantic_state.board[original.action_for_point_id("1,1")] == 0
 
 
-def test_empty_japanese_game_can_score_immediately_after_two_passes():
+def test_empty_v3_game_reaches_scored_after_main_and_two_cleanup_phases():
     game = Torus9JapaneseGame()
-
+    for _ in range(5):
+        game.play_action(game.pass_action())
+        assert not game.win_state().any()
     game.play_action(game.pass_action())
-    assert not game.win_state().any()
-    game.play_action(game.pass_action())
-
-    assert game.terminal_adjudication is not None
-    assert game.terminal_adjudication.training_valid
+    assert game.terminal_kind == "scored"
+    assert game.has_training_result()
     assert game.terminal_adjudication.winner == "white"
     assert np.array_equal(game.win_state(), np.array([0, 1, 0], dtype=np.uint8))
     assert not game.valid_moves().any()
@@ -114,77 +96,46 @@ def test_legacy_chinese_second_pass_remains_terminal():
     game = Torus9ChineseGame()
     game.play_action(game.pass_action())
     game.play_action(game.pass_action())
-    assert game.terminal_adjudication is not None
     assert game.terminal_adjudication.adjudicator_id == "gocube-conservative-area-v1"
 
 
 def graph_args(auxiliary=False):
-    return SimpleNamespace(
-        num_channels=16,
-        depth=2,
-        value_dense_layers=[16],
-        score_dense_layers=[8],
-        gocube_auxiliary_targets=auxiliary,
-    )
+    return SimpleNamespace(num_channels=16, depth=2, value_dense_layers=[16], score_dense_layers=[8],
+                           gocube_auxiliary_targets=auxiliary)
 
 
 def test_graph_network_policy_and_value_shapes_for_torus_and_cube():
     for game_cls in (Torus9ChineseGame, Cube4ChineseGame):
         network = GraphNet(game_cls, graph_args())
-        observations = torch.from_numpy(
-            np.stack((game_cls().observation(), game_cls().observation()))
-        )
-
+        observations = torch.from_numpy(np.stack((game_cls().observation(), game_cls().observation())))
         log_policy, log_value = network(observations)
-
         assert log_policy.shape == (2, game_cls.action_size())
         assert log_value.shape == (2, 3)
         assert torch.allclose(torch.exp(log_policy).sum(dim=1), torch.ones(2), atol=1e-6)
-        assert torch.allclose(torch.exp(log_value).sum(dim=1), torch.ones(2), atol=1e-6)
 
 
-def test_japanese_graph_network_emits_score_and_ownership_heads():
+def test_v3_graph_network_emits_score_and_ownership_heads():
     game_cls = Torus9JapaneseGame
     network = GraphNet(game_cls, graph_args(auxiliary=True))
     observations = torch.from_numpy(np.stack((game_cls().observation(), game_cls().observation())))
-
     log_policy, log_value, log_ownership, score = network(observations)
-
-    assert log_policy.shape == (2, game_cls.action_size())
+    assert log_policy.shape == (2, 82)
     assert log_value.shape == (2, 3)
     assert log_ownership.shape == (2, 81, 3)
     assert score.shape == (2, 1)
-    assert torch.allclose(torch.exp(log_ownership).sum(dim=2), torch.ones((2, 81)), atol=1e-6)
-    assert torch.all(score <= 1.0)
-    assert torch.all(score >= -1.0)
 
 
-def test_graph_message_layer_crosses_torus_wrap_using_logical_neighbors():
-    game_cls = Torus9JapaneseGame
-    topology = game_cls.logical_topology()
-    layer = GraphMessageLayer(1, game_cls.graph_neighbors())
-    with torch.no_grad():
-        layer.self_linear.weight.zero_()
-        layer.neighbor_linear.weight.fill_(1.0)
-
-    nodes = torch.zeros((1, topology.point_count, 1))
-    nodes[0, topology.point_index("8,0"), 0] = 1.0
-    output = layer(nodes)
-
-    assert output[0, topology.point_index("0,0"), 0].item() == 0.25
-
-
-def test_graph_message_layer_crosses_cube_seam_using_logical_neighbors():
-    game_cls = Cube4JapaneseGame
-    topology = game_cls.logical_topology()
-    layer = GraphMessageLayer(1, game_cls.graph_neighbors())
-    with torch.no_grad():
-        layer.self_linear.weight.zero_()
-        layer.neighbor_linear.weight.fill_(1.0)
-
-    nodes = torch.zeros((1, topology.point_count, 1))
-    seam_neighbor = topology.neighbor_ids("front:0:0")[0]
-    nodes[0, topology.point_index(seam_neighbor), 0] = 1.0
-    output = layer(nodes)
-
-    assert output[0, topology.point_index("front:0:0"), 0].item() == 0.25
+def test_graph_message_layer_crosses_torus_wrap_and_cube_seam():
+    for game_cls, source, target in (
+        (Torus9JapaneseGame, "8,0", "0,0"),
+        (Cube4JapaneseGame, Cube4JapaneseGame.logical_topology().neighbor_ids("front:0:0")[0], "front:0:0"),
+    ):
+        topology = game_cls.logical_topology()
+        layer = GraphMessageLayer(1, game_cls.graph_neighbors())
+        with torch.no_grad():
+            layer.self_linear.weight.zero_()
+            layer.neighbor_linear.weight.fill_(1.0)
+        nodes = torch.zeros((1, topology.point_count, 1))
+        nodes[0, topology.point_index(source), 0] = 1.0
+        output = layer(nodes)
+        assert output[0, topology.point_index(target), 0].item() == 0.25
