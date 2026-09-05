@@ -202,3 +202,68 @@ def test_gocube_arena_functional_smoke_with_technical_mcts_models():
     assert len(winrates) == 2
     assert candidate_net.calls > 0
     assert baseline_net.calls > 0
+
+
+class _OneTurnGame:
+    def __init__(self):
+        self.player = 0
+        self.turns = 0
+
+    @staticmethod
+    def num_players():
+        return 2
+
+    def play_action(self, _action):
+        self.turns = 1
+
+    def win_state(self):
+        if self.turns:
+            return np.array([True, False, False], dtype=np.bool_)
+        return np.array([False, False, False], dtype=np.bool_)
+
+
+class _RecordingPlayer:
+    def __init__(self, label, first_movers):
+        self.label = label
+        self.first_movers = first_movers
+        self.args = None
+
+    def __call__(self, _state):
+        self.first_movers.append(self.label)
+        return 0
+
+    @staticmethod
+    def reset():
+        return None
+
+    @staticmethod
+    def update(_state, _action):
+        return None
+
+    @staticmethod
+    def supports_process():
+        return False
+
+
+def test_two_player_non_batched_arena_balances_colors_for_even_game_count():
+    first_movers = []
+    args = dotdict({
+        "numMCTSSims": 100,
+        "arenaMCTSSims": 100,
+        "probFastSim": 0.75,
+        "add_root_noise": True,
+        "add_root_temp": True,
+        "startTemp": 1.0,
+        "arenaTemp": 0.0,
+        "use_draws_for_winrate": True,
+    })
+    players = [
+        _RecordingPlayer(0, first_movers),
+        _RecordingPlayer(1, first_movers),
+    ]
+
+    arena = Arena(players, _OneTurnGame, use_batched_mcts=False, args=args)
+    arena.play_games(4, shuffle_players=True)
+
+    assert first_movers.count(0) == 2
+    assert first_movers.count(1) == 2
