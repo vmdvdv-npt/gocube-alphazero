@@ -27,7 +27,7 @@ cd "$REPO_ROOT"
 PYTHON="$REPO_ROOT/.venv/bin/python"
 [[ -x "$PYTHON" ]] || fail "missing executable virtualenv Python: $PYTHON"
 
-for cmd in git sha256sum find sort awk cmp pgrep df; do
+for cmd in git sha256sum find sort awk cmp pgrep df xargs grep tee wc cp mktemp; do
   need_cmd "$cmd"
 done
 
@@ -125,10 +125,27 @@ if missing:
 args = checkpoint["args"]
 def arg(name):
     return args.get(name) if hasattr(args, "get") else getattr(args, name)
-if arg("gocube_topology") != "cube" or int(arg("gocube_size")) != 4:
-    raise SystemExit("PREFLIGHT FAIL: checkpoint is not Cube 4")
-if float(arg("gocube_komi")) != 7.5:
-    raise SystemExit("PREFLIGHT FAIL: checkpoint komi is not 7.5")
+
+expected_args = {
+    "gocube_topology": "cube",
+    "gocube_size": 4,
+    "gocube_komi": 7.5,
+    "workers": 2,
+    "numMCTSSims": 100,
+    "numFastSims": 20,
+    "probFastSim": 0.25,
+    "gamesPerIteration": 256,
+    "train_batch_size": 256,
+    "gocube_endgame_sample_weight": 1,
+    "arenaMCTSSims": 100,
+    "arenaTemp": 0.0,
+    "arenaBatched": False,
+    "model_gating": False,
+}
+for name, expected in expected_args.items():
+    actual = arg(name)
+    if actual != expected:
+        raise SystemExit(f"PREFLIGHT FAIL: checkpoint arg {name}={actual!r}, expected {expected!r}")
 
 suffixes = ("data", "policy", "value", "score", "ownership", "ownership-mask")
 counts = []
@@ -150,7 +167,10 @@ if manifest.get("run_name") != run_name or int(manifest.get("iteration", -1)) !=
 if len(manifest.get("records", [])) != expected_records:
     raise SystemExit("PREFLIGHT FAIL: iteration manifest record count mismatch")
 
-print(f"PREFLIGHT OK: Python dependencies/checkpoint/tensors valid; cpu_count={cpu_count}; tensor_rows={counts[0]}")
+print(
+    "PREFLIGHT OK: Python/checkpoint/tensors valid; "
+    f"cpu_count={cpu_count}; tensor_rows={counts[0]}; baseline args verified"
+)
 PY
 
 SOURCE_SNAPSHOT_BEFORE=$(mktemp)
@@ -176,7 +196,10 @@ snapshot_source() {
 
 snapshot_source > "$SOURCE_SNAPSHOT_BEFORE"
 
-SANDBOX=$(mktemp -d "${TMPDIR:-/tmp}/gocube-c4-preflight.XXXXXX")
+# Keep the disposable test on the same filesystem as the real project so the
+# disk-space check and I/O path are representative. training_reports is ignored.
+mkdir -p "$REPO_ROOT/training_reports"
+SANDBOX=$(mktemp -d "$REPO_ROOT/training_reports/.c4-preflight.XXXXXX")
 CLONE_RUN="c4-preflight-$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$SANDBOX/checkpoint/$CLONE_RUN" "$SANDBOX/data/$CLONE_RUN"
 cp "$CHECKPOINT_DIR/iteration-0000.pkl" "$SANDBOX/checkpoint/$CLONE_RUN/"
@@ -297,7 +320,9 @@ snapshot_source > "$SOURCE_SNAPSHOT_AFTER"
 cmp -s "$SOURCE_SNAPSHOT_BEFORE" "$SOURCE_SNAPSHOT_AFTER" \
   || fail "SOURCE RUN CHANGED during disposable preflight"
 [[ ! -e "$CHECKPOINT_DIR/iteration-0002.pkl" ]] || fail "source iteration 2 appeared during preflight"
-ok "source run and global C4 game-ID registry are byte-for-byte unchanged"
+git diff --quiet || fail "tracked working tree changed during preflight"
+git diff --cached --quiet || fail "git index changed during preflight"
+ok "source run, global C4 game-ID registry, and tracked checkout are unchanged"
 
 echo "PREFLIGHT PASS"
 echo "Source run: $SOURCE_RUN"
