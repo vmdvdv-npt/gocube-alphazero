@@ -293,6 +293,7 @@ def build_training_args(cli):
         numMCTSSims=cli.sims,
         arenaMCTSSims=cli.arena_sims,
         arenaTemp=0.0,
+        arenaBatched=False,
         process_batch_size=process_batch_size,
         train_batch_size=cli.train_batch_size,
         inference_batch_wait_ms=cli.inference_batch_wait_ms,
@@ -335,7 +336,8 @@ def print_training_configuration(args):
     if arena_enabled:
         print(
             f"Arena: fixed {args.arenaMCTSSims} sims, fast OFF, root noise OFF, "
-            f"root temp OFF, action temp {args.arenaTemp:g}, games {args.arenaCompare}"
+            f"root temp OFF, action temp {args.arenaTemp:g}, games {args.arenaCompare}, "
+            "color-balanced scheduling"
         )
     else:
         print("Arena: OFF")
