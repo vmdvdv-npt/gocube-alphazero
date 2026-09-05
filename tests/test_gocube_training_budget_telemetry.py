@@ -7,9 +7,9 @@ from torch import multiprocessing as mp
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from alphazero.NNetWrapper import NNetWrapper
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube.train import (
-    GoCubeNNetWrapper,
     expected_saved_samples,
     resolve_train_steps,
     validate_tensor_row_counts,
@@ -159,7 +159,7 @@ class _TinyNet(nn.Module):
         )
 
 
-class _TinyWrapper(GoCubeNNetWrapper):
+class _TinyWrapper(NNetWrapper):
     def _load_nnet(self, _args):
         self.nnet = _TinyNet()
 
@@ -175,6 +175,19 @@ def _wrapper_args():
         nnet_type="tiny",
         gocube_auxiliary_targets=False,
         value_loss_weight=1.5,
+        gamesPerIteration=256,
+        numMCTSSims=100,
+        numFastSims=20,
+        probFastSim=0.25,
+        train_batch_size=256,
+        autoTrainSteps=True,
+        train_steps_per_iteration=None,
+        gocube_endgame_sample_weight=1,
+        minTrainHistoryWindow=4,
+        maxTrainHistoryWindow=20,
+        trainHistoryIncrementIters=2,
+        arenaMCTSSims=100,
+        model_gating=False,
     )
 
 
@@ -203,3 +216,27 @@ def test_optimizer_accounting_uses_real_partial_batch_size():
     wrapper.train(loader, 3)
     assert wrapper.last_train_actual_steps == 3
     assert wrapper.last_train_examples_seen == 530
+
+
+def test_checkpoint_persists_training_budget_configuration(tmp_path):
+    wrapper = _TinyWrapper(_TinyGame, _wrapper_args())
+    wrapper.save_checkpoint(str(tmp_path), "budget-config.pth.tar")
+    checkpoint = torch.load(tmp_path / "budget-config.pth.tar")
+    saved = checkpoint["args"]
+    expected = {
+        "gamesPerIteration": 256,
+        "numMCTSSims": 100,
+        "numFastSims": 20,
+        "probFastSim": 0.25,
+        "train_batch_size": 256,
+        "autoTrainSteps": True,
+        "train_steps_per_iteration": None,
+        "gocube_endgame_sample_weight": 1,
+        "minTrainHistoryWindow": 4,
+        "maxTrainHistoryWindow": 20,
+        "trainHistoryIncrementIters": 2,
+        "arenaMCTSSims": 100,
+        "model_gating": False,
+    }
+    for key, value in expected.items():
+        assert getattr(saved, key) == value
