@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "tools" / "c4_overnight_experiment.py"
 EVALUATOR = ROOT / "tools" / "evaluate_gocube_checkpoints.py"
 LAUNCHER = ROOT / "tools" / "launch_c4_overnight.sh"
+RESUMER = ROOT / "tools" / "resume_c4_overnight.sh"
 REPORTER = ROOT / "tools" / "run_with_github_reports.sh"
 
 
@@ -26,6 +27,7 @@ def test_tools_have_valid_python_and_bash_syntax():
     py_compile.compile(str(RUNNER), doraise=True)
     py_compile.compile(str(EVALUATOR), doraise=True)
     subprocess.run(["bash", "-n", str(LAUNCHER)], check=True)
+    subprocess.run(["bash", "-n", str(RESUMER)], check=True)
     subprocess.run(["bash", "-n", str(REPORTER)], check=True)
 
 
@@ -155,4 +157,19 @@ def test_launcher_detaches_via_systemd_and_does_not_require_windows_power_api():
     assert "powercfg" in source  # it removes this legacy block from the disposable preflight copy
     assert "temporary preflight still contains Windows power-policy checks" in source
     assert "training_reports/" in source
+    assert 'setenv="PYTHONPATH=$REPO_ROOT"' in source
     assert "NIGHT LAUNCH PASS" in source
+
+
+def test_resume_script_reuses_existing_experiment_and_repairs_runner_import_path():
+    source = RESUMER.read_text(encoding="utf-8")
+    for token in (
+        'STATE="training_reports/$EXP_ID/state-private.json"',
+        'state["status"] = "RUNNING"',
+        'state.pop("fatal_error", None)',
+        'state["resume_count"]',
+        '--experiment-id "$EXP_ID"',
+        'setenv="PYTHONPATH=$REPO_ROOT"',
+        "NIGHT RESUME PASS",
+    ):
+        assert token in source
