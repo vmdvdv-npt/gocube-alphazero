@@ -8,6 +8,7 @@ import itertools
 import time
 
 from alphazero.MCTS import MCTS
+from alphazero.envs.gocube.records import reserve_game_id
 
 
 class SelfPlayAgent(mp.Process):
@@ -42,6 +43,14 @@ class SelfPlayAgent(mp.Process):
         self._is_arena = _is_arena
         self._is_warmup = _is_warmup
         self.telemetry = telemetry
+        self.recording_enabled = bool(
+            getattr(args, "gocube_recording_enabled", False) and not _is_arena
+        )
+        self.record_registry = getattr(args, "gocube_game_id_registry", None)
+        self.record_id_prefix = getattr(args, "gocube_game_id_prefix", None)
+        self.game_ids = []
+        self.move_histories = []
+        self.game_start_times = []
         if _is_arena:
             self.player_to_index = list(range(game_cls.num_players()))
             np.random.shuffle(self.player_to_index)
@@ -55,6 +64,12 @@ class SelfPlayAgent(mp.Process):
         for _ in range(self.batch_size):
             self.games.append(self.game_cls())
             self.histories.append([])
+            # IDs are reserved when a completed game is accepted into the
+            # iteration.  This avoids consuming an ID for a speculative batch
+            # slot that finishes after gamesPerIteration has already filled.
+            self.game_ids.append(None)
+            self.move_histories.append([])
+            self.game_start_times.append(None)
             self.temps.append(self.args.startTemp)
             self.next_reset.append(0)
             self.mcts.append(self._get_mcts())
@@ -165,6 +180,7 @@ class SelfPlayAgent(mp.Process):
             )
 
     def playMoves(self):
+        recording_enabled = getattr(self, "recording_enabled", False)
         for i in range(self.batch_size):
             self._check_pause()
             self.temps[i] = self.args.temp_scaling_fn(
@@ -176,6 +192,16 @@ class SelfPlayAgent(mp.Process):
                 self._telemetry_add('fast_decisions' if self.fast else 'regular_decisions')
             if not self.fast and not self._is_arena:
                 self.histories[i].append((self.games[i].clone(), self._mcts(i).probs(self.games[i])))
+            if recording_enabled:
+                state = getattr(self.games[i], "semantic_state", None)
+                self.game_start_times[i] = self.game_start_times[i] or time.time()
+                self.move_histories[i].append({
+                    "move_number": len(self.move_histories[i]) + 1,
+                    "player": "black" if self.games[i].player == 0 else "white",
+                    "phase": getattr(state, "phase", None),
+                    "action": int(action),
+                    "move": "PASS" if action == self.game_cls.pass_action() else self.game_cls.point_id_for_action(int(action)),
+                })
             if self._is_arena:
                 [mcts.update_root(self.games[i], action) for mcts in self.mcts[i]]
             else:
@@ -185,55 +211,85 @@ class SelfPlayAgent(mp.Process):
                 self.mcts[i] = self._get_mcts()
                 self.next_reset[i] = self.games[i].turns + self.args.mctsResetThreshold
             winstate = self.games[i].win_state()
-            if winstate.any():
-                final_game = self.games[i].clone()
+            if not winstate.any():
+                continue
+
+            final_game = self.games[i].clone()
+            if recording_enabled:
+                lock = self.games_played.get_lock()
+                lock.acquire()
+                accepted = self.games_played.value < self.args.gamesPerIteration
+                if accepted:
+                    self.games_played.value += 1
+                    game_number = self.games_played.value
+                lock.release()
+                if not accepted:
+                    continue
+                self.game_ids[i] = reserve_game_id(self.record_registry, self.record_id_prefix)
+                self.result_queue.put((
+                    final_game, winstate, self.id, {
+                        "game_id": self.game_ids[i],
+                        "moves": self.move_histories[i],
+                        "start_time": self.game_start_times[i] or time.time(),
+                        "end_time": time.time(),
+                        "game_number_inside_iteration": game_number,
+                    }
+                ))
+            else:
                 self.result_queue.put((final_game, winstate, self.id))
                 lock = self.games_played.get_lock()
                 lock.acquire()
-                if self.games_played.value < self.args.gamesPerIteration:
+                accepted = self.games_played.value < self.args.gamesPerIteration
+                if accepted:
                     self.games_played.value += 1
-                    lock.release()
-                    if not self._is_arena:
-                        training_valid = True
-                        if hasattr(final_game, "has_training_result"):
-                            training_valid = final_game.has_training_result()
-                        if training_valid:
-                            auxiliary = bool(getattr(self.args, "gocube_auxiliary_targets", False))
-                            ownership_mask = None
+                lock.release()
+                if not accepted:
+                    continue
+
+            if not self._is_arena:
+                training_valid = True
+                if hasattr(final_game, "has_training_result"):
+                    training_valid = final_game.has_training_result()
+                if training_valid:
+                    auxiliary = bool(getattr(self.args, "gocube_auxiliary_targets", False))
+                    ownership_mask = None
+                    if auxiliary:
+                        targets = final_game.training_targets()
+                        if len(targets) == 3:
+                            score_target, ownership_target, ownership_mask = targets
+                        else:
+                            score_target, ownership_target = targets
+                    for hist in self.histories[i]:
+                        self._check_pause()
+                        self._telemetry_add('base_positions')
+                        is_endgame = bool(
+                            hasattr(hist[0], "is_endgame_training_state")
+                            and hist[0].is_endgame_training_state()
+                        )
+                        if is_endgame:
+                            self._telemetry_add('base_endgame_positions')
+                        data = hist[0].symmetries(hist[1]) if self.args.symmetricSamples else ((hist[0], hist[1]),)
+                        repeat = 1
+                        endgame_weight = int(getattr(self.args, "gocube_endgame_sample_weight", 1))
+                        if endgame_weight > 1 and is_endgame:
+                            repeat = endgame_weight
+                        for state, pi in data:
+                            self._check_pause()
+                            sample = (state.observation(), pi, np.array(winstate, dtype=np.float32))
                             if auxiliary:
-                                targets = final_game.training_targets()
-                                if len(targets) == 3:
-                                    score_target, ownership_target, ownership_mask = targets
-                                else:
-                                    score_target, ownership_target = targets
-                            for hist in self.histories[i]:
-                                self._check_pause()
-                                self._telemetry_add('base_positions')
-                                is_endgame = bool(
-                                    hasattr(hist[0], "is_endgame_training_state")
-                                    and hist[0].is_endgame_training_state()
-                                )
-                                if is_endgame:
-                                    self._telemetry_add('base_endgame_positions')
-                                data = hist[0].symmetries(hist[1]) if self.args.symmetricSamples else ((hist[0], hist[1]),)
-                                repeat = 1
-                                endgame_weight = int(getattr(self.args, "gocube_endgame_sample_weight", 1))
-                                if endgame_weight > 1 and is_endgame:
-                                    repeat = endgame_weight
-                                for state, pi in data:
-                                    self._check_pause()
-                                    sample = (state.observation(), pi, np.array(winstate, dtype=np.float32))
-                                    if auxiliary:
-                                        sample = sample + (score_target, ownership_target)
-                                        if ownership_mask is not None:
-                                            sample = sample + (ownership_mask,)
-                                    for _ in range(repeat):
-                                        self.output_queue.put(sample)
-                                    if repeat > 1:
-                                        self._telemetry_add('endgame_extra_samples', repeat - 1)
-                    self.games[i] = self.game_cls()
-                    self.histories[i] = []
-                    self.temps[i] = self.args.startTemp
-                    self.mcts[i] = self._get_mcts()
-                else:
-                    lock.release()
+                                sample = sample + (score_target, ownership_target)
+                                if ownership_mask is not None:
+                                    sample = sample + (ownership_mask,)
+                            for _ in range(repeat):
+                                self.output_queue.put(sample)
+                            if repeat > 1:
+                                self._telemetry_add('endgame_extra_samples', repeat - 1)
+
+            self.games[i] = self.game_cls()
+            self.histories[i] = []
+            if recording_enabled:
+                self.game_ids[i] = None
+                self.move_histories[i] = []
+                self.game_start_times[i] = None
+            self.temps[i] = self.args.startTemp
+            self.mcts[i] = self._get_mcts()
