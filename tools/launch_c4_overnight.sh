@@ -102,6 +102,7 @@ systemd-run --user \
   --property="StartLimitIntervalSec=600" \
   --property="StartLimitBurst=3" \
   --setenv="PYTHONUNBUFFERED=1" \
+  --setenv="PYTHONPATH=$REPO_ROOT" \
   /bin/bash -lc "exec $SYSTEMD_COMMAND"
 
 sleep 2
