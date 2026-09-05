@@ -24,3 +24,6 @@
 {"branch": "G", "event": "branch_forked", "run_name": "c4-hparam-night-20260906-005747-g", "time": "2026-09-06T02:56:55+04:00"}
 {"allowed": true, "estimated_seconds": 1663.6, "event": "deadline_check", "label": "stage1 train A@6", "remaining_seconds": 3589331.4, "reserve_seconds": 2100.0, "time": "2026-09-06T02:56:55+04:00"}
 {"branch": "A", "event": "stage_started", "iteration": 6, "stage_id": "stage1_train_A_i6", "time": "2026-09-06T02:56:55+04:00"}
+{"elapsed_seconds": 1302.6, "event": "stage_completed", "stage_id": "stage1_train_A_i6", "time": "2026-09-06T03:18:38+04:00"}
+{"allowed": true, "estimated_seconds": 360.0, "event": "deadline_check", "label": "stage1 eval A@6", "remaining_seconds": 3588028.7, "reserve_seconds": 2100.0, "time": "2026-09-06T03:18:38+04:00"}
+{"event": "evaluation_started", "games": 24, "stage_id": "stage1_eval_A_i6_vs_parent5", "time": "2026-09-06T03:18:38+04:00"}

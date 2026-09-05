@@ -33,7 +33,7 @@ Primary ranking is based on fixed-Arena playing strength, with wall-clock cost s
 
 | Branch | Latest iter | Train wall | Samples (latest) | Opt steps | Realized fast | No-result | Status |
 |---|---:|---:|---:|---:|---:|---:|---|
-| A | 5 | 0.00 h | — | — | — | — | FORKED |
+| A | 6 | 0.36 h | 23402 | 91 | 0.254 | 0.000% | ACTIVE |
 | B | 5 | 0.00 h | — | — | — | — | FORKED |
 | C | 5 | 0.00 h | — | — | — | — | FORKED |
 | D | 5 | 0.00 h | — | — | — | — | FORKED |
