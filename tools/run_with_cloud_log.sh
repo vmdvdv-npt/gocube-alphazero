@@ -38,6 +38,7 @@ RUN_DIR="$REPORT_ROOT/$RUN_NAME"
 LOG_FILE="$RUN_DIR/console.log"
 MD_FILE="$RUN_DIR/run.md"
 REMOTE_DIR="$REMOTE_BASE/$RUN_NAME"
+MANIFEST_ROOT="data/$RUN_NAME/records"
 
 if ! command -v rclone >/dev/null 2>&1; then
   echo "ERROR: rclone is not installed." >&2
@@ -85,13 +86,25 @@ $COMMAND_Q
 
 - console.log — full terminal output
 - run.md — this short run summary
+- manifests/ — compact iteration manifests as they appear
 EOF_MD
+}
+
+sync_manifests() {
+  [[ -d "$MANIFEST_ROOT" ]] || return 0
+  local manifest iteration_name
+  while IFS= read -r -d '' manifest; do
+    iteration_name=$(basename "$(dirname "$manifest")")
+    rclone copyto "$manifest" "$REMOTE_DIR/manifests/${iteration_name}.json" \
+      --retries 2 --low-level-retries 3 >/dev/null 2>&1 || return 1
+  done < <(find "$MANIFEST_ROOT" -mindepth 2 -maxdepth 2 -type f -name 'iteration-manifest.json' -print0)
 }
 
 sync_once() {
   rclone mkdir "$REMOTE_DIR" >/dev/null 2>&1 || return 1
   rclone copyto "$MD_FILE" "$REMOTE_DIR/run.md" --retries 2 --low-level-retries 3 >/dev/null 2>&1 || return 1
   rclone copyto "$LOG_FILE" "$REMOTE_DIR/console.log" --retries 2 --low-level-retries 3 >/dev/null 2>&1 || return 1
+  sync_manifests || return 1
 }
 
 write_md
