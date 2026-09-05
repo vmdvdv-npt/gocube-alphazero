@@ -7,6 +7,8 @@ from alphazero.utils import get_iter_file
 def prepare_evaluation_args(saved_args, game_cls, sims):
     args = saved_args.copy()
     args.numMCTSSims = sims
+    args.arenaMCTSSims = sims
+    args.probFastSim = 0.0
     args._num_players = game_cls.num_players() + game_cls.has_draw()
     args.add_root_noise = False
     args.add_root_temp = False

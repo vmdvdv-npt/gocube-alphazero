@@ -20,7 +20,7 @@ def parse_args():
     parser.add_argument("--candidate", type=int, default=5)
     parser.add_argument("--baseline", type=int, default=0)
     parser.add_argument("--games", type=int, default=32)
-    parser.add_argument("--sims", type=int, default=20)
+    parser.add_argument("--sims", type=int, default=100)
     parser.add_argument("--checkpoint-dir", default="checkpoint")
     return parser.parse_args()
 
@@ -68,6 +68,7 @@ def main():
     print(f"candidate iteration {cli.candidate}: {wins[0]} wins ({winrates[0]:.3f} score rate)")
     print(f"baseline iteration {cli.baseline}: {wins[1]} wins ({winrates[1]:.3f} score rate)")
     print(f"draws: {draws}")
+    print(f"no-result: {arena.no_results}")
 
 
 if __name__ == "__main__":

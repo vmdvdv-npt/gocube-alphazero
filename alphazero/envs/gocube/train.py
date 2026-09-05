@@ -25,9 +25,23 @@ class GoCubeCoach(Coach):
     """Coach variant for GoCube V3 batching, targets, and terminal diagnostics."""
 
     def _save_model(self, model, iteration):
+        previous_self_play_iter = getattr(self, "self_play_iter", max(0, iteration - 1))
         super()._save_model(model, iteration)
         if hasattr(self, "args") and not self.args.model_gating:
+            self._arena_previous_iter = previous_self_play_iter
             self.self_play_iter = iteration
+
+    def compareToPast(self, model_iter):
+        if self.args.model_gating:
+            return super().compareToPast(model_iter)
+
+        current_self_play_iter = self.self_play_iter
+        previous_iter = getattr(self, "_arena_previous_iter", max(0, model_iter - 1))
+        self.self_play_iter = previous_iter
+        try:
+            return super().compareToPast(model_iter)
+        finally:
+            self.self_play_iter = current_self_play_iter
 
     @_set_state(TrainState.SELF_PLAY)
     def processSelfPlayBatches(self, iteration):
@@ -230,6 +244,7 @@ def parse_args():
     parser.add_argument("--size", type=int, default=9)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--sims", type=int, default=100)
+    parser.add_argument("--arena-sims", type=int, default=100)
     parser.add_argument("--games-per-iteration", type=int, default=256)
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--train-batch-size", type=int, default=1024)
@@ -237,6 +252,7 @@ def parse_args():
     parser.add_argument("--endgame-sample-weight", type=int, default=3)
     parser.add_argument("--inference-batch-wait-ms", type=float, default=1.0)
     parser.add_argument("--no-arena", action="store_true")
+    parser.add_argument("--model-gating", action="store_true")
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
@@ -251,6 +267,10 @@ def build_training_args(cli):
         raise ValueError("iterations must be at least 1")
     if cli.train_batch_size < 1:
         raise ValueError("train-batch-size must be at least 1")
+    if cli.sims < 1:
+        raise ValueError("sims must be at least 1")
+    if cli.arena_sims < 1:
+        raise ValueError("arena-sims must be at least 1")
     if not 0.0 <= cli.fast_game_prob <= 1.0:
         raise ValueError("fast-game-prob must be between 0 and 1")
     if cli.inference_batch_wait_ms < 0:
@@ -262,18 +282,24 @@ def build_training_args(cli):
     process_batch_size = max(1, math.ceil(cli.games_per_iteration / cli.workers))
     iterations = 1 if cli.smoke else cli.iterations
     arena_enabled = not (cli.smoke or cli.no_arena)
+    model_gating = bool(cli.model_gating)
+    if model_gating and not arena_enabled:
+        raise ValueError("model gating requires arena evaluation")
     args = get_args(
         run_name=run_name,
         workers=cli.workers,
         gamesPerIteration=cli.games_per_iteration,
         numIters=iterations,
         numMCTSSims=cli.sims,
+        arenaMCTSSims=cli.arena_sims,
+        arenaTemp=0.0,
+        arenaBatched=False,
         process_batch_size=process_batch_size,
         train_batch_size=cli.train_batch_size,
         inference_batch_wait_ms=cli.inference_batch_wait_ms,
         compareWithBaseline=arena_enabled,
         compareWithPast=arena_enabled,
-        model_gating=arena_enabled,
+        model_gating=model_gating,
         autoTrainSteps=not cli.smoke,
         train_steps_per_iteration=1 if cli.smoke else 64,
         probFastSim=0.0 if cli.smoke else cli.fast_game_prob,
@@ -301,9 +327,30 @@ def build_training_args(cli):
     return game_cls, args
 
 
+def print_training_configuration(args):
+    arena_enabled = bool(args.compareWithBaseline or args.compareWithPast)
+    print(
+        f"Self-play: {args.numMCTSSims} sims, fast {args.numFastSims} @ "
+        f"{args.probFastSim:.0%}"
+    )
+    if arena_enabled:
+        print(
+            f"Arena: fixed {args.arenaMCTSSims} sims, fast OFF, root noise OFF, "
+            f"root temp OFF, action temp {args.arenaTemp:g}, games {args.arenaCompare}, "
+            "color-balanced scheduling"
+        )
+    else:
+        print("Arena: OFF")
+    if args.model_gating:
+        print(f"Model gating: ON @ threshold {args.min_next_model_winrate:.3f}")
+    else:
+        print("Model gating: OFF")
+
+
 def main():
     cli = parse_args()
     game_cls, args = build_training_args(cli)
+    print_training_configuration(args)
     ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
     network = NNetWrapper(game_cls, args)
     coach = GoCubeCoach(game_cls, network, args)
