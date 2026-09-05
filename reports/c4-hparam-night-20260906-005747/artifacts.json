@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "branch": "PARENT",
+    "iteration": 2,
+    "kind": "checkpoint",
+    "path": "checkpoint/c4-t001-c4-c001/iteration-0002.pkl",
+    "sha256": "52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+  }
+]

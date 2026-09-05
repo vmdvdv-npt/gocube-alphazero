@@ -1,5 +1,13 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "branch": "PARENT",
+      "iteration": 2,
+      "kind": "checkpoint",
+      "path": "checkpoint/c4-t001-c4-c001/iteration-0002.pkl",
+      "sha256": "52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+    }
+  ],
   "branches": {
     "A": {
       "axis": "control",
@@ -74,13 +82,57 @@
   },
   "deadline_at": "2026-10-17T15:59:07+04:00",
   "deadline_epoch": 1792238347.3347416,
-  "ended_at": "2026-09-06T01:25:58+04:00",
   "evaluations": [],
   "experiment_id": "c4-hparam-night-20260906-005747",
-  "fatal_error": "RuntimeError: existing c4-t001-c4-c001@2 is incomplete/corrupt: No module named 'alphazero'",
   "frozen_training_commit": "85c87a7cfd467a4d3f4b2844253fb63d746d672a",
+  "last_resume_previous_status": "FAILED",
+  "last_resumed_at": "2026-09-06T01:48:47+04:00",
   "max_hours": 999.0,
-  "metrics": [],
+  "metrics": [
+    {
+      "average_game_length": 133.97265625,
+      "base_endgame_positions": 3955,
+      "base_positions": 25870,
+      "batch_size": 256,
+      "black_wins": 117,
+      "branch": "PARENT",
+      "checkpoint_sha256": "52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5",
+      "draws": 0,
+      "effective_passes": 0.495,
+      "examples_seen": 25856,
+      "fast_decisions": 13024,
+      "fast_sims": 20,
+      "games": 256,
+      "games_per_iteration": 256,
+      "history_datasets": 2,
+      "iteration": 2,
+      "last_reported_inference_batch": 44.0,
+      "latest_iteration_samples": 25870,
+      "learning_rate": 0.01,
+      "loss_ownership": 0.474,
+      "loss_policy": 3.3263,
+      "loss_score": 0.164,
+      "loss_value": 0.832,
+      "no_result_games": 0,
+      "optimizer_steps_actual": 101,
+      "optimizer_steps_planned": 101,
+      "pfast": 0.25,
+      "process_batch_size": 16,
+      "realized_fast_fraction": 0.24789999999999998,
+      "regular_decisions": 39520,
+      "run_name": "c4-t001-c4-c001",
+      "saved_samples": 25870,
+      "sims": 100,
+      "stage_id": "canonical_iter_2",
+      "tensor_rows": 25870,
+      "train_batch_size": 256,
+      "training_valid_fraction": 1.0,
+      "wall_seconds": 1491.9401292800903,
+      "white_wins": 139,
+      "window_samples": 52244,
+      "workers": 16
+    }
+  ],
   "notes": [
     "Primary practical objective: strength gain per wall-clock hour.",
     "Losses are diagnostics, not the primary ranking metric.",
@@ -89,12 +141,12 @@
   "parent_checkpoint_sha256": null,
   "parent_iteration": 5,
   "reserve_minutes": 35.0,
+  "resume_count": 1,
   "schema_version": 1,
   "selection": {},
   "source_run": "c4-t001-c4-c001",
   "stages": {
     "canonical_iter_2": {
-      "branch": "PARENT",
       "command": [
         "/home/codex/projects/gocube-alphazero/.venv/bin/python",
         "/home/codex/projects/gocube-alphazero/alphazero/envs/gocube/train.py",
@@ -123,16 +175,47 @@
         "c4-t001-c4-c001"
       ],
       "elapsed_seconds": 1491.9401292800903,
-      "ended_at": "2026-09-06T01:23:59+04:00",
-      "error": "No module named 'alphazero'",
-      "iteration": 2,
-      "started_at": "2026-09-06T00:59:07+04:00",
-      "status": "FAILED_VALIDATION"
+      "ended_at": "2026-09-06T01:49:16+04:00",
+      "recovered": true,
+      "status": "COMPLETED"
+    },
+    "canonical_iter_3": {
+      "branch": "PARENT",
+      "command": [
+        "/home/codex/projects/gocube-alphazero/.venv/bin/python",
+        "/home/codex/projects/gocube-alphazero/alphazero/envs/gocube/train.py",
+        "--topology",
+        "cube",
+        "--size",
+        "4",
+        "--workers",
+        "16",
+        "--sims",
+        "100",
+        "--arena-sims",
+        "100",
+        "--games-per-iteration",
+        "256",
+        "--iterations",
+        "3",
+        "--train-batch-size",
+        "256",
+        "--fast-game-prob",
+        "0.25",
+        "--endgame-sample-weight",
+        "1",
+        "--no-arena",
+        "--run-name",
+        "c4-t001-c4-c001"
+      ],
+      "iteration": 3,
+      "started_at": "2026-09-06T01:49:16+04:00",
+      "status": "RUNNING"
     }
   },
   "started_at": "2026-09-06T00:59:07+04:00",
   "started_epoch": 1788641947.352856,
-  "status": "FAILED",
+  "status": "RUNNING",
   "tooling_commit": "2a8e15c796a8390aae6ed68c13c3688fcd1383eb",
   "workers": 16
 }

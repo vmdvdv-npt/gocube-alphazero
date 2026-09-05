@@ -1,7 +1,7 @@
 # Cube 4 overnight hyperparameter experiment
 
 - Experiment: `c4-hparam-night-20260906-005747`
-- Status: `FAILED`
+- Status: `RUNNING`
 - Started: 2026-09-06T00:59:07+04:00
 - Deadline: 2026-10-17T15:59:07+04:00
 - Frozen training commit: `85c87a7cfd467a4d3f4b2844253fb63d746d672a`
