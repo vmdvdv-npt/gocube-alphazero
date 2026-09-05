@@ -44,7 +44,7 @@ jobs:
             tests/test_gocube_training_budget_telemetry.py
 
       - name: Run full pytest
-        run: python -m pytest -q tests
+        run: python -m pytest -q
 
       - name: Run Cube 4 and Torus 9 V3 validation smoke
         run: python -m alphazero.envs.gocube.v3_smoke --games 32
