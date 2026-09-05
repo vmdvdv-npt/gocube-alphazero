@@ -72,14 +72,21 @@ class SelfPlayAgent(mp.Process):
         while self.pause_event.is_set():
             time.sleep(.1)
 
+    def _select_search_sims(self):
+        if self._is_arena:
+            self.fast = False
+            return getattr(self.args, 'arenaMCTSSims', self.args.numMCTSSims)
+
+        self.fast = np.random.random_sample() < self.args.probFastSim
+        return self.args.numFastSims if self.fast else self.args.numMCTSSims \
+            if not self._is_warmup else self.args.numWarmupSims
+
     def run(self):
         try:
             np.random.seed()
             while not self.stop_event.is_set() and self.games_played.value < self.args.gamesPerIteration:
                 self._check_pause()
-                self.fast = np.random.random_sample() < self.args.probFastSim
-                sims = self.args.numFastSims if self.fast else self.args.numMCTSSims \
-                    if not self._is_warmup else self.args.numWarmupSims
+                sims = self._select_search_sims()
                 for _ in range(sims):
                     if self.stop_event.is_set(): break
                     self.generateBatch()
