@@ -38,7 +38,6 @@ class SelfPlayAgent(mp.Process):
         self.stop_event = stop_event
         self.pause_event = pause_event
         self.args = args
-
         self._is_arena = _is_arena
         self._is_warmup = _is_warmup
         if _is_arena:
@@ -50,7 +49,6 @@ class SelfPlayAgent(mp.Process):
             self._WARMUP_POLICY = torch.full((action_size,), 1 / action_size).to(policy_tensor.device)
             value_size = game_cls.num_players() + 1
             self._WARMUP_VALUE = torch.full((value_size,), 1 / value_size).to(policy_tensor.device)
-
         self.fast = False
         for _ in range(self.batch_size):
             self.games.append(self.game_cls())
@@ -62,15 +60,13 @@ class SelfPlayAgent(mp.Process):
     def _get_mcts(self):
         if self._is_arena:
             return tuple([MCTS(self.args) for _ in range(self.game_cls.num_players())])
-        else:
-            return MCTS(self.args)
+        return MCTS(self.args)
 
     def _mcts(self, index: int) -> MCTS:
         mcts = self.mcts[index]
         if self._is_arena:
             return mcts[self.games[index].player]
-        else:
-            return mcts
+        return mcts
 
     def _check_pause(self):
         while self.pause_event.is_set():
@@ -91,7 +87,6 @@ class SelfPlayAgent(mp.Process):
                     self.processBatch()
                 if self.stop_event.is_set(): break
                 self.playMoves()
-
             with self.complete_count.get_lock():
                 self.complete_count.value += 1
             if not self._is_arena:
@@ -104,7 +99,6 @@ class SelfPlayAgent(mp.Process):
         if self._is_arena:
             batch_tensor = [[] for _ in range(self.game_cls.num_players())]
             self.batch_indices = [[] for _ in range(self.game_cls.num_players())]
-
         for i in range(self.batch_size):
             self._check_pause()
             state = self._mcts(i).find_leaf(self.games[i])
@@ -112,7 +106,6 @@ class SelfPlayAgent(mp.Process):
                 self.policy_tensor[i].copy_(self._WARMUP_POLICY)
                 self.value_tensor[i].copy_(self._WARMUP_VALUE)
                 continue
-
             data = torch.from_numpy(state.observation())
             if self._is_arena:
                 data = data.view(-1, *state.observation_size())
@@ -121,7 +114,6 @@ class SelfPlayAgent(mp.Process):
                 self.batch_indices[player].append(i)
             else:
                 self.batch_tensor[i].copy_(data)
-
         if self._is_arena:
             for player in range(self.game_cls.num_players()):
                 player = self.player_to_index[player]
@@ -130,7 +122,6 @@ class SelfPlayAgent(mp.Process):
                     batch_tensor[player] = torch.cat(data)
             self.output_queue.put(batch_tensor)
             self.batch_indices = list(itertools.chain.from_iterable(self.batch_indices))
-
         if not self._is_warmup:
             self.ready_queue.put(self.id)
 
@@ -138,7 +129,6 @@ class SelfPlayAgent(mp.Process):
         if not self._is_warmup:
             self.batch_ready.wait()
             self.batch_ready.clear()
-
         for i in range(self.batch_size):
             self._check_pause()
             index = self.batch_indices[i] if self._is_arena else i
@@ -159,11 +149,7 @@ class SelfPlayAgent(mp.Process):
             policy = self._mcts(i).probs(self.games[i], self.temps[i])
             action = np.random.choice(self.games[i].action_size(), p=policy)
             if not self.fast and not self._is_arena:
-                self.histories[i].append((
-                    self.games[i].clone(),
-                    self._mcts(i).probs(self.games[i])
-                ))
-
+                self.histories[i].append((self.games[i].clone(), self._mcts(i).probs(self.games[i])))
             if self._is_arena:
                 [mcts.update_root(self.games[i], action) for mcts in self.mcts[i]]
             else:
@@ -172,7 +158,6 @@ class SelfPlayAgent(mp.Process):
             if self.args.mctsResetThreshold and self.games[i].turns >= self.next_reset[i]:
                 self.mcts[i] = self._get_mcts()
                 self.next_reset[i] = self.games[i].turns + self.args.mctsResetThreshold
-
             winstate = self.games[i].win_state()
             if winstate.any():
                 final_game = self.games[i].clone()
@@ -186,37 +171,30 @@ class SelfPlayAgent(mp.Process):
                         training_valid = True
                         if hasattr(final_game, "has_training_result"):
                             training_valid = final_game.has_training_result()
-
                         if training_valid:
                             auxiliary = bool(getattr(self.args, "gocube_auxiliary_targets", False))
+                            ownership_mask = None
                             if auxiliary:
-                                score_target, ownership_target = final_game.training_targets()
-
+                                targets = final_game.training_targets()
+                                if len(targets) == 3:
+                                    score_target, ownership_target, ownership_mask = targets
+                                else:
+                                    score_target, ownership_target = targets
                             for hist in self.histories[i]:
                                 self._check_pause()
-                                if self.args.symmetricSamples:
-                                    data = hist[0].symmetries(hist[1])
-                                else:
-                                    data = ((hist[0], hist[1]),)
-
+                                data = hist[0].symmetries(hist[1]) if self.args.symmetricSamples else ((hist[0], hist[1]),)
                                 repeat = 1
                                 endgame_weight = int(getattr(self.args, "gocube_endgame_sample_weight", 1))
-                                if (
-                                    endgame_weight > 1
-                                    and hasattr(hist[0], "is_endgame_training_state")
-                                    and hist[0].is_endgame_training_state()
-                                ):
+                                if endgame_weight > 1 and hasattr(hist[0], "is_endgame_training_state") \
+                                        and hist[0].is_endgame_training_state():
                                     repeat = endgame_weight
-
                                 for state, pi in data:
                                     self._check_pause()
-                                    sample = (
-                                        state.observation(),
-                                        pi,
-                                        np.array(winstate, dtype=np.float32),
-                                    )
+                                    sample = (state.observation(), pi, np.array(winstate, dtype=np.float32))
                                     if auxiliary:
                                         sample = sample + (score_target, ownership_target)
+                                        if ownership_mask is not None:
+                                            sample = sample + (ownership_mask,)
                                     for _ in range(repeat):
                                         self.output_queue.put(sample)
                     self.games[i] = self.game_cls()
