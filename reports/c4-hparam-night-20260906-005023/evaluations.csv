@@ -1,1 +1,0 @@
-stage_id,candidate_branch,candidate_iteration,reference_id,games_requested,games_effective,candidate_wins,reference_wins,draws,no_results,candidate_score_rate,candidate_score_ci95_approx,mcts_sims,elapsed_seconds,seconds_per_game,seed
