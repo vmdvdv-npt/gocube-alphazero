@@ -75,6 +75,8 @@ class SelfPlayAgent(mp.Process):
     def _select_search_sims(self):
         if self._is_arena:
             self.fast = False
+            if hasattr(self.args, 'get'):
+                return self.args.get('arenaMCTSSims', self.args.numMCTSSims)
             return getattr(self.args, 'arenaMCTSSims', self.args.numMCTSSims)
 
         self.fast = np.random.random_sample() < self.args.probFastSim
