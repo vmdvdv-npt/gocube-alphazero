@@ -4,11 +4,12 @@ import numpy as np
 import pytest
 
 from alphazero.envs.gocube import (
-    CLEANUP_1, CLEANUP_2, MAIN, NO_RESULT, SCORED, Torus9JapaneseGame,
+    CLEANUP_1, CLEANUP_2, NO_RESULT, SCORED, Torus9JapaneseGame,
     Topology, apply_v3_action, initial_v3_state, v3_state_from_board, v3_valid_moves,
 )
 from alphazero.envs.gocube.katago_v3 import (
     EMERGENCY_MOVE_CAP_BASE, EMERGENCY_MOVE_CAP_FACTOR, _cycle_check_and_record,
+    terminal_from_state,
 )
 
 
@@ -67,7 +68,6 @@ def test_cleanup2_move_gets_compensation_counter_but_cleanup1_does_not():
 
 def ko_fixture():
     t = rect_topology(5, 5)
-    # White at (2,2) has one liberty (2,3). Black captures there, creating a direct ko.
     black = [t.point_index(p) for p in ("2,1", "1,2", "3,2")]
     white = [t.point_index(p) for p in ("2,2", "1,3", "3,3", "2,4")]
     state = v3_state_from_board(t, black=black, white=white, phase=CLEANUP_1, current_player=0)
@@ -78,12 +78,11 @@ def test_ko_recap_block_and_unblock_use_existing_point_action():
     t, state, capture, recapture = ko_fixture()
     captured = apply_v3_action(state, capture, t)
     assert capture in captured.ko_recap_blocked
-    assert v3_valid_moves(captured, t)[capture] == 1  # occupied point action is unblock-ko
+    assert v3_valid_moves(captured, t)[capture] == 1
     unblocked = apply_v3_action(captured, capture, t)
     assert unblocked.board[capture] == 1
     assert capture not in unblocked.ko_recap_blocked
     assert unblocked.ko_unblock_actions == 1
-    # Turn returns to Black; after Black passes, White may address the ko point.
     after_pass = apply_v3_action(unblocked, t.pass_action, t)
     assert after_pass.current_player == 1
     assert v3_valid_moves(after_pass, t)[recapture] in (0, 1)
@@ -103,8 +102,6 @@ def test_repeated_state_cycle_is_no_result():
 def test_no_result_is_framework_draw_utility_but_not_training_target():
     game = Torus9JapaneseGame()
     game._state = replace(game.semantic_state, phase=NO_RESULT, terminal_kind=NO_RESULT, no_result_reason="cycle")
-    game._terminal = game.terminal_adjudication = None if False else game._terminal
-    from alphazero.envs.gocube.katago_v3 import terminal_from_state
     game._terminal = terminal_from_state(game._state, game.logical_topology(), game.KOMI)
     assert np.array_equal(game.win_state(), np.array([0, 0, 1], dtype=np.uint8))
     assert not game.has_training_result()
