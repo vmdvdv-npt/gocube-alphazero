@@ -10,6 +10,7 @@ from alphazero.utils import dotdict
 def test_prepare_arena_args_disables_exploration_noise_and_temperature():
     saved = dotdict({
         "numMCTSSims": 100,
+        "probFastSim": 0.75,
         "_num_players": None,
         "add_root_noise": True,
         "add_root_temp": True,
@@ -20,12 +21,16 @@ def test_prepare_arena_args_disables_exploration_noise_and_temperature():
     args = prepare_arena_args(saved, Cube4ChineseGame, sims=20)
 
     assert args.numMCTSSims == 20
+    assert args.arenaMCTSSims == 20
+    assert args.probFastSim == 0.0
     assert args._num_players == 3
     assert args.add_root_noise is False
     assert args.add_root_temp is False
     assert args.startTemp == 0.0
     assert args.arenaTemp == 0.0
     # Do not mutate checkpoint args.
+    assert saved.numMCTSSims == 100
+    assert saved.probFastSim == 0.75
     assert saved.add_root_noise is True
     assert saved.startTemp == 1.0
 
