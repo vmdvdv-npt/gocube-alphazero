@@ -1,3 +1,6 @@
+__pycache__/
+*.py[cod]
+
 alphazero/__pycache__
 alphazero/pytorch_classification/__pycache__
 alphazero/pytorch_classification/utils/__pycache__
