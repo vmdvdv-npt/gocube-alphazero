@@ -1,0 +1,133 @@
+{
+  "artifacts": [],
+  "branches": {
+    "A": {
+      "axis": "control",
+      "games": 256,
+      "label": "baseline",
+      "latest_iteration": 5,
+      "pfast": 0.25,
+      "run_name": "c4-hparam-night-20260906-005747-a",
+      "sims": 100,
+      "status": "PENDING"
+    },
+    "B": {
+      "axis": "pfast",
+      "games": 256,
+      "label": "no fast search",
+      "latest_iteration": 5,
+      "pfast": 0.0,
+      "run_name": "c4-hparam-night-20260906-005747-b",
+      "sims": 100,
+      "status": "PENDING"
+    },
+    "C": {
+      "axis": "pfast",
+      "games": 256,
+      "label": "more fast search",
+      "latest_iteration": 5,
+      "pfast": 0.5,
+      "run_name": "c4-hparam-night-20260906-005747-c",
+      "sims": 100,
+      "status": "PENDING"
+    },
+    "D": {
+      "axis": "sims",
+      "games": 256,
+      "label": "shallower regular search",
+      "latest_iteration": 5,
+      "pfast": 0.25,
+      "run_name": "c4-hparam-night-20260906-005747-d",
+      "sims": 50,
+      "status": "PENDING"
+    },
+    "E": {
+      "axis": "sims",
+      "games": 256,
+      "label": "deeper regular search",
+      "latest_iteration": 5,
+      "pfast": 0.25,
+      "run_name": "c4-hparam-night-20260906-005747-e",
+      "sims": 200,
+      "status": "PENDING"
+    },
+    "F": {
+      "axis": "games",
+      "games": 128,
+      "label": "faster feedback loop",
+      "latest_iteration": 5,
+      "pfast": 0.25,
+      "run_name": "c4-hparam-night-20260906-005747-f",
+      "sims": 100,
+      "status": "PENDING"
+    },
+    "G": {
+      "axis": "games",
+      "games": 512,
+      "label": "more data per update",
+      "latest_iteration": 5,
+      "pfast": 0.25,
+      "run_name": "c4-hparam-night-20260906-005747-g",
+      "sims": 100,
+      "status": "PENDING"
+    }
+  },
+  "deadline_at": "2026-10-17T15:59:07+04:00",
+  "deadline_epoch": 1792238347.3347416,
+  "evaluations": [],
+  "experiment_id": "c4-hparam-night-20260906-005747",
+  "frozen_training_commit": "85c87a7cfd467a4d3f4b2844253fb63d746d672a",
+  "max_hours": 999.0,
+  "metrics": [],
+  "notes": [
+    "Primary practical objective: strength gain per wall-clock hour.",
+    "Losses are diagnostics, not the primary ranking metric.",
+    "F/G are an end-to-end outer-loop configuration test: with 16 workers, games/iteration also changes process_batch_size (8/16/32)."
+  ],
+  "parent_checkpoint_sha256": null,
+  "parent_iteration": 5,
+  "reserve_minutes": 35.0,
+  "schema_version": 1,
+  "selection": {},
+  "source_run": "c4-t001-c4-c001",
+  "stages": {
+    "canonical_iter_2": {
+      "branch": "PARENT",
+      "command": [
+        "/home/codex/projects/gocube-alphazero/.venv/bin/python",
+        "/home/codex/projects/gocube-alphazero/alphazero/envs/gocube/train.py",
+        "--topology",
+        "cube",
+        "--size",
+        "4",
+        "--workers",
+        "16",
+        "--sims",
+        "100",
+        "--arena-sims",
+        "100",
+        "--games-per-iteration",
+        "256",
+        "--iterations",
+        "2",
+        "--train-batch-size",
+        "256",
+        "--fast-game-prob",
+        "0.25",
+        "--endgame-sample-weight",
+        "1",
+        "--no-arena",
+        "--run-name",
+        "c4-t001-c4-c001"
+      ],
+      "iteration": 2,
+      "started_at": "2026-09-06T00:59:07+04:00",
+      "status": "RUNNING"
+    }
+  },
+  "started_at": "2026-09-06T00:59:07+04:00",
+  "started_epoch": 1788641947.352856,
+  "status": "RUNNING",
+  "tooling_commit": "2a8e15c796a8390aae6ed68c13c3688fcd1383eb",
+  "workers": 16
+}

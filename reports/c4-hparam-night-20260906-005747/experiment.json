@@ -1,0 +1,94 @@
+{
+  "axis_pairs": {
+    "games": [
+      "F",
+      "G"
+    ],
+    "pfast": [
+      "B",
+      "C"
+    ],
+    "sims": [
+      "D",
+      "E"
+    ]
+  },
+  "branches": {
+    "A": {
+      "axis": "control",
+      "games": 256,
+      "label": "baseline",
+      "pfast": 0.25,
+      "sims": 100
+    },
+    "B": {
+      "axis": "pfast",
+      "games": 256,
+      "label": "no fast search",
+      "pfast": 0.0,
+      "sims": 100
+    },
+    "C": {
+      "axis": "pfast",
+      "games": 256,
+      "label": "more fast search",
+      "pfast": 0.5,
+      "sims": 100
+    },
+    "D": {
+      "axis": "sims",
+      "games": 256,
+      "label": "shallower regular search",
+      "pfast": 0.25,
+      "sims": 50
+    },
+    "E": {
+      "axis": "sims",
+      "games": 256,
+      "label": "deeper regular search",
+      "pfast": 0.25,
+      "sims": 200
+    },
+    "F": {
+      "axis": "games",
+      "games": 128,
+      "label": "faster feedback loop",
+      "pfast": 0.25,
+      "sims": 100
+    },
+    "G": {
+      "axis": "games",
+      "games": 512,
+      "label": "more data per update",
+      "pfast": 0.25,
+      "sims": 100
+    }
+  },
+  "caveat": "F/G also change process_batch_size because gamesPerIteration/workers is coupled in the current implementation.",
+  "experiment_id": "c4-hparam-night-20260906-005747",
+  "fixed": {
+    "arena_action_temperature": 0.0,
+    "arena_batched": false,
+    "arena_fast_probability": 0.0,
+    "arena_root_noise": false,
+    "arena_root_temperature": false,
+    "arena_sims": 100,
+    "endgame_weight": 1,
+    "fast_sims": 20,
+    "model_gating": false,
+    "train_batch": 256
+  },
+  "frozen_training_commit": "85c87a7cfd467a4d3f4b2844253fb63d746d672a",
+  "parent_iteration": 5,
+  "primary_metric": "evaluation strength per wall-clock hour",
+  "schema_version": 1,
+  "source_run": "c4-t001-c4-c001",
+  "stage_policy": {
+    "direct": "stage2 challengers vs same-depth A@7",
+    "stage1": "all A-G: parent5 -> iteration6, then common-parent evaluation",
+    "stage2": "A + best of B/C + best of D/E + best of F/G: -> iteration7",
+    "stage3": "if time: A + strongest challenger -> iteration8, direct final"
+  },
+  "tooling_commit": "2a8e15c796a8390aae6ed68c13c3688fcd1383eb",
+  "workers": 16
+}

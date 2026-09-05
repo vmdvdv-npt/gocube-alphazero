@@ -7,7 +7,7 @@
 - Exit code: —
 - Source commit: 85c87a7cfd467a4d3f4b2844253fb63d746d672a
 - Completed iteration manifests: 0
-- Structured experiment artifacts: no
+- Structured experiment artifacts: yes
 - Reports branch: training-reports
 
 ## Command

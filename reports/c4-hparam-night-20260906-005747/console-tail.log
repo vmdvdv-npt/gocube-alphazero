@@ -1,0 +1,28 @@
+EXPERIMENT EVENT: environment_validated {'head': '85c87a7cfd467a4d3f4b2844253fb63d746d672a', 'cpu_count': 16}
+EXPERIMENT EVENT: stage_started {'stage_id': 'canonical_iter_2', 'branch': 'PARENT', 'iteration': 2}
+Self-play:
+  regular sims = 100
+  fast sims = 20
+  fast probability = 25%
+Training:
+  games/iteration = 256
+  batch size = 256
+  step mode = auto
+  endgame weight = 1
+Arena: OFF
+Model gating: OFF
+/home/codex/projects/gocube-alphazero/alphazero/NNetWrapper.py:283: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  checkpoint = torch.load(filepath, map_location=device) if device else torch.load(filepath)
+Because of batching, it can take a long time before any games finish.
+------ITER 2------
+
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 50.2 | Total: 0:00:01 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 46.5 | Total: 0:00:02 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 45.8 | Total: 0:00:03 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 45.4 | Total: 0:00:04 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 45.5 | Total: 0:00:05 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 46.2 | Total: 0:00:06 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 45.1 | Total: 0:00:07 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 45.4 | Total: 0:00:08 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 45.7 | Total: 0:00:09 | ETA: 0:00:00
+[KGenerating Samples |                                | (0/256) Sample Time: 0.000s | Infer Batch: 45.9 | Total: 0:00:10 | ETA: 0:00:00
