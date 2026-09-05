@@ -1,0 +1,4 @@
+PREFLIGHT OK: training checkout is the frozen source commit and tracked files are clean
+PREFLIGHT OK: GitHub training-reports push permission is available
+PREFLIGHT OK: systemd user service path is available for detached overnight execution
+PREFLIGHT FAIL: WSL detected but powercfg.exe is unavailable; cannot verify Windows host sleep policy

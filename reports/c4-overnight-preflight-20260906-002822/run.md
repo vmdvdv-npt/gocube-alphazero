@@ -1,10 +1,10 @@
 # Training run
 
 - Run: c4-overnight-preflight-20260906-002822
-- Status: RUNNING
+- Status: FAILED
 - Started: 2026-09-06T00:28:22+04:00
-- Ended: —
-- Exit code: —
+- Ended: 2026-09-06T00:28:31+04:00
+- Exit code: 1
 - Source commit: 85c87a7cfd467a4d3f4b2844253fb63d746d672a
 - Completed iteration manifests: 0
 - Reports branch: training-reports
