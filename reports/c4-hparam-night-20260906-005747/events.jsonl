@@ -9,3 +9,5 @@
 {"error": "RuntimeError: existing c4-t001-c4-c001@2 is incomplete/corrupt: No module named 'alphazero'", "event": "experiment_failed", "time": "2026-09-06T01:25:58+04:00"}
 {"cpu_count": 16, "event": "environment_validated", "head": "85c87a7cfd467a4d3f4b2844253fb63d746d672a", "time": "2026-09-06T01:49:15+04:00"}
 {"branch": "PARENT", "event": "stage_started", "iteration": 3, "stage_id": "canonical_iter_3", "time": "2026-09-06T01:49:16+04:00"}
+{"elapsed_seconds": 1437.5, "event": "stage_completed", "stage_id": "canonical_iter_3", "time": "2026-09-06T02:13:14+04:00"}
+{"branch": "PARENT", "event": "stage_started", "iteration": 4, "stage_id": "canonical_iter_4", "time": "2026-09-06T02:13:14+04:00"}
