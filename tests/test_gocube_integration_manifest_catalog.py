@@ -16,6 +16,9 @@ from alphazero.envs.gocube.katago_v3 import KATAGO_REFERENCE_COMMIT, KATAGO_RULE
 from alphazero.envs.gocube.terminal import JAPANESE_CLEANUP_ADJUDICATOR_V2
 
 
+PRE_BENSON_FIX_CUBE4_FINGERPRINT = "7561e72aa6a87ac049095d233214cbf821631a833fb912bce28b63aae7a85d74"
+
+
 def make_checkpoint(run_dir, iteration, content=b"checkpoint"):
     path = run_dir / f"iteration-{iteration:04d}.pkl"
     path.write_bytes(content)
@@ -52,6 +55,18 @@ def test_new_japanese_manifest_uses_v3_contract(tmp_path):
     assert loaded.rules_fingerprint
     assert loaded.katago_rules_version == KATAGO_RULES_VERSION
     assert loaded.katago_reference_commit == KATAGO_REFERENCE_COMMIT
+
+
+def test_pre_benson_fix_v3_manifest_is_rejected_by_new_rules_fingerprint(tmp_path):
+    run_dir = tmp_path / "old-benson-v3"
+    run_dir.mkdir()
+    payload = RunManifest.create(run_name=run_dir.name, topology="cube", size=4).to_dict()
+    assert payload["rulesFingerprint"] != PRE_BENSON_FIX_CUBE4_FINGERPRINT
+    payload["rulesFingerprint"] = PRE_BENSON_FIX_CUBE4_FINGERPRINT
+    (run_dir / MANIFEST_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ManifestError, match="rules fingerprint"):
+        load_run_manifest(str(run_dir))
 
 
 def test_legacy_japanese_v2_manifest_remains_loadable(tmp_path):
@@ -130,9 +145,14 @@ def test_catalog_exposes_only_manifested_well_named_nonempty_checkpoints(tmp_pat
     run_b = tmp_path / "b-run"
     run_a = tmp_path / "a-run"
     hidden = tmp_path / "no-manifest"
-    for path in (run_b, run_a, hidden): path.mkdir()
-    make_manifest(run_b); make_manifest(run_a)
-    make_checkpoint(run_b, 5); make_checkpoint(run_b, 0); make_checkpoint(run_a, 2); make_checkpoint(hidden, 1)
+    for path in (run_b, run_a, hidden):
+        path.mkdir()
+    make_manifest(run_b)
+    make_manifest(run_a)
+    make_checkpoint(run_b, 5)
+    make_checkpoint(run_b, 0)
+    make_checkpoint(run_a, 2)
+    make_checkpoint(hidden, 1)
     (run_a / "checkpoint-latest.pkl").write_bytes(b"x")
     (run_a / "iteration-0003.pkl").write_bytes(b"")
     (run_a / "iteration-abc.pkl").write_bytes(b"x")
@@ -142,9 +162,12 @@ def test_catalog_exposes_only_manifested_well_named_nonempty_checkpoints(tmp_pat
 
 def test_legacy_registration_and_no_silent_incompatible_overwrite(tmp_path):
     run_dir = tmp_path / "legacy"
-    run_dir.mkdir(); make_checkpoint(run_dir, 5)
-    path = register_run(checkpoint_dir=str(tmp_path), run_name="legacy", topology="cube", size=4,
-                        rule_set="chinese", komi=7.5)
+    run_dir.mkdir()
+    make_checkpoint(run_dir, 5)
+    path = register_run(
+        checkpoint_dir=str(tmp_path), run_name="legacy", topology="cube", size=4,
+        rule_set="chinese", komi=7.5,
+    )
     assert path == str(run_dir / MANIFEST_FILENAME)
     incompatible = RunManifest.create(run_name="legacy", topology="cube", size=3)
     with pytest.raises(ManifestExistsError, match="Refusing to overwrite"):
@@ -152,7 +175,10 @@ def test_legacy_registration_and_no_silent_incompatible_overwrite(tmp_path):
 
 
 def test_registration_requires_existing_checkpoint(tmp_path):
-    run_dir = tmp_path / "empty"; run_dir.mkdir()
+    run_dir = tmp_path / "empty"
+    run_dir.mkdir()
     with pytest.raises(FileNotFoundError, match="No supported iteration checkpoints"):
-        register_run(checkpoint_dir=str(tmp_path), run_name="empty", topology="cube", size=4,
-                     rule_set="chinese", komi=7.5)
+        register_run(
+            checkpoint_dir=str(tmp_path), run_name="empty", topology="cube", size=4,
+            rule_set="chinese", komi=7.5,
+        )
