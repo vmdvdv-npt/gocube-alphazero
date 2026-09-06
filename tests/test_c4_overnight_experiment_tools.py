@@ -125,19 +125,22 @@ def test_summary_calls_games_axis_coupling_out_explicitly():
     assert "loss curves alone" in summary
 
 
-def test_evaluator_is_fixed_noise_free_balanced_arena():
+def test_evaluator_is_fixed_noise_free_balanced_batched_arena():
     source = EVALUATOR.read_text(encoding="utf-8")
     for token in (
-        'eval_args.probFastSim = 0.0',
-        'eval_args.add_root_noise = False',
-        'eval_args.add_root_temp = False',
-        'eval_args.startTemp = 0.0',
-        'eval_args.arenaTemp = 0.0',
-        'use_batched_mcts=False',
-        'shuffle_players=True',
-        'balanced_colors',
+        "prepare_evaluation_args",
+        "play_balanced_batched_match",
+        '"batched": True',
+        '"balanced_colors": True',
+        '"arena_batch_size"',
+        '"arena_workers"',
+        '"fast_probability": 0.0',
+        '"root_noise": False',
+        '"root_temperature": False',
+        '"action_temperature": 0.0',
     ):
         assert token in source
+    assert "use_batched_mcts=False" not in source
 
 
 def test_reporter_watches_and_mirrors_structured_publish_directory():
