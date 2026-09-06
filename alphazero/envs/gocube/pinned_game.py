@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import math
 
@@ -20,6 +21,7 @@ from .game import (
 )
 from .katago_v3 import (
     CLEANUP_2,
+    NO_RESULT,
     SCORED,
     apply_v3_action,
     independent_life_analysis,
@@ -33,6 +35,18 @@ from .selfplay_semantics import (
     PINNED_OBSERVATION_SCHEMA,
     apply_pass_would_end_phase_feature,
 )
+
+
+# =============================================================================
+# ПРИНЦИПЫ ОБУЧЕНИЯ ДЕТАЛЬНО СКОПИРОВАНЫ С KATAGO.
+#
+# Источник истины для этой ветки — pinned KataGo commit
+# f6bc4b19a1686caa2d088b56251e8c11c8be6d51. Search/self-play/endgame
+# semantics ниже переносились по upstream-механике, а не придумывались как
+# локальные эвристики GoCube. Отличия допускаются только там, где Cube/Torus
+# topology или текущий NN contract физически требуют адаптации, и такие
+# отличия должны быть явно задокументированы.
+# =============================================================================
 
 
 class _PinnedPassWouldEndPhaseMixin:
@@ -158,6 +172,19 @@ class _PinnedPassWouldEndPhaseMixin:
         player_before = int(self.player)
         GameState.play_action(self, action)
         state = apply_v3_action(self._state, int(action), self.logical_topology())
+
+        # KataGo's GameRunner does NOT train a move-limit crossing as no-result.
+        # After maxMovesPerGame it calls BoardHistory::endAndScoreGameNow(),
+        # scoring the current board as-is and emitting ordinary win/loss/score
+        # targets. Keep genuine cycle/triple-ko NO_RESULT semantics untouched.
+        if state.terminal_kind == NO_RESULT and state.no_result_reason == "move-cap":
+            state = replace(
+                state,
+                phase=SCORED,
+                terminal_kind=SCORED,
+                no_result_reason=None,
+            )
+
         if not self._pinned_is_search_clone and self._pinned_auto_end_pass_alive:
             state = maybe_pass_alive_early_terminal(state, self.logical_topology())
         self._state = state
