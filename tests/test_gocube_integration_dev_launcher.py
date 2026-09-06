@@ -43,6 +43,7 @@ def test_ensure_known_runs_registers_present_run_and_skips_missing(tmp_path):
     assert manifest.run_name == "gocube-cube4-stage4-v1"
     assert manifest.topology == "cube"
     assert manifest.size == 4
+    assert manifest.komi == pytest.approx(0.5)
     assert any("skip missing legacy run torus-9x9-30iter" in message for message in messages)
 
 
@@ -70,7 +71,7 @@ def test_ensure_known_runs_refuses_incompatible_existing_manifest(tmp_path):
         topology="torus",
         size=9,
         rule_set="chinese",
-        komi=7.5,
+        komi=0.5,
     )
     write_run_manifest(str(run_dir), incompatible)
 
