@@ -492,7 +492,7 @@ class KataGoSearchCoach(GoCubeCoach):
         arena_args.arenaTemp = 0.0
         arena_args.arena_batch_size = max(
             1,
-            math.ceil(games / max(1, int(arena_args.workers))),
+            math.ceil(games / max(1, int(arena_args.get("workers", 1)))),
         )
         current_player = MCTSPlayer(self.train_net, self.game_cls, arena_args)
         opponent_player = MCTSPlayer(self.self_play_net, self.game_cls, arena_args)
@@ -569,7 +569,7 @@ class KataGoSearchCoach(GoCubeCoach):
             "move_temperature": 0.0,
             "alternating_colors": not use_batched,
             "batched": use_batched,
-            "workers": int(self.args.workers),
+            "workers": int(self.args.get("workers", 1)),
             "seed": int(self.args.gocube_arena_seed),
             "rules_fingerprint": self.args.gocube_rules_fingerprint,
             "komi": float(self.args.gocube_komi),
