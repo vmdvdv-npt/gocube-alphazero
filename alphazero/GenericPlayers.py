@@ -1,6 +1,7 @@
 from alphazero.MCTS import MCTS
 from alphazero.Game import GameState
 from alphazero.NNetWrapper import NNetWrapper
+from alphazero.search_contract import SearchOutput
 from alphazero.utils import dotdict, plot_mcts_tree
 
 from abc import ABC, abstractmethod
@@ -42,6 +43,10 @@ class BasePlayer(ABC):
 
     def process(self, batch):
         raise NotImplementedError
+
+    def process_for_search(self, batch):
+        policy, value = self.process(batch)
+        return SearchOutput(policy=policy, value=value)
 
 
 class RandomPlayer(BasePlayer):
@@ -96,6 +101,9 @@ class NNPlayer(BasePlayer):
     def process(self, *args, **kwargs):
         return self.nn.process(*args, **kwargs)
 
+    def process_for_search(self, *args, **kwargs):
+        return self.nn.process_for_search(*args, **kwargs)
+
 
 class MCTSPlayer(BasePlayer):
     def __init__(self, nn: NNetWrapper, *args, print_policy=False,
@@ -139,16 +147,22 @@ class MCTSPlayer(BasePlayer):
             print(f'policy: {policy}')
 
         if self.verbose:
-            _, value = self.nn.predict(state.observation())
+            if hasattr(self.nn, 'predict_for_search') and getattr(self.args, 'search_utility_mode', 'legacy') != 'legacy':
+                output = self.nn.predict_for_search(state.observation())
+                value = output.value
+            else:
+                _, value = self.nn.predict(state.observation())
             print('max tree depth:', self.mcts.max_depth)
             print(f'raw network value: {value}')
 
             value = self.mcts.value(self.average_value)
-            rel_val = 0.5 * (value - self.__rel_val_split) / (1 - self.__rel_val_split) + 0.5 \
-                if value >= self.__rel_val_split else (value / self.__rel_val_split) * 0.5
-
-            print(f'value for player {state.player}: {value}')
-            print('relative value:', rel_val)
+            if getattr(self.args, 'search_utility_mode', 'legacy') == 'legacy':
+                rel_val = 0.5 * (value - self.__rel_val_split) / (1 - self.__rel_val_split) + 0.5 \
+                    if value >= self.__rel_val_split else (value / self.__rel_val_split) * 0.5
+                print(f'value for player {state.player}: {value}')
+                print('relative value:', rel_val)
+            else:
+                print(f'combined search utility for player {state.player}: {value}')
 
         if self.draw_mcts:
             plot_mcts_tree(self.mcts, max_depth=self.draw_depth)
@@ -162,6 +176,9 @@ class MCTSPlayer(BasePlayer):
     def process(self, *args, **kwargs):
         return self.nn.process(*args, **kwargs)
 
+    def process_for_search(self, *args, **kwargs):
+        return self.nn.process_for_search(*args, **kwargs)
+
 
 class RawMCTSPlayer(MCTSPlayer):
     def __init__(self, *args, **kwargs):
@@ -169,6 +186,7 @@ class RawMCTSPlayer(MCTSPlayer):
         self._POLICY_SIZE = self.game_cls.action_size()
         self._POLICY_FILL_VALUE = 1 / self._POLICY_SIZE
         self._VALUE_SIZE = self.game_cls.num_players() + 1
+        self._POINT_COUNT = self.game_cls.action_size() - 1
 
     @staticmethod
     def supports_process() -> bool:
@@ -177,6 +195,14 @@ class RawMCTSPlayer(MCTSPlayer):
     @staticmethod
     def requires_model() -> bool:
         return False
+
+    def reset(self):
+        # A model-free baseline has no score/ownership prediction. Its own MCTS
+        # therefore remains on the historical utility path rather than silently
+        # inventing auxiliary heads.
+        args = self.args.copy()
+        args.search_utility_mode = 'legacy'
+        self.mcts = MCTS(args)
 
     def play(self, state) -> int:
         self.mcts.raw_search(state, self.args.numMCTSSims, self.args.add_root_noise, self.args.add_root_temp)
@@ -198,3 +224,11 @@ class RawMCTSPlayer(MCTSPlayer):
     def process(self, batch: torch.Tensor):
         return torch.full((batch.shape[0], self._POLICY_SIZE), self._POLICY_FILL_VALUE).to(batch.device), \
                torch.zeros(batch.shape[0], self._VALUE_SIZE).to(batch.device)
+
+    def process_for_search(self, batch: torch.Tensor):
+        policy, value = self.process(batch)
+        score = torch.zeros((batch.shape[0], 1), device=batch.device)
+        ownership = torch.full(
+            (batch.shape[0], self._POINT_COUNT, 3), 1.0 / 3.0, device=batch.device
+        )
+        return SearchOutput(policy=policy, value=value, score=score, ownership=ownership)
