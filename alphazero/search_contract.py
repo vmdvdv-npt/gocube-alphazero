@@ -11,7 +11,9 @@ LEGACY_SEARCH_UTILITY_MODE = "legacy"
 KATAGO_PINNED_SEARCH_UTILITY_MODE = "katago-pinned-f6bc4b19"
 KATAGO_SEARCH_CONTRACT = "katago-pinned-search-v1"
 
-# Pinned from cpp/configs/training/selfplay8b20.cfg at KATAGO_REFERENCE_COMMIT.
+# Values explicitly set in cpp/configs/training/selfplay8b20.cfg are copied
+# from the pinned commit. conservativePass and fillDameBeforePass are omitted
+# from that self-play config, so KataGo's SearchParams defaults (false) apply.
 KATAGO_SEARCH_DEFAULTS = {
     "win_loss_utility_factor": 1.0,
     "static_score_utility_factor": 0.0,
@@ -26,8 +28,8 @@ KATAGO_SEARCH_DEFAULTS = {
     "fpu_parent_weight_by_visited_policy": True,
     "fpu_parent_weight_by_visited_policy_pow": 2.0,
     "root_ending_bonus_points": 0.50,
-    "fill_dame_before_pass": True,
-    "conservative_pass": True,
+    "fill_dame_before_pass": False,
+    "conservative_pass": False,
 }
 
 
@@ -357,7 +359,7 @@ def root_ending_white_score_bonus(
 
 
 def conservative_root_observation(game: Any, observation: np.ndarray) -> np.ndarray:
-    """Map KataGo conservativePass root history hiding onto GoCube observation V3."""
+    """Optional analysis-mode history hiding; disabled in pinned self-play."""
 
     state = getattr(game, "semantic_state", None)
     if state is None:

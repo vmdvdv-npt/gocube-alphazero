@@ -4,13 +4,13 @@
 
 This branch starts from `main` and deliberately does **not** inherit the abandoned `fix/gocube-score-aware-pass-v1` search/recovery stack.
 
-The rules and terminal state machine remain the existing GoCube Japanese V3 implementation, already pinned to KataGo commit:
+The rules and terminal state machine remain the existing GoCube Japanese V3 implementation, pinned to KataGo commit:
 
 `f6bc4b19a1686caa2d088b56251e8c11c8be6d51`
 
 The new search layer ports the relevant behavior from that same pinned source. Cube and Torus topology differences remain isolated behind `Topology.neighbor_indices(...)` and the existing graph Benson/pass-alive implementation.
 
-## Ported search semantics
+## Pinned self-play search semantics
 
 The production GoCube search mode is `katago-pinned-f6bc4b19`.
 
@@ -28,8 +28,13 @@ From `cpp/configs/training/selfplay8b20.cfg` and the pinned search sources:
 - `fpuParentWeightByVisitedPolicy = true`
 - `fpuParentWeightByVisitedPolicyPow = 2.0`
 - `rootEndingBonusPoints = 0.50`
-- `fillDameBeforePass = true`
-- `conservativePass = true`
+
+`selfplay8b20.cfg` does **not** set `conservativePass` or `fillDameBeforePass`. At the pinned commit, KataGo's `SearchParams` defaults both to `false`, so the GoCube pinned self-play profile now also uses:
+
+- `conservativePass = false`
+- `fillDameBeforePass = false`
+
+KataGo enables these behaviors in some GTP/analysis configurations; those analysis defaults must not be mistaken for self-play training settings.
 
 Search utility is stored from White's perspective, like KataGo. Selection converts it to the player-to-move perspective only at the final PUCT comparison.
 
@@ -50,20 +55,17 @@ KataGo models score variance as well as score mean. GoCube currently has only a 
 
 Ownership is **not** a generic veto or permission signal.
 
-It is consumed only where KataGo consumes ownership for the behavior covered by this port:
-
-- root ending score bonuses/penalties;
-- territory-scoring `fillDameBeforePass` move selection.
-
-The root ending calculation uses the pinned `0.95` ownership extreme and `0.05` tail, the territory PASS penalty of `2/3 * rootEndingBonusPoints`, opponent adjacency, captures, and a graph-topology adaptation of `isNonPassAliveSelfConnection` based on the existing V3 pass-alive analysis.
+It is consumed by the implemented root-ending bonus/penalty logic. The root ending calculation uses the pinned `0.95` ownership extreme and `0.05` tail, the territory PASS penalty of `2/3 * rootEndingBonusPoints`, opponent adjacency, captures, and a graph-topology adaptation of `isNonPassAliveSelfConnection` based on the existing V3 pass-alive analysis.
 
 Root ending bonuses are precomputed once per root, then converted through score utility during PUCT selection.
 
-`fillDameBeforePass` uses KataGo's visit/weight gate and the pinned utility (`0.1`) and score (`0.5`) tolerances. KataGo has a distinct lead head; GoCube does not. This port therefore keeps the utility and score-mean tests and does not manufacture a second lead signal.
-
-`conservativePass` is mapped to GoCube V3 by hiding pass-ending/history-derived observation planes at a MAIN root after one pass, matching KataGo's root history-hiding intent.
+The code also retains an implementation of KataGo's `fillDameBeforePass` heuristic and a GoCube observation adaptation for `conservativePass` for explicit non-self-play use. Neither is enabled by the pinned self-play training profile, matching KataGo's effective `selfplay8b20.cfg` settings.
 
 `rootPruneUselessMoves` is **not yet enabled**. KataGo's implementation requires the last four opponent moves explicitly; GoCube V3 does not currently retain the equivalent ordered move history in semantic state. Rather than invent a replacement threshold, the behavior is left disabled until the required state is represented directly.
+
+## Cleanup PASS-for-ko
+
+The V3 rules engine implements both pass-for-ko forms in pinned KataGo. In cleanup, a player can lift a ko-recapture block either by choosing the blocked opposing single stone in atari, or by choosing the empty ko-capture point whose unique capturable one-stone target is that blocked stone. Both consume the turn, clear the relevant block, and leave the board unchanged. The normal `point_count + PASS` action space is sufficient; no extra action is added.
 
 ## Terminal treatment
 
@@ -102,5 +104,7 @@ Defaults:
 - games per iteration: `256`
 - iterations: `8`
 - random-MCTS warmup: disabled; iteration 0 starts from a randomly initialized network and policy-guided self-play
+- `conservativePass = false`
+- `fillDameBeforePass = false`
 
 Search noise, move temperature, games/iteration, network size, optimizer, learning rate, and other training-scale parameters remain experiment dimensions rather than being claimed universal KataGo constants.

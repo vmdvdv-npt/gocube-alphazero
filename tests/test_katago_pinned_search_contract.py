@@ -34,6 +34,9 @@ def test_pinned_reference_and_defaults_are_explicit():
     assert KATAGO_SEARCH_DEFAULTS["fpu_reduction_max"] == 0.20
     assert KATAGO_SEARCH_DEFAULTS["root_fpu_reduction_max"] == 0.0
     assert KATAGO_SEARCH_DEFAULTS["root_ending_bonus_points"] == 0.50
+    # selfplay8b20.cfg does not override these SearchParams defaults.
+    assert KATAGO_SEARCH_DEFAULTS["fill_dame_before_pass"] is False
+    assert KATAGO_SEARCH_DEFAULTS["conservative_pass"] is False
 
 
 def test_dynamic_score_center_caps_relative_to_expected_score_not_zero():
@@ -99,6 +102,8 @@ def test_cube4_from_scratch_defaults_pin_requested_experiment_dimensions():
     assert args.cpuct == 1.10
     assert args.fpu_reduction == 0.20
     assert args.gocube_root_fpu_reduction == 0.0
+    assert args.gocube_fill_dame_before_pass is False
+    assert args.gocube_conservative_pass is False
     assert args.numWarmupIters == 0
 
     # The abandoned branch used local recovery thresholds. The clean port has

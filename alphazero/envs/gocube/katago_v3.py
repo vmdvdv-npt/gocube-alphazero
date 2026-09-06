@@ -18,7 +18,7 @@ NO_RESULT = "no_result"
 KATAGO_JAPANESE_ADJUDICATOR_V3 = "gocube-katago-japanese-v3"
 OBSERVATION_SCHEMA_V3 = "gocube-observation-v3"
 KATAGO_RULES_VERSION = 3
-KATAGO_RULES_IMPLEMENTATION_VERSION = 2
+KATAGO_RULES_IMPLEMENTATION_VERSION = 3
 KATAGO_REFERENCE_COMMIT = "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
 KATAGO_REFERENCE_VERSION = "1.18.0+ Rules Version 3"
 
@@ -331,14 +331,46 @@ def _is_ko_move(old_board: np.ndarray, new_board: np.ndarray, player: int, actio
     return np.array_equal(reply_board, old_board)
 
 
-def _unblock_action_legal(state: V3State, action: int, topology: Topology) -> bool:
-    if state.phase not in (CLEANUP_1, CLEANUP_2) or action not in state.ko_recap_blocked:
-        return False
+def _pass_for_ko_unblock_target(state: V3State, action: int, topology: Topology) -> int | None:
+    """Return the ko-recap block lifted by this KataGo pass-for-ko action."""
+
+    if state.phase not in (CLEANUP_1, CLEANUP_2):
+        return None
     opponent = WHITE if state.current_player == 0 else BLACK
-    if int(state.board[action]) != opponent:
-        return False
-    group, liberties = _collect_group(state.board, action, opponent, topology)
-    return len(group) == 1 and len(liberties) == 1
+    blocked = set(state.ko_recap_blocked)
+
+    # KataGo path 1: play on the blocked opponent stone itself. The move is a
+    # pass-for-ko rather than a board placement when that stone is a one-stone
+    # chain in atari.
+    if action in blocked and int(state.board[action]) == opponent:
+        group, liberties = _collect_group(state.board, action, opponent, topology)
+        if len(group) == 1 and len(liberties) == 1:
+            return action
+
+    # KataGo path 2: play on the empty ko-capture point whose capture target is
+    # a blocked opponent stone. Board::getKoCaptureLoc requires every on-board
+    # neighbor to be opponent-colored and exactly one capturable one-stone chain.
+    if action < 0 or action >= topology.point_count or int(state.board[action]) != EMPTY:
+        return None
+    capture_target = None
+    for neighbor in topology.neighbor_indices(action):
+        neighbor = int(neighbor)
+        if int(state.board[neighbor]) != opponent:
+            return None
+        group, liberties = _collect_group(state.board, neighbor, opponent, topology)
+        if len(liberties) == 1 and action in liberties:
+            if capture_target is not None:
+                return None
+            if len(group) != 1:
+                return None
+            capture_target = neighbor
+    if capture_target is None or capture_target not in blocked:
+        return None
+    return capture_target
+
+
+def _unblock_action_legal(state: V3State, action: int, topology: Topology) -> bool:
+    return _pass_for_ko_unblock_target(state, action, topology) is not None
 
 
 def _ko_repeat_forbidden(state: V3State, action: int) -> bool:
@@ -441,8 +473,11 @@ def _pass(state: V3State, topology: Topology) -> V3State:
     return _cycle_check_and_record(next_state, after_pass=True)
 
 
-def _unblock(state: V3State, action: int) -> V3State:
-    blocked = tuple(p for p in state.ko_recap_blocked if p != action)
+def _unblock(state: V3State, action: int, topology: Topology) -> V3State:
+    target = _pass_for_ko_unblock_target(state, action, topology)
+    if target is None:
+        raise V3IllegalMove("invalid-pass-for-ko")
+    blocked = tuple(p for p in state.ko_recap_blocked if p != target)
     next_state = replace(
         state,
         current_player=1 - state.current_player,
@@ -502,7 +537,7 @@ def apply_v3_action(state: V3State, action: int, topology: Topology) -> V3State:
     if action == topology.pass_action:
         next_state = _pass(state, topology)
     elif _unblock_action_legal(state, action, topology):
-        next_state = _unblock(state, action)
+        next_state = _unblock(state, action, topology)
     else:
         next_state = _placement(state, action, topology)
     if next_state.terminal_kind is None and next_state.turns >= EMERGENCY_MOVE_CAP_BASE + EMERGENCY_MOVE_CAP_FACTOR * topology.point_count:

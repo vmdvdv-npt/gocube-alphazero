@@ -47,7 +47,7 @@ A cleanup ko-move is a pseudolegal move for which the opponent has a pseudolegal
 
 Cleanup state includes `ko-recapture-blocked` points and phase-local ko history. A cleanup ko capture is forbidden when it captures a region containing a blocked point, or when the same player already made the same ko capture at the same point from the same exact grid coloring in the phase. A legal ko capture marks its played point blocked; blocks whose points become empty are removed.
 
-An unblock-ko-recapture action chooses a blocked, opposing, single-stone region in atari and removes the block. It uses the same board-point action index. The NN action space remains `point_count + PASS`.
+KataGo pass-for-ko has two board-point forms, both represented in the existing `point_count + PASS` action space and both leaving the board unchanged while consuming the turn. A player may choose the blocked opposing single stone in atari itself, or choose the empty ko-capture point whose unique capturable one-stone target is that blocked stone. In either case the corresponding ko-recapture block is removed. No extra action type is introduced.
 
 ## Final Tax=SEKI scoring
 
@@ -79,10 +79,10 @@ Ownership labels are Black, White, or Neutral based on final formal independent-
 
 The observation preserves Black stones, White stones, previous Black, previous White, current player, pass state, Black captures, and White captures, and adds CLEANUP_1 flag, CLEANUP_2 flag, ko-recapture-blocked mask, second-cleanup-start Black/White masks, CLEANUP_2 Black/White move counts, repetition pressure, and current ko-repeat-forbidden mask.
 
-This state is sufficient to expose cleanup legality and score-relevant state to policy/value inference.
+This state exposes cleanup legality and score-relevant state used by the current policy/value inference contract.
 
 ## Compatibility and fingerprint
 
 V1 Chinese, Japanese Cleanup V2, and V3 have separate Game classes and manifest versions. New `train.py` defaults only to V3 and the namespace `gocube-{topology}-{size}-japanese75-katago-v3`.
 
-Checkpoint/run metadata records rule set, komi, terminal adjudicator, observation schema, topology, size, KataGo rules version, KataGo reference commit, and deterministic SHA-256 rules fingerprint. V3 loading fails closed if required metadata is missing or differs. V2 samples/checkpoints are never silently resumed as V3.
+Checkpoint/run metadata records rule set, komi, terminal adjudicator, observation schema, topology, size, KataGo rules version, KataGo reference commit, and deterministic SHA-256 rules fingerprint. The rules implementation version is bumped whenever production move legality or adjudication semantics change; adding the second KataGo pass-for-ko form therefore changes the V3 fingerprint. V3 loading fails closed if required metadata is missing or differs. V2 samples/checkpoints are never silently resumed as V3.
