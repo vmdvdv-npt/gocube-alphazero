@@ -15,7 +15,7 @@ class KnownRun:
     topology: str
     size: int
     rule_set: str = "chinese"
-    komi: float = 7.5
+    komi: float = 0.5
 
 
 # Legacy runs trained before immutable GoCube metadata/manifests were written
