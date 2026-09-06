@@ -26,7 +26,7 @@ EMERGENCY_MOVE_CAP_FACTOR = 24
 EMERGENCY_MOVE_CAP_BASE = 256
 
 
-def rules_fingerprint(topology: Topology, komi: float = 7.5) -> str:
+def rules_fingerprint(topology: Topology, komi: float = 0.5) -> str:
     payload = {
         "adjudicator": KATAGO_JAPANESE_ADJUDICATOR_V3,
         "observationSchema": OBSERVATION_SCHEMA_V3,
@@ -339,17 +339,11 @@ def _pass_for_ko_unblock_target(state: V3State, action: int, topology: Topology)
     opponent = WHITE if state.current_player == 0 else BLACK
     blocked = set(state.ko_recap_blocked)
 
-    # KataGo path 1: play on the blocked opponent stone itself. The move is a
-    # pass-for-ko rather than a board placement when that stone is a one-stone
-    # chain in atari.
     if action in blocked and int(state.board[action]) == opponent:
         group, liberties = _collect_group(state.board, action, opponent, topology)
         if len(group) == 1 and len(liberties) == 1:
             return action
 
-    # KataGo path 2: play on the empty ko-capture point whose capture target is
-    # a blocked opponent stone. Board::getKoCaptureLoc requires every on-board
-    # neighbor to be opponent-colored and exactly one capturable one-stone chain.
     if action < 0 or action >= topology.point_count or int(state.board[action]) != EMPTY:
         return None
     capture_target = None
@@ -554,10 +548,6 @@ def _benson_pass_alive_groups(board: np.ndarray, topology: Topology, color: int)
         for p in group:
             owner[p] = gi
 
-    # Benson regions are maximal connected components that contain no stone of
-    # the color being proved alive. They may therefore contain both EMPTY and
-    # opponent stones. This is the graph-topology form of the standard Benson
-    # construction and deliberately makes no planar edge/corner assumptions.
     regions: list[tuple[tuple[int, ...], set[int], set[int]]] = []
     for region in _components_matching(board, topology, lambda c, own=color: c != own):
         boundary = {
@@ -569,10 +559,6 @@ def _benson_pass_alive_groups(board: np.ndarray, topology: Topology, color: int)
         if not boundary:
             continue
 
-        # A region is vital for a chain iff every EMPTY intersection in that
-        # region is a liberty of the chain. Opponent stones are part of the
-        # region but are not themselves intersections that must border the
-        # chain, and their presence does not invalidate the region.
         vital = set(boundary)
         for p in region:
             if int(board[p]) != EMPTY:

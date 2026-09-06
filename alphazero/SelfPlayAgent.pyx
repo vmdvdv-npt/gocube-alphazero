@@ -389,11 +389,26 @@ class SelfPlayAgent(mp.Process):
                     in_cleanup_prelude = False
                 else:
                     policy = prelude_policy
+
+            training_policy = None
+            search_telemetry = None
+            if not self.fast and not self._is_arena and not in_cleanup_prelude:
+                training_policy = self._mcts(i).probs(self.games[i])
+                if getattr(self, 'score_aware', False):
+                    search_telemetry = self._mcts(i).root_search_telemetry(self.games[i])
+                    forced = int(search_telemetry.get('forced_exploration_visit_total', 0))
+                    raw_visits = int(sum(search_telemetry.get('root_visit_counts', ())))
+                    target_mass = raw_visits - forced - int(search_telemetry.get('pass_suppressed_visits', 0))
+                    self._telemetry_add('exploration_telemetry_positions', 1)
+                    self._telemetry_add('exploration_raw_visits', raw_visits)
+                    self._telemetry_add('exploration_forced_visits', forced)
+                    self._telemetry_add('exploration_target_visits', max(0, target_mass))
+
             action = np.random.choice(self.games[i].action_size(), p=policy)
             if not self._is_arena and not in_cleanup_prelude:
                 self._telemetry_add('fast_decisions' if self.fast else 'regular_decisions')
-            if not self.fast and not self._is_arena and not in_cleanup_prelude:
-                self.histories[i].append((self.games[i].clone(), self._mcts(i).probs(self.games[i])))
+            if training_policy is not None:
+                self.histories[i].append((self.games[i].clone(), training_policy))
             if recording_enabled and not in_cleanup_prelude:
                 state = getattr(self.games[i], "semantic_state", None)
                 self.game_start_times[i] = self.game_start_times[i] or time.time()
@@ -404,6 +419,8 @@ class SelfPlayAgent(mp.Process):
                     "action": int(action),
                     "move": "PASS" if action == self.game_cls.pass_action() else self.game_cls.point_id_for_action(int(action)),
                 }
+                if search_telemetry is not None:
+                    move_record["search_telemetry"] = search_telemetry
                 metadata_slots = getattr(self, 'cleanup_training_metadata', None)
                 metadata = metadata_slots[i] if metadata_slots is not None and i < len(metadata_slots) else None
                 if not self.move_histories[i] and metadata is not None:

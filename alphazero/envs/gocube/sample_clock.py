@@ -14,7 +14,7 @@ from alphazero.NNetWrapper import NNetWrapper, _optional_arg
 from alphazero.pytorch_classification.utils import AverageMeter, Bar
 
 
-TRAINING_CONTRACT = "gocube-sample-clock-v1"
+TRAINING_CONTRACT = "gocube-sample-clock-v2"
 
 
 @dataclass(frozen=True)
@@ -99,7 +99,7 @@ class SampleBasedLRScheduler:
 
     def state_dict(self) -> dict[str, object]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "training_contract": TRAINING_CONTRACT,
             "base_lr": self.base_lr,
             "warmup_samples": self.warmup_samples,
@@ -114,7 +114,7 @@ class SampleBasedLRScheduler:
 
     def load_state_dict(self, state: dict[str, object]) -> None:
         if state.get("training_contract") != TRAINING_CONTRACT:
-            raise ValueError("Checkpoint scheduler state does not use gocube-sample-clock-v1")
+            raise ValueError(f"Checkpoint scheduler state does not use {TRAINING_CONTRACT}")
         expected = SampleClockConfig(
             self.base_lr,
             self.warmup_samples,
@@ -172,6 +172,8 @@ class SampleClockNNetWrapper(NNetWrapper):
         fields = super()._checkpoint_contract()
         for key in (
             "gocube_training_contract",
+            "gocube_train_samples_per_new_sample",
+            "gocube_katago_exploration_contract",
             "gocube_lr_warmup_samples",
             "gocube_lr_warmup_start_factor",
             "gocube_lr_milestone_samples",
@@ -190,6 +192,8 @@ class SampleClockNNetWrapper(NNetWrapper):
         )
         for key in (
             "gocube_training_contract",
+            "gocube_train_samples_per_new_sample",
+            "gocube_katago_exploration_contract",
             "gocube_lr_warmup_samples",
             "gocube_lr_warmup_start_factor",
             "gocube_lr_milestone_samples",
@@ -205,8 +209,9 @@ class SampleClockNNetWrapper(NNetWrapper):
         if make_dirs and not os.path.exists(folder):
             os.makedirs(folder)
         training_state = {
-            "schema_version": 1,
+            "schema_version": 2,
             "training_contract": TRAINING_CONTRACT,
+            "train_samples_per_new_sample": float(self.args.gocube_train_samples_per_new_sample),
             "total_training_samples": self.total_training_samples,
             "total_optimizer_updates": self.total_optimizer_updates,
             "samples_since_lr_change": self.scheduler.samples_since_last_lr_change,
@@ -235,7 +240,7 @@ class SampleClockNNetWrapper(NNetWrapper):
             training_state = checkpoint.get("training_state")
             if not isinstance(training_state, dict) or training_state.get("training_contract") != TRAINING_CONTRACT:
                 raise ValueError(
-                    "Checkpoint predates gocube-sample-clock-v1 and cannot be resumed under the new training contract"
+                    f"Checkpoint predates {TRAINING_CONTRACT} and cannot be resumed under the new training contract"
                 )
         result = super().load_checkpoint(
             folder=folder,
@@ -251,6 +256,12 @@ class SampleClockNNetWrapper(NNetWrapper):
                 raise ValueError("Checkpoint training-sample counter disagrees with scheduler state")
             if int(training_state["total_optimizer_updates"]) != self.total_optimizer_updates:
                 raise ValueError("Checkpoint optimizer-update counter disagrees with scheduler state")
+            saved_ratio = float(training_state["train_samples_per_new_sample"])
+            expected_ratio = float(self.args.gocube_train_samples_per_new_sample)
+            if not math.isclose(saved_ratio, expected_ratio, rel_tol=1e-12, abs_tol=0.0):
+                raise ValueError(
+                    "Checkpoint train/new-data ratio disagrees with configured training contract"
+                )
         return result
 
     @property
