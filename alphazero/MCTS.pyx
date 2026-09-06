@@ -475,7 +475,7 @@ cdef class MCTS:
         else:
             score_arr = np.asarray(score, dtype=np.float32).reshape(-1)
             if score_arr.size != 1:
-                raise ValueError(f'GoCube score head must contain one value, got {score_arr.shape}')
+                raise ValueError(f'GoCube score head must contain one value, got size={score_arr.size}')
             white_score = float(normalized_black_minus_white_to_white_score(
                 float(score_arr[0]), self._point_count
             ))
@@ -507,9 +507,9 @@ cdef class MCTS:
                 bonus_arr = np.asarray(root_ending_white_score_bonuses(
                     gs, self._root_ownership, self.root_ending_bonus_points
                 ), dtype=np.float32).reshape(-1)
-                if bonus_arr.shape != (gs.action_size(),):
+                if bonus_arr.size != gs.action_size():
                     raise ValueError(
-                        f'root-ending bonus shape {bonus_arr.shape} != ({gs.action_size()},)'
+                        f'root-ending bonus size {bonus_arr.size} != {gs.action_size()}'
                     )
                 self._root_ending_bonus_by_action = bonus_arr
                 self._root_context_ready = True
