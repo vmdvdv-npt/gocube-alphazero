@@ -11,7 +11,10 @@ from alphazero.Coach import TrainState, _set_state
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
-from alphazero.envs.gocube.selfplay_semantics import KATAGO_CLEANUP_TRAINING_DEFAULTS
+from alphazero.envs.gocube.selfplay_semantics import (
+    KATAGO_CLEANUP_TRAINING_DEFAULTS,
+    install_pinned_observation_contract,
+)
 from alphazero.envs.gocube.train import GoCubeCoach, build_training_args, print_training_configuration
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
@@ -201,6 +204,7 @@ def parse_args(argv=None):
 
 def build_katago_training_args(cli):
     game_cls, args = build_training_args(cli)
+    game_cls = install_pinned_observation_contract(game_cls)
     defaults = KATAGO_SEARCH_DEFAULTS
     cleanup_defaults = KATAGO_CLEANUP_TRAINING_DEFAULTS
 
@@ -210,6 +214,7 @@ def build_katago_training_args(cli):
     # with the old score-aware experiment.
     args.gocube_katago_search_contract = KATAGO_SEARCH_CONTRACT
     args.gocube_katago_search_reference_commit = KATAGO_REFERENCE_COMMIT
+    args.gocube_observation_schema = game_cls.OBSERVATION_SCHEMA
 
     args.gocube_win_loss_utility_factor = defaults["win_loss_utility_factor"]
     args.gocube_static_score_utility_factor = defaults["static_score_utility_factor"]
@@ -277,6 +282,7 @@ def print_katago_search_configuration(args):
     print("Pinned KataGo search:")
     print(f"  reference commit = {args.gocube_katago_search_reference_commit}")
     print(f"  utility mode = {args.search_utility_mode}")
+    print(f"  observation schema = {args.gocube_observation_schema}")
     print(f"  win/loss factor = {args.gocube_win_loss_utility_factor:g}")
     print(f"  dynamic score factor = {args.gocube_dynamic_score_utility_factor:g}")
     print(f"  dynamic center zero weight = {args.gocube_dynamic_score_center_zero_weight:g}")
