@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate two GoCube checkpoints with a fixed, noise-free MCTS Arena."""
+"""Evaluate two GoCube checkpoints with a fixed, noise-free batched MCTS Arena."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import json
 import math
 import os
 import random
-import time
 from pathlib import Path
 
 import numpy as np
@@ -18,9 +17,8 @@ import torch
 
 pyximport.install()
 
-from alphazero.Arena import Arena
-from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.NNetWrapper import NNetWrapper
+from alphazero.envs.gocube.evaluation import play_balanced_batched_match, prepare_evaluation_args
 from alphazero.envs.gocube.game import game_class
 
 
@@ -42,12 +40,20 @@ def score_interval(score: float, n: int, z: float = 1.959963984540054) -> tuple[
     return max(0.0, center - radius), min(1.0, center + radius)
 
 
-def load_network(game_cls, checkpoint_path: Path) -> NNetWrapper:
+def resolve_device(value: str) -> str:
+    if value == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if value == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA requested for checkpoint evaluation but torch.cuda.is_available() is false")
+    return value
+
+
+def load_network(game_cls, checkpoint_path: Path, device: str) -> NNetWrapper:
     return NNetWrapper.from_checkpoint(
         game_cls,
         folder=str(checkpoint_path.parent),
         filename=checkpoint_path.name,
-        device="cpu",
+        device=device,
         load_training_state=False,
     )
 
@@ -63,6 +69,9 @@ def main() -> int:
     parser.add_argument("--size", type=int, default=4)
     parser.add_argument("--games", type=int, default=32)
     parser.add_argument("--sims", type=int, default=100)
+    parser.add_argument("--arena-batch-size", type=int, default=16)
+    parser.add_argument("--arena-workers", type=int, default=1)
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--seed", type=int, default=20260906)
     args = parser.parse_args()
 
@@ -70,6 +79,10 @@ def main() -> int:
         parser.error("--games must be an even integer >= 2 so colors are balanced")
     if args.sims < 1:
         parser.error("--sims must be >= 1")
+    if args.arena_batch_size < 2:
+        parser.error("--arena-batch-size must be >= 2")
+    if args.arena_workers < 1:
+        parser.error("--arena-workers must be >= 1")
 
     candidate_path = Path(args.candidate).resolve()
     reference_path = Path(args.reference).resolve()
@@ -83,32 +96,24 @@ def main() -> int:
     torch.manual_seed(args.seed)
     torch.set_num_threads(max(1, min(16, os.cpu_count() or 1)))
 
+    device = resolve_device(args.device)
     game_cls = game_class(args.topology, args.size, "japanese")
-    candidate = load_network(game_cls, candidate_path)
-    reference = load_network(game_cls, reference_path)
+    candidate = load_network(game_cls, candidate_path, device)
+    reference = load_network(game_cls, reference_path, device)
 
-    eval_args = candidate.args.copy()
-    eval_args.cuda = False
-    eval_args.numMCTSSims = int(args.sims)
-    eval_args.arenaMCTSSims = int(args.sims)
-    eval_args.probFastSim = 0.0
-    eval_args.add_root_noise = False
-    eval_args.add_root_temp = False
-    eval_args.startTemp = 0.0
-    eval_args.arenaTemp = 0.0
-    eval_args.arenaBatched = False
-    eval_args.use_draws_for_winrate = True
-
-    players = [
-        MCTSPlayer(candidate, game_cls=game_cls, args=eval_args),
-        MCTSPlayer(reference, game_cls=game_cls, args=eval_args),
-    ]
-    arena = Arena(players, game_cls, use_batched_mcts=False, args=eval_args)
-
-    started = time.time()
-    wins, draws, _winrates = arena.play_games(args.games, verbose=False, shuffle_players=True)
-    elapsed = time.time() - started
-    no_results = int(arena.no_results)
+    eval_args = prepare_evaluation_args(
+        candidate.args,
+        game_cls,
+        args.sims,
+        arena_batch_size=args.arena_batch_size,
+        arena_workers=args.arena_workers,
+        cuda=device == "cuda",
+    )
+    match = play_balanced_batched_match(candidate, reference, game_cls, eval_args, args.games)
+    wins = match["wins"]
+    draws = int(match["draws"])
+    no_results = int(match["no_results"])
+    elapsed = float(match["elapsed_seconds"])
     effective_games = int(sum(wins) + draws)
     candidate_points = float(wins[0]) + 0.5 * float(draws)
     reference_points = float(wins[1]) + 0.5 * float(draws)
@@ -117,7 +122,7 @@ def main() -> int:
     ci_low, ci_high = score_interval(candidate_score, effective_games)
 
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "candidate": {
             "id": args.candidate_id,
             "path": str(candidate_path),
@@ -133,9 +138,11 @@ def main() -> int:
         "ruleset": "japanese",
         "games_requested": args.games,
         "games_effective": effective_games,
+        "candidate_black_games": int(match["candidate_black_games"]),
+        "candidate_white_games": int(match["candidate_white_games"]),
         "candidate_wins": int(wins[0]),
         "reference_wins": int(wins[1]),
-        "draws": int(draws),
+        "draws": draws,
         "no_results": no_results,
         "candidate_score_rate": candidate_score,
         "reference_score_rate": reference_score,
@@ -145,8 +152,11 @@ def main() -> int:
         "root_noise": False,
         "root_temperature": False,
         "action_temperature": 0.0,
-        "batched": False,
+        "batched": True,
+        "arena_batch_size": int(match["arena_batch_size"]),
+        "arena_workers": int(match["arena_workers"]),
         "balanced_colors": True,
+        "device": device,
         "seed": args.seed,
         "elapsed_seconds": elapsed,
         "seconds_per_game": elapsed / args.games,
@@ -162,6 +172,7 @@ def main() -> int:
         "EVAL RESULT: "
         f"{args.candidate_id} {wins[0]}W / {wins[1]}L / {draws}D / {no_results}NR, "
         f"score={candidate_score:.3f}, ci95~[{ci_low:.3f}, {ci_high:.3f}], "
+        f"batch={match['arena_batch_size']} x {match['arena_workers']} worker(s), "
         f"{elapsed:.1f}s"
     )
     return 0
