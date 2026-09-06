@@ -34,17 +34,64 @@ def const_temp_scaling(temp, *args, **kwargs) -> float:
     return temp
 
 
-def dotdict_to_dict(data):
-    if isinstance(data, dotdict):
-        return {key: dotdict_to_dict(value) for key, value in data.items()}
-    if isinstance(data, list):
-        return [dotdict_to_dict(value) for value in data]
-    return data
+def get_game_results(result_queue, game_cls, _get_index=None):
+    player_to_index = {p: i for i, p in enumerate(range(game_cls.num_players()))}
+
+    num_games = result_queue.qsize()
+    wins = [0] * game_cls.num_players()
+    draws = 0
+    game_len_sum = 0
+
+    for _ in range(num_games):
+        state, winstate, agent_id = result_queue.get()
+        game_len_sum += state.turns
+
+        for player, is_win in enumerate(winstate):
+            if is_win:
+                if player == len(wins):
+                    draws += 1
+                else:
+                    index = _get_index(player, agent_id) if _get_index else player_to_index[player]
+                    wins[index] += 1
+
+    return wins, draws, game_len_sum / num_games if num_games else 0
 
 
-def plot_mcts_tree(*args, **kwargs):
-    try:
-        from AlphaZeroGUI.CustomGUI import MCTSTreeDialog
-        MCTSTreeDialog(*args, **kwargs).exec_()
-    except ImportError:
-        print('Could not import AlphaZeroGUI. MCTS tree cannot be displayed.')
+def plot_mcts_tree(mcts, max_depth=2):
+    import networkx as nx
+    import matplotlib.pyplot as plt
+    G = nx.Graph()
+
+    global node_idx
+    node_idx = 0
+
+    def find_nodes(cur_node, _past_node=None, _past_i=None, _depth=0):
+        if _depth > max_depth: return
+        global node_idx
+        cur_idx = node_idx
+
+        G.add_node(cur_idx, a=cur_node.a, q=round(cur_node.q, 2), n=cur_node.n, v=round(cur_node.v, 2))
+        if _past_node:
+            G.add_edge(cur_idx, _past_i)
+        node_idx += 1
+
+        for node in cur_node._children:
+            find_nodes(node, cur_node, cur_idx, _depth+1)
+
+    find_nodes(mcts._root)
+    labels = {node: '\n'.join(['{}: {}'.format(k, v) for k, v in G.nodes[node].items()]) for node in G.nodes}
+    #pos = nx.spring_layout(G, k=0.15, iterations=50)
+    pos = nx.nx_agraph.graphviz_layout(G, prog='dot', args='-Gnodesep=1.0 -Goverlap=false')
+    nx.draw(G, pos, labels=labels)
+    plt.show()
+
+
+def convert_checkpoint_file(filepath: str, game_cls, args: dotdict, overwrite_args=False):
+    from alphazero.NNetWrapper import NNetWrapper
+    nnet = NNetWrapper(game_cls, args)
+    nnet.load_checkpoint('', filepath, use_saved_args=not overwrite_args)
+    nnet.save_checkpoint('', filepath, make_dirs=False)
+
+
+def map_value(value, in_min, in_max, out_min, out_max):
+    return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
