@@ -311,7 +311,7 @@ class SelfPlayAgent(mp.Process):
                 self._record_decision_telemetry(self.games[i], action)
                 self._record_search_audit(self.games[i], action)
                 self._telemetry_add('fast_decisions' if self.fast else 'regular_decisions')
-            if not self.fast and not self._is_arena and not self.validation_only:
+            if not self.fast and not self._is_arena and not getattr(self, 'validation_only', False):
                 self.histories[i].append((self.games[i].clone(), current_mcts.probs(self.games[i])))
             if recording_enabled:
                 state = getattr(self.games[i], "semantic_state", None)
@@ -367,7 +367,7 @@ class SelfPlayAgent(mp.Process):
                 if not accepted:
                     continue
 
-            if not self._is_arena and not self.validation_only:
+            if not self._is_arena and not getattr(self, 'validation_only', False):
                 training_valid = True
                 if hasattr(final_game, "has_training_result"):
                     training_valid = final_game.has_training_result()
