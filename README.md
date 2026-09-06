@@ -9,7 +9,7 @@ This project is still work-in-progress, so expect frequent fixes, updates, and m
 You may join the [Discord server](https://discord.gg/MVaHwGZpRC) if you wish to join the community and discuss this project, ask questions, or contribute to the framework's development.
 
 ### Current differences from the above repos
-1. **Cython:** The most computationally intensive components are written in Cython to be compiled for a runtime speedup of [up to 30x](https://towardsdatascience.com/use-cython-to-get-more-than-30x-speedup-with-cython-f6cb337919b6) compared to pure python.
+1. **Cython:** The most computationally intensive components are written in Cython to be compiled for a runtime speedup of [up to 30x](https://towardsdatascience.com/use-cython-to-get-more-than-30x-speedup-on-your-python-code-f6cb337919b6) compared to pure python.
 2. **GUI:** Includes a graphical user interface for easier training and arena comparisons. It also allows for games to be played visually (agent-agent, agent-human, human-human) instead of through a command line interface (work-in-progress). Custom environments must implement their own GUI naturally.
 3. **Node-based MCTS:** Uses a better implementation of MCTS that uses nodes instead of dictionary lookups. This allows for a huge increase in performance and much less RAM usage than what the previous implementation used, about 30-50% speed increase and 95% less RAM usage from experimental data. The base code for this was provided by [bhandsconnect](https://github.com/bhandsconnect).
 4. **Model Gating:** After each iteration, the model is compared to the previous iteration. The model that performs better continues forward based on an adjustable minimum winrate parameter.
@@ -64,7 +64,7 @@ Make sure you have Python 3 installed. Then run:
 ### GUI (work-in-progress)
 ![image](https://user-images.githubusercontent.com/28303167/164362451-01590045-5070-45a1-8989-ab70e364b19f.png)
 
-AlphaZeroGUI, built using PyQT5, is intended to simplify the training, hyperparameter selection, and deployment/inference processes as opposed to modifying different files and running through a command line interface. It can be run with the following command:
+AlphaZeroGUI, built using PyQT5, is intended to simplify the training, hyperparameter selection, and deployment/inference processes as opposed to modifying different files and running in the command line. It can be run with the following command:
 
 `python -m AlphaZeroGUI.main`
 
@@ -80,7 +80,7 @@ For now, Arena is still displayed in the console, but eventually there will be s
 1. Adjust the hyperparameters in one of the examples to your preference (in the GUI editor, or path is ```alphazero/envs/<env name>/train.py```). Take a look at Coach.py where the default arguments are stored to see the available options. For example, edit ```alphazero/envs/connect4/train.py```.
 
 
-2. After that, you can start training AlphaZero on your chosen environment by pressing the 'play' button in the GUI, or running it through a console with the following command:
+2. After that, you can start training AlphaZero on your chosen environment by pressing the 'play' button in the GUI, or running the following in the console:
 
 ```python3 -m alphazero.envs.<env name>.train```
 
@@ -130,7 +130,7 @@ As a general guideline, game engine files/other potential bottlenecks should be 
 
 **`cpuct`:** A constant for balancing exploration vs exploitation in the MCTS algorithm. A higher number promotes more exploration of new actions whereas a lower one promotes exploitation of previously known good actions. A normal range is between 1-4, depending on the environment; a game with less possible moves on each turn would need a lower CPUCT.
 
-**`fpu_reduction`:** "First Play Urgency" reduction decreases the initialization Q value of an unvisited node by this factor, must be in the range `[-1, 1]`. The closer this value is to 1, it discourages MCTS to explore unvisited nodes further, which (hopefully) allows it to explore paths that are more familiar. If this is set to 0, no reduction is done and unvisited nodes inherit their parent's Q value. Closer to a value of -1 (not recommended to go below 0), it makes it increasingly more prefered which can lead to more exploration.
+**`fpu_reduction`:** "First Play Urgency" reduction decreases the initialization Q value of an unvisited node by this factor, must be in the range `[-1, 1]`. The closer this value is to 1, it discourages MCTS to explore unvisited nodes further, which (hopefully) allows it to explore paths that are more familiar. If this is set to 0, no reduction is done and unvisited nodes inherit their parent's Q value. Closer to a value of -1 (not recommended to go below 0), unvisited nodes become more prefered which can lead to more exploration.
 
 **`num_channels`:** The number of channels each ResNet convolution block has.
 
@@ -162,7 +162,7 @@ I was surprised to see that even in only 35 iterations (which took approximately
 ![image](https://user-images.githubusercontent.com/28303167/164116313-5afe1e73-b087-4827-a407-553b652b66de.png)
 For unknown reasons, it does not perform as well against the baseline tester as the instance above, but this is probably due to the use of dirichlet noise and root temperature in Arena, which can cause AlphaZero to make a 'mistake' by random chance (which is intended for further exploration in self-play). However, if these are turned off, temperature is set to a low value (0-0.25), and more 'thinking' time is allowed (number of MCTS simulations are increased), then even this undertrained model can essentially play a perfect game.
 
-The model for the lateset iteration (35) of this instance can be downloaded [here](https://drive.google.com/file/d/1goGnOWeQy2LmWounB-FPPoSH7ZdCg59X/view?usp=sharing).
+The model for the lateset iteration (35) of this instance can be downloaded [here](https://drive.google.com/file/d/1goGnOWeQY2LmWounB-FPPoSH7ZdCg59X/view?usp=sharing).
 
 ### Viking Chess - Brandubh
 `envs/brandubh`
