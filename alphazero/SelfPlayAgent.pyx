@@ -51,6 +51,7 @@ class SelfPlayAgent(mp.Process):
         )
         if self.score_aware and not _is_warmup and (score_tensor is None or ownership_tensor is None):
             raise ValueError('score-aware SelfPlayAgent requires score_tensor and ownership_tensor')
+        self.validation_only = bool(getattr(args, "gocube_validation_only", False) and not _is_arena)
         self.recording_enabled = bool(
             getattr(args, "gocube_recording_enabled", False) and not _is_arena
         )
@@ -310,7 +311,7 @@ class SelfPlayAgent(mp.Process):
                 self._record_decision_telemetry(self.games[i], action)
                 self._record_search_audit(self.games[i], action)
                 self._telemetry_add('fast_decisions' if self.fast else 'regular_decisions')
-            if not self.fast and not self._is_arena:
+            if not self.fast and not self._is_arena and not self.validation_only:
                 self.histories[i].append((self.games[i].clone(), current_mcts.probs(self.games[i])))
             if recording_enabled:
                 state = getattr(self.games[i], "semantic_state", None)
@@ -366,7 +367,7 @@ class SelfPlayAgent(mp.Process):
                 if not accepted:
                     continue
 
-            if not self._is_arena:
+            if not self._is_arena and not self.validation_only:
                 training_valid = True
                 if hasattr(final_game, "has_training_result"):
                     training_valid = final_game.has_training_result()
