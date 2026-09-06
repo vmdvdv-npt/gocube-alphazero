@@ -38,8 +38,9 @@ def _args():
 
 
 class _SecondPassNet:
-    def __init__(self, *, pass_is_good=False):
+    def __init__(self, *, pass_is_good=False, ownership_extreme=False):
         self.pass_is_good = pass_is_good
+        self.ownership_extreme = ownership_extreme
 
     def predict_for_search(self, observation):
         point_count = observation.shape[1]
@@ -61,7 +62,15 @@ class _SecondPassNet:
             policy[:-1] /= np.sum(policy[:-1])
 
         value = np.array([0.5, 0.5, 0.0], dtype=np.float32)
-        ownership = np.full((point_count, 3), 1.0 / 3.0, dtype=np.float32)
+        if self.ownership_extreme and root_after_one_pass:
+            # After Black's first PASS White is to move. Mark every point as
+            # confidently White-owned, which makes the ownership heuristic call
+            # all empty-board placements "not useful". Direct searched score
+            # evidence must still be allowed to suppress a dominated second PASS.
+            ownership = np.zeros((point_count, 3), dtype=np.float32)
+            ownership[:, 1] = 1.0
+        else:
+            ownership = np.full((point_count, 3), 1.0 / 3.0, dtype=np.float32)
 
         cleanup1 = bool(np.max(observation[8, :, 0]) > 0.5)
         white_stones = int(np.sum(observation[1, :, 0]))
@@ -114,6 +123,26 @@ def test_score_aware_search_rejects_score_dominated_second_pass(sims):
     assert diagnostic["pass_suppressed"] is True, diagnostic
     assert mcts.best_action(game) != game.pass_action(), diagnostic
     assert np.asarray(mcts.counts(game))[game.pass_action()] == 0, diagnostic
+
+
+@pytest.mark.parametrize("sims", [20, 50])
+def test_direct_score_evidence_overrides_ownership_veto_for_second_pass(sims):
+    game = _after_black_pass()
+    mcts = MCTS(_args())
+    mcts.search(
+        game,
+        _SecondPassNet(pass_is_good=False, ownership_extreme=True),
+        sims,
+        False,
+        False,
+    )
+
+    diagnostic = mcts.pass_diagnostic(game)
+    assert diagnostic["best_nonpass_score_gain"] >= 1.0, diagnostic
+    assert diagnostic["best_nonpass_win_delta"] >= -0.005, diagnostic
+    assert diagnostic["score_dominated_pass"] is True, diagnostic
+    assert diagnostic["pass_suppressed"] is True, diagnostic
+    assert mcts.best_action(game) != game.pass_action(), diagnostic
 
 
 def test_conservative_pass_switch_controls_suppression_independently_of_dame_exploration():
