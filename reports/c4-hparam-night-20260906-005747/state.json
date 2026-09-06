@@ -450,6 +450,7 @@
   ],
   "experiment_id": "c4-hparam-night-20260906-005747",
   "frozen_training_commit": "85c87a7cfd467a4d3f4b2844253fb63d746d672a",
+  "last_attempt_started_at": "2026-09-06T09:20:55+04:00",
   "last_resume_previous_status": "FAILED",
   "last_resumed_at": "2026-09-06T01:48:47+04:00",
   "max_hours": 999.0,
@@ -937,8 +938,40 @@
   "parent_iteration": 5,
   "reserve_minutes": 35.0,
   "resume_count": 1,
+  "run_attempts": 1,
   "schema_version": 1,
   "selection": {
+    "adaptive": {
+      "final_block_games": 32,
+      "final_max_games": 128,
+      "matches": {},
+      "mode": "leader-first-sequential",
+      "schema_version": 1,
+      "screen_block_games": 24,
+      "screen_leader": "D",
+      "screen_max_games_per_match": 72,
+      "screen_selected_at": "2026-09-06T09:21:01+04:00",
+      "screen_tie_delta": 0.1,
+      "screening_games_per_branch": 24,
+      "shortlist": [
+        "D",
+        "B",
+        "C",
+        "A",
+        "F",
+        "G"
+      ],
+      "stage1_scores": {
+        "A": 0.4583333333333333,
+        "B": 0.5416666666666666,
+        "C": 0.5,
+        "D": 0.75,
+        "E": 0.4583333333333333,
+        "F": 0.25,
+        "G": 0.25
+      },
+      "status": "VALIDATING_SCREEN_LEADER"
+    },
     "stage2": {
       "axes": {
         "games": {
@@ -974,6 +1007,39 @@
   },
   "source_run": "c4-t001-c4-c001",
   "stages": {
+    "adaptive_screen_D_i6_vs_A_i6_b01": {
+      "candidate": "D",
+      "candidate_iteration": 6,
+      "command": [
+        "/home/codex/projects/gocube-alphazero/.venv/bin/python",
+        "/home/codex/.cache/gocube-night-tools-028342cee09a757a8c9c84b225c550c36bbf601a/evaluate_gocube_checkpoints.py",
+        "--candidate",
+        "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-d/iteration-0006.pkl",
+        "--reference",
+        "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-a/iteration-0006.pkl",
+        "--output",
+        "/home/codex/projects/gocube-alphazero/training_reports/c4-hparam-night-20260906-005747/evaluations/adaptive_screen_D_i6_vs_A_i6_b01.json",
+        "--candidate-id",
+        "D@6",
+        "--reference-id",
+        "A@6",
+        "--topology",
+        "cube",
+        "--size",
+        "4",
+        "--games",
+        "24",
+        "--sims",
+        "100",
+        "--seed",
+        "20656814"
+      ],
+      "games": 24,
+      "reference": "adaptive:A@6",
+      "seed": 20656814,
+      "started_at": "2026-09-06T09:21:01+04:00",
+      "status": "RUNNING"
+    },
     "canonical_iter_2": {
       "command": [
         "/home/codex/projects/gocube-alphazero/.venv/bin/python",
@@ -1659,6 +1725,9 @@
   "started_at": "2026-09-06T00:59:07+04:00",
   "started_epoch": 1788641947.352856,
   "status": "RUNNING",
-  "tooling_commit": "2a8e15c796a8390aae6ed68c13c3688fcd1383eb",
+  "tooling_commit": "028342cee09a757a8c9c84b225c550c36bbf601a",
+  "tooling_history": [
+    "028342cee09a757a8c9c84b225c550c36bbf601a"
+  ],
   "workers": 16
 }

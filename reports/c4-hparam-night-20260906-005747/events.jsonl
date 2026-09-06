@@ -66,3 +66,9 @@
 {"event": "evaluation_completed", "score": 0.25, "stage_id": "stage1_eval_G_i6_vs_parent5", "time": "2026-09-06T09:20:37+04:00"}
 {"allowed": true, "estimated_seconds": 1663.6, "event": "deadline_check", "label": "stage2 train A@7", "remaining_seconds": 3566310.1, "reserve_seconds": 2100.0, "time": "2026-09-06T09:20:37+04:00"}
 {"branch": "A", "event": "stage_started", "iteration": 7, "stage_id": "stage2_train_A_i7", "time": "2026-09-06T09:20:37+04:00"}
+{"attempt": 1, "event": "attempt_started", "previous_status": "RUNNING", "time": "2026-09-06T09:20:55+04:00", "tooling_commit": "028342cee09a757a8c9c84b225c550c36bbf601a"}
+{"cpu_count": 16, "event": "environment_validated", "head": "85c87a7cfd467a4d3f4b2844253fb63d746d672a", "time": "2026-09-06T09:20:55+04:00"}
+{"event": "parent_frozen", "sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4", "time": "2026-09-06T09:20:59+04:00"}
+{"event": "adaptive_shortlist_selected", "leader": "D", "scores": {"A": 0.4583333333333333, "B": 0.5416666666666666, "C": 0.5, "D": 0.75, "E": 0.4583333333333333, "F": 0.25, "G": 0.25}, "shortlist": ["D", "B", "C", "A", "F", "G"], "time": "2026-09-06T09:21:01+04:00"}
+{"allowed": true, "estimated_seconds": 2102.2, "event": "deadline_check", "label": "adaptive D@6 vs A@6 block 1", "remaining_seconds": 3566286.2, "reserve_seconds": 2100.0, "time": "2026-09-06T09:21:01+04:00"}
+{"event": "adaptive_evaluation_started", "games": 24, "seed": 20656814, "stage_id": "adaptive_screen_D_i6_vs_A_i6_b01", "time": "2026-09-06T09:21:01+04:00"}

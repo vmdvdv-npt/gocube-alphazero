@@ -89,6 +89,6 @@
     "stage2": "A + best of B/C + best of D/E + best of F/G: -> iteration7",
     "stage3": "if time: A + strongest challenger -> iteration8, direct final"
   },
-  "tooling_commit": "2a8e15c796a8390aae6ed68c13c3688fcd1383eb",
+  "tooling_commit": "028342cee09a757a8c9c84b225c550c36bbf601a",
   "workers": 16
 }
