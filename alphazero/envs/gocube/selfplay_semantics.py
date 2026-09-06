@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from dataclasses import replace
 from typing import Any
 
@@ -61,45 +60,6 @@ def apply_pass_would_end_phase_feature(game: Any, observation: np.ndarray) -> np
         )
     result[PASS_WOULD_END_PHASE_CHANNEL] = 1.0 if pass_would_end_phase(state) else 0.0
     return result
-
-
-def install_pinned_observation_contract(game_cls):
-    """Expand the pinned pilot observation from 17 to 18 planes, idempotently."""
-
-    if getattr(game_cls, "_PINNED_PASS_WOULD_END_PHASE_INSTALLED", False):
-        return game_cls
-
-    original_features = int(game_cls.OBSERVATION_FEATURES)
-    if original_features != PASS_WOULD_END_PHASE_CHANNEL:
-        raise ValueError(
-            f"Pinned passWouldEndPhase contract expected {PASS_WOULD_END_PHASE_CHANNEL} V3 planes, "
-            f"got {original_features}"
-        )
-
-    original_observation = game_cls.observation
-    original_rules_fingerprint = game_cls.rules_fingerprint
-
-    def observation(self):
-        # observation_size() reads the class feature count dynamically, so after
-        # installing the contract the original V3 encoder allocates 18 planes
-        # and leaves the new final plane free for the exact pass-end bit.
-        result = original_observation(self)
-        return apply_pass_would_end_phase_feature(self, result)
-
-    def rules_fingerprint(cls):
-        base = original_rules_fingerprint()
-        payload = (
-            f"{base}|observation={PINNED_OBSERVATION_SCHEMA}"
-            f"|passWouldEndPhaseChannel={PASS_WOULD_END_PHASE_CHANNEL}"
-        )
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-    game_cls.OBSERVATION_FEATURES = PASS_WOULD_END_PHASE_CHANNEL + 1
-    game_cls.OBSERVATION_SCHEMA = PINNED_OBSERVATION_SCHEMA
-    game_cls.observation = observation
-    game_cls.rules_fingerprint = classmethod(rules_fingerprint)
-    game_cls._PINNED_PASS_WOULD_END_PHASE_INSTALLED = True
-    return game_cls
 
 
 def rebase_cleanup_training_state(state: V3State, target_phase: str) -> V3State:
