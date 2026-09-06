@@ -228,7 +228,7 @@ def test_scoring_rejects_incomplete_group_classification():
             topology,
             (GroupClassification(black_group, "alive"),),
             "chinese",
-            7.5,
+            0.5,
         )
 
 
@@ -236,9 +236,9 @@ def test_empty_torus_is_neutral_and_komi_decides_score():
     topology = torus_topology(9)
     state = initial_state(topology)
 
-    score = score_position(state, topology, (), "chinese", 7.5)
+    score = score_position(state, topology, (), "chinese", 0.5)
 
     assert score.territory.neutral == 81
     assert score.black == 0.0
-    assert score.white == 7.5
+    assert score.white == 0.5
     assert score.winner == "white"
