@@ -116,6 +116,29 @@ def test_score_aware_search_rejects_score_dominated_second_pass(sims):
     assert np.asarray(mcts.counts(game))[game.pass_action()] == 0, diagnostic
 
 
+def test_conservative_pass_switch_controls_suppression_independently_of_dame_exploration():
+    game = _after_black_pass()
+    args = _args()
+    args.gocube_conservative_pass = False
+    assert args.gocube_fill_dame_before_pass is True
+
+    mcts = MCTS(args)
+    mcts.search(game, _SecondPassNet(pass_is_good=False), 50, False, False)
+
+    diagnostic = mcts.pass_diagnostic(game)
+    raw_counts = np.asarray(mcts.raw_counts(game))
+    selected_counts = np.asarray(mcts.counts(game))
+    pass_action = game.pass_action()
+
+    # Search can still diagnose that PASS is score-dominated, and the dame
+    # exploration helper remains enabled, but the explicit suppression switch
+    # must leave the visit distribution untouched.
+    assert diagnostic["score_dominated_pass"] is True, diagnostic
+    assert diagnostic["pass_suppressed"] is False, diagnostic
+    assert raw_counts[pass_action] > 0
+    assert selected_counts[pass_action] == raw_counts[pass_action]
+
+
 @pytest.mark.parametrize("sims", [20, 50])
 def test_pass_remains_selectable_when_nonpass_does_not_improve_score(sims):
     game = _after_black_pass()
