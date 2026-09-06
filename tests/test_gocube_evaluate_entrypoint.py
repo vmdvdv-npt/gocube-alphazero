@@ -1,4 +1,7 @@
 from argparse import Namespace
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -137,3 +140,17 @@ def test_balanced_batched_match_runs_two_fixed_color_halves(monkeypatch):
     assert result["wins"] == [4, 3]
     assert result["draws"] == 1
     assert result["no_results"] == 2
+
+
+def test_checkpoint_evaluator_supports_direct_script_execution():
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "tools/evaluate_gocube_checkpoints.py", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--arena-batch-size" in result.stdout

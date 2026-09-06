@@ -9,11 +9,18 @@ import json
 import math
 import os
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
 import pyximport
 import torch
+
+# Support direct execution from the repository root, e.g.
+# `python tools/evaluate_gocube_checkpoints.py ...`.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 pyximport.install()
 
