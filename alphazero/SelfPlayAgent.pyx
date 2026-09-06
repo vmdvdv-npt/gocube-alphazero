@@ -241,7 +241,6 @@ class SelfPlayAgent(mp.Process):
             return None
         policy[valid == 0] = 0.0
         policy[policy < 0.0] = 0.0
-        policy[int(self.game_cls.pass_action())] = 0.0
         if float(policy.sum()) <= 0.0:
             self._cancel_cleanup_training_plan(index)
             return None
