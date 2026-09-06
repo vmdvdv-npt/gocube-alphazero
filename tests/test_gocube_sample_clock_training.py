@@ -5,6 +5,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from alphazero.envs.gocube.exploration_contract import KATAGO_PINNED_EXPLORATION_CONTRACT
 from alphazero.envs.gocube.sample_clock import (
     SampleBasedLRScheduler,
     SampleClockNNetWrapper,
@@ -87,6 +88,8 @@ def _args():
         "gocube_auxiliary_targets": False,
         "value_loss_weight": 1.5,
         "gocube_training_contract": TRAINING_CONTRACT,
+        "gocube_train_samples_per_new_sample": 1.0,
+        "gocube_katago_exploration_contract": KATAGO_PINNED_EXPLORATION_CONTRACT,
         "gocube_lr_warmup_samples": 1000,
         "gocube_lr_warmup_start_factor": 0.1,
         "gocube_lr_milestone_samples": (2000, 4000),
@@ -133,6 +136,16 @@ def test_checkpoint_resume_preserves_sample_clock_and_does_not_restart_warmup(tm
     restored.train(DataLoader(_dataset(100), batch_size=100, shuffle=False), 1)
     assert restored.total_training_samples == before_samples + 100
     assert restored.total_optimizer_updates == 4
+
+
+def test_checkpoint_resume_rejects_changed_train_new_data_ratio(tmp_path):
+    wrapper = _TinySampleClockWrapper(_TinyGame, _args())
+    wrapper.save_checkpoint(str(tmp_path), "ratio.pkl")
+    changed = _args()
+    changed.gocube_train_samples_per_new_sample = 2.0
+    restored = _TinySampleClockWrapper(_TinyGame, changed)
+    with pytest.raises(ValueError, match="gocube_train_samples_per_new_sample"):
+        restored.load_checkpoint(str(tmp_path), "ratio.pkl", use_saved_args=False)
 
 
 def test_old_checkpoint_contract_is_rejected_explicitly():

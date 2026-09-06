@@ -13,6 +13,12 @@ import numpy as np
 cimport numpy as np
 from alphazero.utils import dotdict
 from alphazero.mcts_policy import normalize_masked_policy
+from alphazero.envs.gocube.exploration_contract import (
+    KATAGO_PINNED_EXPLORATION_DEFAULTS,
+    retrospectively_reduce_root_visits,
+    root_policy_temperature,
+    shaped_dirichlet_alpha_distribution,
+)
 from alphazero.search_contract import (
     KATAGO_PINNED_SEARCH_UTILITY_MODE,
     SearchOutput,
@@ -134,11 +140,18 @@ cdef class MCTS:
     cdef public float root_ending_bonus_points
     cdef public bint fill_dame_before_pass
     cdef public bint conservative_pass
+    cdef public float root_dirichlet_noise_total_concentration
+    cdef public float root_policy_temperature_early
+    cdef public float root_policy_temperature_normal
+    cdef public float root_policy_temperature_halflife
+    cdef public float root_desired_per_child_visits_coeff
     cdef public int _point_count
     cdef public float _recent_score_center_white
     cdef public float _root_score_white
     cdef public object _root_ownership
     cdef public object _root_ending_bonus_by_action
+    cdef public object _root_nn_policy
+    cdef public object _root_exploration_policy
     cdef public bint _root_context_ready
 
     def __init__(self, args: dotdict):
@@ -172,6 +185,28 @@ cdef class MCTS:
         self.root_ending_bonus_points = float(_optional_arg(args, 'gocube_root_ending_bonus_points', 0.5))
         self.fill_dame_before_pass = bool(_optional_arg(args, 'gocube_fill_dame_before_pass', True))
         self.conservative_pass = bool(_optional_arg(args, 'gocube_conservative_pass', True))
+        exploration = KATAGO_PINNED_EXPLORATION_DEFAULTS
+        self.root_dirichlet_noise_total_concentration = float(_optional_arg(
+            args,
+            'gocube_root_dirichlet_noise_total_concentration',
+            exploration['root_dirichlet_noise_total_concentration'],
+        ))
+        self.root_policy_temperature_early = float(_optional_arg(
+            args, 'gocube_root_policy_temperature_early', exploration['root_policy_temperature_early']
+        ))
+        self.root_policy_temperature_normal = float(_optional_arg(
+            args, 'gocube_root_policy_temperature', exploration['root_policy_temperature']
+        ))
+        self.root_policy_temperature_halflife = float(_optional_arg(
+            args,
+            'gocube_root_policy_temperature_halflife',
+            exploration['root_policy_temperature_halflife'],
+        ))
+        self.root_desired_per_child_visits_coeff = float(_optional_arg(
+            args,
+            'gocube_root_desired_per_child_visits_coeff',
+            exploration['root_desired_per_child_visits_coeff'],
+        ))
 
         self._root = Node(-1, self._num_players)
         self._curnode = self._root
@@ -184,6 +219,8 @@ cdef class MCTS:
         self._root_score_white = 0
         self._root_ownership = None
         self._root_ending_bonus_by_action = None
+        self._root_nn_policy = None
+        self._root_exploration_policy = None
         self._root_context_ready = False
 
     def __repr__(self):
@@ -208,6 +245,8 @@ cdef class MCTS:
         self._root_score_white = 0
         self._root_ownership = None
         self._root_ending_bonus_by_action = None
+        self._root_nn_policy = None
+        self._root_exploration_policy = None
         self._root_context_ready = False
 
     cpdef object search_observation(self, object gs):
@@ -266,10 +305,6 @@ cdef class MCTS:
         for c in self._root._children:
             if c.a == a:
                 if self._katago_search:
-                    # Dynamic score utility is centered on the current root. A
-                    # faithful tree-reuse port would need to re-center retained
-                    # subtree statistics. Reset rather than mixing utilities
-                    # computed under two different score centers.
                     self.reset()
                 else:
                     self._root = c
@@ -277,16 +312,43 @@ cdef class MCTS:
 
         raise ValueError(f'Invalid action encountered while updating root: {a}')
 
+    cdef np.ndarray _root_policy_array(self, int action_size):
+        cdef np.ndarray policy = np.zeros(action_size, dtype=np.float64)
+        cdef Node c
+        for c in self._root._children:
+            policy[c.a] = c.p
+        return policy
+
     cpdef void _add_root_noise(self):
         cdef int num_valid_moves = len(self._root._children)
-        cdef double[:] noise = np.random.dirichlet(
-            [NOISE_ALPHA_RATIO / num_valid_moves] * num_valid_moves
-        )
         cdef Node c
         cdef double n
+        cdef object alpha_props
+        cdef object alpha
+        cdef object policy
+        cdef object noise
+
+        if num_valid_moves <= 0:
+            return
+        if self._katago_search and not self._force_legacy_search:
+            policy = np.asarray([c.p for c in self._root._children], dtype=np.float64)
+            alpha_props = shaped_dirichlet_alpha_distribution(policy)
+            alpha = np.asarray(alpha_props, dtype=np.float64) * self.root_dirichlet_noise_total_concentration
+            noise = np.random.dirichlet(alpha)
+        else:
+            noise = np.random.dirichlet([NOISE_ALPHA_RATIO / num_valid_moves] * num_valid_moves)
 
         for n, c in zip(noise, self._root._children):
             c.p = c.p * (1 - self.root_noise_frac) + self.root_noise_frac * n
+
+    cdef float _katago_root_policy_temp(self, object gs):
+        return float(root_policy_temperature(
+            int(gs.turns),
+            int(gs.logical_topology().point_count),
+            early_temperature=self.root_policy_temperature_early,
+            temperature=self.root_policy_temperature_normal,
+            halflife=self.root_policy_temperature_halflife,
+        ))
 
     cdef float _katago_fpu_value(self, Node parent, bint is_root, float visited_policy):
         cdef float parent_utility = parent.q
@@ -313,6 +375,23 @@ cdef class MCTS:
                 (total_child_weight + self.cpuct_exploration_base) / self.cpuct_exploration_base
             )
         return cpuct_value * sqrt(total_child_weight + _TOTAL_CHILD_WEIGHT_PUCT_OFFSET)
+
+    cdef float _katago_root_child_utility(self, Node c):
+        cdef float child_utility = c.q
+        cdef float ending_bonus
+        if self._root_context_ready and self._root_ending_bonus_by_action is not None:
+            ending_bonus = float(self._root_ending_bonus_by_action[c.a])
+            if ending_bonus != 0:
+                child_utility += float(score_utility_diff(
+                    c.score_q,
+                    ending_bonus,
+                    recent_center=self._recent_score_center_white,
+                    point_count=self._point_count,
+                    static_factor=self.static_score_utility_factor,
+                    dynamic_factor=self.dynamic_score_utility_factor,
+                    dynamic_scale=self.dynamic_score_center_scale,
+                ))
+        return child_utility
 
     cdef Node _best_child_katago(self, Node parent, object gs, bint is_root):
         cdef Node c
@@ -353,7 +432,15 @@ cdef class MCTS:
                     ))
 
             value_component = child_utility if parent.player == 1 else -child_utility
-            selection_value = value_component + explore_scaling * c.p / (1.0 + c.n)
+            if (
+                is_root
+                and self.root_desired_per_child_visits_coeff > 0.0
+                and c.p > 0.0
+                and c.n < sqrt(c.p * total_child_weight * self.root_desired_per_child_visits_coeff)
+            ):
+                selection_value = 1e20
+            else:
+                selection_value = value_component + explore_scaling * c.p / (1.0 + c.n)
             if selection_value > cur_best:
                 cur_best = selection_value
                 child = c
@@ -464,6 +551,7 @@ cdef class MCTS:
         cdef np.ndarray bonus_arr
         cdef float white_score = 0.0
         cdef float utility
+        cdef float root_temp
         cdef bint score_available = True
 
         if not self._katago_search:
@@ -495,8 +583,10 @@ cdef class MCTS:
             pi = normalize_masked_policy(pi, valids)
 
             if self._curnode == self._root:
+                self._root_nn_policy = np.array(pi, dtype=np.float64, copy=True)
                 if add_root_temp:
-                    pi = np.asarray(pi) ** (1.0 / self.root_temp)
+                    root_temp = self._katago_root_policy_temp(gs)
+                    pi = np.asarray(pi) ** (1.0 / root_temp)
                     pi /= np.sum(pi)
                 self._curnode.update_policy(pi)
                 self._root_ownership = np.asarray(ownership, dtype=np.float32)
@@ -524,6 +614,7 @@ cdef class MCTS:
                 self._root_context_ready = True
                 if add_root_noise:
                     self._add_root_noise()
+                self._root_exploration_policy = self._root_policy_array(gs.action_size())
             else:
                 self._curnode.update_policy(pi)
 
@@ -622,9 +713,6 @@ cdef class MCTS:
             if ((c.n <= 500 and child_weight <= 2.0 * sqrt(pass_weight)) or child_weight <= 1e-10):
                 continue
 
-            # KataGo additionally compares a distinct lead head. GoCube has one
-            # scalar score head and no separate lead head, so do not invent a
-            # second signal: retain KataGo's utility and score-mean conditions.
             if (
                 player == 1
                 and c.q > pass_utility - 0.1
@@ -639,11 +727,68 @@ cdef class MCTS:
                 return True
         return False
 
+    cdef np.ndarray _katago_corrected_counts(self, object gs, np.ndarray search_counts):
+        cdef np.ndarray policy = self._root_policy_array(gs.action_size())
+        cdef np.ndarray utilities = np.zeros(gs.action_size(), dtype=np.float64)
+        cdef np.ndarray legal = np.zeros(gs.action_size(), dtype=np.bool_)
+        cdef float total_child_weight = 0.0
+        cdef Node c
+        for c in self._root._children:
+            legal[c.a] = True
+            total_child_weight += c.n
+            if c.n > 0:
+                utilities[c.a] = self._katago_root_child_utility(c)
+        return np.asarray(retrospectively_reduce_root_visits(
+            search_counts,
+            policy,
+            utilities,
+            root_player=int(self._root.player),
+            explore_scaling=float(self._katago_explore_scaling(total_child_weight)),
+            legal_mask=legal,
+        ), dtype=np.int32)
+
     cpdef int[:] counts(self, object gs):
         cdef np.ndarray counts = np.asarray(self.raw_counts(gs), dtype=np.int32).copy()
         if self._should_suppress_pass(gs):
             counts[int(gs.pass_action())] = 0
+        if self._katago_search and not self._force_legacy_search:
+            counts = self._katago_corrected_counts(gs, counts)
         return counts
+
+    cpdef object root_search_telemetry(self, object gs):
+        cdef np.ndarray raw = np.asarray(self.raw_counts(gs), dtype=np.int32).copy()
+        cdef np.ndarray search_counts = raw.copy()
+        cdef bint pass_suppressed = self._should_suppress_pass(gs)
+        cdef int pass_action = int(gs.pass_action())
+        cdef int pass_suppressed_visits = 0
+        cdef np.ndarray corrected
+        cdef np.ndarray forced
+        cdef np.ndarray target
+        cdef float total
+        if pass_suppressed:
+            pass_suppressed_visits = int(search_counts[pass_action])
+            search_counts[pass_action] = 0
+        corrected = self._katago_corrected_counts(gs, search_counts) if self._katago_search else search_counts
+        forced = np.maximum(search_counts - corrected, 0).astype(np.int32)
+        target = corrected.astype(np.float64)
+        total = float(np.sum(target))
+        if total > 0.0:
+            target /= total
+        return {
+            'nn_root_policy': (
+                np.asarray(self._root_nn_policy, dtype=np.float64).tolist()
+                if self._root_nn_policy is not None else None
+            ),
+            'exploration_policy': (
+                np.asarray(self._root_exploration_policy, dtype=np.float64).tolist()
+                if self._root_exploration_policy is not None else self._root_policy_array(gs.action_size()).tolist()
+            ),
+            'root_visit_counts': raw.tolist(),
+            'policy_training_target': target.tolist(),
+            'forced_exploration_visits': forced.tolist(),
+            'forced_exploration_visit_total': int(np.sum(forced)),
+            'pass_suppressed_visits': pass_suppressed_visits,
+        }
 
     cpdef int best_action(self, object gs):
         return np.argmax(self.counts(gs))
