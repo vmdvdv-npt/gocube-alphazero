@@ -8,6 +8,7 @@ from alphazero.envs.gocube.game import Cube4JapaneseGame
 from alphazero.search_contract import (
     GOCUBE_KATAGO_V3_SEARCH_UTILITY_MODE,
     SearchOutput,
+    equivalent_win_probability,
     exact_player_score_points,
     player_score_points,
     score_value,
@@ -21,7 +22,7 @@ def _args():
         min_discount=1.0,
         fpu_reduction=0.0,
         cpuct=1.25,
-        _num_players=2,
+        _num_players=3,
         search_utility_mode=GOCUBE_KATAGO_V3_SEARCH_UTILITY_MODE,
         gocube_win_loss_utility_factor=1.0,
         gocube_static_score_utility_factor=0.0,
@@ -43,8 +44,22 @@ class _SecondPassNet:
     def predict_for_search(self, observation):
         point_count = observation.shape[1]
         action_size = point_count + 1
-        policy = np.full(action_size, 0.001 / point_count, dtype=np.float32)
-        policy[-1] = 0.999
+        root_after_one_pass = bool(np.max(observation[5, :, 0]) > 0.5) and not (
+            bool(np.max(observation[8, :, 0]) > 0.5)
+            or bool(np.max(observation[9, :, 0]) > 0.5)
+        )
+        if root_after_one_pass:
+            policy = np.full(action_size, 0.001 / point_count, dtype=np.float32)
+            policy[-1] = 0.999
+        else:
+            # The fixture is testing the root choice, not fast repeated passing
+            # in descendants. Keep later play on-board so exact terminal results
+            # do not manufacture a win-value difference that the NN did not
+            # predict at the root children.
+            policy = np.full(action_size, 1.0 / point_count, dtype=np.float32)
+            policy[-1] = 0.0
+            policy[:-1] /= np.sum(policy[:-1])
+
         value = np.array([0.5, 0.5, 0.0], dtype=np.float32)
         ownership = np.full((point_count, 3), 1.0 / 3.0, dtype=np.float32)
 
@@ -78,6 +93,12 @@ def test_score_value_matches_pinned_katago_smooth_transform():
     points = Cube4JapaneseGame.logical_topology().point_count
     expected = (2.0 / np.pi) * np.arctan(7.0 / (2.0 * np.sqrt(points)))
     assert score_value(7.0, 0.0, 2.0, points) == pytest.approx(expected)
+
+
+def test_framework_result_width_keeps_draw_as_half_win():
+    value = np.array([0.4, 0.4, 0.2], dtype=np.float32)
+    assert equivalent_win_probability(value, 0, 3) == pytest.approx(0.5)
+    assert equivalent_win_probability(value, 1, 3) == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize("sims", [20, 50])
