@@ -22,6 +22,7 @@ KATAGO_CLEANUP_TRAINING_DEFAULTS = {
     "policy_temperature": 2.0 / 3.0,
 }
 
+# cpp/configs/training/selfplay8b20.cfg at the pinned KataGo commit.
 KATAGO_PINNED_SELFPLAY_DEFAULTS = {
     "pass_alive_auto_end_probability": 0.98,
     "root_prune_useless_moves": True,
@@ -29,10 +30,41 @@ KATAGO_PINNED_SELFPLAY_DEFAULTS = {
     "seki_fork_pool_capacity": 1000,
     "seki_fork_candidates_per_game": 2,
     "seki_fork_tail_scale": 0.10,
+    "early_fork_game_probability": 0.04,
+    "early_fork_expected_move_prop": 0.025,
+    "fork_game_probability": 0.01,
+    "fork_game_min_choices": 3,
+    "early_fork_game_max_choices": 12,
+    "fork_game_max_choices": 36,
+    "init_games_with_policy": True,
+    "policy_init_area_prop": 0.04,
+    "policy_init_gamma_shape": 1.0,
+    "policy_init_temperature": 1.0,
 }
 
 PINNED_OBSERVATION_SCHEMA = "gocube-observation-v4-pass-would-end-phase"
 PASS_WOULD_END_PHASE_CHANNEL = 17
+
+
+def sample_plain_fork_kind(rng, early_probability: float, ordinary_probability: float):
+    """Sample KataGo's early-first, ordinary-second fork decision."""
+    if rng.random_sample() < float(early_probability):
+        return "early"
+    if float(ordinary_probability) > 0.0 and rng.random_sample() < float(ordinary_probability):
+        return "ordinary"
+    return None
+
+
+def sample_early_fork_depth(rng, point_count: int, expected_move_prop: float) -> int:
+    mean = float(point_count) * float(expected_move_prop)
+    return int(np.floor(rng.exponential() * mean)) if mean > 0.0 else 0
+
+
+def sample_policy_init_moves(rng, point_count: int, area_prop: float, gamma_shape: float) -> int:
+    mean = float(point_count) * float(area_prop)
+    if mean <= 0.0:
+        return 0
+    return int(np.floor(rng.gamma(float(gamma_shape), mean / float(gamma_shape))))
 
 
 def pass_would_end_phase(state: V3State) -> bool:
