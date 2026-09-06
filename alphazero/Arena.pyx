@@ -276,6 +276,8 @@ class Arena:
                         score_tensor=score_tensors[i], ownership_tensor=ownership_tensors[i],
                     )
                 )
+                if not shuffle_players:
+                    self._agents[i].player_to_index = list(range(self.game_cls.num_players()))
                 self._agents[i].daemon = True
                 self._agents[i].start()
 
