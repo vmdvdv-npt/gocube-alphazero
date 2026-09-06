@@ -1,0 +1,34 @@
+
+=== COMMAND 2026-09-06T04:55:22+04:00 ===
+/home/codex/projects/gocube-alphazero/.venv/bin/python /home/codex/.cache/gocube-night-tools-d1e63d0f6bd6fdecce5887af97bdb5e3cc166f89/evaluate_gocube_checkpoints.py --candidate /home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-c/iteration-0006.pkl --reference /home/codex/projects/gocube-alphazero/checkpoint/c4-t001-c4-c001/iteration-0005.pkl --output /home/codex/projects/gocube-alphazero/training_reports/c4-hparam-night-20260906-005747/evaluations/stage1_eval_C_i6_vs_parent5.json --candidate-id C@6 --reference-id parent@5 --topology cube --size 4 --games 24 --sims 100 --seed 20261573
+/home/codex/projects/gocube-alphazero/alphazero/NNetWrapper.py:283: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  checkpoint = torch.load(filepath, map_location=device) if device else torch.load(filepath)
+/home/codex/projects/gocube-alphazero/alphazero/NNetWrapper.py:283: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  checkpoint = torch.load(filepath, map_location=device) if device else torch.load(filepath)
+
+[KArena.play_games |#                               | (1/24) Winrates: [1.0, 0.0] | No-result: 0 | Eps Time: 62.069s | Total: 0:01:02 | ETA: 0:00:00
+[KArena.play_games |##                              | (2/24) Winrates: [0.5, 0.5] | No-result: 0 | Eps Time: 67.387s | Total: 0:02:14 | ETA: 0:23:48
+[KArena.play_games |####                            | (3/24) Winrates: [0.667, 0.333] | No-result: 0 | Eps Time: 66.392s | Total: 0:03:19 | ETA: 0:24:43
+[KArena.play_games |#####                           | (4/24) Winrates: [0.5, 0.5] | No-result: 0 | Eps Time: 66.552s | Total: 0:04:26 | ETA: 0:23:15
+[KArena.play_games |######                          | (5/24) Winrates: [0.6, 0.4] | No-result: 0 | Eps Time: 67.240s | Total: 0:05:36 | ETA: 0:22:12
+[KArena.play_games |########                        | (6/24) Winrates: [0.5, 0.5] | No-result: 0 | Eps Time: 68.913s | Total: 0:06:53 | ETA: 0:21:18
+[KArena.play_games |#########                       | (7/24) Winrates: [0.571, 0.429] | No-result: 0 | Eps Time: 68.067s | Total: 0:07:56 | ETA: 0:20:41
+[KArena.play_games |##########                      | (8/24) Winrates: [0.625, 0.375] | No-result: 0 | Eps Time: 69.117s | Total: 0:09:12 | ETA: 0:19:18
+[KArena.play_games |############                    | (9/24) Winrates: [0.667, 0.333] | No-result: 0 | Eps Time: 68.319s | Total: 0:10:14 | ETA: 0:18:26
+[KArena.play_games |#############                   | (10/24) Winrates: [0.7, 0.3] | No-result: 0 | Eps Time: 67.178s | Total: 0:11:11 | ETA: 0:17:05
+[KArena.play_games |##############                  | (11/24) Winrates: [0.727, 0.273] | No-result: 0 | Eps Time: 67.025s | Total: 0:12:17 | ETA: 0:15:41
+[KArena.play_games |################                | (12/24) Winrates: [0.667, 0.333] | No-result: 0 | Eps Time: 68.101s | Total: 0:13:37 | ETA: 0:14:38
+[KArena.play_games |#################               | (13/24) Winrates: [0.692, 0.308] | No-result: 0 | Eps Time: 67.794s | Total: 0:14:41 | ETA: 0:13:39
+[KArena.play_games |##################              | (14/24) Winrates: [0.643, 0.357] | No-result: 0 | Eps Time: 67.302s | Total: 0:15:42 | ETA: 0:12:31
+[KArena.play_games |####################            | (15/24) Winrates: [0.667, 0.333] | No-result: 0 | Eps Time: 67.063s | Total: 0:16:45 | ETA: 0:11:17
+[KArena.play_games |#####################           | (16/24) Winrates: [0.625, 0.375] | No-result: 0 | Eps Time: 68.208s | Total: 0:18:11 | ETA: 0:10:03
+[KArena.play_games |######################          | (17/24) Winrates: [0.588, 0.412] | No-result: 0 | Eps Time: 68.048s | Total: 0:19:16 | ETA: 0:09:03
+[KArena.play_games |########################        | (18/24) Winrates: [0.556, 0.444] | No-result: 0 | Eps Time: 68.397s | Total: 0:20:31 | ETA: 0:07:57
+[KArena.play_games |#########################       | (19/24) Winrates: [0.526, 0.474] | No-result: 0 | Eps Time: 68.648s | Total: 0:21:44 | ETA: 0:06:47
+[KArena.play_games |##########################      | (20/24) Winrates: [0.5, 0.5] | No-result: 0 | Eps Time: 68.744s | Total: 0:22:54 | ETA: 0:05:45
+[KArena.play_games |############################    | (21/24) Winrates: [0.476, 0.524] | No-result: 0 | Eps Time: 68.934s | Total: 0:24:07 | ETA: 0:04:42
+[KArena.play_games |#############################   | (22/24) Winrates: [0.5, 0.5] | No-result: 0 | Eps Time: 68.373s | Total: 0:25:04 | ETA: 0:03:34
+[KArena.play_games |##############################  | (23/24) Winrates: [0.522, 0.478] | No-result: 0 | Eps Time: 68.033s | Total: 0:26:04 | ETA: 0:02:18
+[KArena.play_games |################################| (24/24) Winrates: [0.5, 0.5] | No-result: 0 | Eps Time: 67.628s | Total: 0:27:03 | ETA: 0:01:09
+[KArena.play_games |################################| (24/24) Winrates: [0.5, 0.5] | No-result: 0 | Eps Time: 67.628s | Total: 0:27:03 | ETA: 0:01:09
+[?25hEVAL RESULT: C@6 12W / 12L / 0D / 0NR, score=0.500, ci95~[0.314, 0.686], 1623.1s

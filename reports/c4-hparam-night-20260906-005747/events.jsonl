@@ -39,3 +39,6 @@
 {"elapsed_seconds": 936.9, "event": "stage_completed", "stage_id": "stage1_train_C_i6", "time": "2026-09-06T04:55:22+04:00"}
 {"allowed": true, "estimated_seconds": 1989.5, "event": "deadline_check", "label": "stage1 eval C@6", "remaining_seconds": 3582225.0, "reserve_seconds": 2100.0, "time": "2026-09-06T04:55:22+04:00"}
 {"event": "evaluation_started", "games": 24, "stage_id": "stage1_eval_C_i6_vs_parent5", "time": "2026-09-06T04:55:22+04:00"}
+{"event": "evaluation_completed", "score": 0.5, "stage_id": "stage1_eval_C_i6_vs_parent5", "time": "2026-09-06T05:22:27+04:00"}
+{"allowed": true, "estimated_seconds": 883.8, "event": "deadline_check", "label": "stage1 train D@6", "remaining_seconds": 3580599.8, "reserve_seconds": 2100.0, "time": "2026-09-06T05:22:27+04:00"}
+{"branch": "D", "event": "stage_started", "iteration": 6, "stage_id": "stage1_train_D_i6", "time": "2026-09-06T05:22:27+04:00"}

@@ -1,3 +1,4 @@
 stage_id,candidate_branch,candidate_iteration,reference_id,games_requested,games_effective,candidate_wins,reference_wins,draws,no_results,candidate_score_rate,candidate_score_ci95_approx,mcts_sims,elapsed_seconds,seconds_per_game,seed
 stage1_eval_A_i6_vs_parent5,A,6,parent@5,24,24,11,13,0,0,0.4583333333333333,"[0.2789133373121098, 0.6492513464108052]",100,1575.1060888767242,65.62942036986351,20261571
 stage1_eval_B_i6_vs_parent5,B,6,parent@5,24,24,13,11,0,0,0.5416666666666666,"[0.3507486535891948, 0.72108666268789]",100,1608.0743527412415,67.00309803088506,20261572
+stage1_eval_C_i6_vs_parent5,C,6,parent@5,24,24,12,12,0,0,0.5,"[0.3142742581957335, 0.6857257418042665]",100,1623.0773973464966,67.62822488943736,20261573
