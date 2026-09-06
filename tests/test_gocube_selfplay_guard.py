@@ -20,6 +20,8 @@ def _args(**overrides):
 def _telemetry(**overrides):
     values = dict(
         main_double_pass_within_2=0,
+        main_double_pass_within_4=0,
+        main_double_pass_within_8=0,
         phase_main_decisions=1000,
         phase_cleanup1_decisions=100,
         phase_cleanup2_decisions=100,
@@ -39,13 +41,34 @@ def test_normal_iteration_is_valid_and_training_allowed():
 
 def test_pathological_early_double_pass_iteration_is_invalid():
     result = evaluate_selfplay_guard(
-        _telemetry(main_double_pass_within_2=20),
+        _telemetry(
+            main_double_pass_within_2=20,
+            main_double_pass_within_4=20,
+            main_double_pass_within_8=20,
+        ),
         games=32,
         args=_args(),
     )
     assert result.status == "invalid_selfplay"
     assert result.training_allowed is False
     assert any("early MAIN double-pass" in reason for reason in result.fatal_reasons)
+
+
+def test_guard_catches_recovery_pattern_that_starts_after_ply_two():
+    result = evaluate_selfplay_guard(
+        _telemetry(
+            main_double_pass_within_2=0,
+            main_double_pass_within_4=116,
+            main_double_pass_within_8=120,
+        ),
+        games=256,
+        args=_args(),
+    )
+    assert result.status == "invalid_selfplay"
+    assert result.metrics["main_early_double_pass_rate"] == 120 / 256
+    assert result.metrics["main_double_pass_within_2"] == 0
+    assert result.metrics["main_double_pass_within_4"] == 116
+    assert result.metrics["main_double_pass_within_8"] == 120
 
 
 def test_cleanup2_domination_is_invalid_after_minimum_game_count():
@@ -76,12 +99,12 @@ def test_score_dominated_pass_guard_requires_minimum_audit_sample():
         args=_args(),
     )
     assert enough.status == "invalid_selfplay"
-    assert any("score-dominated second-PASS" in reason for reason in enough.fatal_reasons)
+    assert any("escaped score-dominated second-PASS" in reason for reason in enough.fatal_reasons)
 
 
 def test_one_or_two_early_games_do_not_trigger_guard_before_minimum_games():
     result = evaluate_selfplay_guard(
-        _telemetry(main_double_pass_within_2=2),
+        _telemetry(main_double_pass_within_2=2, main_double_pass_within_4=2, main_double_pass_within_8=2),
         games=2,
         args=_args(),
     )
