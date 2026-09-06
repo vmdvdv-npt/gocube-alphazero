@@ -34,6 +34,8 @@ from .selfplay_semantics import (
     PASS_WOULD_END_PHASE_CHANNEL,
     PINNED_OBSERVATION_SCHEMA,
     apply_pass_would_end_phase_feature,
+    sample_early_fork_depth,
+    sample_plain_fork_kind,
 )
 
 
@@ -53,9 +55,11 @@ class _PinnedPassWouldEndPhaseMixin:
     OBSERVATION_FEATURES = PASS_WOULD_END_PHASE_CHANNEL + 1
     OBSERVATION_SCHEMA = PINNED_OBSERVATION_SCHEMA
     _SEKI_FORK_POOL = []
+    _PLAIN_FORK_POOL = []
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        defaults = KATAGO_PINNED_SELFPLAY_DEFAULTS
         self._pinned_auto_end_pass_alive = True
         self._pinned_root_prune_useless_moves = False
         self._pinned_selfplay_semantics = False
@@ -63,14 +67,18 @@ class _PinnedPassWouldEndPhaseMixin:
         self._pinned_is_search_clone = False
         self._pinned_at_search_root = False
         self._pinned_started_from_seki_fork = False
+        self._pinned_started_from_plain_fork = False
+        self._pinned_early_fork_game_prob = defaults["early_fork_game_probability"]
+        self._pinned_early_fork_expected_move_prop = defaults["early_fork_expected_move_prop"]
+        self._pinned_fork_game_prob = defaults["fork_game_probability"]
+        self._pinned_fork_game_min_choices = defaults["fork_game_min_choices"]
+        self._pinned_early_fork_game_max_choices = defaults["early_fork_game_max_choices"]
+        self._pinned_fork_game_max_choices = defaults["fork_game_max_choices"]
         self._pinned_start_phase = self._state.phase
         self._pinned_move_history = ()
         self._pinned_state_history = (self._state,)
 
     def observation(self):
-        # Base GoGame.observation() allocates using self.observation_size(), so
-        # the subclass feature count makes the existing 17 V3 planes land in an
-        # 18-plane tensor and leaves the final plane for passWouldEndPhase.
         return apply_pass_would_end_phase_feature(self, super().observation())
 
     @classmethod
@@ -84,23 +92,36 @@ class _PinnedPassWouldEndPhaseMixin:
 
     @classmethod
     def _seki_pool(cls):
-        # Keep pools topology-specific within each self-play worker process.
         if "_SEKI_FORK_POOL" not in cls.__dict__:
             cls._SEKI_FORK_POOL = []
         return cls._SEKI_FORK_POOL
 
+    @classmethod
+    def _plain_fork_pool(cls):
+        if "_PLAIN_FORK_POOL" not in cls.__dict__:
+            cls._PLAIN_FORK_POOL = []
+        return cls._PLAIN_FORK_POOL
+
     def clone(self):
         clone = super().clone()
-        clone._pinned_auto_end_pass_alive = self._pinned_auto_end_pass_alive
-        clone._pinned_root_prune_useless_moves = self._pinned_root_prune_useless_moves
-        clone._pinned_selfplay_semantics = self._pinned_selfplay_semantics
-        clone._pinned_seki_fork_hack_prob = self._pinned_seki_fork_hack_prob
-        clone._pinned_started_from_seki_fork = self._pinned_started_from_seki_fork
-        clone._pinned_start_phase = self._pinned_start_phase
-        clone._pinned_move_history = self._pinned_move_history
-        clone._pinned_state_history = self._pinned_state_history
-        # MCTS clones are search states. KataGo does not call the game-level
-        # all-pass-alive auto-terminal inside search. Root pruning is also root-only.
+        for name in (
+            "_pinned_auto_end_pass_alive",
+            "_pinned_root_prune_useless_moves",
+            "_pinned_selfplay_semantics",
+            "_pinned_seki_fork_hack_prob",
+            "_pinned_started_from_seki_fork",
+            "_pinned_started_from_plain_fork",
+            "_pinned_early_fork_game_prob",
+            "_pinned_early_fork_expected_move_prop",
+            "_pinned_fork_game_prob",
+            "_pinned_fork_game_min_choices",
+            "_pinned_early_fork_game_max_choices",
+            "_pinned_fork_game_max_choices",
+            "_pinned_start_phase",
+            "_pinned_move_history",
+            "_pinned_state_history",
+        ):
+            setattr(clone, name, getattr(self, name))
         clone._pinned_is_search_clone = True
         clone._pinned_at_search_root = True
         return clone
@@ -112,15 +133,43 @@ class _PinnedPassWouldEndPhaseMixin:
         root_prune_useless_moves: bool,
         seki_fork_hack_prob: float,
         started_from_seki_fork: bool | None = None,
+        started_from_plain_fork: bool | None = None,
+        early_fork_game_prob: float | None = None,
+        early_fork_expected_move_prop: float | None = None,
+        fork_game_prob: float | None = None,
+        fork_game_min_choices: int | None = None,
+        early_fork_game_max_choices: int | None = None,
+        fork_game_max_choices: int | None = None,
     ) -> None:
+        defaults = KATAGO_PINNED_SELFPLAY_DEFAULTS
         self._pinned_selfplay_semantics = True
         self._pinned_auto_end_pass_alive = bool(auto_end_pass_alive)
         self._pinned_root_prune_useless_moves = bool(root_prune_useless_moves)
         self._pinned_seki_fork_hack_prob = float(seki_fork_hack_prob)
+        self._pinned_early_fork_game_prob = float(
+            defaults["early_fork_game_probability"] if early_fork_game_prob is None else early_fork_game_prob
+        )
+        self._pinned_early_fork_expected_move_prop = float(
+            defaults["early_fork_expected_move_prop"] if early_fork_expected_move_prop is None else early_fork_expected_move_prop
+        )
+        self._pinned_fork_game_prob = float(
+            defaults["fork_game_probability"] if fork_game_prob is None else fork_game_prob
+        )
+        self._pinned_fork_game_min_choices = int(
+            defaults["fork_game_min_choices"] if fork_game_min_choices is None else fork_game_min_choices
+        )
+        self._pinned_early_fork_game_max_choices = int(
+            defaults["early_fork_game_max_choices"] if early_fork_game_max_choices is None else early_fork_game_max_choices
+        )
+        self._pinned_fork_game_max_choices = int(
+            defaults["fork_game_max_choices"] if fork_game_max_choices is None else fork_game_max_choices
+        )
         self._pinned_is_search_clone = False
         self._pinned_at_search_root = False
         if started_from_seki_fork is not None:
             self._pinned_started_from_seki_fork = bool(started_from_seki_fork)
+        if started_from_plain_fork is not None:
+            self._pinned_started_from_plain_fork = bool(started_from_plain_fork)
 
     def pinned_selfplay_config(self) -> dict[str, object]:
         return {
@@ -128,6 +177,13 @@ class _PinnedPassWouldEndPhaseMixin:
             "root_prune_useless_moves": self._pinned_root_prune_useless_moves,
             "seki_fork_hack_prob": self._pinned_seki_fork_hack_prob,
             "started_from_seki_fork": self._pinned_started_from_seki_fork,
+            "started_from_plain_fork": self._pinned_started_from_plain_fork,
+            "early_fork_game_prob": self._pinned_early_fork_game_prob,
+            "early_fork_expected_move_prop": self._pinned_early_fork_expected_move_prop,
+            "fork_game_prob": self._pinned_fork_game_prob,
+            "fork_game_min_choices": self._pinned_fork_game_min_choices,
+            "early_fork_game_max_choices": self._pinned_early_fork_game_max_choices,
+            "fork_game_max_choices": self._pinned_fork_game_max_choices,
         }
 
     def _last_four_opponent_moves_are_passes(self) -> bool:
@@ -161,7 +217,6 @@ class _PinnedPassWouldEndPhaseMixin:
         result = np.asarray(valids, dtype=np.uint8).copy()
         for point in safe:
             result[int(point)] = 0
-        # PASS is never pruned by KataGo's rootPruneUselessMoves condition.
         result[int(self.pass_action())] = valids[int(self.pass_action())]
         return result
 
@@ -173,10 +228,6 @@ class _PinnedPassWouldEndPhaseMixin:
         GameState.play_action(self, action)
         state = apply_v3_action(self._state, int(action), self.logical_topology())
 
-        # KataGo's GameRunner does NOT train a move-limit crossing as no-result.
-        # After maxMovesPerGame it calls BoardHistory::endAndScoreGameNow(),
-        # scoring the current board as-is and emitting ordinary win/loss/score
-        # targets. Keep genuine cycle/triple-ko NO_RESULT semantics untouched.
         if state.terminal_kind == NO_RESULT and state.no_result_reason == "move-cap":
             state = replace(
                 state,
@@ -196,10 +247,65 @@ class _PinnedPassWouldEndPhaseMixin:
         if not self._pinned_is_search_clone:
             self._pinned_state_history = self._pinned_state_history + (self._state,)
             self._maybe_store_seki_forks()
+            self._maybe_store_plain_fork()
 
     def _has_unowned_final_spot(self) -> bool:
         analysis = independent_life_analysis(self._state.board, self.logical_topology())
         return bool(analysis.dame or analysis.seki)
+
+    def _maybe_store_plain_fork(self) -> None:
+        if (
+            not self._pinned_selfplay_semantics
+            or self._pinned_start_phase != "main"
+            or self._pinned_started_from_seki_fork
+            or self._pinned_started_from_plain_fork
+            or self._state.terminal_kind is None
+        ):
+            return
+        move_count = len(self._pinned_move_history)
+        if move_count <= 0:
+            return
+
+        mode = sample_plain_fork_kind(
+            np.random, self._pinned_early_fork_game_prob, self._pinned_fork_game_prob
+        )
+        if mode is None:
+            return
+
+        if mode == "early":
+            move_idx = sample_early_fork_depth(
+                np.random, int(self.logical_topology().point_count), self._pinned_early_fork_expected_move_prop
+            )
+        else:
+            move_idx = int(np.random.randint(0, move_count))
+        move_idx = max(0, min(move_count - 1, move_idx))
+        candidate_state = self._pinned_state_history[move_idx]
+        if candidate_state.terminal_kind is not None:
+            return
+        type(self)._plain_fork_pool().append((
+            candidate_state,
+            self._pinned_move_history[:move_idx],
+            mode,
+            move_idx,
+        ))
+
+    def maybe_start_plain_fork(self):
+        pool = type(self)._plain_fork_pool()
+        if not pool:
+            return None
+        index = int(np.random.randint(0, len(pool)))
+        candidate_state, candidate_history, mode, depth = pool.pop(index)
+        self._state = candidate_state
+        self._terminal = terminal_from_state(candidate_state, self.logical_topology(), self.KOMI)
+        self._sync_framework_fields()
+        self.last_action = candidate_history[-1][1] if candidate_history else None
+        self._pinned_move_history = tuple(candidate_history)
+        self._pinned_state_history = (candidate_state,)
+        self._pinned_start_phase = candidate_state.phase
+        self._pinned_started_from_plain_fork = True
+        self._pinned_is_search_clone = False
+        self._pinned_at_search_root = False
+        return {"mode": mode, "depth": int(depth)}
 
     def _maybe_store_seki_forks(self) -> None:
         defaults = KATAGO_PINNED_SELFPLAY_DEFAULTS
@@ -207,6 +313,7 @@ class _PinnedPassWouldEndPhaseMixin:
             not self._pinned_selfplay_semantics
             or self._pinned_seki_fork_hack_prob <= 0.0
             or self._pinned_started_from_seki_fork
+            or self._pinned_started_from_plain_fork
             or self._pinned_start_phase == CLEANUP_2
             or self._state.terminal_kind != SCORED
             or not self._has_unowned_final_spot()
