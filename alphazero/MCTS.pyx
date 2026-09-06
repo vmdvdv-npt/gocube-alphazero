@@ -593,8 +593,10 @@ cdef class MCTS:
         for c in self._root._children:
             if c.a == pass_action or c.n <= 0:
                 continue
-            if not self._root_move_useful(gs, c.a):
-                continue
+            # Ownership is only an exploration/ending heuristic. Once search has
+            # actually evaluated a legal non-PASS child, score gain + win tolerance
+            # are the authoritative conservative-PASS contract. A noisy ownership
+            # head must never veto that direct search evidence.
             gain = c.score_q - pass_node.score_q
             if (
                 gain >= self.score_improvement_threshold_points
@@ -663,6 +665,7 @@ cdef class MCTS:
         cdef int action
         cdef dict item
         cdef float gain
+        cdef float candidate_win_delta
         cdef float best_gain = -float('inf')
         cdef float win_delta = 0.0
         cdef bint dominated = False
@@ -676,15 +679,16 @@ cdef class MCTS:
             if action == pass_action:
                 continue
             gain = float(item['score_estimate']) - float(pass_stats['score_estimate'])
+            candidate_win_delta = float(item['win_estimate']) - float(pass_stats['win_estimate'])
             if gain > best_gain:
                 best_gain = gain
                 best = item
-        if best is not None:
-            win_delta = float(best['win_estimate']) - float(pass_stats['win_estimate'])
-            dominated = (
-                best_gain >= self.score_improvement_threshold_points
-                and win_delta >= -self.win_probability_tolerance
-            )
+                win_delta = candidate_win_delta
+            if (
+                gain >= self.score_improvement_threshold_points
+                and candidate_win_delta >= -self.win_probability_tolerance
+            ):
+                dominated = True
         return {
             'pass_root_prior': float(pass_stats['policy_prior']),
             'pass_visit_fraction': float(pass_stats['visit_fraction']),
