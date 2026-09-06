@@ -72,3 +72,7 @@
 {"event": "adaptive_shortlist_selected", "leader": "D", "scores": {"A": 0.4583333333333333, "B": 0.5416666666666666, "C": 0.5, "D": 0.75, "E": 0.4583333333333333, "F": 0.25, "G": 0.25}, "shortlist": ["D", "B", "C", "A", "F", "G"], "time": "2026-09-06T09:21:01+04:00"}
 {"allowed": true, "estimated_seconds": 2102.2, "event": "deadline_check", "label": "adaptive D@6 vs A@6 block 1", "remaining_seconds": 3566286.2, "reserve_seconds": 2100.0, "time": "2026-09-06T09:21:01+04:00"}
 {"event": "adaptive_evaluation_started", "games": 24, "seed": 20656814, "stage_id": "adaptive_screen_D_i6_vs_A_i6_b01", "time": "2026-09-06T09:21:01+04:00"}
+{"elapsed_seconds": 1573.4, "event": "adaptive_evaluation_completed", "score": 0.8333333333333334, "stage_id": "adaptive_screen_D_i6_vs_A_i6_b01", "time": "2026-09-06T09:47:14+04:00"}
+{"candidate": "D", "ci95": [0.6415, 0.9332], "decision": "CANDIDATE", "event": "adaptive_match_decided", "games": 24, "iteration": 6, "reference": "A", "score": 0.8333, "time": "2026-09-06T09:47:14+04:00"}
+{"allowed": true, "estimated_seconds": 2084.9, "event": "deadline_check", "label": "adaptive D@6 vs B@6 block 1", "remaining_seconds": 3564712.8, "reserve_seconds": 2100.0, "time": "2026-09-06T09:47:14+04:00"}
+{"event": "adaptive_evaluation_started", "games": 24, "seed": 21250158, "stage_id": "adaptive_screen_D_i6_vs_B_i6_b01", "time": "2026-09-06T09:47:14+04:00"}

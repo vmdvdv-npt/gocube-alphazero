@@ -446,6 +446,51 @@
       "size": 4,
       "stage_id": "stage1_eval_G_i6_vs_parent5",
       "topology": "cube"
+    },
+    {
+      "action_temperature": 0.0,
+      "adaptive_block": true,
+      "adaptive_reference_branch": "A",
+      "adaptive_reference_iteration": 6,
+      "balanced_colors": true,
+      "batched": false,
+      "candidate": {
+        "id": "D@6",
+        "path": "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-d/iteration-0006.pkl",
+        "sha256": "6e10d19c16e24f72e7e682557015f34df409baaae32fbb6793da3e628f77dfbf"
+      },
+      "candidate_branch": "D",
+      "candidate_iteration": 6,
+      "candidate_score_ci95_approx": [
+        0.6414692935030095,
+        0.9332132367136705
+      ],
+      "candidate_score_rate": 0.8333333333333334,
+      "candidate_wins": 20,
+      "draws": 0,
+      "elapsed_seconds": 1571.0252571105957,
+      "fast_probability": 0.0,
+      "games_effective": 24,
+      "games_requested": 24,
+      "mcts_sims": 100,
+      "no_results": 0,
+      "reference": {
+        "id": "A@6",
+        "path": "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-a/iteration-0006.pkl",
+        "sha256": "1083dd246f5b0fda4877eecf603ce1049456b86f40d14e0a9986317732d27706"
+      },
+      "reference_id": "adaptive:A@6",
+      "reference_score_rate": 0.16666666666666666,
+      "reference_wins": 4,
+      "root_noise": false,
+      "root_temperature": false,
+      "ruleset": "japanese",
+      "schema_version": 1,
+      "seconds_per_game": 65.45938571294148,
+      "seed": 20656814,
+      "size": 4,
+      "stage_id": "adaptive_screen_D_i6_vs_A_i6_b01",
+      "topology": "cube"
     }
   ],
   "experiment_id": "c4-hparam-night-20260906-005747",
@@ -944,7 +989,31 @@
     "adaptive": {
       "final_block_games": 32,
       "final_max_games": 128,
-      "matches": {},
+      "matches": {
+        "screen:D@6_vs_A@6": {
+          "blocks": 1,
+          "candidate": "D",
+          "candidate_wins": 20,
+          "ci95": [
+            0.6414692935030095,
+            0.9332132367136705
+          ],
+          "ci99": [
+            0.5732774489424883,
+            0.9490027535461549
+          ],
+          "decision": "CANDIDATE",
+          "decision_basis": "99% sequential interval above 0.5",
+          "draws": 0,
+          "games_effective": 24,
+          "games_requested": 24,
+          "iteration": 6,
+          "no_results": 0,
+          "reference": "A",
+          "reference_wins": 4,
+          "score": 0.8333333333333334
+        }
+      },
       "mode": "leader-first-sequential",
       "schema_version": 1,
       "screen_block_games": 24,
@@ -1010,19 +1079,29 @@
     "adaptive_screen_D_i6_vs_A_i6_b01": {
       "candidate": "D",
       "candidate_iteration": 6,
+      "elapsed_seconds": 1573.4110207557678,
+      "ended_at": "2026-09-06T09:47:14+04:00",
+      "games": 24,
+      "recovered": false,
+      "reference": "adaptive:A@6",
+      "status": "COMPLETED"
+    },
+    "adaptive_screen_D_i6_vs_B_i6_b01": {
+      "candidate": "D",
+      "candidate_iteration": 6,
       "command": [
         "/home/codex/projects/gocube-alphazero/.venv/bin/python",
         "/home/codex/.cache/gocube-night-tools-028342cee09a757a8c9c84b225c550c36bbf601a/evaluate_gocube_checkpoints.py",
         "--candidate",
         "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-d/iteration-0006.pkl",
         "--reference",
-        "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-a/iteration-0006.pkl",
+        "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-b/iteration-0006.pkl",
         "--output",
-        "/home/codex/projects/gocube-alphazero/training_reports/c4-hparam-night-20260906-005747/evaluations/adaptive_screen_D_i6_vs_A_i6_b01.json",
+        "/home/codex/projects/gocube-alphazero/training_reports/c4-hparam-night-20260906-005747/evaluations/adaptive_screen_D_i6_vs_B_i6_b01.json",
         "--candidate-id",
         "D@6",
         "--reference-id",
-        "A@6",
+        "B@6",
         "--topology",
         "cube",
         "--size",
@@ -1032,12 +1111,12 @@
         "--sims",
         "100",
         "--seed",
-        "20656814"
+        "21250158"
       ],
       "games": 24,
-      "reference": "adaptive:A@6",
-      "seed": 20656814,
-      "started_at": "2026-09-06T09:21:01+04:00",
+      "reference": "adaptive:B@6",
+      "seed": 21250158,
+      "started_at": "2026-09-06T09:47:14+04:00",
       "status": "RUNNING"
     },
     "canonical_iter_2": {
