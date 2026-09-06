@@ -11,12 +11,39 @@ from pathlib import Path
 import torch
 
 from alphazero.NNetWrapper import NNetWrapper
+from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
 from alphazero.envs.gocube.train import GoCubeCoach, build_training_args
+from alphazero.utils import get_iter_file
 
 
 DEFAULT_CHECKPOINT = "checkpoint/c4-komi05-d5-20260906-110926/iteration-0006.pkl"
 DEFAULT_RUN_NAME = "c4-komi05-iter6-score-aware-recovery"
+DEFAULT_TRAINING_RUN_NAME = "c4-komi05-score-aware-validation-10iter"
 EXPECTED_KOMI = 0.5
+
+# These settings determine the checkpoint's network/optimizer structure and must
+# come from the archived checkpoint when making a continuation fork. Search,
+# self-play, sampling, guard, and run metadata are deliberately replaced by the
+# current contract.
+_PRESERVE_SAVED_ARG_KEYS = {
+    "nnet_type",
+    "num_channels",
+    "depth",
+    "value_head_channels",
+    "policy_head_channels",
+    "input_fc_layers",
+    "value_dense_layers",
+    "policy_dense_layers",
+    "score_dense_layers",
+    "optimizer",
+    "optimizer_args",
+    "scheduler",
+    "scheduler_args",
+    "lr",
+    "value_loss_weight",
+    "ownership_loss_weight",
+    "score_loss_weight",
+}
 
 
 def parse_args():
@@ -39,6 +66,15 @@ def parse_args():
     parser.add_argument("--output-root", default="diagnostics")
     parser.add_argument("--record-games", action="store_true")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument(
+        "--prepare-training-run",
+        action="store_true",
+        help=(
+            "after a valid 256-game recovery, create a separate iteration-0000 checkpoint "
+            "with the current search contract for the clean continuation test"
+        ),
+    )
+    parser.add_argument("--training-run-name", default=DEFAULT_TRAINING_RUN_NAME)
     return parser.parse_args()
 
 
@@ -105,6 +141,127 @@ def build_recovery_args(cli) -> tuple[type, object]:
     args.gocube_search_audit_probability = 1.0
     args.data = str(cli.output_root)
     return game_cls, args
+
+
+def build_training_fork_args(saved_args, current_args, run_name: str):
+    """Keep the archived model shape/state while adopting current search semantics."""
+
+    fork_args = saved_args.copy()
+    for key, value in current_args.items():
+        if key not in _PRESERVE_SAVED_ARG_KEYS:
+            fork_args[key] = value
+
+    fork_args.run_name = run_name
+    fork_args.checkpoint = "checkpoint"
+    fork_args.data = "data"
+    fork_args.load_model = True
+    fork_args.startIter = 0
+    fork_args.numWarmupIters = 0
+    fork_args.gocube_validation_only = False
+    fork_args.gocube_recording_enabled = True
+    fork_args.gocube_record_root = os.path.join("data", run_name, "records")
+    fork_args.gocube_game_id_registry = os.path.join("data", ".gocube-game-ids")
+    return fork_args
+
+
+def _continuation_command(cli, run_name: str) -> list[str]:
+    return [
+        "python",
+        "-m",
+        "alphazero.envs.gocube.train",
+        "--topology",
+        cli.topology,
+        "--size",
+        str(cli.size),
+        "--workers",
+        str(cli.workers),
+        "--sims",
+        str(cli.sims),
+        "--arena-sims",
+        str(cli.sims),
+        "--games-per-iteration",
+        str(cli.games),
+        "--iterations",
+        "10",
+        "--train-batch-size",
+        "256",
+        "--fast-game-prob",
+        str(cli.fast_prob),
+        "--endgame-sample-weight",
+        "1",
+        "--no-arena",
+        "--run-name",
+        run_name,
+    ]
+
+
+def prepare_training_fork(
+    *,
+    checkpoint: Path,
+    source_network: NNetWrapper,
+    game_cls,
+    current_args,
+    cli,
+    device: str,
+) -> dict[str, object]:
+    run_name = str(cli.training_run_name)
+    if not run_name or os.path.basename(run_name) != run_name or run_name in {".", ".."}:
+        raise ValueError("training-run-name must be a single non-empty directory name")
+
+    checkpoint_dir = Path("checkpoint") / run_name
+    data_dir = Path("data") / run_name
+    runs_dir = Path("runs") / run_name
+    collisions = [path for path in (checkpoint_dir, data_dir, runs_dir) if path.exists()]
+    if collisions:
+        raise FileExistsError(
+            "Refusing to prepare a non-clean validation run; remove or rename existing paths: "
+            + ", ".join(str(path) for path in collisions)
+        )
+
+    fork_args = build_training_fork_args(source_network.args, current_args, run_name)
+    fork_network = NNetWrapper(game_cls, fork_args)
+    fork_network.load_checkpoint(
+        folder=str(checkpoint.parent),
+        filename=checkpoint.name,
+        use_saved_args=False,
+        device=device,
+        load_training_state=True,
+        allow_legacy_search_contract=True,
+    )
+    fork_network.args = fork_args
+
+    ensure_training_manifest(fork_args.checkpoint, run_name, game_cls, fork_args)
+    bootstrap_name = get_iter_file(0)
+    fork_network.save_checkpoint(folder=str(checkpoint_dir), filename=bootstrap_name)
+    bootstrap_path = checkpoint_dir / bootstrap_name
+
+    # Prove that the newly written bootstrap is now strict-contract loadable;
+    # subsequent train.py resume must not need the legacy compatibility switch.
+    strict_probe = NNetWrapper.from_checkpoint(
+        game_cls,
+        folder=str(checkpoint_dir),
+        filename=bootstrap_name,
+        use_saved_args=True,
+        device=device,
+        load_training_state=False,
+        allow_legacy_search_contract=False,
+    )
+    if strict_probe.args.gocube_search_contract != current_args.gocube_search_contract:
+        raise RuntimeError("Prepared bootstrap did not persist the current GoCube search contract")
+    if not math.isclose(float(strict_probe.args.gocube_komi), EXPECTED_KOMI, abs_tol=1e-12):
+        raise RuntimeError("Prepared bootstrap did not persist half-point komi")
+
+    command = _continuation_command(cli, run_name)
+    return {
+        "run_name": run_name,
+        "bootstrap_checkpoint": str(bootstrap_path.resolve()),
+        "bootstrap_sha256": _sha256(bootstrap_path),
+        "search_contract": strict_probe.args.gocube_search_contract,
+        "komi": float(strict_probe.args.gocube_komi),
+        "continuation_iterations": 10,
+        "continuation_command": command,
+        "continuation_command_shell": " ".join(command),
+    }
 
 
 def run_recovery_validation(cli) -> dict[str, object]:
@@ -192,6 +349,28 @@ def run_recovery_validation(cli) -> dict[str, object]:
     if not unchanged:
         raise RuntimeError("Historical checkpoint changed during validation")
 
+    training_fork = None
+    if bool(getattr(cli, "prepare_training_run", False)):
+        if not guard.training_allowed:
+            raise RuntimeError("Refusing to prepare a training fork from invalid_selfplay recovery")
+        training_fork = prepare_training_fork(
+            checkpoint=checkpoint,
+            source_network=network,
+            game_cls=game_cls,
+            current_args=args,
+            cli=cli,
+            device=device,
+        )
+        # The fork operation also reads the archive; prove once more that source
+        # checkpoint bytes and metadata stayed untouched.
+        final_stat = checkpoint.stat()
+        if (
+            _sha256(checkpoint) != source_hash
+            or final_stat.st_size != source_stat.st_size
+            or final_stat.st_mtime_ns != source_stat.st_mtime_ns
+        ):
+            raise RuntimeError("Historical checkpoint changed while preparing training fork")
+
     report = {
         "schema": "gocube-score-aware-recovery-v1",
         "checkpoint": {
@@ -231,6 +410,7 @@ def run_recovery_validation(cli) -> dict[str, object]:
         "iteration_manifest": str(manifest_path),
         "aggregate_metrics": iteration_manifest.get("aggregate_metrics", {}),
         "agents_joined": killed,
+        "training_fork": training_fork,
     }
 
     output_dir = Path(cli.output_root) / cli.run_name
