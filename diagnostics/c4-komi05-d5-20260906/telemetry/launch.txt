@@ -1,0 +1,15 @@
+run=c4-komi05-d5-20260906-110926
+branch=exp/c4-komi05-d5-20260906-110926
+source_commit=b02bec69427d7b820b98de7100dda0efb4dceba1
+topology=cube
+size=4
+komi=0.5
+sims=50
+fast_sims=20
+pFast=0.25
+games_per_iteration=256
+iterations=5
+workers=16
+train_batch_size=256
+inference_batch_wait_ms=2.5
+arena=off

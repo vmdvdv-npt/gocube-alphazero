@@ -1,0 +1,1680 @@
+{
+  "aggregate_metrics": {
+    "average_game_length": 124.17578125,
+    "black_wins": 132,
+    "draws": 0,
+    "games": 256,
+    "terminal/cleanup1_moves": 4503,
+    "terminal/cleanup2_moves": 1630,
+    "terminal/cleanup_captures": 3033,
+    "terminal/cycle_no_result": 0,
+    "terminal/entered_cleanup1": 181,
+    "terminal/entered_cleanup2": 181,
+    "terminal/ko_unblock_actions": 1,
+    "terminal/no_result_games": 0,
+    "terminal/pass_alive_early_end": 75,
+    "terminal/scored_games": 256,
+    "terminal/training_valid_fraction": 1.0,
+    "white_wins": 124
+  },
+  "checkpoint": {
+    "id": "c4-komi05-d5-20260906-110926@3",
+    "iteration": 3,
+    "model_role": "self_play",
+    "path": "checkpoint/c4-komi05-d5-20260906-110926/iteration-0003.pkl"
+  },
+  "effective_iteration_parameters": {
+    "_num_players": 3,
+    "add_root_noise": true,
+    "add_root_temp": true,
+    "arenaBatched": false,
+    "arenaCompare": 128,
+    "arenaCompareBaseline": 128,
+    "arenaMCTS": true,
+    "arenaMCTSSims": 100,
+    "arenaTemp": 0.0,
+    "arena_batch_size": 64,
+    "autoTrainSteps": true,
+    "averageTrainSteps": false,
+    "baselineCompareFreq": 1,
+    "baselineTester": "alphazero.GenericPlayers.RawMCTSPlayer",
+    "checkpoint": "checkpoint",
+    "compareWithBaseline": false,
+    "compareWithPast": false,
+    "cpuct": 1.25,
+    "cuda": true,
+    "data": "data",
+    "depth": 6,
+    "fpu_reduction": 0.2,
+    "gamesPerIteration": 256,
+    "gocube_auxiliary_targets": true,
+    "gocube_endgame_sample_weight": 1,
+    "gocube_game_id_prefix": "C4",
+    "gocube_game_id_registry": "data/.gocube-game-ids",
+    "gocube_katago_reference_commit": "f6bc4b19a1686caa2d088b56251e8c11c8be6d51",
+    "gocube_katago_rules_version": 3,
+    "gocube_komi": 0.5,
+    "gocube_observation_schema": "gocube-observation-v3",
+    "gocube_record_root": "data/c4-komi05-d5-20260906-110926/records",
+    "gocube_recording_enabled": true,
+    "gocube_rule_set": "japanese",
+    "gocube_rules_fingerprint": "00e1a70acb9717df7f40453e123fdf8173ad1f8b895f50ef8e0c23b544b77303",
+    "gocube_size": 4,
+    "gocube_terminal_adjudicator": "gocube-katago-japanese-v3",
+    "gocube_topology": "cube",
+    "inference_batch_wait_ms": 2.5,
+    "input_fc_layers": [
+      1024,
+      1024,
+      1024,
+      1024
+    ],
+    "load_model": true,
+    "lr": 0.01,
+    "maxTrainHistoryWindow": 20,
+    "max_gating_iters": null,
+    "mctsResetThreshold": null,
+    "minTrainHistoryWindow": 4,
+    "min_discount": 1,
+    "min_next_model_winrate": 0.52,
+    "model_gating": false,
+    "nnet_type": "graph",
+    "numFastSims": 20,
+    "numIters": 5,
+    "numMCTSSims": 50,
+    "numWarmupIters": 1,
+    "numWarmupSims": 5,
+    "num_channels": 64,
+    "num_stacked_observations": 8,
+    "optimizer": "torch.optim.sgd.SGD",
+    "optimizer_args": {
+      "momentum": 0.9,
+      "weight_decay": 0.0001
+    },
+    "ownership_loss_weight": 0.5,
+    "pastCompareFreq": 1,
+    "past_data_chunk_size": 25,
+    "past_data_run_name": "boardgame",
+    "policy_dense_layers": [
+      128
+    ],
+    "policy_head_channels": 16,
+    "probFastSim": 0.25,
+    "process_batch_size": 16,
+    "root_noise_frac": 0.1,
+    "root_policy_temp": 1.1,
+    "run_name": "c4-komi05-d5-20260906-110926",
+    "scheduler": "torch.optim.lr_scheduler.MultiStepLR",
+    "scheduler_args": {
+      "gamma": 0.1,
+      "milestones": [
+        75,
+        125
+      ]
+    },
+    "score_dense_layers": [
+      64
+    ],
+    "score_loss_weight": 0.5,
+    "selfPlayModelIter": null,
+    "skipSelfPlayIters": null,
+    "startIter": 1,
+    "startTemp": 1,
+    "symmetricSamples": false,
+    "temp_scaling_fn": "alphazero.utils.default_temp_scaling",
+    "trainHistoryIncrementIters": 2,
+    "train_batch_size": 256,
+    "train_on_past_data": false,
+    "train_sample_ratio": 1,
+    "train_steps_per_iteration": null,
+    "use_draws_for_winrate": true,
+    "value_dense_layers": [
+      128,
+      64
+    ],
+    "value_head_channels": 16,
+    "value_loss_weight": 1.5,
+    "workers": 16
+  },
+  "iteration": 4,
+  "records": [
+    {
+      "game_id": "C4-004231",
+      "game_number_inside_iteration": 1,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004231.json",
+      "sha256": "b4af70557ce4d9c9331741fc5658571bc5c86583f10ded38647cb2125d9a16a5"
+    },
+    {
+      "game_id": "C4-004232",
+      "game_number_inside_iteration": 2,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004232.json",
+      "sha256": "a30f6a25a99e446d34f3866c5910e1cfc70ef517fda0ebe3fcd23d2a30d4fe30"
+    },
+    {
+      "game_id": "C4-004233",
+      "game_number_inside_iteration": 3,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004233.json",
+      "sha256": "4b264bbe4eb53d51be995396e824b9beeeafc80e2b6429042a915d517aa3c883"
+    },
+    {
+      "game_id": "C4-004234",
+      "game_number_inside_iteration": 4,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004234.json",
+      "sha256": "745d24c6ee970dbccb663eaacb94a3082d2d227441b94d14c37a866719c3bc85"
+    },
+    {
+      "game_id": "C4-004235",
+      "game_number_inside_iteration": 5,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004235.json",
+      "sha256": "d4e2bf2077628031eabcef84300d05bea66da9327bd7e9957ed0d465816e4eed"
+    },
+    {
+      "game_id": "C4-004236",
+      "game_number_inside_iteration": 6,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004236.json",
+      "sha256": "00f4df222810e3218207f84d70f05f1f4f37e0adf5b8bc0855f17c86b2840bbf"
+    },
+    {
+      "game_id": "C4-004237",
+      "game_number_inside_iteration": 7,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004237.json",
+      "sha256": "6d1d1825344f28b33bcefa6acef1f735794240d30dca138c5ea31fb7564a0dda"
+    },
+    {
+      "game_id": "C4-004238",
+      "game_number_inside_iteration": 8,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004238.json",
+      "sha256": "39c6ee9dd477ce18bac27d6c3732ff994d0788d95f306e5a99dd84fd30a4c471"
+    },
+    {
+      "game_id": "C4-004239",
+      "game_number_inside_iteration": 9,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004239.json",
+      "sha256": "8f8bb8c6d41be42d4d7dbf19701d0ccd7e5ad0e31094a6fa1acfd83a429576f1"
+    },
+    {
+      "game_id": "C4-004240",
+      "game_number_inside_iteration": 10,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004240.json",
+      "sha256": "8e232f3f085c627ca6b6c9e1027cd1303f700315aa429732042d250448a601b6"
+    },
+    {
+      "game_id": "C4-004241",
+      "game_number_inside_iteration": 11,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004241.json",
+      "sha256": "8668e8662e30be4da48dab36c4a2d16193c14e4aed0b73e6bce4775ce8efd5a4"
+    },
+    {
+      "game_id": "C4-004242",
+      "game_number_inside_iteration": 12,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004242.json",
+      "sha256": "a4c29491e7f94f375b3b95fdbdc4cbb5a4bf4b1884928f4148314e61c3830c07"
+    },
+    {
+      "game_id": "C4-004243",
+      "game_number_inside_iteration": 13,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004243.json",
+      "sha256": "1ff42b95c2282ecb699a82e7dc804e59f4aa31f36996c200e7843cc679a62b1f"
+    },
+    {
+      "game_id": "C4-004244",
+      "game_number_inside_iteration": 14,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004244.json",
+      "sha256": "052409b9823fd26723c37b846d11834bc81359c885074fcf8b65326f773aba35"
+    },
+    {
+      "game_id": "C4-004245",
+      "game_number_inside_iteration": 15,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004245.json",
+      "sha256": "1158d2e86487cb4f93a75bead4f1cc65bdefc962d1669eda5405ca51dd8fe180"
+    },
+    {
+      "game_id": "C4-004246",
+      "game_number_inside_iteration": 16,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004246.json",
+      "sha256": "019f09e3ffc95a90756436ce7433c095afe0e44d0363c61d981b2fe2366527f6"
+    },
+    {
+      "game_id": "C4-004247",
+      "game_number_inside_iteration": 17,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004247.json",
+      "sha256": "ca0d8ac0cc012507b937ed9f55753f1a05d1a04fca69af597fbd0a44bd84c2b2"
+    },
+    {
+      "game_id": "C4-004248",
+      "game_number_inside_iteration": 18,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004248.json",
+      "sha256": "e2d5f50ea3868c39ef6392403b539449cb2146da58025a5520a8265b4d117f29"
+    },
+    {
+      "game_id": "C4-004249",
+      "game_number_inside_iteration": 19,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004249.json",
+      "sha256": "f034eb18517b3664e0b64c43d8735e3ec2fc37097a3fe08f80238ceb4c654035"
+    },
+    {
+      "game_id": "C4-004250",
+      "game_number_inside_iteration": 20,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004250.json",
+      "sha256": "c06495b75e3bb0e280f75f579edfd4e2a55cd3939ac3794a3ad1d73812c42c82"
+    },
+    {
+      "game_id": "C4-004251",
+      "game_number_inside_iteration": 21,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004251.json",
+      "sha256": "0d1be4c7f9ce0358510a2e1b60e5bbad16b9acde4114157778e7e148ef1511e1"
+    },
+    {
+      "game_id": "C4-004252",
+      "game_number_inside_iteration": 22,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004252.json",
+      "sha256": "d218911077352f4e26dcc998423436cac702c64f1f485a7393b01bb26a0d40a8"
+    },
+    {
+      "game_id": "C4-004253",
+      "game_number_inside_iteration": 23,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004253.json",
+      "sha256": "7b5124c023fb30048415134fe2e4371ba985ccc8e499786481412e84619db5e7"
+    },
+    {
+      "game_id": "C4-004254",
+      "game_number_inside_iteration": 24,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004254.json",
+      "sha256": "c9a2b99b33aabe2647377f31b93dd079a4d021baefa3236e909ec8cc6ac3416a"
+    },
+    {
+      "game_id": "C4-004255",
+      "game_number_inside_iteration": 25,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004255.json",
+      "sha256": "5c90c3bf189725a501be5b365d904fe5e0dea57a950b7284e15fec7a734d0707"
+    },
+    {
+      "game_id": "C4-004256",
+      "game_number_inside_iteration": 26,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004256.json",
+      "sha256": "9a39336c0ba353bd4cd34279cad5181dabd2900fefb2444d784e2f00cf827dbc"
+    },
+    {
+      "game_id": "C4-004257",
+      "game_number_inside_iteration": 27,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004257.json",
+      "sha256": "a1765f7429eb458be49d363db06a19e73c479c7c46b501db6d9200127081a64c"
+    },
+    {
+      "game_id": "C4-004258",
+      "game_number_inside_iteration": 28,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004258.json",
+      "sha256": "63cad3e18b14556a5e735bfe76d42a2960a016898448046e13976c731a105211"
+    },
+    {
+      "game_id": "C4-004259",
+      "game_number_inside_iteration": 29,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004259.json",
+      "sha256": "dc4dbdd5169e8e15429e370fb431713248d360d61483d142ae7cdbd11f264eee"
+    },
+    {
+      "game_id": "C4-004260",
+      "game_number_inside_iteration": 30,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004260.json",
+      "sha256": "ac01b8de6c3058c06c1d97dad8eec09c17dc22e2b5980b79593c25b28e2d0215"
+    },
+    {
+      "game_id": "C4-004261",
+      "game_number_inside_iteration": 31,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004261.json",
+      "sha256": "1d3471abd51de9bcffad93b0baa70b8c02dc9fa7505886abef8ec978ead2ae4a"
+    },
+    {
+      "game_id": "C4-004262",
+      "game_number_inside_iteration": 32,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004262.json",
+      "sha256": "b58268149c00d37ca3d07b7b09cc6f6cbdc1bed745d4e348b40b41fa2ed70005"
+    },
+    {
+      "game_id": "C4-004263",
+      "game_number_inside_iteration": 33,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004263.json",
+      "sha256": "da7e6e03a3382a808a3615ac47c6743425c4e8f877bd849d33a72924082a0f99"
+    },
+    {
+      "game_id": "C4-004264",
+      "game_number_inside_iteration": 34,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004264.json",
+      "sha256": "d557a2ee17578290e3c4251dbc40a71fc46286df4d52d3f80a69f667bba1c001"
+    },
+    {
+      "game_id": "C4-004265",
+      "game_number_inside_iteration": 35,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004265.json",
+      "sha256": "9a387f276531a0854e49a773711edc9651bed5c3f5a19939e0a0bbf54b16dd40"
+    },
+    {
+      "game_id": "C4-004266",
+      "game_number_inside_iteration": 36,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004266.json",
+      "sha256": "2809dbf5a22bdee534700e3fd47225e3b89dbcee54481afc70c7bc5fa8f351b3"
+    },
+    {
+      "game_id": "C4-004267",
+      "game_number_inside_iteration": 37,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004267.json",
+      "sha256": "bc1f59779ba97afd554573a34673d2b5741a8df901a5edde30f7b40ec93e0b4e"
+    },
+    {
+      "game_id": "C4-004268",
+      "game_number_inside_iteration": 38,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004268.json",
+      "sha256": "540cbbdf9eb8b51a6172be8bb9c120fe47164471d0ea3e158f44daf20920bd25"
+    },
+    {
+      "game_id": "C4-004269",
+      "game_number_inside_iteration": 39,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004269.json",
+      "sha256": "83add966240c61ca1724cddcdc186262a6441f19b33496af458a6c81b03d7d4f"
+    },
+    {
+      "game_id": "C4-004270",
+      "game_number_inside_iteration": 40,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004270.json",
+      "sha256": "da9c9392c975536838d07cc4f59fb397b0f1501f9a0e4865e9e9828fac258129"
+    },
+    {
+      "game_id": "C4-004271",
+      "game_number_inside_iteration": 41,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004271.json",
+      "sha256": "01dc998800400061d2e1588312d198cefb87a7d0d1c955ec990f4c6973cfd15b"
+    },
+    {
+      "game_id": "C4-004272",
+      "game_number_inside_iteration": 42,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004272.json",
+      "sha256": "7f3513e6c6287e407807dd20d26356d5bf0daaefd70abbbd1eec1b5f94fd38be"
+    },
+    {
+      "game_id": "C4-004273",
+      "game_number_inside_iteration": 43,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004273.json",
+      "sha256": "5c60b12bfe58704153e18cdcf573aec1d940b3e63f5dfa0815a4a94e44e0245c"
+    },
+    {
+      "game_id": "C4-004274",
+      "game_number_inside_iteration": 44,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004274.json",
+      "sha256": "a7a99245ea2acfb24408e13da22d9c4c4fcefa906f7c94abdd47063f222b7da4"
+    },
+    {
+      "game_id": "C4-004275",
+      "game_number_inside_iteration": 45,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004275.json",
+      "sha256": "1afeb54734d232ab94629745a9ce28f428a8e7ac66c2b89cf037b92c913ca3b4"
+    },
+    {
+      "game_id": "C4-004276",
+      "game_number_inside_iteration": 46,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004276.json",
+      "sha256": "6381a0d2d62f7ed126851ac2befef6c36d5d1f5137447f1b2ed6947769e5fb7f"
+    },
+    {
+      "game_id": "C4-004277",
+      "game_number_inside_iteration": 47,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004277.json",
+      "sha256": "63ccda3f160bb2e90db7766982d0cdfe3165573587b607a4fba7087531b63af5"
+    },
+    {
+      "game_id": "C4-004278",
+      "game_number_inside_iteration": 48,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004278.json",
+      "sha256": "8593de36203fab053609df104b93fe41e47ec90e8ef2102cc6a48605d6a26216"
+    },
+    {
+      "game_id": "C4-004279",
+      "game_number_inside_iteration": 49,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004279.json",
+      "sha256": "b67f8671db6e93de1d1821d539318bed4807e0d3dcfc24a208902373c662a75b"
+    },
+    {
+      "game_id": "C4-004280",
+      "game_number_inside_iteration": 50,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004280.json",
+      "sha256": "bf9905d80c7d66744590b7d2b1bdb298536980b80b8df2f628240ddd6064e404"
+    },
+    {
+      "game_id": "C4-004281",
+      "game_number_inside_iteration": 51,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004281.json",
+      "sha256": "7ab5a7bd3b05d5f9eca88bb01bf6b30fdef60a7a57fade94ca67302d3f2f2cda"
+    },
+    {
+      "game_id": "C4-004282",
+      "game_number_inside_iteration": 52,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004282.json",
+      "sha256": "01f11d6420473784fbc343f39552ead0384f4c32feb487d2624187ba913e9016"
+    },
+    {
+      "game_id": "C4-004283",
+      "game_number_inside_iteration": 53,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004283.json",
+      "sha256": "1f8d28f7fc0610e5d5da04fb78e2c2ae451318ab91b51ac63c626d7784ff1bc3"
+    },
+    {
+      "game_id": "C4-004284",
+      "game_number_inside_iteration": 54,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004284.json",
+      "sha256": "b91a1497f772a45fb325f77ac430ce15f6f8c2c82de44db35f7543623fe91de2"
+    },
+    {
+      "game_id": "C4-004285",
+      "game_number_inside_iteration": 55,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004285.json",
+      "sha256": "4ea2557f8621fd88041fff27e4509da8f74dc5869ac23c525ca299e3ca11afc9"
+    },
+    {
+      "game_id": "C4-004286",
+      "game_number_inside_iteration": 56,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004286.json",
+      "sha256": "5364e1f025fa63bc5e41e6306f7ca268ce73a8f4444f49c53415b895b465f9a5"
+    },
+    {
+      "game_id": "C4-004287",
+      "game_number_inside_iteration": 57,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004287.json",
+      "sha256": "38aedd60f222c5c8dae77c52b30fb1db9b4a611ce64fa1990df3764c9c375e90"
+    },
+    {
+      "game_id": "C4-004288",
+      "game_number_inside_iteration": 58,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004288.json",
+      "sha256": "11a5cc81fc1fa3c3c748f068c12d8f018e34cd22572e78925716474afbdaa291"
+    },
+    {
+      "game_id": "C4-004289",
+      "game_number_inside_iteration": 59,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004289.json",
+      "sha256": "cb69e988a1e50550fefab009648a27fe63ef1c5227f5831b6bf804e09b40d0bd"
+    },
+    {
+      "game_id": "C4-004290",
+      "game_number_inside_iteration": 60,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004290.json",
+      "sha256": "8de4ad6d7612331acc2d7928bd8defd4f6ad5cfb6de11dc9933644f8501f5c70"
+    },
+    {
+      "game_id": "C4-004291",
+      "game_number_inside_iteration": 61,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004291.json",
+      "sha256": "c2f92448d5481f77218365934f0eae6a7a0ee7dc4e94caf6c59d7fade2d8ac04"
+    },
+    {
+      "game_id": "C4-004292",
+      "game_number_inside_iteration": 62,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004292.json",
+      "sha256": "7b15058b1f23c53f365c3bc863758176c1a3bb593b8686d26847d59f7657abdd"
+    },
+    {
+      "game_id": "C4-004293",
+      "game_number_inside_iteration": 63,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004293.json",
+      "sha256": "4cac82d809c1668cee054cd5216b86881ccf630f54f02cc798d03485a4d407c0"
+    },
+    {
+      "game_id": "C4-004294",
+      "game_number_inside_iteration": 64,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004294.json",
+      "sha256": "76f143a8f22910a918c1a43baafd8800f87250b9d53b34fb6ea3d135057b67e1"
+    },
+    {
+      "game_id": "C4-004295",
+      "game_number_inside_iteration": 65,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004295.json",
+      "sha256": "5edddd7e299d68a546047389aa4f9a0dc46f2e72398d5291a5bd100880c760e6"
+    },
+    {
+      "game_id": "C4-004296",
+      "game_number_inside_iteration": 66,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004296.json",
+      "sha256": "443e8ce89162b8c642be7a3ea91e55777a7f04e2921fb30059cdf83106bb72c3"
+    },
+    {
+      "game_id": "C4-004297",
+      "game_number_inside_iteration": 67,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004297.json",
+      "sha256": "7b806f817fa22d4ae73640d3282b419fbca5d45c46bcfd38cbe65d34873f0bd5"
+    },
+    {
+      "game_id": "C4-004298",
+      "game_number_inside_iteration": 68,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004298.json",
+      "sha256": "48e36bc6adb1812529bf2af53a1bbdcb99cf1d8deb0f7848aa062275c101549a"
+    },
+    {
+      "game_id": "C4-004299",
+      "game_number_inside_iteration": 69,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004299.json",
+      "sha256": "f909c6f392bf51f597a2dfb9ddaf5fc7ddb6507c5f71273aa4eb34d1cc550bee"
+    },
+    {
+      "game_id": "C4-004300",
+      "game_number_inside_iteration": 70,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004300.json",
+      "sha256": "b19889621eef615e7a89d7d05a20e75613222eb58ec3f25c0c4338b18654977d"
+    },
+    {
+      "game_id": "C4-004301",
+      "game_number_inside_iteration": 71,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004301.json",
+      "sha256": "26239b79edaaeb9ef2353a2f9374a0fcd7dfec74b43e47b1d1a7f285d309b76d"
+    },
+    {
+      "game_id": "C4-004302",
+      "game_number_inside_iteration": 72,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004302.json",
+      "sha256": "49e8220c049727f8079ea7cad685c1899a9f53c58314f02116f4e37ffe23ba81"
+    },
+    {
+      "game_id": "C4-004303",
+      "game_number_inside_iteration": 73,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004303.json",
+      "sha256": "aff9ce10b305293dc2770311dc7926c58a22cd1c36e3f278fe3fd1299a091e40"
+    },
+    {
+      "game_id": "C4-004304",
+      "game_number_inside_iteration": 74,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004304.json",
+      "sha256": "47701c5c059d7679086dcf453d57aeee1b8ec282bb335684373457ce00fe4683"
+    },
+    {
+      "game_id": "C4-004305",
+      "game_number_inside_iteration": 75,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004305.json",
+      "sha256": "d03b1ab8a1e0648eef7e62547347370db25f896f208b6b4564b275221fda0385"
+    },
+    {
+      "game_id": "C4-004306",
+      "game_number_inside_iteration": 76,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004306.json",
+      "sha256": "4c1b1b4ab8a9f37c3100b979ce158346bf8bba78a91db51d535338a44e73a51b"
+    },
+    {
+      "game_id": "C4-004307",
+      "game_number_inside_iteration": 77,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004307.json",
+      "sha256": "4c043da140a8dbe61cd37f24c014ef4c14745e866e79a9acb928d4b947a0fb11"
+    },
+    {
+      "game_id": "C4-004308",
+      "game_number_inside_iteration": 78,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004308.json",
+      "sha256": "dc8969d3941a744b9897ccd9bc2cee1e2f239e94452a71b41f79899aa82c6683"
+    },
+    {
+      "game_id": "C4-004309",
+      "game_number_inside_iteration": 79,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004309.json",
+      "sha256": "4daa3bb8d09251cdbc05316932253157dff8ac28dbbe015e05c86f37b5fe7ae6"
+    },
+    {
+      "game_id": "C4-004310",
+      "game_number_inside_iteration": 80,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004310.json",
+      "sha256": "38eb0e62372c53face100b72d7833a271af97b6c197970dda111a7e6ebef76bb"
+    },
+    {
+      "game_id": "C4-004311",
+      "game_number_inside_iteration": 81,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004311.json",
+      "sha256": "b143d229e94016cc71f1dc80be2cf4b17c58458c760a5b943683ae859f9189c5"
+    },
+    {
+      "game_id": "C4-004312",
+      "game_number_inside_iteration": 82,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004312.json",
+      "sha256": "19f3cfe486882f9d5e5ce26b110305bc323ab8f5864b72be227e4c57d6276fb7"
+    },
+    {
+      "game_id": "C4-004313",
+      "game_number_inside_iteration": 83,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004313.json",
+      "sha256": "2c215877a3e681d5e1985a59fc2fa0117621aad375ee4a636b31a9697d8e30eb"
+    },
+    {
+      "game_id": "C4-004314",
+      "game_number_inside_iteration": 84,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004314.json",
+      "sha256": "1148527600c11b2d5d9563daa3887e0a56e7e377e2683c0e1497b57d5dd804cc"
+    },
+    {
+      "game_id": "C4-004315",
+      "game_number_inside_iteration": 85,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004315.json",
+      "sha256": "c981989728ddced756b1ace4e6ed3c6b4b7613e59675c8b7286c97c8af8fce8a"
+    },
+    {
+      "game_id": "C4-004316",
+      "game_number_inside_iteration": 86,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004316.json",
+      "sha256": "d27a8c522cf11cb44040a1f192e4a1870fa0c15a5af42e76cacc7ff7b0d2bfe9"
+    },
+    {
+      "game_id": "C4-004317",
+      "game_number_inside_iteration": 87,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004317.json",
+      "sha256": "26f800d84d523f6114915ebd62889f22b58b0c305cf1edb3c8751cc4a86211d7"
+    },
+    {
+      "game_id": "C4-004318",
+      "game_number_inside_iteration": 88,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004318.json",
+      "sha256": "a793f3897104ac501bfbd2060a5f91d3b45ec8bf9c72098326796e0adbe22d07"
+    },
+    {
+      "game_id": "C4-004319",
+      "game_number_inside_iteration": 89,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004319.json",
+      "sha256": "33ba6fde7d2eaaf07121a3fb922969ec71640e844119d550f2ff9dcaf497a8af"
+    },
+    {
+      "game_id": "C4-004320",
+      "game_number_inside_iteration": 90,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004320.json",
+      "sha256": "34297d97dbe94c8d1be4348e95e4178e9c8e844f2a66fa05af8b13823aeb3896"
+    },
+    {
+      "game_id": "C4-004321",
+      "game_number_inside_iteration": 91,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004321.json",
+      "sha256": "f09d865afcfc08cb99f5b6df86eca6f05cf15500d1355ad4389163bdf5ad562a"
+    },
+    {
+      "game_id": "C4-004322",
+      "game_number_inside_iteration": 92,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004322.json",
+      "sha256": "e1bb3db62a2ca94bd678eae8cc154b3249b3e155cebaf255c32ad938dae42fca"
+    },
+    {
+      "game_id": "C4-004323",
+      "game_number_inside_iteration": 93,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004323.json",
+      "sha256": "b85350cbc509c9b65f2c34eb8ae648d676616b7f6f6022af949bc8026f950612"
+    },
+    {
+      "game_id": "C4-004324",
+      "game_number_inside_iteration": 94,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004324.json",
+      "sha256": "e4a54d88d2a851c4430636159d3abc42b35a81d25f2d7d9ba9bfcc6f360ed89c"
+    },
+    {
+      "game_id": "C4-004325",
+      "game_number_inside_iteration": 95,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004325.json",
+      "sha256": "a11bde5b50332b40dab7817abb0a7fc6aecfcae54b42a75b8388a09ee9261bf7"
+    },
+    {
+      "game_id": "C4-004326",
+      "game_number_inside_iteration": 96,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004326.json",
+      "sha256": "0de32b1705b6629f80b7ac970df20aa2003783124bb39d91b69c7438037a2c4b"
+    },
+    {
+      "game_id": "C4-004327",
+      "game_number_inside_iteration": 97,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004327.json",
+      "sha256": "87ac887ca7235d548bcd5da6aafcfd246a613b933556d6d75529634ac06cf365"
+    },
+    {
+      "game_id": "C4-004328",
+      "game_number_inside_iteration": 98,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004328.json",
+      "sha256": "1280c6cd8f1a9002c4d6f58ed68394c3aaf05b616eff2243bd3a9f52daf4e67c"
+    },
+    {
+      "game_id": "C4-004329",
+      "game_number_inside_iteration": 99,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004329.json",
+      "sha256": "fa6bec533812f6ab5b9a7a10854d5b8340fab75766734d235c0254cedcd1ff80"
+    },
+    {
+      "game_id": "C4-004330",
+      "game_number_inside_iteration": 100,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004330.json",
+      "sha256": "120ba465900c28f366ee92688ee572e2d1aeed330c57658fa8de8ccebbc4d9e3"
+    },
+    {
+      "game_id": "C4-004331",
+      "game_number_inside_iteration": 101,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004331.json",
+      "sha256": "77c07e5dcb7750f91eae32af8a64310ba752874c1981a4036bd806ce4a19e6bf"
+    },
+    {
+      "game_id": "C4-004332",
+      "game_number_inside_iteration": 102,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004332.json",
+      "sha256": "d97a6b3989b026ff2be3df28978a23b3f1db8da268508df846f4d7ccec03cd0c"
+    },
+    {
+      "game_id": "C4-004333",
+      "game_number_inside_iteration": 103,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004333.json",
+      "sha256": "1a1ca79e0bcc99906cbcd7d657415cb70fe9e9ba68127001f2f2d3b35ab80324"
+    },
+    {
+      "game_id": "C4-004334",
+      "game_number_inside_iteration": 104,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004334.json",
+      "sha256": "73d6d28301cfe847e8b4259a50bbafffd8dc73fb1ba2cee3199fd9bdb651915c"
+    },
+    {
+      "game_id": "C4-004335",
+      "game_number_inside_iteration": 105,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004335.json",
+      "sha256": "c1225bcd48d990cc25f8826294983b98cdf4d14c2d22db05601bd8e9fa549d37"
+    },
+    {
+      "game_id": "C4-004336",
+      "game_number_inside_iteration": 106,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004336.json",
+      "sha256": "77d385b9e27bd2352c861d3b0a92e3bc29241b6993b580d9bd8235518d89d1af"
+    },
+    {
+      "game_id": "C4-004337",
+      "game_number_inside_iteration": 107,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004337.json",
+      "sha256": "8288c0358b6bceee45eb24be8227934dd8ef9d6d999f72b6f2b0c30b153033c3"
+    },
+    {
+      "game_id": "C4-004338",
+      "game_number_inside_iteration": 108,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004338.json",
+      "sha256": "024c47a3c6dba05faf4a13a425b0a6bfde2d3663c0e5ea80408dd9c93c572192"
+    },
+    {
+      "game_id": "C4-004339",
+      "game_number_inside_iteration": 109,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004339.json",
+      "sha256": "f7a54b844f79fc664449a07157fff350133659b5f694c3fc157565c88d2068a2"
+    },
+    {
+      "game_id": "C4-004340",
+      "game_number_inside_iteration": 110,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004340.json",
+      "sha256": "b82fb7a99df2ea35bedc402c89a42c4d4b80809bbc5e8873c79c13ba706798c1"
+    },
+    {
+      "game_id": "C4-004341",
+      "game_number_inside_iteration": 111,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004341.json",
+      "sha256": "a2f822d145a1ee4fe475639df6732bdd26f48ab30ce3f979337990cbe5c566e1"
+    },
+    {
+      "game_id": "C4-004342",
+      "game_number_inside_iteration": 112,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004342.json",
+      "sha256": "46156728678a04f0d0bdc7dd0fc84aca6a70963e9e4168c37cf08794c73195de"
+    },
+    {
+      "game_id": "C4-004343",
+      "game_number_inside_iteration": 113,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004343.json",
+      "sha256": "771b354f3e74304d34b8e0a27500dedd1fce0417c9d279046b747d24920a7689"
+    },
+    {
+      "game_id": "C4-004344",
+      "game_number_inside_iteration": 114,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004344.json",
+      "sha256": "e14021dbb64c1e0cc2e7f5c6f7dd59bcaada0bc10d43ff1a433dfe294d804111"
+    },
+    {
+      "game_id": "C4-004345",
+      "game_number_inside_iteration": 115,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004345.json",
+      "sha256": "03e8356a30f3fb6f84dd4d66239c0168eef00e4d5f7b1aa57e253b87c8d9ef3b"
+    },
+    {
+      "game_id": "C4-004346",
+      "game_number_inside_iteration": 116,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004346.json",
+      "sha256": "702c6d687cebf902ddb372028b61baf77a6b90c19c41020f69e8571ac225bd51"
+    },
+    {
+      "game_id": "C4-004347",
+      "game_number_inside_iteration": 117,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004347.json",
+      "sha256": "d53953187ff0bbbd5f68246d4024193809b46d5afe399ae219efe22546cc6efc"
+    },
+    {
+      "game_id": "C4-004348",
+      "game_number_inside_iteration": 118,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004348.json",
+      "sha256": "9b04e6de8c56a10c44cd4020591d8085bbea9fda6e83c8c83f12874664442e52"
+    },
+    {
+      "game_id": "C4-004349",
+      "game_number_inside_iteration": 119,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004349.json",
+      "sha256": "bf252cbe03a9274a802931a55de82a0a1b14317b6d5c5be1185626bc134a4279"
+    },
+    {
+      "game_id": "C4-004350",
+      "game_number_inside_iteration": 120,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004350.json",
+      "sha256": "0f042fd08542ad27cbdbe3a7d7e6803948a717dd79a7cffb406f94288723d323"
+    },
+    {
+      "game_id": "C4-004351",
+      "game_number_inside_iteration": 121,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004351.json",
+      "sha256": "8252c3588ccf7c655e80dca6eaa306080a4d663c96e6b067655df154f27fa7a1"
+    },
+    {
+      "game_id": "C4-004352",
+      "game_number_inside_iteration": 122,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004352.json",
+      "sha256": "bb296274832ed41870c2799dda935dd615bcd5dc34d11e1e5b42884305ead876"
+    },
+    {
+      "game_id": "C4-004353",
+      "game_number_inside_iteration": 123,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004353.json",
+      "sha256": "e653b25bc608979e0d385f2f9bf4f571b29b824817e8220609c45f7046b58fd5"
+    },
+    {
+      "game_id": "C4-004354",
+      "game_number_inside_iteration": 124,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004354.json",
+      "sha256": "d204eafcbfdcbee1894e31dff74715b80084f68ffdfdddc15c1d5382d1787f88"
+    },
+    {
+      "game_id": "C4-004355",
+      "game_number_inside_iteration": 125,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004355.json",
+      "sha256": "b41b88e186f3e9f72c9ed2522470283cad1577fe15a766abc960600633552331"
+    },
+    {
+      "game_id": "C4-004356",
+      "game_number_inside_iteration": 126,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004356.json",
+      "sha256": "72358745a388efe3762e56b9aa05385035bf9423fe12f7901f0b7ecb5c7f790b"
+    },
+    {
+      "game_id": "C4-004357",
+      "game_number_inside_iteration": 127,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004357.json",
+      "sha256": "019ddabbd68a5e699bfc1ef17dc1e8be3ec0841c2206f6d0acbea348d9dcfb73"
+    },
+    {
+      "game_id": "C4-004358",
+      "game_number_inside_iteration": 128,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004358.json",
+      "sha256": "97711ff64865ee3b598476007d56b811e908f95491a579e57535fc8fd7223e4e"
+    },
+    {
+      "game_id": "C4-004359",
+      "game_number_inside_iteration": 129,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004359.json",
+      "sha256": "4ec47ff61cfcdfc178af90aa53d75d18acc04f110f3c0d4fc587f33433489212"
+    },
+    {
+      "game_id": "C4-004360",
+      "game_number_inside_iteration": 130,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004360.json",
+      "sha256": "c7cae8310a7b9678ae1f9c1931f918644bccac54438d9f427304be1f831b3e9b"
+    },
+    {
+      "game_id": "C4-004361",
+      "game_number_inside_iteration": 131,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004361.json",
+      "sha256": "b2653347443fd09038134ff99ebaefd6755e0e93c3acfc2b0d2d4fc452931009"
+    },
+    {
+      "game_id": "C4-004362",
+      "game_number_inside_iteration": 132,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004362.json",
+      "sha256": "c1f5459d43ed5ba100be7d61912aade39e7048bb01f067827cf8b76acc453616"
+    },
+    {
+      "game_id": "C4-004363",
+      "game_number_inside_iteration": 133,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004363.json",
+      "sha256": "10620f453e5b9f2050dacf51998d7e8e525e5d85f7a2f0da9c10b7b18bef69b0"
+    },
+    {
+      "game_id": "C4-004364",
+      "game_number_inside_iteration": 134,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004364.json",
+      "sha256": "38fd1f7a3c312d74ec466ecd3cc543b0e2c9180221b33ff19ae4b97ccedab8d5"
+    },
+    {
+      "game_id": "C4-004365",
+      "game_number_inside_iteration": 135,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004365.json",
+      "sha256": "f0f477e9417b58fadacdeafc62f02c25a7dae3ebcb943e24c6e3bf1333d10fe4"
+    },
+    {
+      "game_id": "C4-004366",
+      "game_number_inside_iteration": 136,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004366.json",
+      "sha256": "041b10c8f5f6db5e7fbc8fd521b6380e4b4313b78a6cdf7463f82b3a3b665238"
+    },
+    {
+      "game_id": "C4-004367",
+      "game_number_inside_iteration": 137,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004367.json",
+      "sha256": "1b0c9953a6763f1a066fb8d0523db38ec604b66b3f879be397fa3642a654532f"
+    },
+    {
+      "game_id": "C4-004368",
+      "game_number_inside_iteration": 138,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004368.json",
+      "sha256": "272dc61b909d61a6df323a023b555b3a9901ccf95fb35e09382ed71059658be6"
+    },
+    {
+      "game_id": "C4-004369",
+      "game_number_inside_iteration": 139,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004369.json",
+      "sha256": "73e9d94a5d57c7dc50ede9259dce937667d06dc2821bca980f14ca5f7875faa8"
+    },
+    {
+      "game_id": "C4-004370",
+      "game_number_inside_iteration": 140,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004370.json",
+      "sha256": "bef37006f468efef178ff6f2275c6f790b0555730e75d0aa7f00d13ff7643385"
+    },
+    {
+      "game_id": "C4-004371",
+      "game_number_inside_iteration": 141,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004371.json",
+      "sha256": "2d471815da47f94bcfc630dc967a6232d47c671f5381bdb4150a19c985a21494"
+    },
+    {
+      "game_id": "C4-004372",
+      "game_number_inside_iteration": 142,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004372.json",
+      "sha256": "e9f1a17d700ebed6144c7634f3cea184a7edf9ef21520ce01bfc343b3c50b0f7"
+    },
+    {
+      "game_id": "C4-004373",
+      "game_number_inside_iteration": 143,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004373.json",
+      "sha256": "8a87391c5893d1195a72924e97116767bd0d58f6b4f2cc167cca83e58f483134"
+    },
+    {
+      "game_id": "C4-004374",
+      "game_number_inside_iteration": 144,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004374.json",
+      "sha256": "7651181841b389d52de3b839937e8e0689b18c32a43c023c4f0f0c91f01e3511"
+    },
+    {
+      "game_id": "C4-004375",
+      "game_number_inside_iteration": 145,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004375.json",
+      "sha256": "d01faa076da7ddc56697f9b890fb5780133654cb17c834f8e51d2bcc7acdd43f"
+    },
+    {
+      "game_id": "C4-004376",
+      "game_number_inside_iteration": 146,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004376.json",
+      "sha256": "5bb562b8474720f3a2ff0fb0bdf724286714ed52d3dfaf072a60b8b3395cdb2c"
+    },
+    {
+      "game_id": "C4-004377",
+      "game_number_inside_iteration": 147,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004377.json",
+      "sha256": "9c58f4e43c362b4c734905b4c118b712672bdab642d077d7b120fd22634d8f15"
+    },
+    {
+      "game_id": "C4-004378",
+      "game_number_inside_iteration": 148,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004378.json",
+      "sha256": "70273aa000bc78dd5b28d0b25283df484a820691ec730576590f861706ba259a"
+    },
+    {
+      "game_id": "C4-004379",
+      "game_number_inside_iteration": 149,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004379.json",
+      "sha256": "4dd8fa3ca94d281e346c8851f62fa90852a1e626f9c8bf6f1f32b85daa1c68de"
+    },
+    {
+      "game_id": "C4-004380",
+      "game_number_inside_iteration": 150,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004380.json",
+      "sha256": "9cea6714343bc9326b7385631b8ee59018ae0e8eaed7c3d85308956bf7b3e79f"
+    },
+    {
+      "game_id": "C4-004381",
+      "game_number_inside_iteration": 151,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004381.json",
+      "sha256": "a93f7286b079a68758576a7777dc7cb41bfb7d90c08fa34021f3d654a4b5c71b"
+    },
+    {
+      "game_id": "C4-004382",
+      "game_number_inside_iteration": 152,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004382.json",
+      "sha256": "ef866439104a9f35f2f0b2f5ee415241c635d8535ff40beeaf5ae375d172b78f"
+    },
+    {
+      "game_id": "C4-004383",
+      "game_number_inside_iteration": 153,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004383.json",
+      "sha256": "48b4f217804bcdbdb41e36b3145879004539a0a0236f34a7931b9bd111213a7b"
+    },
+    {
+      "game_id": "C4-004384",
+      "game_number_inside_iteration": 154,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004384.json",
+      "sha256": "a6a0d58ce3440946b3b7772279de301836f9695789034e959ae5525838ed0bd2"
+    },
+    {
+      "game_id": "C4-004385",
+      "game_number_inside_iteration": 155,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004385.json",
+      "sha256": "06910bb89673cc02a74a6053b14883718388aa9573f3e2dbb441a6de0a9023a3"
+    },
+    {
+      "game_id": "C4-004386",
+      "game_number_inside_iteration": 156,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004386.json",
+      "sha256": "c506d6ca911e0c67d40b96189dc09afa42564a1c53f8ece6c75ef4789e0b2087"
+    },
+    {
+      "game_id": "C4-004387",
+      "game_number_inside_iteration": 157,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004387.json",
+      "sha256": "1386bdffcbd63631246aadfb8ad1e7c3d3781a2036378a7822fa417981e57fb3"
+    },
+    {
+      "game_id": "C4-004388",
+      "game_number_inside_iteration": 158,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004388.json",
+      "sha256": "6f33ceb587fd2614eb92d7de6f32138ccec7caeff8e9baa53cbab6953547c1ca"
+    },
+    {
+      "game_id": "C4-004389",
+      "game_number_inside_iteration": 159,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004389.json",
+      "sha256": "84366541f7793191571ed3b3405f04856d659757d01ddffffe6c5e85ea87daba"
+    },
+    {
+      "game_id": "C4-004390",
+      "game_number_inside_iteration": 160,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004390.json",
+      "sha256": "37359e402bcde00d24e147cf4be98019848ee47e64e1389898796932a0685bd0"
+    },
+    {
+      "game_id": "C4-004391",
+      "game_number_inside_iteration": 161,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004391.json",
+      "sha256": "8ca66f16181ed7035d7a76cc83f8c3951cb578098d7df7d3575b8b02adc3a791"
+    },
+    {
+      "game_id": "C4-004392",
+      "game_number_inside_iteration": 162,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004392.json",
+      "sha256": "08f9eeda7f189186e6d59cdf18f7be8187b572ee0b44434484b18469eb922561"
+    },
+    {
+      "game_id": "C4-004393",
+      "game_number_inside_iteration": 163,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004393.json",
+      "sha256": "51817d92d38d4dd515577139415a73f9761c1adbaf28c8f3310dcda6b51e5ded"
+    },
+    {
+      "game_id": "C4-004394",
+      "game_number_inside_iteration": 164,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004394.json",
+      "sha256": "15f8453b0016e50cbb162349e50e2e7f93755a2c83d1e5be500abb6d4804405b"
+    },
+    {
+      "game_id": "C4-004395",
+      "game_number_inside_iteration": 165,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004395.json",
+      "sha256": "d66e23eaa3c287efdb091b501cc0767a35345be19744c38f4d443068c2dcee47"
+    },
+    {
+      "game_id": "C4-004396",
+      "game_number_inside_iteration": 166,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004396.json",
+      "sha256": "50150b40ad685f0e997c9d38fa9d52e0950b6e74a1e82a1a1df8d12f07657013"
+    },
+    {
+      "game_id": "C4-004397",
+      "game_number_inside_iteration": 167,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004397.json",
+      "sha256": "764f21bb2a9633be5bc0f41d417d2fc78656bddad63c677dc82a93f876e8f275"
+    },
+    {
+      "game_id": "C4-004398",
+      "game_number_inside_iteration": 168,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004398.json",
+      "sha256": "c32ee33e136ab6bf90ea2922c14cb3fdec4fbd768fa2f21513ea848487be5e9b"
+    },
+    {
+      "game_id": "C4-004399",
+      "game_number_inside_iteration": 169,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004399.json",
+      "sha256": "eb707cd3d645fbdc9a78d5befe9dc433e296c8041f887317b91f57c2e266b432"
+    },
+    {
+      "game_id": "C4-004400",
+      "game_number_inside_iteration": 170,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004400.json",
+      "sha256": "390e2b802b7fd599c20bb589946f9e6d99d5c186dd056ce7e7098cbf28b1a31f"
+    },
+    {
+      "game_id": "C4-004401",
+      "game_number_inside_iteration": 171,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004401.json",
+      "sha256": "0fc3f6c3d76e151ccc84e1ddf0fb293b5f9970e3130a5487c27fb5edf0d93021"
+    },
+    {
+      "game_id": "C4-004402",
+      "game_number_inside_iteration": 172,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004402.json",
+      "sha256": "a35c400573dbfca7e29b6c25225730a99c14a8c41202d373cd1aa993376d7b37"
+    },
+    {
+      "game_id": "C4-004403",
+      "game_number_inside_iteration": 173,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004403.json",
+      "sha256": "c0651791970f55af7a201f422412351d2b2c9585813b87d5e65ec0c4790f5eff"
+    },
+    {
+      "game_id": "C4-004404",
+      "game_number_inside_iteration": 174,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004404.json",
+      "sha256": "871cb0b8e514ecc4571a0909b728ea2b578f0150a8f9f6e8a14d624c706684aa"
+    },
+    {
+      "game_id": "C4-004405",
+      "game_number_inside_iteration": 175,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004405.json",
+      "sha256": "c3a2a2f16465134253663c0ad3ccff1686e377596c0f5cb809f80f87ea60d1ec"
+    },
+    {
+      "game_id": "C4-004406",
+      "game_number_inside_iteration": 176,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004406.json",
+      "sha256": "b8318499a8b835429d32dffbad533e40e8b1d03ae4de9c5b0a7f2daaa4e61495"
+    },
+    {
+      "game_id": "C4-004407",
+      "game_number_inside_iteration": 177,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004407.json",
+      "sha256": "35733950c05cc19f67828a537591e7a79b5c50d0396582c2220bea3315f0724a"
+    },
+    {
+      "game_id": "C4-004408",
+      "game_number_inside_iteration": 178,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004408.json",
+      "sha256": "57b79a472f4f09d7d62717331c9022090d2cac33a5de73ad07e5d186874d7ad7"
+    },
+    {
+      "game_id": "C4-004409",
+      "game_number_inside_iteration": 179,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004409.json",
+      "sha256": "bac152dc3427f1ab679f257a8efb23f2b7462c46bafa40a5e2af691d4ea18633"
+    },
+    {
+      "game_id": "C4-004410",
+      "game_number_inside_iteration": 180,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004410.json",
+      "sha256": "8a8368b4473aa043ad60ce0ceeed2f6f5374478bd52a9d8970d715565abef3b9"
+    },
+    {
+      "game_id": "C4-004411",
+      "game_number_inside_iteration": 181,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004411.json",
+      "sha256": "fdf336eadc87a7456f29facaca600a69299978de05b2b223802c7de6399f90f7"
+    },
+    {
+      "game_id": "C4-004412",
+      "game_number_inside_iteration": 182,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004412.json",
+      "sha256": "9fe575440572e7a981ff551f32689f4ad9e8af6f89640dd31b74d0aa48faac93"
+    },
+    {
+      "game_id": "C4-004413",
+      "game_number_inside_iteration": 183,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004413.json",
+      "sha256": "4826dfe7da73b4e1faff9e92c928a244abbfd6966f764bab2e3c7fe66dba4dfb"
+    },
+    {
+      "game_id": "C4-004414",
+      "game_number_inside_iteration": 184,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004414.json",
+      "sha256": "18166acb69188422c9f42018abf2ac3e2dd1f28f333eb39c71cc1f70a7925c32"
+    },
+    {
+      "game_id": "C4-004415",
+      "game_number_inside_iteration": 185,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004415.json",
+      "sha256": "c98d766ba45c9a178f3e63d9063d5deedf50b9997ebc8d972a792065411186ec"
+    },
+    {
+      "game_id": "C4-004416",
+      "game_number_inside_iteration": 186,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004416.json",
+      "sha256": "c2d71dca92376f1a7aae97291124f82c735c004b200828778fd48c85b05f8c94"
+    },
+    {
+      "game_id": "C4-004417",
+      "game_number_inside_iteration": 187,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004417.json",
+      "sha256": "9af3e3d6fd2d35af5019a690f9f140069439dc04e9550002832b745e18b9b738"
+    },
+    {
+      "game_id": "C4-004418",
+      "game_number_inside_iteration": 188,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004418.json",
+      "sha256": "9862735c533a42173f1d14acf8efd8ea72c14b8af439051db59734bb82ff9ed5"
+    },
+    {
+      "game_id": "C4-004419",
+      "game_number_inside_iteration": 189,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004419.json",
+      "sha256": "daf3025a4819e32691c3aad1f989fa7d890981b81a820a7e58890ef5d2b789a5"
+    },
+    {
+      "game_id": "C4-004420",
+      "game_number_inside_iteration": 190,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004420.json",
+      "sha256": "1323de1e54deaaf177383a7018ee94b7e539011b738c1b0737de1aa29fe5d068"
+    },
+    {
+      "game_id": "C4-004421",
+      "game_number_inside_iteration": 191,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004421.json",
+      "sha256": "0a4e725705816965d86797e3034236247638e85e84f6f04b9436d038b0dacc54"
+    },
+    {
+      "game_id": "C4-004422",
+      "game_number_inside_iteration": 192,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004422.json",
+      "sha256": "ac07bff19dc54b24683a890a791f8ee89100255246b7ced46089f6bf3002f639"
+    },
+    {
+      "game_id": "C4-004423",
+      "game_number_inside_iteration": 193,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004423.json",
+      "sha256": "5d7a713b4974ad89447cf107679c921e84a4fdcfddcf0f3dd69fa8be9e094bbc"
+    },
+    {
+      "game_id": "C4-004424",
+      "game_number_inside_iteration": 194,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004424.json",
+      "sha256": "e0cb108b761ca32d4e7a6f436aa0551560faa02519d58c1689973f6f356c2bb3"
+    },
+    {
+      "game_id": "C4-004425",
+      "game_number_inside_iteration": 195,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004425.json",
+      "sha256": "c9777d2846964c232d448767064e120136582e66aeb5ae7864d16948779c8435"
+    },
+    {
+      "game_id": "C4-004426",
+      "game_number_inside_iteration": 196,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004426.json",
+      "sha256": "06c576c28a6f44975620d90510618e903725eea013eb53113056824bd4b39d63"
+    },
+    {
+      "game_id": "C4-004427",
+      "game_number_inside_iteration": 197,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004427.json",
+      "sha256": "0020e96ee1b7726582fca6cfcb199e255b062ba39663a74a54dca4b93e04a0c3"
+    },
+    {
+      "game_id": "C4-004428",
+      "game_number_inside_iteration": 198,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004428.json",
+      "sha256": "6340bec71459e53f6ec43b52b68f0bbaf01d6ef979a7992ba2848b757f145632"
+    },
+    {
+      "game_id": "C4-004429",
+      "game_number_inside_iteration": 199,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004429.json",
+      "sha256": "764a53d2715d36b9035495a67dbcba589da7d29ee2040c25015c53341297be17"
+    },
+    {
+      "game_id": "C4-004430",
+      "game_number_inside_iteration": 200,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004430.json",
+      "sha256": "331abaa650f1fd36769cebeb12678a967951dbcad6c2523307fe259374479d3e"
+    },
+    {
+      "game_id": "C4-004431",
+      "game_number_inside_iteration": 201,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004431.json",
+      "sha256": "55bf3145a91f52a1ec990853648be6f537ba66d7a0fa245bacc1519a06245aea"
+    },
+    {
+      "game_id": "C4-004432",
+      "game_number_inside_iteration": 202,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004432.json",
+      "sha256": "f82d0bd5a8d6bb97fab0ceea679554effc82b917048519172d481c2a7ee48026"
+    },
+    {
+      "game_id": "C4-004433",
+      "game_number_inside_iteration": 203,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004433.json",
+      "sha256": "83794c3e3038196f8dff08c0a01810d33ea5f7fbaafe34235150ef29b947c8fd"
+    },
+    {
+      "game_id": "C4-004434",
+      "game_number_inside_iteration": 204,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004434.json",
+      "sha256": "5a3b21c8712ac3a38c020bb643f36d96aebb94beceddcc4b143d780f7e6cb3a6"
+    },
+    {
+      "game_id": "C4-004435",
+      "game_number_inside_iteration": 205,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004435.json",
+      "sha256": "5691ab0c4680c45f18916e7d1318137eaeae6cf397d94fa1e7d4dfc9bf01b787"
+    },
+    {
+      "game_id": "C4-004436",
+      "game_number_inside_iteration": 206,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004436.json",
+      "sha256": "35d6eda090dfa62a663190572f78005d9b9fa05b8f91fe2f0996021dacbece91"
+    },
+    {
+      "game_id": "C4-004437",
+      "game_number_inside_iteration": 207,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004437.json",
+      "sha256": "bd0d9ab7f3de2bcae1ed623c92686e40084b8b74e46424f80f4c882498903990"
+    },
+    {
+      "game_id": "C4-004438",
+      "game_number_inside_iteration": 208,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004438.json",
+      "sha256": "8747e1777505b98d30bd3841160fbd32fd95a00acfd38a821248d38c3f7325c2"
+    },
+    {
+      "game_id": "C4-004439",
+      "game_number_inside_iteration": 209,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004439.json",
+      "sha256": "45037c4c2abd5a5f0971a56c8e3a8d62f44269191c7e7ecd6eb928974df34df6"
+    },
+    {
+      "game_id": "C4-004440",
+      "game_number_inside_iteration": 210,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004440.json",
+      "sha256": "5a497187aa5298805911fef914a396859fc6be64fb1070067a7ac4cc06156927"
+    },
+    {
+      "game_id": "C4-004441",
+      "game_number_inside_iteration": 211,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004441.json",
+      "sha256": "cd8f59a60b6f5d5636a495f449783f0a1f33d47f427f92e3939ae5fa9574aa17"
+    },
+    {
+      "game_id": "C4-004442",
+      "game_number_inside_iteration": 212,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004442.json",
+      "sha256": "2a48e2d297ae55c1f2c99f183c24d3425cfd95352bb3a9aed26188e94ebbac97"
+    },
+    {
+      "game_id": "C4-004443",
+      "game_number_inside_iteration": 213,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004443.json",
+      "sha256": "25b150cad63af8ea366628c7585369713b81e81e8faaf6255e5d4c55e90a0d63"
+    },
+    {
+      "game_id": "C4-004444",
+      "game_number_inside_iteration": 214,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004444.json",
+      "sha256": "13896c9ffcaeeddd133eb9d5840bf0d88f367d529281774d4103cd7c8305fda2"
+    },
+    {
+      "game_id": "C4-004445",
+      "game_number_inside_iteration": 215,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004445.json",
+      "sha256": "12ed854956c59cff690318b269ac21ecf7af6517649408aae1283d4e0c59f6f0"
+    },
+    {
+      "game_id": "C4-004446",
+      "game_number_inside_iteration": 216,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004446.json",
+      "sha256": "162b4810f78a87cb4fe7f8d1ce1289de9b4b321d89188a69473430a74c9f234b"
+    },
+    {
+      "game_id": "C4-004447",
+      "game_number_inside_iteration": 217,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004447.json",
+      "sha256": "a0ed04c29aedce67e5932f4c3c515cc2cf22ce16ffa706f7ac88c5778a3cab16"
+    },
+    {
+      "game_id": "C4-004448",
+      "game_number_inside_iteration": 218,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004448.json",
+      "sha256": "9a3c7e6c3c90b2f192b8066c5e228ce9c2ed5ccb8f13051260bd6f58a2c55c69"
+    },
+    {
+      "game_id": "C4-004449",
+      "game_number_inside_iteration": 219,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004449.json",
+      "sha256": "4c0b27288bcdafa6a7dba931371a16329d71c0d0dd8c393b4f7f2830226d0ffe"
+    },
+    {
+      "game_id": "C4-004450",
+      "game_number_inside_iteration": 220,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004450.json",
+      "sha256": "64042842456db91141a76fa894b2f94c68efd25ca31437cdfca7ef3e31e29d41"
+    },
+    {
+      "game_id": "C4-004451",
+      "game_number_inside_iteration": 221,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004451.json",
+      "sha256": "7b42a62690794ca3f86bdedc97156beb95be65161f331c22a91e30ab0c3c2307"
+    },
+    {
+      "game_id": "C4-004452",
+      "game_number_inside_iteration": 222,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004452.json",
+      "sha256": "1d04d213e1e71a302796461771249cc74d11b71dc10e3498137c4c2ae12383f0"
+    },
+    {
+      "game_id": "C4-004453",
+      "game_number_inside_iteration": 223,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004453.json",
+      "sha256": "66b724d8e931dbb551915ba0ebc65ea9cf22ffc503c9e9f3bb44ce3e974c1131"
+    },
+    {
+      "game_id": "C4-004454",
+      "game_number_inside_iteration": 224,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004454.json",
+      "sha256": "a93a1c330f6dd91a4a3c6fcf560b907e93fca4caa54b9ed51969099823de3541"
+    },
+    {
+      "game_id": "C4-004455",
+      "game_number_inside_iteration": 225,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004455.json",
+      "sha256": "5665a5af564817ceedbd4844ce2a3415e50ba41473a776dcae3249f1db0c8aaa"
+    },
+    {
+      "game_id": "C4-004456",
+      "game_number_inside_iteration": 226,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004456.json",
+      "sha256": "64ff2bd36cdf208607fb66f824be48efbd383ebc130210beca0d39abe5550a6c"
+    },
+    {
+      "game_id": "C4-004457",
+      "game_number_inside_iteration": 227,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004457.json",
+      "sha256": "0870e6c3aa1bd60b0c703967329a2eb98e8710d7f8af169a885d831a05105858"
+    },
+    {
+      "game_id": "C4-004458",
+      "game_number_inside_iteration": 228,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004458.json",
+      "sha256": "fa58458c08cf4c783f0be74659064a9804efe63065bed506b32e4e226a68aee6"
+    },
+    {
+      "game_id": "C4-004459",
+      "game_number_inside_iteration": 229,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004459.json",
+      "sha256": "6170ff6e5d82ac3d34f72be573eaebb421f59410ea067e7b821402546a7697e3"
+    },
+    {
+      "game_id": "C4-004460",
+      "game_number_inside_iteration": 230,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004460.json",
+      "sha256": "228ef2fc6af153fc9af99b40550475986445de26d80206806e64607b6d83bc1f"
+    },
+    {
+      "game_id": "C4-004461",
+      "game_number_inside_iteration": 231,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004461.json",
+      "sha256": "c095dfd7fff070fe8df4fa5280a467d6d844db0632c7612f3b184cdfaab0ed71"
+    },
+    {
+      "game_id": "C4-004462",
+      "game_number_inside_iteration": 232,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004462.json",
+      "sha256": "df384bc012c6114f4f580ac00220050cac16791f4e194d7fdf9a9e352bf9dc70"
+    },
+    {
+      "game_id": "C4-004463",
+      "game_number_inside_iteration": 233,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004463.json",
+      "sha256": "1a071c6bd4e7dfa8d9ddb7509a3da4847470531a19f7783baeb1cbc61af3e870"
+    },
+    {
+      "game_id": "C4-004464",
+      "game_number_inside_iteration": 234,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004464.json",
+      "sha256": "7cc6ae6ea3bff9e106717b219444b5e1356a04a0906eb645fb304ba06075f131"
+    },
+    {
+      "game_id": "C4-004465",
+      "game_number_inside_iteration": 235,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004465.json",
+      "sha256": "007db8ba8232f02673682c79c17f4ba52ea342e1af941be499f7508b78fbf711"
+    },
+    {
+      "game_id": "C4-004466",
+      "game_number_inside_iteration": 236,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004466.json",
+      "sha256": "dd378187ed82705d35262e4eff904e3dfc4cfa2ac6a41feef564c97172f9f0f2"
+    },
+    {
+      "game_id": "C4-004467",
+      "game_number_inside_iteration": 237,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004467.json",
+      "sha256": "78e81c4d09b8545b848d4d404700bd83333cf813330c77cd7c68b9f8a1438c50"
+    },
+    {
+      "game_id": "C4-004468",
+      "game_number_inside_iteration": 238,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004468.json",
+      "sha256": "a68439012df6e429f03a6782e64d1ab05cdc2dd218af9a4dc9a8337bd4624b85"
+    },
+    {
+      "game_id": "C4-004469",
+      "game_number_inside_iteration": 239,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004469.json",
+      "sha256": "669fef9c6428338f381a98ca1ac849095924b0842d26d8177e242ffd034fa8d5"
+    },
+    {
+      "game_id": "C4-004470",
+      "game_number_inside_iteration": 240,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004470.json",
+      "sha256": "c92b3daa05a68831618e95f5c71a679761a02cc72ee951a770a9ebce2fc73e36"
+    },
+    {
+      "game_id": "C4-004471",
+      "game_number_inside_iteration": 241,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004471.json",
+      "sha256": "dc42d526e16ab9b3511f6954012d1d62cb54fd67cf07bbac2930ac0a61b4d438"
+    },
+    {
+      "game_id": "C4-004472",
+      "game_number_inside_iteration": 242,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004472.json",
+      "sha256": "96a436daa967578393f055f31baa258d9c92e963ac19be02a4868146a6d19a29"
+    },
+    {
+      "game_id": "C4-004473",
+      "game_number_inside_iteration": 243,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004473.json",
+      "sha256": "8ebb5b749ce77238e7e4f589e39f32e8cf127e0052675b28b28ba869e2c288df"
+    },
+    {
+      "game_id": "C4-004474",
+      "game_number_inside_iteration": 244,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004474.json",
+      "sha256": "36d85c7f5d176361bcf38777c9112628cdc752ebf6f8ca34c1f467c91626be01"
+    },
+    {
+      "game_id": "C4-004475",
+      "game_number_inside_iteration": 245,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004475.json",
+      "sha256": "1e22567edf5febd5aa61bacb32c0544b0f26092071b038902df8f02cc983161a"
+    },
+    {
+      "game_id": "C4-004476",
+      "game_number_inside_iteration": 246,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004476.json",
+      "sha256": "920c8ebaac47c39bb4a10fa02b237ebe40ff1c2ce978b72cb958b88fa8efb2b1"
+    },
+    {
+      "game_id": "C4-004477",
+      "game_number_inside_iteration": 247,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004477.json",
+      "sha256": "8dfbfab61fbc1e65c271ed1f549e875ca5628486dcbda2d5dcbff5fbb8e3d02d"
+    },
+    {
+      "game_id": "C4-004478",
+      "game_number_inside_iteration": 248,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004478.json",
+      "sha256": "89c1a6873d3717f8f326673523676c208908dac64c60195a8b4b0615f2d981a8"
+    },
+    {
+      "game_id": "C4-004479",
+      "game_number_inside_iteration": 249,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004479.json",
+      "sha256": "aa92a77118bd294db0cba01886662825c4270a405927ef3e8504de3c44433213"
+    },
+    {
+      "game_id": "C4-004480",
+      "game_number_inside_iteration": 250,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004480.json",
+      "sha256": "3dcd10f79f25b9df68964bb52b96790e1bfd1e3e9cdcfad254ce21bc91adeed6"
+    },
+    {
+      "game_id": "C4-004481",
+      "game_number_inside_iteration": 251,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004481.json",
+      "sha256": "b9d9a0fa590bd78800d48754fa04dce64040d3a4e66b231b76834ef74716efed"
+    },
+    {
+      "game_id": "C4-004482",
+      "game_number_inside_iteration": 252,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004482.json",
+      "sha256": "9189e6a10a1e336a6d1427167ab2b07c63b2289f8656a8afe1ca67d35e8157fb"
+    },
+    {
+      "game_id": "C4-004483",
+      "game_number_inside_iteration": 253,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004483.json",
+      "sha256": "f4e078a86b4f8cc8c4fd49eac9296bdb3ad98081dd4add4801466ee5675cfd15"
+    },
+    {
+      "game_id": "C4-004484",
+      "game_number_inside_iteration": 254,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004484.json",
+      "sha256": "566d6dd3c729e1ca5eb592cd4e235cad71a6a769cefac4e702933448b924673e"
+    },
+    {
+      "game_id": "C4-004485",
+      "game_number_inside_iteration": 255,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004485.json",
+      "sha256": "36fdf351768f762df734dab406792906ec97ea2426f0b2fc98397058ac336e4f"
+    },
+    {
+      "game_id": "C4-004486",
+      "game_number_inside_iteration": 256,
+      "record_path": "data/c4-komi05-d5-20260906-110926/records/iteration-0004/C4-004486.json",
+      "sha256": "ca7072e1203ffc0dddc27fa3248501e0474eb9aead002e46b28145b2d682f6b8"
+    }
+  ],
+  "run_name": "c4-komi05-d5-20260906-110926",
+  "schema_version": 1
+}
