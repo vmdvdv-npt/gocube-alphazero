@@ -32,6 +32,7 @@ def cli_args(**overrides):
 def test_v3_contract_and_training_controls_are_forwarded():
     game_cls, args = build_training_args(cli_args())
     assert game_cls.RULESET == "japanese"
+    assert game_cls.KOMI == pytest.approx(0.5)
     assert game_cls.TERMINAL_ADJUDICATOR_ID == "gocube-katago-japanese-v3"
     assert game_cls.OBSERVATION_SCHEMA == "gocube-observation-v3"
     assert args.numIters == 3
@@ -63,6 +64,7 @@ def test_v3_contract_and_training_controls_are_forwarded():
     assert args.gocube_root_ending_bonus_points == pytest.approx(0.5)
     assert args.gocube_score_improvement_threshold_points == pytest.approx(1.0)
     assert args.gocube_win_probability_tolerance == pytest.approx(0.005)
+    assert args.gocube_komi == pytest.approx(0.5)
     assert args.gocube_terminal_adjudicator == "gocube-katago-japanese-v3"
     assert args.gocube_observation_schema == "gocube-observation-v3"
     assert args.gocube_rules_fingerprint == game_cls.rules_fingerprint()
@@ -77,6 +79,8 @@ def test_v3_cli_defaults_are_conservative_pilot_defaults(monkeypatch):
     cli = parse_args()
     game_cls, args = build_training_args(cli)
     assert game_cls.topology_kind() == "torus"
+    assert game_cls.KOMI == pytest.approx(0.5)
+    assert args.gocube_komi == pytest.approx(0.5)
     assert args.numMCTSSims == 100
     assert args.arenaMCTSSims == 100
     assert args.gamesPerIteration == 256
@@ -101,9 +105,9 @@ def test_v3_cli_defaults_are_conservative_pilot_defaults(monkeypatch):
     assert args.train_steps_per_iteration is None
 
 
-def test_default_run_name_uses_new_pilot_methodology_namespace():
+def test_default_run_name_uses_komi05_pilot_namespace():
     _, args = build_training_args(cli_args(run_name=None))
-    assert args.run_name == "gocube-torus-9-japanese75-katago-v3-pilot"
+    assert args.run_name == "gocube-torus-9-japanese05-katago-v3-pilot"
 
 
 def test_smoke_mode_is_one_iteration_without_arena_comparisons():
