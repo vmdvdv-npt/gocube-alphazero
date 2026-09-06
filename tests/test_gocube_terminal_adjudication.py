@@ -46,14 +46,14 @@ def test_empty_board_adjudication_is_total_and_komi_decides_winner():
         state,
         topology,
         ruleset="chinese",
-        komi=7.5,
+        komi=0.5,
     )
 
     assert result.adjudicator_id == CONSERVATIVE_AREA_ADJUDICATOR_V1
     assert result.stage_a == ()
     assert result.classification == ()
     assert result.fallback_count == 0
-    assert result.score.white == 7.5
+    assert result.score.white == 0.5
     assert result.winner == "white"
 
 
@@ -116,8 +116,8 @@ def test_adjudication_is_deterministic_for_same_state_and_configuration():
         topology,
     )
 
-    first = conservative_area_adjudicate(state, topology, ruleset="chinese", komi=7.5)
-    second = conservative_area_adjudicate(state, topology, ruleset="chinese", komi=7.5)
+    first = conservative_area_adjudicate(state, topology, ruleset="chinese", komi=0.5)
+    second = conservative_area_adjudicate(state, topology, ruleset="chinese", komi=0.5)
 
     assert first == second
 
@@ -143,5 +143,5 @@ def test_adjudicator_rejects_state_before_two_passes():
             initial_state(topology),
             topology,
             ruleset="chinese",
-            komi=7.5,
+            komi=0.5,
         )
