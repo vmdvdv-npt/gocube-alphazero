@@ -188,3 +188,106 @@ def combined_utility(
         dynamic_scale=dynamic_score_scale,
     )
     return result_utility + score_util, win_prob, points, score_util
+
+
+def player_ownership_value(ownership: Any, point: int, player: int) -> float:
+    """Return ownership in [-1,1] from the requested player's perspective.
+
+    GoCube V3 ownership classes are [Black, White, neutral]. Neutral therefore
+    contributes zero and the signed signal is own_probability-opponent_probability.
+    """
+
+    arr = np.asarray(ownership, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape[1] != 3:
+        raise ValueError(f"GoCube ownership must have shape (points,3), got {arr.shape}")
+    player = int(player)
+    if player not in (0, 1):
+        raise ValueError(f"GoCube ownership only supports Black/White player ids, got {player}")
+    return float(arr[int(point), player] - arr[int(point), 1 - player])
+
+
+def _root_context(game: Any, action: int):
+    state = getattr(game, "semantic_state", None)
+    topology = game.logical_topology() if hasattr(game, "logical_topology") else None
+    board = getattr(state, "board", None) if state is not None else None
+    if topology is None or board is None:
+        return None
+    action = int(action)
+    if action < 0 or action >= int(topology.point_count):
+        return None
+    player = int(game.player)
+    own_stone = 1 if player == 0 else 2
+    opp_stone = 2 if player == 0 else 1
+    neighbors = tuple(int(n) for n in topology.neighbor_indices(action))
+    adjacent_opponent = any(int(board[n]) == opp_stone for n in neighbors)
+    # Conservatively regard two adjacent own stones as a potential connection.
+    # This may under-penalize an already-connected shape but cannot incorrectly
+    # prune a genuine topology-spanning connection, and needs no planar logic.
+    potential_connection = sum(int(board[n]) == own_stone for n in neighbors) >= 2
+    return player, neighbors, adjacent_opponent, potential_connection
+
+
+def ownership_root_move_useful(
+    game: Any,
+    action: int,
+    ownership: Any,
+    *,
+    extreme: float = 0.95,
+) -> bool:
+    """Topology-independent KataGo-style filter for candidate non-PASS moves.
+
+    Neutral/dame-like points remain useful. Deep opponent territory is useful
+    only near a point the network strongly expects us to own. Deep own territory
+    is useful only when it touches an opponent stone or may connect own groups.
+    The helper never changes legality; it only informs root PASS suppression.
+    """
+
+    if hasattr(game, "pass_action") and int(action) == int(game.pass_action()):
+        return False
+    context = _root_context(game, action)
+    if context is None or ownership is None:
+        return True
+    player, neighbors, adjacent_opponent, potential_connection = context
+    own = player_ownership_value(ownership, action, player)
+    if own <= -float(extreme):
+        return any(player_ownership_value(ownership, n, player) >= float(extreme) for n in neighbors)
+    if own >= float(extreme):
+        return adjacent_opponent or potential_connection
+    return True
+
+
+def ownership_root_ending_bonus_points(
+    game: Any,
+    action: int,
+    ownership: Any,
+    bonus_points: float,
+    *,
+    extreme: float = 0.95,
+    tail: float = 0.05,
+) -> float:
+    """KataGo territory-style root ending adjustment in score-point units.
+
+    This mirrors the intent of KataGo's ``getEndingWhiteScoreBonus`` without
+    rectangular-board assumptions. PASS receives the territory-scoring 2/3
+    ending penalty. Strongly opponent-owned invasions and pointless filling of
+    strong own territory are penalized up to ``bonus_points``. The result is
+    still converted through score utility before affecting Q.
+    """
+
+    bonus_points = float(bonus_points)
+    if bonus_points <= 0:
+        return 0.0
+    if hasattr(game, "pass_action") and int(action) == int(game.pass_action()):
+        return -bonus_points * (2.0 / 3.0)
+    context = _root_context(game, action)
+    if context is None or ownership is None:
+        return 0.0
+    player, _neighbors, adjacent_opponent, potential_connection = context
+    own = player_ownership_value(ownership, action, player)
+    if own <= -float(extreme):
+        strength = min(1.0, max(0.0, (-float(extreme) - own) / float(tail)))
+        return -bonus_points * strength
+    if own >= float(extreme) and not adjacent_opponent and not potential_connection:
+        strength = min(1.0, max(0.0, (own - float(extreme)) / float(tail)))
+        return -bonus_points * strength
+    return 0.0
