@@ -24,6 +24,7 @@ from alphazero.envs.gocube.katago_train import (
     KataGoSearchCoach,
     assert_fresh_run,
     build_katago_training_args,
+    checkpoint_arg_overrides,
     parse_args,
     print_katago_search_configuration,
     run_paths,
@@ -101,8 +102,10 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
             super().__init__(game_cls, nnet, init_args)
             self.args.load_model = True
             self._load_model(self.train_net, int(last_valid))
-            # load_checkpoint reinitializes the wrapper, so reconnect Coach's
-            # multiprocessing control events afterwards.
+            # A normal resume may reinitialize the wrapper from saved args;
+            # explicit parameter-sweep overrides intentionally load weights and
+            # training state without replacing current CLI args. Reconnecting
+            # the control events is harmless in either case.
             self.train_net.stop_train = self.stop_train
             self.train_net.pause_train = self.pause_train
             self.self_play_iter = int(last_valid)
@@ -163,14 +166,7 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
     def _load_replay_datasets(self, iteration):
         datasets = []
         loaded_samples = {}
-        current_history_size = min(
-            max(
-                self.args.minTrainHistoryWindow,
-                (iteration + self.args.minTrainHistoryWindow) // self.args.trainHistoryIncrementIters,
-            ),
-            self.args.maxTrainHistoryWindow,
-        )
-        for train_iter in range(max(1, iteration - current_history_size), iteration + 1):
+        for train_iter in self._replay_iterations(iteration):
             base = os.path.join(
                 self.args.data,
                 self.args.run_name,
@@ -206,7 +202,9 @@ def build_hardened_training_args(cli):
     args.gocube_recovery_contract = RECOVERY_CONTRACT
     args.gocube_chosen_move_temperature_early = defaults["chosen_move_temperature_early"]
     args.gocube_chosen_move_temperature = defaults["chosen_move_temperature"]
-    args.gocube_chosen_move_temperature_halflife = defaults["chosen_move_temperature_halflife"]
+    args.gocube_chosen_move_temperature_halflife = float(
+        cli.chosen_move_temperature_halflife
+    )
     args.gocube_chosen_move_subtract = defaults["chosen_move_subtract"]
     args.gocube_chosen_move_prune = defaults["chosen_move_prune"]
     args.gocube_use_lcb_for_selection = defaults["use_lcb_for_selection"]
@@ -264,6 +262,7 @@ def main(argv=None):
     print_hardened_configuration(args)
     ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
     network = AtomicSampleClockNNetWrapper(game_cls, args)
+    network._gocube_checkpoint_arg_overrides = checkpoint_arg_overrides(cli, args)
     coach = HardenedKataGoSearchCoach(game_cls, network, args)
     coach.learn()
 
