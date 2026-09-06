@@ -36,7 +36,7 @@ Primary ranking is based on fixed-Arena playing strength, with wall-clock cost s
 | A | 6 | 0.36 h | 23402 | 91 | 0.254 | 0.000% | ACTIVE |
 | B | 6 | 0.47 h | 32792 | 128 | 0.000 | 0.000% | ACTIVE |
 | C | 6 | 0.26 h | 15108 | 59 | 0.508 | 0.000% | ACTIVE |
-| D | 5 | 0.00 h | — | — | — | — | FORKED |
+| D | 6 | 0.18 h | 23446 | 91 | 0.246 | 0.000% | ACTIVE |
 | E | 5 | 0.00 h | — | — | — | — | FORKED |
 | F | 5 | 0.00 h | — | — | — | — | FORKED |
 | G | 5 | 0.00 h | — | — | — | — | FORKED |
