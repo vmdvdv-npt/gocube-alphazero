@@ -11,10 +11,8 @@ from alphazero.Coach import TrainState, _set_state
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
-from alphazero.envs.gocube.selfplay_semantics import (
-    KATAGO_CLEANUP_TRAINING_DEFAULTS,
-    install_pinned_observation_contract,
-)
+from alphazero.envs.gocube.pinned_game import pinned_game_class
+from alphazero.envs.gocube.selfplay_semantics import KATAGO_CLEANUP_TRAINING_DEFAULTS
 from alphazero.envs.gocube.train import GoCubeCoach, build_training_args, print_training_configuration
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
@@ -203,8 +201,8 @@ def parse_args(argv=None):
 
 
 def build_katago_training_args(cli):
-    game_cls, args = build_training_args(cli)
-    game_cls = install_pinned_observation_contract(game_cls)
+    base_game_cls, args = build_training_args(cli)
+    game_cls = pinned_game_class(base_game_cls)
     defaults = KATAGO_SEARCH_DEFAULTS
     cleanup_defaults = KATAGO_CLEANUP_TRAINING_DEFAULTS
 
