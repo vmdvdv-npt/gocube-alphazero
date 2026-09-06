@@ -9,13 +9,14 @@ import time
 
 from alphazero.MCTS import MCTS
 from alphazero.envs.gocube.records import reserve_game_id
+from alphazero.search_contract import KATAGO_PINNED_SEARCH_UTILITY_MODE
 
 
 class SelfPlayAgent(mp.Process):
     def __init__(self, id, game_cls, ready_queue, batch_ready, batch_tensor, policy_tensor,
                  value_tensor, output_queue, result_queue, complete_count, games_played,
                  stop_event: mp.Event, pause_event: mp.Event(), args, _is_arena=False, _is_warmup=False,
-                 telemetry=None):
+                 telemetry=None, score_tensor=None, ownership_tensor=None):
         super().__init__()
         self.id = id
         self.game_cls = game_cls
@@ -28,6 +29,8 @@ class SelfPlayAgent(mp.Process):
             self.batch_size = self.batch_tensor.shape[0]
         self.policy_tensor = policy_tensor
         self.value_tensor = value_tensor
+        self.score_tensor = score_tensor
+        self.ownership_tensor = ownership_tensor
         self.output_queue = output_queue
         self.result_queue = result_queue
         self.games = []
@@ -43,6 +46,11 @@ class SelfPlayAgent(mp.Process):
         self._is_arena = _is_arena
         self._is_warmup = _is_warmup
         self.telemetry = telemetry
+        self.score_aware = (
+            getattr(args, 'search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
+        )
+        if self.score_aware and not _is_warmup and (score_tensor is None or ownership_tensor is None):
+            raise ValueError('KataGo-derived SelfPlayAgent requires score_tensor and ownership_tensor')
         self.recording_enabled = bool(
             getattr(args, "gocube_recording_enabled", False) and not _is_arena
         )
@@ -59,14 +67,17 @@ class SelfPlayAgent(mp.Process):
             action_size = game_cls.action_size()
             self._WARMUP_POLICY = torch.full((action_size,), 1 / action_size).to(policy_tensor.device)
             value_size = game_cls.num_players() + 1
-            self._WARMUP_VALUE = torch.full((value_size,), 1 / value_size).to(policy_tensor.device)
+            self._WARMUP_VALUE = torch.full((value_size,), 1 / value_size).to(value_tensor.device)
+            if score_tensor is not None:
+                self._WARMUP_SCORE = torch.zeros((1,)).to(score_tensor.device)
+            if ownership_tensor is not None:
+                self._WARMUP_OWNERSHIP = torch.full(
+                    ownership_tensor.shape[1:], 1.0 / ownership_tensor.shape[-1]
+                ).to(ownership_tensor.device)
         self.fast = False
         for _ in range(self.batch_size):
             self.games.append(self.game_cls())
             self.histories.append([])
-            # IDs are reserved when a completed game is accepted into the
-            # iteration.  This avoids consuming an ID for a speculative batch
-            # slot that finishes after gamesPerIteration has already filled.
             self.game_ids.append(None)
             self.move_histories.append([])
             self.game_start_times.append(None)
@@ -144,8 +155,13 @@ class SelfPlayAgent(mp.Process):
             if self._is_warmup:
                 self.policy_tensor[i].copy_(self._WARMUP_POLICY)
                 self.value_tensor[i].copy_(self._WARMUP_VALUE)
+                if self.score_tensor is not None:
+                    self.score_tensor[i].copy_(self._WARMUP_SCORE)
+                if self.ownership_tensor is not None:
+                    self.ownership_tensor[i].copy_(self._WARMUP_OWNERSHIP)
                 continue
-            data = torch.from_numpy(state.observation())
+            observation = self._mcts(i).search_observation(state) if self.score_aware else state.observation()
+            data = torch.from_numpy(observation)
             if self._is_arena:
                 data = data.view(-1, *state.observation_size())
                 player = self.player_to_index[self.games[i].player]
@@ -171,13 +187,24 @@ class SelfPlayAgent(mp.Process):
         for i in range(self.batch_size):
             self._check_pause()
             index = self.batch_indices[i] if self._is_arena else i
-            self._mcts(i).process_results(
-                self.games[i],
-                self.value_tensor[index].data.numpy(),
-                self.policy_tensor[index].data.numpy(),
-                False if self._is_arena else self.args.add_root_noise,
-                False if self._is_arena else self.args.add_root_temp
-            )
+            if self.score_aware:
+                self._mcts(i).process_search_results(
+                    self.games[i],
+                    self.value_tensor[index].data.numpy(),
+                    self.policy_tensor[index].data.numpy(),
+                    self.score_tensor[index].data.numpy(),
+                    self.ownership_tensor[index].data.numpy(),
+                    False if self._is_arena else self.args.add_root_noise,
+                    False if self._is_arena else self.args.add_root_temp,
+                )
+            else:
+                self._mcts(i).process_results(
+                    self.games[i],
+                    self.value_tensor[index].data.numpy(),
+                    self.policy_tensor[index].data.numpy(),
+                    False if self._is_arena else self.args.add_root_noise,
+                    False if self._is_arena else self.args.add_root_temp
+                )
 
     def playMoves(self):
         recording_enabled = getattr(self, "recording_enabled", False)

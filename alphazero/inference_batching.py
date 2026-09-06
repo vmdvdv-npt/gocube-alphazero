@@ -3,6 +3,8 @@ from time import monotonic
 
 import torch
 
+from alphazero.search_contract import SearchOutput
+
 
 def collect_ready_worker_ids(ready_queue, worker_count, wait_ms):
     """Collect one or more workers that are waiting for neural inference.
@@ -57,18 +59,24 @@ def process_coalesced_inference(
     policy_tensors,
     value_tensors,
     batch_ready,
+    score_tensors=None,
+    ownership_tensors=None,
 ):
-    """Run one NN call for several ready self-play workers and split results.
+    """Run one NN call for several ready workers and split all search heads.
 
-    Each worker owns a fixed shared-memory input/output tensor. Concatenating
-    ready inputs turns several tiny GPU launches into one larger launch. The
-    outputs are copied back to CPU once, split by worker, and each worker is
-    released only after its slices are ready.
+    Legacy games keep the historical policy/value contract. Score-aware GoCube
+    search supplies both ``score_tensors`` and ``ownership_tensors``; all four
+    heads come from the same network forward pass and are copied back to the
+    worker-owned shared-memory slices before the worker is released.
 
     Returns the number of positions evaluated in the combined neural batch.
     """
     if not worker_ids:
         return 0
+
+    score_aware = score_tensors is not None or ownership_tensors is not None
+    if score_aware and (score_tensors is None or ownership_tensors is None):
+        raise ValueError("score-aware inference requires both score and ownership tensors")
 
     batch_sizes = [int(input_tensors[worker_id].size(0)) for worker_id in worker_ids]
     total_rows = sum(batch_sizes)
@@ -80,14 +88,38 @@ def process_coalesced_inference(
     else:
         combined = torch.cat([input_tensors[worker_id] for worker_id in worker_ids], dim=0)
 
-    policy, value = nnet.process(combined)
-    policy = policy.detach().cpu()
-    value = value.detach().cpu()
+    if score_aware:
+        if not hasattr(nnet, "process_for_search"):
+            raise RuntimeError("score-aware search requires process_for_search()")
+        output = nnet.process_for_search(combined)
+        if not isinstance(output, SearchOutput):
+            raise RuntimeError("process_for_search() must return SearchOutput")
+        policy = output.policy.detach().cpu()
+        value = output.value.detach().cpu()
+        score = output.score.detach().cpu() if output.score is not None else None
+        ownership = output.ownership.detach().cpu() if output.ownership is not None else None
+        if score is None or ownership is None:
+            raise RuntimeError("score-aware network omitted score or ownership search head")
+    else:
+        policy, value = nnet.process(combined)
+        policy = policy.detach().cpu()
+        value = value.detach().cpu()
+        score = None
+        ownership = None
 
-    if policy.size(0) != total_rows or value.size(0) != total_rows:
+    returned = {
+        "policy": int(policy.size(0)),
+        "value": int(value.size(0)),
+    }
+    if score_aware:
+        returned["score"] = int(score.size(0))
+        returned["ownership"] = int(ownership.size(0))
+    mismatched = {name: rows for name, rows in returned.items() if rows != total_rows}
+    if mismatched:
+        details = ", ".join(f"{name}={rows}" for name, rows in returned.items())
         raise RuntimeError(
             "network returned a different batch size than requested: "
-            f"requested={total_rows}, policy={policy.size(0)}, value={value.size(0)}"
+            f"requested={total_rows}, {details}"
         )
 
     offset = 0
@@ -95,6 +127,9 @@ def process_coalesced_inference(
         end = offset + batch_size
         policy_tensors[worker_id].copy_(policy[offset:end])
         value_tensors[worker_id].copy_(value[offset:end])
+        if score_aware:
+            score_tensors[worker_id].copy_(score[offset:end])
+            ownership_tensors[worker_id].copy_(ownership[offset:end])
         batch_ready[worker_id].set()
         offset = end
 
