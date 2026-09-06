@@ -138,11 +138,11 @@ def test_winner_margin_fractional_komi_and_ruleset_difference_match_gocube():
     all_black = full_state(topology, BLACK)
     classification = classify_all(all_black, topology)
 
-    white_win = score_position(all_black, topology, classification, "japanese", 7.5)
+    white_win = score_position(all_black, topology, classification, "japanese", 0.5)
     draw = score_position(all_black, topology, classification, "japanese", 0)
 
     assert white_win.winner == "white"
-    assert white_win.margin == 7.5
+    assert white_win.margin == 0.5
     assert draw.winner == "draw"
     assert draw.margin == 0
 
