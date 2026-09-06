@@ -49,6 +49,7 @@ Primary ranking is based on fixed-Arena playing strength, with wall-clock cost s
 | B@6 | parent@5 | 24 | 13-11-0-0 | 0.542 | 0.351-0.721 | 26.8 min |
 | C@6 | parent@5 | 24 | 12-12-0-0 | 0.500 | 0.314-0.686 | 27.1 min |
 | D@6 | adaptive:A@6 | 24 | 20-4-0-0 | 0.833 | 0.641-0.933 | 26.2 min |
+| D@6 | adaptive:B@6 | 24 | 12-12-0-0 | 0.500 | 0.314-0.686 | 26.4 min |
 | D@6 | parent@5 | 24 | 18-6-0-0 | 0.750 | 0.551-0.880 | 27.0 min |
 | E@6 | parent@5 | 24 | 11-13-0-0 | 0.458 | 0.279-0.649 | 27.2 min |
 | F@6 | parent@5 | 24 | 6-18-0-0 | 0.250 | 0.120-0.449 | 27.2 min |

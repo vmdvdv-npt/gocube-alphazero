@@ -76,3 +76,6 @@
 {"candidate": "D", "ci95": [0.6415, 0.9332], "decision": "CANDIDATE", "event": "adaptive_match_decided", "games": 24, "iteration": 6, "reference": "A", "score": 0.8333, "time": "2026-09-06T09:47:14+04:00"}
 {"allowed": true, "estimated_seconds": 2084.9, "event": "deadline_check", "label": "adaptive D@6 vs B@6 block 1", "remaining_seconds": 3564712.8, "reserve_seconds": 2100.0, "time": "2026-09-06T09:47:14+04:00"}
 {"event": "adaptive_evaluation_started", "games": 24, "seed": 21250158, "stage_id": "adaptive_screen_D_i6_vs_B_i6_b01", "time": "2026-09-06T09:47:14+04:00"}
+{"elapsed_seconds": 1583.9, "event": "adaptive_evaluation_completed", "score": 0.5, "stage_id": "adaptive_screen_D_i6_vs_B_i6_b01", "time": "2026-09-06T10:13:38+04:00"}
+{"allowed": true, "estimated_seconds": 2072.9, "event": "deadline_check", "label": "adaptive D@6 vs B@6 block 2", "remaining_seconds": 3563128.8, "reserve_seconds": 2100.0, "time": "2026-09-06T10:13:38+04:00"}
+{"event": "adaptive_evaluation_started", "games": 24, "seed": 21230474, "stage_id": "adaptive_screen_D_i6_vs_B_i6_b02", "time": "2026-09-06T10:13:38+04:00"}
