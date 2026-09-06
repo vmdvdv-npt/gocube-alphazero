@@ -26,7 +26,7 @@ EMERGENCY_MOVE_CAP_FACTOR = 24
 EMERGENCY_MOVE_CAP_BASE = 256
 
 
-def rules_fingerprint(topology: Topology, komi: float = 7.5) -> str:
+def rules_fingerprint(topology: Topology, komi: float = 0.5) -> str:
     payload = {
         "adjudicator": KATAGO_JAPANESE_ADJUDICATOR_V3,
         "observationSchema": OBSERVATION_SCHEMA_V3,
