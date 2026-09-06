@@ -581,7 +581,7 @@ cdef class MCTS:
         cdef Node pass_node = None
         cdef int pass_action
         cdef float gain
-        if not self._is_second_pass_root(gs) or not self.fill_dame_before_pass:
+        if not self._is_second_pass_root(gs) or not self.conservative_pass:
             return False
         pass_action = int(gs.pass_action())
         for c in self._root._children:
