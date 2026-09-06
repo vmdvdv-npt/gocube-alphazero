@@ -278,9 +278,10 @@ class SelfPlayAgent(mp.Process):
         self._telemetry_add('search_pass_combined_utility_sum', diagnostic['pass_combined_utility'])
         self._telemetry_add('search_best_nonpass_score_gain_sum', diagnostic['best_nonpass_score_gain'])
         self._telemetry_add('search_best_nonpass_win_delta_sum', diagnostic['best_nonpass_win_delta'])
-        pass_action = int(self.game_cls.pass_action())
-        pass_best = int(self._mcts_current.best_action(game)) == pass_action
-        if pass_best and diagnostic['score_dominated_pass']:
+        # best_action() already applies conditional PASS suppression. The audit
+        # must count the pre-suppression score-dominance signal itself, or the
+        # guard would systematically miss exactly the cases that were corrected.
+        if diagnostic['score_dominated_pass']:
             self._telemetry_add('search_score_dominated_pass')
 
     @property
