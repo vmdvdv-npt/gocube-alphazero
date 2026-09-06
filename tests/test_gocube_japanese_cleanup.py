@@ -34,7 +34,7 @@ def test_unresolved_group_produces_no_result_not_fake_alive_reward():
         scoring,
         topology,
         ruleset="japanese",
-        komi=7.5,
+        komi=0.5,
     )
 
     assert result.adjudicator_id == JAPANESE_CLEANUP_ADJUDICATOR_V2
@@ -60,7 +60,7 @@ def test_cleanup_capture_resolves_original_group_as_dead():
         cleanup,
         topology,
         ruleset="japanese",
-        komi=7.5,
+        komi=0.5,
     )
 
     assert result.training_valid
@@ -109,7 +109,7 @@ def test_auxiliary_targets_are_finite_and_topology_aligned():
         cleanup,
         topology,
         ruleset="japanese",
-        komi=7.5,
+        komi=0.5,
     )
 
     score = normalized_score_target(result, topology)
