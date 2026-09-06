@@ -404,6 +404,48 @@
       "size": 4,
       "stage_id": "stage1_eval_F_i6_vs_parent5",
       "topology": "cube"
+    },
+    {
+      "action_temperature": 0.0,
+      "balanced_colors": true,
+      "batched": false,
+      "candidate": {
+        "id": "G@6",
+        "path": "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-g/iteration-0006.pkl",
+        "sha256": "36c3afceed55de58b80ff48223aeaeb6cbc913913bfa916e406bc5a9e6e41a0f"
+      },
+      "candidate_branch": "G",
+      "candidate_iteration": 6,
+      "candidate_score_ci95_approx": [
+        0.11999366228595004,
+        0.44899444005154004
+      ],
+      "candidate_score_rate": 0.25,
+      "candidate_wins": 6,
+      "draws": 0,
+      "elapsed_seconds": 2084.819286584854,
+      "fast_probability": 0.0,
+      "games_effective": 24,
+      "games_requested": 24,
+      "mcts_sims": 100,
+      "no_results": 0,
+      "reference": {
+        "id": "parent@5",
+        "path": "/home/codex/projects/gocube-alphazero/checkpoint/c4-t001-c4-c001/iteration-0005.pkl",
+        "sha256": "28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+      },
+      "reference_id": "parent@5",
+      "reference_score_rate": 0.75,
+      "reference_wins": 18,
+      "root_noise": false,
+      "root_temperature": false,
+      "ruleset": "japanese",
+      "schema_version": 1,
+      "seconds_per_game": 86.86747027436893,
+      "seed": 20261577,
+      "size": 4,
+      "stage_id": "stage1_eval_G_i6_vs_parent5",
+      "topology": "cube"
     }
   ],
   "experiment_id": "c4-hparam-night-20260906-005747",
@@ -896,7 +938,40 @@
   "reserve_minutes": 35.0,
   "resume_count": 1,
   "schema_version": 1,
-  "selection": {},
+  "selection": {
+    "stage2": {
+      "axes": {
+        "games": {
+          "scores": {
+            "F": 0.25,
+            "G": 0.25
+          },
+          "winner": "F"
+        },
+        "pfast": {
+          "scores": {
+            "B": 0.5416666666666666,
+            "C": 0.5
+          },
+          "winner": "B"
+        },
+        "sims": {
+          "scores": {
+            "D": 0.75,
+            "E": 0.4583333333333333
+          },
+          "winner": "D"
+        }
+      },
+      "branches": [
+        "A",
+        "B",
+        "D",
+        "F"
+      ],
+      "selected_at": "2026-09-06T09:20:37+04:00"
+    }
+  },
   "source_run": "c4-t001-c4-c001",
   "stages": {
     "canonical_iter_2": {
@@ -1280,10 +1355,13 @@
         "--seed",
         "20261577"
       ],
+      "elapsed_seconds": 2087.2051742076874,
+      "ended_at": "2026-09-06T09:20:37+04:00",
+      "exit_code": 0,
       "games": 24,
       "reference": "parent@5",
       "started_at": "2026-09-06T08:45:49+04:00",
-      "status": "RUNNING"
+      "status": "COMPLETED"
     },
     "stage1_train_A_i6": {
       "branch": "A",
@@ -1543,6 +1621,39 @@
       "iteration": 6,
       "started_at": "2026-09-06T07:52:49+04:00",
       "status": "COMPLETED"
+    },
+    "stage2_train_A_i7": {
+      "branch": "A",
+      "command": [
+        "/home/codex/projects/gocube-alphazero/.venv/bin/python",
+        "/home/codex/projects/gocube-alphazero/alphazero/envs/gocube/train.py",
+        "--topology",
+        "cube",
+        "--size",
+        "4",
+        "--workers",
+        "16",
+        "--sims",
+        "100",
+        "--arena-sims",
+        "100",
+        "--games-per-iteration",
+        "256",
+        "--iterations",
+        "7",
+        "--train-batch-size",
+        "256",
+        "--fast-game-prob",
+        "0.25",
+        "--endgame-sample-weight",
+        "1",
+        "--no-arena",
+        "--run-name",
+        "c4-hparam-night-20260906-005747-a"
+      ],
+      "iteration": 7,
+      "started_at": "2026-09-06T09:20:37+04:00",
+      "status": "RUNNING"
     }
   },
   "started_at": "2026-09-06T00:59:07+04:00",

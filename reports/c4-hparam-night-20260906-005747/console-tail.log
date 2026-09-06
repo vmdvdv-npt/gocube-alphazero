@@ -1,33 +1,3 @@
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.3 | Total: 0:19:19 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.3 | Total: 0:19:20 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.3 | Total: 0:19:21 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.3 | Total: 0:19:22 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.3 | Total: 0:19:23 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.3 | Total: 0:19:25 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.3 | Total: 0:19:26 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:27 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:28 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:29 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:30 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:31 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:32 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:33 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:34 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:35 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:36 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:37 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:38 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:39 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:40 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:41 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:42 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:43 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:44 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:45 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:46 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:47 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:48 | ETA: 0:00:00
-[KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:49 | ETA: 0:00:00
 [KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.4 | Total: 0:19:50 | ETA: 0:00:00
 [KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:51 | ETA: 0:00:00
 [KGenerating Samples |                                | (0/512) Sample Time: 0.000s | Infer Batch: 101.5 | Total: 0:19:52 | ETA: 0:00:00
@@ -1998,3 +1968,33 @@ EXPERIMENT EVENT: evaluation_started {'stage_id': 'stage1_eval_G_i6_vs_parent5',
   checkpoint = torch.load(filepath, map_location=device) if device else torch.load(filepath)
 /home/codex/projects/gocube-alphazero/alphazero/NNetWrapper.py:283: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
   checkpoint = torch.load(filepath, map_location=device) if device else torch.load(filepath)
+
+[KArena.play_games |#                               | (1/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 114.067s | Total: 0:01:54 | ETA: 0:00:00
+[KArena.play_games |##                              | (2/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 91.869s | Total: 0:03:03 | ETA: 0:43:44
+[KArena.play_games |####                            | (3/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 85.422s | Total: 0:04:16 | ETA: 0:33:42
+[KArena.play_games |#####                           | (4/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 87.629s | Total: 0:05:50 | ETA: 0:29:54
+[KArena.play_games |######                          | (5/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 86.493s | Total: 0:07:12 | ETA: 0:29:13
+[KArena.play_games |########                        | (6/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 83.404s | Total: 0:08:20 | ETA: 0:27:24
+[KArena.play_games |#########                       | (7/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 85.799s | Total: 0:10:00 | ETA: 0:25:02
+[KArena.play_games |##########                      | (8/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 83.700s | Total: 0:11:09 | ETA: 0:24:19
+[KArena.play_games |############                    | (9/24) Winrates: [0.0, 1.0] | No-result: 0 | Eps Time: 86.206s | Total: 0:12:55 | ETA: 0:22:20
+[KArena.play_games |#############                   | (10/24) Winrates: [0.1, 0.9] | No-result: 0 | Eps Time: 86.746s | Total: 0:14:27 | ETA: 0:21:34
+[KArena.play_games |##############                  | (11/24) Winrates: [0.091, 0.909] | No-result: 0 | Eps Time: 89.341s | Total: 0:16:22 | ETA: 0:20:15
+[KArena.play_games |################                | (12/24) Winrates: [0.083, 0.917] | No-result: 0 | Eps Time: 89.748s | Total: 0:17:56 | ETA: 0:18:50
+[KArena.play_games |#################               | (13/24) Winrates: [0.154, 0.846] | No-result: 0 | Eps Time: 90.156s | Total: 0:19:32 | ETA: 0:17:52
+[KArena.play_games |##################              | (14/24) Winrates: [0.143, 0.857] | No-result: 0 | Eps Time: 90.975s | Total: 0:21:13 | ETA: 0:16:48
+[KArena.play_games |####################            | (15/24) Winrates: [0.133, 0.867] | No-result: 0 | Eps Time: 90.984s | Total: 0:22:44 | ETA: 0:15:24
+[KArena.play_games |#####################           | (16/24) Winrates: [0.188, 0.812] | No-result: 0 | Eps Time: 90.763s | Total: 0:24:12 | ETA: 0:14:00
+[KArena.play_games |######################          | (17/24) Winrates: [0.235, 0.765] | No-result: 0 | Eps Time: 90.892s | Total: 0:25:45 | ETA: 0:12:42
+[KArena.play_games |########################        | (18/24) Winrates: [0.222, 0.778] | No-result: 0 | Eps Time: 90.428s | Total: 0:27:07 | ETA: 0:11:02
+[KArena.play_games |#########################       | (19/24) Winrates: [0.263, 0.737] | No-result: 0 | Eps Time: 89.530s | Total: 0:28:21 | ETA: 0:09:35
+[KArena.play_games |##########################      | (20/24) Winrates: [0.25, 0.75] | No-result: 0 | Eps Time: 89.641s | Total: 0:29:52 | ETA: 0:07:43
+[KArena.play_games |############################    | (21/24) Winrates: [0.286, 0.714] | No-result: 0 | Eps Time: 89.176s | Total: 0:31:12 | ETA: 0:06:11
+[KArena.play_games |#############################   | (22/24) Winrates: [0.273, 0.727] | No-result: 0 | Eps Time: 88.492s | Total: 0:32:26 | ETA: 0:04:27
+[KArena.play_games |##############################  | (23/24) Winrates: [0.261, 0.739] | No-result: 0 | Eps Time: 87.401s | Total: 0:33:30 | ETA: 0:02:54
+[KArena.play_games |################################| (24/24) Winrates: [0.25, 0.75] | No-result: 0 | Eps Time: 86.867s | Total: 0:34:44 | ETA: 0:01:24
+[KArena.play_games |################################| (24/24) Winrates: [0.25, 0.75] | No-result: 0 | Eps Time: 86.867s | Total: 0:34:44 | ETA: 0:01:24
+[?25hEVAL RESULT: G@6 6W / 18L / 0D / 0NR, score=0.250, ci95~[0.120, 0.449], 2084.8s
+EXPERIMENT EVENT: evaluation_completed {'stage_id': 'stage1_eval_G_i6_vs_parent5', 'score': 0.25}
+EXPERIMENT EVENT: deadline_check {'label': 'stage2 train A@7', 'remaining_seconds': 3566310.1, 'estimated_seconds': 1663.6, 'reserve_seconds': 2100.0, 'allowed': True}
+EXPERIMENT EVENT: stage_started {'stage_id': 'stage2_train_A_i7', 'branch': 'A', 'iteration': 7}
