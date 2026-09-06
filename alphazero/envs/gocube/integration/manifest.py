@@ -43,6 +43,8 @@ class RunManifest:
     rules_fingerprint: str | None = None
     katago_rules_version: int | None = None
     katago_reference_commit: str | None = None
+    search_contract: str | None = None
+    search_settings: dict[str, object] | None = None
 
     @classmethod
     def create(
@@ -54,6 +56,8 @@ class RunManifest:
         rule_set: str = "japanese",
         komi: float = 7.5,
         terminal_adjudicator: str | None = None,
+        search_contract: str | None = None,
+        search_settings: dict[str, object] | None = None,
     ) -> "RunManifest":
         if terminal_adjudicator is None:
             terminal_adjudicator = (
@@ -93,6 +97,8 @@ class RunManifest:
             rules_fingerprint=fingerprint,
             katago_rules_version=rules_version,
             katago_reference_commit=reference_commit,
+            search_contract=search_contract,
+            search_settings=dict(search_settings) if search_settings is not None else None,
         ).validated()
 
     @classmethod
@@ -123,6 +129,8 @@ class RunManifest:
             rules_fingerprint=data.get("rulesFingerprint"),
             katago_rules_version=data.get("katagoRulesVersion"),
             katago_reference_commit=data.get("katagoReferenceCommit"),
+            search_contract=data.get("searchContract"),
+            search_settings=data.get("searchSettings"),
         ).validated()
 
         if directory_name is not None and manifest.run_name != directory_name:
@@ -154,6 +162,12 @@ class RunManifest:
             raise ManifestError("Run manifest komi must be a finite number")
         if not isinstance(self.terminal_adjudicator, str):
             raise ManifestError("Run manifest terminalAdjudicator must be a string")
+        if self.search_contract is not None and (
+            not isinstance(self.search_contract, str) or not self.search_contract
+        ):
+            raise ManifestError("searchContract must be a non-empty string when present")
+        if self.search_settings is not None and not isinstance(self.search_settings, dict):
+            raise ManifestError("searchSettings must be a JSON object when present")
 
         expected = {
             1: CONSERVATIVE_AREA_ADJUDICATOR_V1,
@@ -189,6 +203,8 @@ class RunManifest:
                 raise ManifestError("Manifest KataGo rules version does not match V3")
             if self.katago_reference_commit != KATAGO_REFERENCE_COMMIT:
                 raise ManifestError("Manifest KataGo reference commit does not match V3")
+        elif self.search_contract is not None or self.search_settings is not None:
+            raise ManifestError("search contract metadata is only valid for GoCube V3 manifests")
         return self
 
     def to_dict(self) -> dict[str, object]:
@@ -208,6 +224,10 @@ class RunManifest:
                 "katagoRulesVersion": self.katago_rules_version,
                 "katagoReferenceCommit": self.katago_reference_commit,
             })
+            if self.search_contract is not None:
+                data["searchContract"] = self.search_contract
+            if self.search_settings is not None:
+                data["searchSettings"] = self.search_settings
         return data
 
 
@@ -255,7 +275,36 @@ def write_run_manifest(run_dir: str, manifest: RunManifest, *, force: bool = Fal
     return path
 
 
-def ensure_training_manifest(checkpoint_dir: str, run_name: str, game_cls) -> RunManifest:
+def _search_manifest_settings(args) -> dict[str, object] | None:
+    if args is None or not getattr(args, "gocube_search_contract", None):
+        return None
+    keys = (
+        "search_utility_mode",
+        "gocube_win_loss_utility_factor",
+        "gocube_static_score_utility_factor",
+        "gocube_dynamic_score_utility_factor",
+        "gocube_dynamic_score_center_zero_weight",
+        "gocube_dynamic_score_center_scale",
+        "gocube_root_ending_bonus_points",
+        "gocube_fill_dame_before_pass",
+        "gocube_conservative_pass",
+        "gocube_score_improvement_threshold_points",
+        "gocube_win_probability_tolerance",
+        "gocube_main_after_pass_weight",
+        "gocube_cleanup1_weight",
+        "gocube_cleanup2_weight",
+        "gocube_guard_min_games",
+        "gocube_early_double_pass_warning_rate",
+        "gocube_early_double_pass_fatal_rate",
+        "gocube_cleanup2_warning_fraction",
+        "gocube_cleanup2_fatal_fraction",
+        "gocube_score_dominated_pass_fatal_rate",
+        "gocube_score_audit_min_positions",
+    )
+    return {key: getattr(args, key) for key in keys}
+
+
+def ensure_training_manifest(checkpoint_dir: str, run_name: str, game_cls, args=None) -> RunManifest:
     manifest = RunManifest.create(
         run_name=run_name,
         topology=game_cls.topology_kind(),
@@ -263,6 +312,8 @@ def ensure_training_manifest(checkpoint_dir: str, run_name: str, game_cls) -> Ru
         rule_set=game_cls.RULESET,
         komi=game_cls.KOMI,
         terminal_adjudicator=game_cls.TERMINAL_ADJUDICATOR_ID,
+        search_contract=getattr(args, "gocube_search_contract", None) if args is not None else None,
+        search_settings=_search_manifest_settings(args),
     )
     run_dir = os.path.join(checkpoint_dir, run_name)
     write_run_manifest(run_dir, manifest, force=False)
