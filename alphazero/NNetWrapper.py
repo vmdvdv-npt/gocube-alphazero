@@ -1,6 +1,7 @@
 from alphazero.NNetArchitecture import ResNet, FullyConnected
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
 from alphazero.Game import GameState
+from alphazero.search_contract import SearchOutput
 from alphazero.utils import dotdict
 from threading import Event
 from abc import ABC, abstractmethod
@@ -13,6 +14,39 @@ import torch
 import pickle
 import time
 import os
+
+
+_MISSING = object()
+_SEARCH_CONTRACT_ARG_KEYS = (
+    'gocube_katago_search_contract',
+    'gocube_katago_search_reference_commit',
+    'search_utility_mode',
+    'gocube_win_loss_utility_factor',
+    'gocube_static_score_utility_factor',
+    'gocube_dynamic_score_utility_factor',
+    'gocube_dynamic_score_center_zero_weight',
+    'gocube_dynamic_score_center_scale',
+    'gocube_cpuct_exploration',
+    'gocube_cpuct_exploration_log',
+    'gocube_cpuct_exploration_base',
+    'gocube_root_fpu_reduction',
+    'gocube_fpu_parent_weight_by_visited_policy',
+    'gocube_fpu_parent_weight_by_visited_policy_pow',
+    'gocube_root_ending_bonus_points',
+    'gocube_fill_dame_before_pass',
+    'gocube_conservative_pass',
+    'cpuct',
+    'fpu_reduction',
+)
+
+
+def _optional_arg(args, name, default=None):
+    if hasattr(args, 'get'):
+        return args.get(name, default)
+    try:
+        return getattr(args, name)
+    except (AttributeError, KeyError):
+        return default
 
 
 class BaseWrapper(ABC):
@@ -182,8 +216,14 @@ class NNetWrapper(BaseWrapper):
         print()
         return pi_losses.avg, v_losses.avg
 
+    def _prepare_input(self, board: np.ndarray):
+        tensor = torch.FloatTensor(board.astype(np.float64))
+        if self.args.cuda:
+            tensor = tensor.contiguous().cuda()
+        return tensor
+
     def predict(self, board: np.ndarray):
-        board = torch.FloatTensor(board.astype(np.float64))
+        board = self._prepare_input(board)
         if self.args.cuda:
             board = board.contiguous().cuda()
         with torch.no_grad():
@@ -191,6 +231,21 @@ class NNetWrapper(BaseWrapper):
             outputs = self.nnet(board)
             pi, v = outputs[0], outputs[1]
             return torch.exp(pi).data.cpu().numpy()[0], torch.exp(v).data.cpu().numpy()[0]
+
+    def predict_for_search(self, board: np.ndarray) -> SearchOutput:
+        """Return every head needed by production search in one NN forward."""
+
+        board = self._prepare_input(board)
+        with torch.no_grad():
+            self.nnet.eval()
+            outputs = self.nnet(board)
+            pi = torch.exp(outputs[0]).data.cpu().numpy()[0]
+            value = torch.exp(outputs[1]).data.cpu().numpy()[0]
+            if len(outputs) < 4:
+                return SearchOutput(policy=pi, value=value)
+            ownership = torch.exp(outputs[2]).data.cpu().numpy()[0]
+            score = outputs[3].data.cpu().numpy()[0]
+            return SearchOutput(policy=pi, value=value, score=score, ownership=ownership)
 
     def process(self, batch: torch.Tensor):
         batch = batch.type(torch.FloatTensor)
@@ -201,6 +256,23 @@ class NNetWrapper(BaseWrapper):
             outputs = self.nnet(batch)
             pi, v = outputs[0], outputs[1]
             return torch.exp(pi), torch.exp(v)
+
+    def process_for_search(self, batch: torch.Tensor) -> SearchOutput:
+        """Batched four-head search inference with exactly one NN forward."""
+
+        batch = batch.type(torch.FloatTensor)
+        if self.args.cuda:
+            batch = batch.cuda()
+        self.nnet.eval()
+        with torch.no_grad():
+            outputs = self.nnet(batch)
+            pi = torch.exp(outputs[0])
+            value = torch.exp(outputs[1])
+            if len(outputs) < 4:
+                return SearchOutput(policy=pi, value=value)
+            ownership = torch.exp(outputs[2])
+            score = outputs[3]
+            return SearchOutput(policy=pi, value=value, score=score, ownership=ownership)
 
     def loss_pi(self, targets, outputs):
         return -torch.sum(targets * outputs) / targets.size()[0]
@@ -223,12 +295,6 @@ class NNetWrapper(BaseWrapper):
 
     def _checkpoint_contract(self):
         fields = {}
-        mapping = {
-            'gocube_terminal_adjudicator': 'TERMINAL_ADJUDICATOR_ID',
-            'gocube_observation_schema': 'OBSERVATION_SCHEMA',
-            'gocube_topology': None,
-            'gocube_size': None,
-        }
         if hasattr(self.game_cls, 'TERMINAL_ADJUDICATOR_ID'):
             fields['gocube_terminal_adjudicator'] = self.game_cls.TERMINAL_ADJUDICATOR_ID
         if hasattr(self.game_cls, 'OBSERVATION_SCHEMA'):
@@ -238,13 +304,26 @@ class NNetWrapper(BaseWrapper):
             fields['gocube_size'] = self.game_cls.board_size()
         if hasattr(self.game_cls, 'rules_fingerprint'):
             fields['gocube_rules_fingerprint'] = self.game_cls.rules_fingerprint()
+
+        configured_args = getattr(self, 'args', None)
+        configured_contract = _optional_arg(
+            configured_args, 'gocube_katago_search_contract', None
+        ) if configured_args is not None else None
+        if configured_contract:
+            for key in _SEARCH_CONTRACT_ARG_KEYS:
+                value = _optional_arg(configured_args, key, _MISSING)
+                if value is _MISSING:
+                    raise ValueError(f'Missing required configured search-contract field: {key}')
+                fields[key] = value
         return fields
 
-    def _validate_saved_contract(self, saved_args):
+    def _validate_saved_contract(self, saved_args, allow_legacy_search_contract=False):
         expected = self._checkpoint_contract()
         strict_v3 = expected.get('gocube_terminal_adjudicator') == 'gocube-katago-japanese-v3'
         for key, value in expected.items():
             if key not in saved_args:
+                if key in _SEARCH_CONTRACT_ARG_KEYS and allow_legacy_search_contract:
+                    continue
                 if strict_v3:
                     raise ValueError(f'Checkpoint missing required GoCube V3 metadata: {key}')
                 continue
@@ -272,6 +351,7 @@ class NNetWrapper(BaseWrapper):
         use_saved_args=True,
         device=None,
         load_training_state=True,
+        allow_legacy_search_contract=False,
     ) -> Optional[dotdict]:
         filepath = os.path.join(folder, filename)
         if not os.path.exists(filepath):
@@ -283,7 +363,10 @@ class NNetWrapper(BaseWrapper):
         checkpoint = torch.load(filepath, map_location=device) if device else torch.load(filepath)
         args_saved = 'args' in checkpoint
         if args_saved:
-            self._validate_saved_contract(checkpoint['args'])
+            self._validate_saved_contract(
+                checkpoint['args'],
+                allow_legacy_search_contract=allow_legacy_search_contract,
+            )
         elif self._checkpoint_contract().get('gocube_terminal_adjudicator') == 'gocube-katago-japanese-v3':
             raise ValueError('V3 checkpoint has no saved args/contract metadata')
         if use_saved_args and args_saved:

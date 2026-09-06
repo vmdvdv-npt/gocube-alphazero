@@ -52,7 +52,7 @@ class RunManifest:
         topology: str,
         size: int,
         rule_set: str = "japanese",
-        komi: float = 7.5,
+        komi: float | None = None,
         terminal_adjudicator: str | None = None,
     ) -> "RunManifest":
         if terminal_adjudicator is None:
@@ -70,12 +70,26 @@ class RunManifest:
         else:
             raise ManifestError(f"Unsupported terminalAdjudicator: {terminal_adjudicator!r}")
 
+        # Preserve the public validation contract before resolving a concrete
+        # game class. Otherwise an unsupported topology degrades into the less
+        # specific "No game" error from legacy_game_class().
+        if not isinstance(topology, str):
+            raise ManifestError("Run manifest topology must be a string")
+        if topology not in {"cube", "torus"}:
+            raise ManifestError(f"Unsupported topology: {topology!r}")
+
+        try:
+            game_cls = legacy_game_class(topology, size, terminal_adjudicator)
+        except ValueError as exc:
+            raise ManifestError(str(exc)) from exc
+        if komi is None:
+            komi = float(game_cls.KOMI)
+
         observation_schema = None
         fingerprint = None
         rules_version = None
         reference_commit = None
         if version == 3:
-            game_cls = legacy_game_class(topology, size, terminal_adjudicator)
             observation_schema = game_cls.OBSERVATION_SCHEMA
             fingerprint = game_cls.rules_fingerprint()
             rules_version = KATAGO_RULES_VERSION

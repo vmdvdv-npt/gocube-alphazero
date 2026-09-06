@@ -89,6 +89,31 @@ def test_ko_recap_block_and_unblock_use_existing_point_action():
     assert t.action_size == t.point_count + 1
 
 
+def test_ko_recap_block_can_be_lifted_from_empty_ko_capture_point():
+    t, state, capture, recapture = ko_fixture()
+    captured = apply_v3_action(state, capture, t)
+    assert capture in captured.ko_recap_blocked
+    assert captured.board[recapture] == 0
+    assert v3_valid_moves(captured, t)[recapture] == 1
+
+    # KataGo's second pass-for-ko form: playing the empty ko-capture point
+    # removes the recap block but does not place a stone or perform a capture.
+    unblocked = apply_v3_action(captured, recapture, t)
+    assert np.array_equal(unblocked.board, captured.board)
+    assert unblocked.captures == captured.captures
+    assert capture not in unblocked.ko_recap_blocked
+    assert unblocked.current_player == 0
+    assert unblocked.ko_unblock_actions == captured.ko_unblock_actions + 1
+
+    # After the opponent takes a turn, the actual ko recapture is available.
+    after_pass = apply_v3_action(unblocked, t.pass_action, t)
+    assert after_pass.current_player == 1
+    assert v3_valid_moves(after_pass, t)[recapture] == 1
+    recaptured = apply_v3_action(after_pass, recapture, t)
+    assert recaptured.board[recapture] == 2
+    assert recaptured.board[capture] == 0
+
+
 def test_repeated_state_cycle_is_no_result():
     t = rect_topology(3, 3)
     state = v3_state_from_board(t, phase=CLEANUP_1)

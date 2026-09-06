@@ -56,6 +56,7 @@ LEGACY_OBSERVATION_FEATURES = 8
 V2_OBSERVATION_FEATURES = 10
 OBSERVATION_FEATURES = 17
 DEFAULT_KOMI = 7.5
+V3_DEFAULT_KOMI = 0.5
 MAX_CLEANUP_STAGES = 2
 
 
@@ -111,6 +112,7 @@ class _TopologyAdapter(GameState):
 class GoGame(_TopologyAdapter):
     """Production GoCube Japanese-like training game using KataGo Rules V3 semantics."""
 
+    KOMI: ClassVar[float] = V3_DEFAULT_KOMI
     TERMINAL_ADJUDICATOR_ID: ClassVar[str] = KATAGO_JAPANESE_ADJUDICATOR_V3
     OBSERVATION_SCHEMA: ClassVar[str] = OBSERVATION_SCHEMA_V3
     OBSERVATION_FEATURES: ClassVar[int] = OBSERVATION_FEATURES
