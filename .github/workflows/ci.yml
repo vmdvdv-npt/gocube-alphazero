@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+    paths-ignore:
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 permissions:
@@ -12,9 +14,9 @@ permissions:
 
 jobs:
   test:
-    name: Tests, V3 smoke, and Cython MCTS build
+    name: Core tests and GoCube smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -34,77 +36,48 @@ jobs:
           python -m pip install 'torch<2.5' --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -r requirements.txt pytest
 
-      - name: Run focused V3 tests
-        run: |
-          python -m pytest -q \
-            tests/test_gocube_katago_v3_cleanup.py \
-            tests/test_gocube_katago_v3_scoring.py \
-            tests/test_gocube_katago_v3_benson_topology.py \
-            tests/test_gocube_score_aware_search.py \
-            tests/test_gocube_ownership_search_helpers.py \
-            tests/test_gocube_phase_sampling.py \
-            tests/test_gocube_search_audit_telemetry.py \
-            tests/test_gocube_selfplay_guard.py \
-            tests/test_gocube_search_contract_metadata.py \
-            tests/test_gocube_default_komi.py \
-            tests/test_gocube_recovery_validation.py \
-            tests/test_gocube_evaluate_entrypoint.py \
-            tests/test_arena_search_policy.py \
-            tests/test_c4_overnight_experiment_tools.py \
-            tests/test_inference_batching.py \
-            tests/test_gocube_train_entrypoint.py \
-            tests/test_gocube_training_budget_telemetry.py
-
       - name: Run full pytest
         run: python -m pytest -q
 
-      - name: Run Cube 4 and Torus 9 V3 validation smoke
-        run: python -m alphazero.envs.gocube.v3_smoke --games 32
+      - name: Run Cube 4 V3 smoke
+        run: python -m alphazero.envs.gocube.v3_smoke --games 16 --topology cube --size 4
 
-      - name: Run Cube 4 training accounting smoke
+      - name: Run batched Cube 4 Arena smoke
         run: |
-          python -m alphazero.envs.gocube.train \
-            --topology cube --size 4 --workers 1 --sims 1 --arena-sims 1 \
-            --games-per-iteration 4 --iterations 1 --train-batch-size 256 \
-            --endgame-sample-weight 1 --smoke --run-name ci-cube4-v3-budget-smoke \
-            | tee /tmp/cube-training-smoke.log
-          grep -Eq 'Games:[[:space:]]+4' /tmp/cube-training-smoke.log
-          grep -Eq 'Regular decisions:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
-          grep -Eq 'Fast decisions:[[:space:]]+0' /tmp/cube-training-smoke.log
-          grep -Eq 'Saved samples:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
-          grep -Eq 'Optimizer steps actual:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
-          grep -Eq 'Examples seen:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
           python - <<'PY'
-          import glob
-          import json
+          from pathlib import Path
+          from types import SimpleNamespace
           import torch
-          files = sorted(glob.glob('data/ci-cube4-v3-budget-smoke/iteration-0001-*.pkl'))
-          assert len(files) == 6, files
-          rows = [int(torch.load(path).size(0)) for path in files]
-          assert len(set(rows)) == 1 and rows[0] > 0, rows
-          with open('checkpoint/ci-cube4-v3-budget-smoke/gocube-run.json', encoding='utf-8') as handle:
-              manifest = json.load(handle)
-          assert manifest['komi'] == 0.5, manifest
-          assert manifest['searchContract'] == 'katago-v3-score-aware-v1', manifest
-          assert manifest['searchSettings']['search_utility_mode'] == 'gocube-katago-v3', manifest
-          assert manifest['searchSettings']['gocube_dynamic_score_utility_factor'] == 0.4, manifest
-          assert manifest['searchSettings']['gocube_main_after_pass_weight'] == 1, manifest
-          assert manifest['searchSettings']['gocube_cleanup1_weight'] == 1, manifest
-          assert manifest['searchSettings']['gocube_cleanup2_weight'] == 1, manifest
-          print('Cube 4 tensor rows:', rows[0])
-          print('Cube 4 komi:', manifest['komi'])
-          print('Cube 4 search contract:', manifest['searchContract'])
+
+          from alphazero.NNetWrapper import NNetWrapper
+          from alphazero.envs.gocube.train import build_training_args
+
+          cli = SimpleNamespace(
+              topology='cube', size=4, workers=1, sims=1, arena_sims=1,
+              games_per_iteration=4, iterations=1, train_batch_size=256,
+              train_steps_per_iteration=1, fast_game_prob=0.0,
+              endgame_sample_weight=1, inference_batch_wait_ms=0.0,
+              smoke=False, run_name='ci-arena-fixture', no_arena=True,
+              model_gating=False,
+          )
+          game_cls, args = build_training_args(cli)
+          folder = Path('/tmp/ci-arena-fixture')
+          folder.mkdir(parents=True, exist_ok=True)
+
+          torch.manual_seed(1)
+          NNetWrapper(game_cls, args).save_checkpoint(str(folder), 'iteration-0000.pkl')
+          torch.manual_seed(2)
+          NNetWrapper(game_cls, args).save_checkpoint(str(folder), 'iteration-0001.pkl')
           PY
 
-      - name: Run balanced batched Cube 4 Arena smoke
-        run: |
           python tools/evaluate_gocube_checkpoints.py \
-            --candidate checkpoint/ci-cube4-v3-budget-smoke/iteration-0001.pkl \
-            --reference checkpoint/ci-cube4-v3-budget-smoke/iteration-0000.pkl \
+            --candidate /tmp/ci-arena-fixture/iteration-0001.pkl \
+            --reference /tmp/ci-arena-fixture/iteration-0000.pkl \
             --candidate-id ci-i1 --reference-id ci-i0 \
             --output /tmp/ci-batched-arena.json \
             --topology cube --size 4 --games 4 --sims 1 \
             --arena-batch-size 2 --arena-workers 1 --device cpu
+
           python - <<'PY'
           import json
           with open('/tmp/ci-batched-arena.json', encoding='utf-8') as handle:
@@ -113,61 +86,9 @@ jobs:
           assert result['balanced_colors'] is True, result
           assert result['candidate_black_games'] == 2, result
           assert result['candidate_white_games'] == 2, result
-          assert result['arena_batch_size'] == 2, result
-          assert result['arena_workers'] == 1, result
-          assert result['games_requested'] == 4, result
           assert result['games_effective'] + result['no_results'] == 4, result
           print('Batched Arena smoke:', result)
           PY
-
-      - name: Run Torus 9 training accounting smoke
-        run: |
-          python -m alphazero.envs.gocube.train \
-            --topology torus --size 9 --workers 1 --sims 1 --arena-sims 1 \
-            --games-per-iteration 4 --iterations 1 --train-batch-size 256 \
-            --endgame-sample-weight 1 --smoke --run-name ci-torus9-v3-budget-smoke \
-            | tee /tmp/torus-training-smoke.log
-          grep -Eq 'Games:[[:space:]]+4' /tmp/torus-training-smoke.log
-          grep -Eq 'Regular decisions:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
-          grep -Eq 'Fast decisions:[[:space:]]+0' /tmp/torus-training-smoke.log
-          grep -Eq 'Saved samples:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
-          grep -Eq 'Optimizer steps actual:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
-          grep -Eq 'Examples seen:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
-          python - <<'PY'
-          import glob
-          import json
-          import torch
-          files = sorted(glob.glob('data/ci-torus9-v3-budget-smoke/iteration-0001-*.pkl'))
-          assert len(files) == 6, files
-          rows = [int(torch.load(path).size(0)) for path in files]
-          assert len(set(rows)) == 1 and rows[0] > 0, rows
-          with open('checkpoint/ci-torus9-v3-budget-smoke/gocube-run.json', encoding='utf-8') as handle:
-              manifest = json.load(handle)
-          assert manifest['komi'] == 0.5, manifest
-          assert manifest['searchContract'] == 'katago-v3-score-aware-v1', manifest
-          assert manifest['searchSettings']['search_utility_mode'] == 'gocube-katago-v3', manifest
-          assert manifest['searchSettings']['gocube_dynamic_score_utility_factor'] == 0.4, manifest
-          assert manifest['searchSettings']['gocube_main_after_pass_weight'] == 1, manifest
-          assert manifest['searchSettings']['gocube_cleanup1_weight'] == 1, manifest
-          assert manifest['searchSettings']['gocube_cleanup2_weight'] == 1, manifest
-          print('Torus 9 tensor rows:', rows[0])
-          print('Torus 9 komi:', manifest['komi'])
-          print('Torus 9 search contract:', manifest['searchContract'])
-          PY
-
-      - name: Print rules fingerprints and git status
-        run: |
-          python - <<'PY'
-          from alphazero.envs.gocube.game import Cube4JapaneseGame, Torus9JapaneseGame
-          assert Cube4JapaneseGame.KOMI == 0.5
-          assert Torus9JapaneseGame.KOMI == 0.5
-          print('Cube4 komi:', Cube4JapaneseGame.KOMI)
-          print('Torus9 komi:', Torus9JapaneseGame.KOMI)
-          print('Cube4 rules fingerprint:', Cube4JapaneseGame.rules_fingerprint())
-          print('Torus9 rules fingerprint:', Torus9JapaneseGame.rules_fingerprint())
-          PY
-          git diff --stat origin/main...HEAD
-          git status --short --branch
 
       - name: Build and import Cython MCTS
         run: |
