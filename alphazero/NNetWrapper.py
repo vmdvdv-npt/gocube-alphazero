@@ -298,15 +298,12 @@ class NNetWrapper(BaseWrapper):
         if hasattr(self.game_cls, 'rules_fingerprint'):
             fields['gocube_rules_fingerprint'] = self.game_cls.rules_fingerprint()
 
-        # Search semantics are versioned independently from rules semantics.
-        # Only wrappers explicitly configured for the new contract enforce it,
-        # so historical V3 checkpoints remain available through the explicit
-        # diagnostic compatibility path below.
-        if getattr(self.args, 'gocube_search_contract', None):
+        configured_args = getattr(self, 'args', None)
+        if configured_args is not None and getattr(configured_args, 'gocube_search_contract', None):
             for key in _SEARCH_CONTRACT_ARG_KEYS:
-                if not hasattr(self.args, key):
+                if not hasattr(configured_args, key):
                     raise ValueError(f'Missing required configured search-contract field: {key}')
-                fields[key] = getattr(self.args, key)
+                fields[key] = getattr(configured_args, key)
         return fields
 
     def _validate_saved_contract(self, saved_args, allow_legacy_search_contract=False):
