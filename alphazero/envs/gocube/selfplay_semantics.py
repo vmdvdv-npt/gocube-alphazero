@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from typing import Any
 
@@ -22,6 +23,9 @@ KATAGO_CLEANUP_TRAINING_DEFAULTS = {
     "policy_temperature": 2.0 / 3.0,
 }
 
+PINNED_OBSERVATION_SCHEMA = "gocube-observation-v4-pass-would-end-phase"
+PASS_WOULD_END_PHASE_CHANNEL = 17
+
 
 def pass_would_end_phase(state: V3State) -> bool:
     """Return whether PASS would end the current V3 phase/game.
@@ -40,20 +44,62 @@ def pass_would_end_phase(state: V3State) -> bool:
 
 
 def apply_pass_would_end_phase_feature(game: Any, observation: np.ndarray) -> np.ndarray:
-    """Use V3 observation plane 5 as KataGo's passWouldEndPhase signal.
+    """Fill KataGo's dedicated passWouldEndPhase input plane.
 
-    The tensor shape stays unchanged. Legacy/non-V3 games are returned exactly
-    as supplied. Pinned search and pinned training samples both call this helper,
-    so inference and targets see the same feature semantics.
+    GoCube represents global inputs as constant spatial planes. Pinned training
+    expands V3 from 17 to 18 planes and reserves plane 17 for this exact bit;
+    the old consecutive-pass plane 5 remains unchanged.
     """
 
     state = getattr(game, "semantic_state", None)
     if not isinstance(state, V3State):
         return observation
     result = np.asarray(observation).copy()
-    if result.ndim >= 1 and result.shape[0] >= 6:
-        result[5] = 1.0 if pass_would_end_phase(state) else 0.0
+    if result.ndim < 1 or result.shape[0] <= PASS_WOULD_END_PHASE_CHANNEL:
+        raise ValueError(
+            "Pinned V3 observation is missing the dedicated passWouldEndPhase plane"
+        )
+    result[PASS_WOULD_END_PHASE_CHANNEL] = 1.0 if pass_would_end_phase(state) else 0.0
     return result
+
+
+def install_pinned_observation_contract(game_cls):
+    """Expand the pinned pilot observation from 17 to 18 planes, idempotently."""
+
+    if getattr(game_cls, "_PINNED_PASS_WOULD_END_PHASE_INSTALLED", False):
+        return game_cls
+
+    original_features = int(game_cls.OBSERVATION_FEATURES)
+    if original_features != PASS_WOULD_END_PHASE_CHANNEL:
+        raise ValueError(
+            f"Pinned passWouldEndPhase contract expected {PASS_WOULD_END_PHASE_CHANNEL} V3 planes, "
+            f"got {original_features}"
+        )
+
+    original_observation = game_cls.observation
+    original_rules_fingerprint = game_cls.rules_fingerprint
+
+    def observation(self):
+        # observation_size() reads the class feature count dynamically, so after
+        # installing the contract the original V3 encoder allocates 18 planes
+        # and leaves the new final plane free for the exact pass-end bit.
+        result = original_observation(self)
+        return apply_pass_would_end_phase_feature(self, result)
+
+    def rules_fingerprint(cls):
+        base = original_rules_fingerprint()
+        payload = (
+            f"{base}|observation={PINNED_OBSERVATION_SCHEMA}"
+            f"|passWouldEndPhaseChannel={PASS_WOULD_END_PHASE_CHANNEL}"
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    game_cls.OBSERVATION_FEATURES = PASS_WOULD_END_PHASE_CHANNEL + 1
+    game_cls.OBSERVATION_SCHEMA = PINNED_OBSERVATION_SCHEMA
+    game_cls.observation = observation
+    game_cls.rules_fingerprint = classmethod(rules_fingerprint)
+    game_cls._PINNED_PASS_WOULD_END_PHASE_INSTALLED = True
+    return game_cls
 
 
 def rebase_cleanup_training_state(state: V3State, target_phase: str) -> V3State:
@@ -61,8 +107,9 @@ def rebase_cleanup_training_state(state: V3State, target_phase: str) -> V3State:
 
     KataGo's cleanup-training path policy-initializes a board and then clears
     BoardHistory into encore phase 1 or 2. GoCube mirrors that by preserving the
-    board and player to move while clearing game-history-dependent state. Prelude
-    captures and moves are setup, not part of the synthetic training game.
+    board and player to move while clearing history-dependent state. Captures are
+    retained because KataGo stores them on Board, while GoCube stores their
+    equivalent count on V3State.
     """
 
     if target_phase not in (CLEANUP_1, CLEANUP_2):
@@ -76,7 +123,7 @@ def rebase_cleanup_training_state(state: V3State, target_phase: str) -> V3State:
         state,
         turns=0,
         consecutive_passes=0,
-        captures=(0, 0),
+        captures=state.captures,
         previous_board=None,
         phase=target_phase,
         ko_recap_blocked=(),
