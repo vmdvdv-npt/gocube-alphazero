@@ -53,7 +53,7 @@ jobs:
           from alphazero.envs.gocube.train import build_training_args
 
           cli = SimpleNamespace(
-              topology='cube', size=4, workers=1, sims=1, arena_sims=1,
+              topology='cube', size=4, workers=1, sims=2, arena_sims=2,
               games_per_iteration=4, iterations=1, train_batch_size=256,
               train_steps_per_iteration=1, fast_game_prob=0.0,
               endgame_sample_weight=1, inference_batch_wait_ms=0.0,
@@ -75,7 +75,7 @@ jobs:
             --reference /tmp/ci-arena-fixture/iteration-0000.pkl \
             --candidate-id ci-i1 --reference-id ci-i0 \
             --output /tmp/ci-batched-arena.json \
-            --topology cube --size 4 --games 4 --sims 1 \
+            --topology cube --size 4 --games 4 --sims 2 \
             --arena-batch-size 2 --arena-workers 1 --device cpu
 
           python - <<'PY'
