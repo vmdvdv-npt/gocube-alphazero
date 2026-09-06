@@ -103,8 +103,8 @@ def test_cube4_from_scratch_defaults_pin_requested_experiment_dimensions():
 
     # The abandoned branch used local recovery thresholds. The clean port has
     # no such knobs in the new experiment contract.
-    assert not hasattr(args, "gocube_score_improvement_threshold_points")
-    assert not hasattr(args, "gocube_win_probability_tolerance")
+    assert "gocube_score_improvement_threshold_points" not in args
+    assert "gocube_win_probability_tolerance" not in args
 
 
 def test_pinned_mcts_consumes_all_heads_and_searches_cube4():

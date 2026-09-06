@@ -12,6 +12,15 @@ from alphazero.envs.gocube.records import reserve_game_id
 from alphazero.search_contract import KATAGO_PINNED_SEARCH_UTILITY_MODE
 
 
+def _optional_arg(args, name, default):
+    if hasattr(args, 'get'):
+        return args.get(name, default)
+    try:
+        return getattr(args, name)
+    except (AttributeError, KeyError):
+        return default
+
+
 class SelfPlayAgent(mp.Process):
     def __init__(self, id, game_cls, ready_queue, batch_ready, batch_tensor, policy_tensor,
                  value_tensor, output_queue, result_queue, complete_count, games_played,
@@ -47,7 +56,7 @@ class SelfPlayAgent(mp.Process):
         self._is_warmup = _is_warmup
         self.telemetry = telemetry
         self.score_aware = (
-            getattr(args, 'search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
+            _optional_arg(args, 'search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
         )
         if self.score_aware and not _is_warmup and (score_tensor is None or ownership_tensor is None):
             raise ValueError('KataGo-derived SelfPlayAgent requires score_tensor and ownership_tensor')
@@ -160,7 +169,7 @@ class SelfPlayAgent(mp.Process):
                 if self.ownership_tensor is not None:
                     self.ownership_tensor[i].copy_(self._WARMUP_OWNERSHIP)
                 continue
-            observation = self._mcts(i).search_observation(state) if self.score_aware else state.observation()
+            observation = self._mcts(i).search_observation(state) if getattr(self, 'score_aware', False) else state.observation()
             data = torch.from_numpy(observation)
             if self._is_arena:
                 data = data.view(-1, *state.observation_size())
@@ -187,7 +196,7 @@ class SelfPlayAgent(mp.Process):
         for i in range(self.batch_size):
             self._check_pause()
             index = self.batch_indices[i] if self._is_arena else i
-            if self.score_aware:
+            if getattr(self, 'score_aware', False):
                 self._mcts(i).process_search_results(
                     self.games[i],
                     self.value_tensor[index].data.numpy(),

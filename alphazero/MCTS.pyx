@@ -36,6 +36,15 @@ _TOTAL_CHILD_WEIGHT_PUCT_OFFSET = 0.01
 np.seterr(all='raise')
 
 
+def _optional_arg(args, name, default):
+    if hasattr(args, 'get'):
+        return args.get(name, default)
+    try:
+        return getattr(args, name)
+    except (AttributeError, KeyError):
+        return default
+
+
 cdef class Node:
     cdef public list _children
     cdef public int a
@@ -139,30 +148,30 @@ cdef class MCTS:
         self.fpu_reduction = args.fpu_reduction
         self.cpuct = args.cpuct
         self._num_players = args._num_players
-        self.search_utility_mode = getattr(args, 'search_utility_mode', 'legacy')
+        self.search_utility_mode = _optional_arg(args, 'search_utility_mode', 'legacy')
         self._katago_search = self.search_utility_mode == KATAGO_PINNED_SEARCH_UTILITY_MODE
         self._force_legacy_search = False
 
-        self.win_loss_utility_factor = float(getattr(args, 'gocube_win_loss_utility_factor', 1.0))
-        self.static_score_utility_factor = float(getattr(args, 'gocube_static_score_utility_factor', 0.0))
-        self.dynamic_score_utility_factor = float(getattr(args, 'gocube_dynamic_score_utility_factor', 0.30))
+        self.win_loss_utility_factor = float(_optional_arg(args, 'gocube_win_loss_utility_factor', 1.0))
+        self.static_score_utility_factor = float(_optional_arg(args, 'gocube_static_score_utility_factor', 0.0))
+        self.dynamic_score_utility_factor = float(_optional_arg(args, 'gocube_dynamic_score_utility_factor', 0.30))
         self.dynamic_score_center_zero_weight = float(
-            getattr(args, 'gocube_dynamic_score_center_zero_weight', 0.25)
+            _optional_arg(args, 'gocube_dynamic_score_center_zero_weight', 0.25)
         )
-        self.dynamic_score_center_scale = float(getattr(args, 'gocube_dynamic_score_center_scale', 0.50))
-        self.cpuct_exploration = float(getattr(args, 'gocube_cpuct_exploration', self.cpuct))
-        self.cpuct_exploration_log = float(getattr(args, 'gocube_cpuct_exploration_log', 0.0))
-        self.cpuct_exploration_base = float(getattr(args, 'gocube_cpuct_exploration_base', 500.0))
-        self.root_fpu_reduction = float(getattr(args, 'gocube_root_fpu_reduction', 0.0))
+        self.dynamic_score_center_scale = float(_optional_arg(args, 'gocube_dynamic_score_center_scale', 0.50))
+        self.cpuct_exploration = float(_optional_arg(args, 'gocube_cpuct_exploration', self.cpuct))
+        self.cpuct_exploration_log = float(_optional_arg(args, 'gocube_cpuct_exploration_log', 0.0))
+        self.cpuct_exploration_base = float(_optional_arg(args, 'gocube_cpuct_exploration_base', 500.0))
+        self.root_fpu_reduction = float(_optional_arg(args, 'gocube_root_fpu_reduction', 0.0))
         self.fpu_parent_weight_by_visited_policy = bool(
-            getattr(args, 'gocube_fpu_parent_weight_by_visited_policy', True)
+            _optional_arg(args, 'gocube_fpu_parent_weight_by_visited_policy', True)
         )
         self.fpu_parent_weight_by_visited_policy_pow = float(
-            getattr(args, 'gocube_fpu_parent_weight_by_visited_policy_pow', 2.0)
+            _optional_arg(args, 'gocube_fpu_parent_weight_by_visited_policy_pow', 2.0)
         )
-        self.root_ending_bonus_points = float(getattr(args, 'gocube_root_ending_bonus_points', 0.5))
-        self.fill_dame_before_pass = bool(getattr(args, 'gocube_fill_dame_before_pass', True))
-        self.conservative_pass = bool(getattr(args, 'gocube_conservative_pass', True))
+        self.root_ending_bonus_points = float(_optional_arg(args, 'gocube_root_ending_bonus_points', 0.5))
+        self.fill_dame_before_pass = bool(_optional_arg(args, 'gocube_fill_dame_before_pass', True))
+        self.conservative_pass = bool(_optional_arg(args, 'gocube_conservative_pass', True))
 
         self._root = Node(-1, self._num_players)
         self._curnode = self._root
