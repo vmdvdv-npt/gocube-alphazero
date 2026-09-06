@@ -43,7 +43,13 @@ def evaluate_selfplay_guard(
         + telemetry.get("phase_cleanup1_decisions", 0)
         + telemetry.get("phase_cleanup2_decisions", 0)
     )
-    early_count = int(telemetry.get("main_double_pass_within_2", 0))
+    early_within_2 = int(telemetry.get("main_double_pass_within_2", 0))
+    early_within_4 = int(telemetry.get("main_double_pass_within_4", 0))
+    early_within_8 = int(telemetry.get("main_double_pass_within_8", 0))
+    # On both Cube4 and Torus9, ending MAIN inside the first eight plies is
+    # unambiguously premature. Using only <=2 missed the fixed-20 recovery
+    # pathology where 45% of games double-passed by ply 4.
+    early_count = early_within_8
     early_rate = early_count / games if games else 0.0
     cleanup2_decisions = int(telemetry.get("phase_cleanup2_decisions", 0))
     cleanup2_fraction = cleanup2_decisions / total_decisions if total_decisions else 0.0
@@ -53,7 +59,9 @@ def evaluate_selfplay_guard(
 
     metrics: dict[str, float | int] = {
         "games": games,
-        "main_double_pass_within_2": early_count,
+        "main_double_pass_within_2": early_within_2,
+        "main_double_pass_within_4": early_within_4,
+        "main_double_pass_within_8": early_within_8,
         "main_early_double_pass_rate": early_rate,
         "cleanup2_decisions": cleanup2_decisions,
         "total_phase_decisions": total_decisions,
@@ -76,13 +84,13 @@ def evaluate_selfplay_guard(
     if games >= min_games:
         if early_rate >= early_fatal:
             fatal.append(
-                f"early MAIN double-pass rate {early_rate:.2%} >= fatal {early_fatal:.2%} "
-                f"({early_count}/{games})"
+                f"early MAIN double-pass by ply 8 rate {early_rate:.2%} >= fatal {early_fatal:.2%} "
+                f"({early_count}/{games}; <=2:{early_within_2}, <=4:{early_within_4})"
             )
         elif early_rate >= early_warning:
             warnings.append(
-                f"early MAIN double-pass rate {early_rate:.2%} >= warning {early_warning:.2%} "
-                f"({early_count}/{games})"
+                f"early MAIN double-pass by ply 8 rate {early_rate:.2%} >= warning {early_warning:.2%} "
+                f"({early_count}/{games}; <=2:{early_within_2}, <=4:{early_within_4})"
             )
 
         if cleanup2_fraction > cleanup_fatal:
@@ -96,7 +104,7 @@ def evaluate_selfplay_guard(
 
     if audited >= audit_min and dominated_rate >= dominated_fatal:
         fatal.append(
-            f"score-dominated second-PASS rate {dominated_rate:.2%} >= fatal {dominated_fatal:.2%} "
+            f"escaped score-dominated second-PASS rate {dominated_rate:.2%} >= fatal {dominated_fatal:.2%} "
             f"({dominated}/{audited} audited positions)"
         )
 
