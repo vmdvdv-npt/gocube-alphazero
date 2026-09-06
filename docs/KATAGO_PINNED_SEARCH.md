@@ -61,11 +61,34 @@ Root ending bonuses are precomputed once per root, then converted through score 
 
 The code also retains an implementation of KataGo's `fillDameBeforePass` heuristic and a GoCube observation adaptation for `conservativePass` for explicit non-self-play use. Neither is enabled by the pinned self-play training profile, matching KataGo's effective `selfplay8b20.cfg` settings.
 
+### `passWouldEndPhase`
+
+Pinned KataGo gives the neural net a dedicated `passWouldEndPhase` input rather than approximating it solely from the previous move. GoCube now computes the same semantic question from the actual V3 PASS transition: PASS ends the phase when it would produce two consecutive ending passes **or** when the same player is passing again from a recorded same-player pass state.
+
+The pinned self-play path reuses existing observation plane 5 for this exact boolean, so the tensor shape remains unchanged. The same transformation is applied both when the network is queried during pinned search and when pinned self-play samples are written, avoiding an inference/training feature mismatch.
+
 `rootPruneUselessMoves` is **not yet enabled**. KataGo's implementation requires the last four opponent moves explicitly; GoCube V3 does not currently retain the equivalent ordered move history in semantic state. Rather than invent a replacement threshold, the behavior is left disabled until the required state is represented directly.
 
 ## Cleanup PASS-for-ko
 
 The V3 rules engine implements both pass-for-ko forms in pinned KataGo. In cleanup, a player can lift a ko-recapture block either by choosing the blocked opposing single stone in atari, or by choosing the empty ko-capture point whose unique capturable one-stone target is that blocked stone. Both consume the turn, clear the relevant block, and leave the board unchanged. The normal `point_count + PASS` action space is sufficient; no extra action is added.
+
+## KataGo cleanup/encore training
+
+Pinned KataGo deliberately dedicates a small amount of self-play to teaching the encore phases. The corresponding `play.cpp` path is now represented in the GoCube pinned self-play entrypoint:
+
+- probability per eligible pinned self-play game: `0.04`;
+- policy-initialization mean: `0.25 * logicalPointCount` moves;
+- gamma shape: `1.0` (the pinned default), so the prelude length is exponentially distributed around that mean;
+- PASS is excluded during the policy prelude;
+- policy sampling temperature: `2/3`;
+- after the prelude, choose `CLEANUP_1` or `CLEANUP_2` with equal probability;
+- preserve the initialized board and player to move, but clear move history, captures, pass state, ko-recap state, cycle history, counters, and prior training samples before the synthetic cleanup game begins;
+- when starting directly in `CLEANUP_2`, the rebased board is also the `second_cleanup_start_colors` reference position.
+
+The prelude uses the raw root network policy captured from the normal coalesced inference path; its positions are setup and are not written as training samples. This avoids an additional network-forward path while preserving KataGo's policy-initialization intent. If game recording is enabled, prelude moves are omitted and the first recorded cleanup move carries the non-empty synthetic training-start board metadata.
+
+One deliberate adaptation remains: pinned KataGo calls `adjustKomiToEven` before rebasing cleanup training. GoCube V3 currently has class-level fixed komi, so this change keeps the experiment's `0.5` komi rather than inventing per-game dynamic-komi state. Dynamic/evened komi can be treated as a separate training-methodology change later.
 
 ## Terminal treatment
 
@@ -106,5 +129,8 @@ Defaults:
 - random-MCTS warmup: disabled; iteration 0 starts from a randomly initialized network and policy-guided self-play
 - `conservativePass = false`
 - `fillDameBeforePass = false`
+- cleanup/encore training probability: `0.04`
+- cleanup policy-prelude mean: `0.25 * logicalPointCount`
+- cleanup target phase: uniformly `CLEANUP_1` / `CLEANUP_2`
 
 Search noise, move temperature, games/iteration, network size, optimizer, learning rate, and other training-scale parameters remain experiment dimensions rather than being claimed universal KataGo constants.

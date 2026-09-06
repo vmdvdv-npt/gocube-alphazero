@@ -11,6 +11,7 @@ from alphazero.Coach import TrainState, _set_state
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
+from alphazero.envs.gocube.selfplay_semantics import KATAGO_CLEANUP_TRAINING_DEFAULTS
 from alphazero.envs.gocube.train import GoCubeCoach, build_training_args, print_training_configuration
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
@@ -158,6 +159,7 @@ class KataGoSearchCoach(GoCubeCoach):
 
 
 def parse_args(argv=None):
+    cleanup_defaults = KATAGO_CLEANUP_TRAINING_DEFAULTS
     parser = argparse.ArgumentParser(
         description="Train GoCube from scratch with search semantics ported from pinned KataGo"
     )
@@ -173,6 +175,18 @@ def parse_args(argv=None):
     parser.add_argument("--fast-game-prob", type=float, default=0.25)
     parser.add_argument("--endgame-sample-weight", type=int, default=1)
     parser.add_argument("--inference-batch-wait-ms", type=float, default=1.0)
+    parser.add_argument(
+        "--cleanup-training-prob",
+        type=float,
+        default=cleanup_defaults["probability"],
+        help="KataGo-style probability of rebasing a self-play game into cleanup/encore training.",
+    )
+    parser.add_argument(
+        "--cleanup-training-prelude-area-prop",
+        type=float,
+        default=cleanup_defaults["prelude_area_prop"],
+        help="Mean pure-policy prelude length as a fraction of logical board area.",
+    )
     parser.add_argument("--no-arena", action="store_true")
     parser.add_argument("--model-gating", action="store_true")
     parser.add_argument("--smoke", action="store_true")
@@ -188,6 +202,7 @@ def parse_args(argv=None):
 def build_katago_training_args(cli):
     game_cls, args = build_training_args(cli)
     defaults = KATAGO_SEARCH_DEFAULTS
+    cleanup_defaults = KATAGO_CLEANUP_TRAINING_DEFAULTS
 
     args.search_utility_mode = KATAGO_PINNED_SEARCH_UTILITY_MODE
     # This is intentionally metadata only here. The checkpoint already saves the
@@ -214,6 +229,14 @@ def build_katago_training_args(cli):
     args.gocube_root_ending_bonus_points = defaults["root_ending_bonus_points"]
     args.gocube_fill_dame_before_pass = defaults["fill_dame_before_pass"]
     args.gocube_conservative_pass = defaults["conservative_pass"]
+
+    # KataGo's self-play path dedicates a small fraction of territory-scoring
+    # games to cleanup/encore training. Its policy-init gamma shape defaults to
+    # 1.0 and cleanup uses a 2/3 policy temperature at the pinned commit.
+    args.gocube_cleanup_training_prob = float(cli.cleanup_training_prob)
+    args.gocube_cleanup_training_prelude_area_prop = float(cli.cleanup_training_prelude_area_prop)
+    args.gocube_cleanup_training_gamma_shape = cleanup_defaults["prelude_gamma_shape"]
+    args.gocube_cleanup_training_policy_temperature = cleanup_defaults["policy_temperature"]
 
     # Keep the framework fields aligned with the pinned KataGo values that are
     # actually consumed by MCTS. The experiment dimensions requested by the user
@@ -264,6 +287,10 @@ def print_katago_search_configuration(args):
     print(f"  root ending bonus points = {args.gocube_root_ending_bonus_points:g}")
     print(f"  fill dame before pass = {args.gocube_fill_dame_before_pass}")
     print(f"  conservative pass = {args.gocube_conservative_pass}")
+    print(f"  cleanup training probability = {args.gocube_cleanup_training_prob:g}")
+    print(f"  cleanup prelude area proportion = {args.gocube_cleanup_training_prelude_area_prop:g}")
+    print(f"  cleanup prelude gamma shape = {args.gocube_cleanup_training_gamma_shape:g}")
+    print(f"  cleanup policy temperature = {args.gocube_cleanup_training_policy_temperature:g}")
 
 
 def main(argv=None):
