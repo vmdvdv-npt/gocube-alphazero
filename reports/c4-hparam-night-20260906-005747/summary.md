@@ -11,7 +11,7 @@
 
 ## Decision status
 
-Only common-parent evidence is available so far; branch B currently leads at score 0.542. Treat this as provisional until a same-depth A comparison completes.
+Only common-parent evidence is available so far; branch D currently leads at score 0.750. Treat this as provisional until a same-depth A comparison completes.
 
 Primary ranking is based on fixed-Arena playing strength, with wall-clock cost shown alongside it. Training losses are diagnostics only.
 
@@ -48,11 +48,12 @@ Primary ranking is based on fixed-Arena playing strength, with wall-clock cost s
 | A@6 | parent@5 | 24 | 11-13-0-0 | 0.458 | 0.279-0.649 | 26.3 min |
 | B@6 | parent@5 | 24 | 13-11-0-0 | 0.542 | 0.351-0.721 | 26.8 min |
 | C@6 | parent@5 | 24 | 12-12-0-0 | 0.500 | 0.314-0.686 | 27.1 min |
+| D@6 | parent@5 | 24 | 18-6-0-0 | 0.750 | 0.551-0.880 | 27.0 min |
 
 ## Axis readout after the first descendant iteration
 
 - **pfast:** B=0.542, C=0.500.
-- **sims:** D=pending, E=pending.
+- **sims:** D=0.750, E=pending.
 - **games:** F=pending, G=pending.
 
 ## Report completeness
