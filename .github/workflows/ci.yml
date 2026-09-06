@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -47,6 +48,9 @@ jobs:
             tests/test_gocube_search_contract_metadata.py \
             tests/test_gocube_default_komi.py \
             tests/test_gocube_recovery_validation.py \
+            tests/test_gocube_evaluate_entrypoint.py \
+            tests/test_arena_search_policy.py \
+            tests/test_c4_overnight_experiment_tools.py \
             tests/test_inference_batching.py \
             tests/test_gocube_train_entrypoint.py \
             tests/test_gocube_training_budget_telemetry.py
@@ -90,6 +94,30 @@ jobs:
           print('Cube 4 tensor rows:', rows[0])
           print('Cube 4 komi:', manifest['komi'])
           print('Cube 4 search contract:', manifest['searchContract'])
+          PY
+
+      - name: Run balanced batched Cube 4 Arena smoke
+        run: |
+          python tools/evaluate_gocube_checkpoints.py \
+            --candidate checkpoint/ci-cube4-v3-budget-smoke/iteration-0001.pkl \
+            --reference checkpoint/ci-cube4-v3-budget-smoke/iteration-0000.pkl \
+            --candidate-id ci-i1 --reference-id ci-i0 \
+            --output /tmp/ci-batched-arena.json \
+            --topology cube --size 4 --games 4 --sims 1 \
+            --arena-batch-size 2 --arena-workers 1 --device cpu
+          python - <<'PY'
+          import json
+          with open('/tmp/ci-batched-arena.json', encoding='utf-8') as handle:
+              result = json.load(handle)
+          assert result['batched'] is True, result
+          assert result['balanced_colors'] is True, result
+          assert result['candidate_black_games'] == 2, result
+          assert result['candidate_white_games'] == 2, result
+          assert result['arena_batch_size'] == 2, result
+          assert result['arena_workers'] == 1, result
+          assert result['games_requested'] == 4, result
+          assert result['games_effective'] + result['no_results'] == 4, result
+          print('Batched Arena smoke:', result)
           PY
 
       - name: Run Torus 9 training accounting smoke
