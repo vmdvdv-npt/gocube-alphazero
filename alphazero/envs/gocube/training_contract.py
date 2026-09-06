@@ -135,6 +135,8 @@ class SampleClockNNetWrapper(NNetWrapper):
 
     def _checkpoint_contract(self):
         fields = super()._checkpoint_contract()
+        if getattr(self, "args", None) is None:
+            return fields
         fields.update({
             "gocube_training_contract": getattr(self.args, "gocube_training_contract"),
             "gocube_lr_clock": getattr(self.args, "gocube_lr_clock"),
@@ -238,7 +240,7 @@ class SampleClockNNetWrapper(NNetWrapper):
                 self.optimizer.zero_grad()
                 total_loss.backward()
                 grad_norm = float(torch.nn.utils.clip_grad_norm_(self.nnet.parameters(), clip_norm))
-                clipped = bool(torch.isfinite(torch.tensor(grad_norm)) and grad_norm > clip_norm)
+                clipped = bool(grad_norm > clip_norm)
                 self.optimizer.step()
 
                 self.total_training_samples += batch_samples
