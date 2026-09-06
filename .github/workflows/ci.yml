@@ -46,6 +46,8 @@ jobs:
             tests/test_gocube_search_audit_telemetry.py \
             tests/test_gocube_selfplay_guard.py \
             tests/test_gocube_search_contract_metadata.py \
+            tests/test_gocube_default_komi.py \
+            tests/test_gocube_recovery_validation.py \
             tests/test_inference_batching.py \
             tests/test_gocube_train_entrypoint.py \
             tests/test_gocube_training_budget_telemetry.py
@@ -79,6 +81,7 @@ jobs:
           assert len(set(rows)) == 1 and rows[0] > 0, rows
           with open('checkpoint/ci-cube4-v3-budget-smoke/gocube-run.json', encoding='utf-8') as handle:
               manifest = json.load(handle)
+          assert manifest['komi'] == 0.5, manifest
           assert manifest['searchContract'] == 'katago-v3-score-aware-v1', manifest
           assert manifest['searchSettings']['search_utility_mode'] == 'gocube-katago-v3', manifest
           assert manifest['searchSettings']['gocube_dynamic_score_utility_factor'] == 0.4, manifest
@@ -86,6 +89,7 @@ jobs:
           assert manifest['searchSettings']['gocube_cleanup1_weight'] == 1, manifest
           assert manifest['searchSettings']['gocube_cleanup2_weight'] == 1, manifest
           print('Cube 4 tensor rows:', rows[0])
+          print('Cube 4 komi:', manifest['komi'])
           print('Cube 4 search contract:', manifest['searchContract'])
           PY
 
@@ -112,6 +116,7 @@ jobs:
           assert len(set(rows)) == 1 and rows[0] > 0, rows
           with open('checkpoint/ci-torus9-v3-budget-smoke/gocube-run.json', encoding='utf-8') as handle:
               manifest = json.load(handle)
+          assert manifest['komi'] == 0.5, manifest
           assert manifest['searchContract'] == 'katago-v3-score-aware-v1', manifest
           assert manifest['searchSettings']['search_utility_mode'] == 'gocube-katago-v3', manifest
           assert manifest['searchSettings']['gocube_dynamic_score_utility_factor'] == 0.4, manifest
@@ -119,6 +124,7 @@ jobs:
           assert manifest['searchSettings']['gocube_cleanup1_weight'] == 1, manifest
           assert manifest['searchSettings']['gocube_cleanup2_weight'] == 1, manifest
           print('Torus 9 tensor rows:', rows[0])
+          print('Torus 9 komi:', manifest['komi'])
           print('Torus 9 search contract:', manifest['searchContract'])
           PY
 
@@ -126,6 +132,10 @@ jobs:
         run: |
           python - <<'PY'
           from alphazero.envs.gocube.game import Cube4JapaneseGame, Torus9JapaneseGame
+          assert Cube4JapaneseGame.KOMI == 0.5
+          assert Torus9JapaneseGame.KOMI == 0.5
+          print('Cube4 komi:', Cube4JapaneseGame.KOMI)
+          print('Torus9 komi:', Torus9JapaneseGame.KOMI)
           print('Cube4 rules fingerprint:', Cube4JapaneseGame.rules_fingerprint())
           print('Torus9 rules fingerprint:', Torus9JapaneseGame.rules_fingerprint())
           PY
