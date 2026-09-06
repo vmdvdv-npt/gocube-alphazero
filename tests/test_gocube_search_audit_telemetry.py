@@ -35,19 +35,12 @@ class _SuppressedPassMCTS:
             "pass_suppressed": True,
         }
 
-    @staticmethod
-    def best_action(_game):
-        # Production best_action sees the post-suppression counts, therefore
-        # it is deliberately non-PASS here. The audit must still count the raw
-        # score-dominance condition.
-        return 0
-
 
 def _counter(kind="d"):
     return mp.Value(kind, 0)
 
 
-def test_score_dominated_pass_counter_uses_diagnostic_not_post_suppression_best_action():
+def _agent():
     agent = SelfPlayAgent.__new__(SelfPlayAgent)
     agent.score_aware = True
     agent.args = SimpleNamespace(gocube_search_audit_probability=1.0)
@@ -64,9 +57,23 @@ def test_score_dominated_pass_counter_uses_diagnostic_not_post_suppression_best_
         "search_score_dominated_pass": _counter("q"),
     }
     agent._SelfPlayAgent__mcts_current = _SuppressedPassMCTS()
+    return agent
+
+
+def test_suppressed_score_dominated_pass_is_not_a_guard_failure():
+    agent = _agent()
 
     agent._record_search_audit(_Game(), action=0)
 
     assert agent.telemetry["search_audited_positions"].value == 1
-    assert agent.telemetry["search_score_dominated_pass"].value == 1
+    assert agent.telemetry["search_score_dominated_pass"].value == 0
     assert agent.telemetry["search_best_nonpass_score_gain_sum"].value == 4.5
+
+
+def test_score_dominated_pass_counter_counts_only_pass_that_escaped_search():
+    agent = _agent()
+
+    agent._record_search_audit(_Game(), action=_GameClass.pass_action())
+
+    assert agent.telemetry["search_audited_positions"].value == 1
+    assert agent.telemetry["search_score_dominated_pass"].value == 1
