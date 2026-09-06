@@ -74,7 +74,7 @@ After that, the controls are generally intuitive. Default/saved arguments can be
 
 At the top left, the Arena tab can be toggled as seen above. Here, a separate set of args & env can be loaded and the type of players can be selected. For example, in the above image the brandubh environment was loaded and an MCTS Player with a model is pitted against a human player.
 
-For now, Arena is still displayed in the console, but eventually there will be support for each environment to implement their own graphical interface to play games (agent-agent, agent-player, player-player).
+For now, Arena is still displayed in the console, but eventually there will be support for each environment to implement its own graphical interface to play games (agent-agent, agent-player, player-player).
 
 ### Try one of the existing examples
 1. Adjust the hyperparameters in one of the examples to your preference (in the GUI editor, or path is ```alphazero/envs/<env name>/train.py```). Take a look at Coach.py where the default arguments are stored to see the available options. For example, edit ```alphazero/envs/connect4/train.py```.
