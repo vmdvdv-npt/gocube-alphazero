@@ -22,6 +22,15 @@ KATAGO_CLEANUP_TRAINING_DEFAULTS = {
     "policy_temperature": 2.0 / 3.0,
 }
 
+KATAGO_PINNED_SELFPLAY_DEFAULTS = {
+    "pass_alive_auto_end_probability": 0.98,
+    "root_prune_useless_moves": True,
+    "seki_fork_hack_probability": 0.02,
+    "seki_fork_pool_capacity": 1000,
+    "seki_fork_candidates_per_game": 2,
+    "seki_fork_tail_scale": 0.10,
+}
+
 PINNED_OBSERVATION_SCHEMA = "gocube-observation-v4-pass-would-end-phase"
 PASS_WOULD_END_PHASE_CHANNEL = 17
 
