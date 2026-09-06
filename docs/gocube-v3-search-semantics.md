@@ -6,6 +6,8 @@ GoCube Japanese V3 deliberately separates the game rules from the search heurist
 
 The V3 rules engine owns legality, phase transitions, ko/repetition handling, cleanup, terminal detection, final scoring, ownership training targets, and the final winner. MCTS must not rewrite any of those rules.
 
+The production GoCube default komi is **0.5 points for every supported Cube and Torus topology**. The same default is used by game classes, training, run manifests, and run-registration tooling. New automatic run names use the `japanese05` namespace.
+
 In particular:
 
 - PASS legality comes from `v3_valid_moves()` and remains unchanged by search.
@@ -23,7 +25,7 @@ The GoCube V3 search contract is versioned as `katago-v3-score-aware-v1` and use
 3. normalized Black-minus-White score,
 4. per-point Black / White / neutral ownership.
 
-Legacy games and legacy checkpoints remain on the historical policy/value-only search path.
+Legacy games and legacy checkpoints remain on the historical policy/value-only search path when explicitly loaded for diagnostics. They do not define production GoCube defaults.
 
 For GoCube V3, MCTS combines win/loss utility with a KataGo-style smooth score utility. The score component is expressed in score-point space first and then transformed into search utility. Root ending adjustments are also expressed in points and converted through the same score-utility transform; they are never subtracted directly from Q as if points and utility were interchangeable units.
 
