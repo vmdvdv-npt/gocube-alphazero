@@ -28,7 +28,7 @@ def make_checkpoint(run_dir, iteration, content=b"checkpoint"):
 def make_manifest(run_dir, *, topology="cube", size=4, run_name=None):
     manifest = RunManifest.create(
         run_name=run_name or run_dir.name, topology=topology, size=size,
-        rule_set="chinese", komi=7.5,
+        rule_set="chinese", komi=0.5,
     )
     write_run_manifest(str(run_dir), manifest)
     return manifest
@@ -91,7 +91,7 @@ def test_manifest_rejects_missing_fields_and_unsupported_version(tmp_path):
         load_run_manifest(str(run_dir))
     payload = {
         "version": 99, "runName": run_dir.name, "topology": "cube", "size": 4,
-        "ruleSet": "japanese", "komi": 7.5,
+        "ruleSet": "japanese", "komi": 0.5,
         "terminalAdjudicator": "gocube-katago-japanese-v3",
     }
     (run_dir / MANIFEST_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
@@ -119,7 +119,7 @@ def test_manifest_rejects_wrong_json_field_types(tmp_path):
     ],
 )
 def test_manifest_validation(field, value, match):
-    kwargs = dict(run_name="bad-run", topology="cube", size=4, rule_set="chinese", komi=7.5)
+    kwargs = dict(run_name="bad-run", topology="cube", size=4, rule_set="chinese", komi=0.5)
     kwargs[field] = value
     with pytest.raises((ManifestError, ValueError), match=match):
         RunManifest.create(**kwargs)
@@ -166,7 +166,7 @@ def test_legacy_registration_and_no_silent_incompatible_overwrite(tmp_path):
     make_checkpoint(run_dir, 5)
     path = register_run(
         checkpoint_dir=str(tmp_path), run_name="legacy", topology="cube", size=4,
-        rule_set="chinese", komi=7.5,
+        rule_set="chinese", komi=0.5,
     )
     assert path == str(run_dir / MANIFEST_FILENAME)
     incompatible = RunManifest.create(run_name="legacy", topology="cube", size=3)
@@ -180,5 +180,5 @@ def test_registration_requires_existing_checkpoint(tmp_path):
     with pytest.raises(FileNotFoundError, match="No supported iteration checkpoints"):
         register_run(
             checkpoint_dir=str(tmp_path), run_name="empty", topology="cube", size=4,
-            rule_set="chinese", komi=7.5,
+            rule_set="chinese", komi=0.5,
         )

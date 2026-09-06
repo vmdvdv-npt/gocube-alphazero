@@ -22,7 +22,7 @@ def descriptor(checkpoint_id="run@5", *, topology="cube", size=2, rule_set="chin
         topology=topology,
         size=size,
         rule_set=rule_set,
-        komi=7.5,
+        komi=0.5,
         terminal_adjudicator="gocube-conservative-area-v1",
         path=f"/tmp/{checkpoint_id}.pkl",
     )
@@ -101,7 +101,7 @@ def test_game_generator_uses_real_game_terminal_flow_and_evaluation_settings():
     ]
     assert game["result"]["winner"] == "white"
     assert game["result"]["adjudicatorId"] == "gocube-conservative-area-v1"
-    assert game["result"]["score"]["komi"] == 7.5
+    assert game["result"]["score"]["komi"] == 0.5
     assert len(updates) == 4
     assert updates[0][:2] == (0, 0)
     assert updates[2][:2] == (1, 1)
