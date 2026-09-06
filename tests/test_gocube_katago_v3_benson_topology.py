@@ -213,8 +213,8 @@ def test_graph_isomorphic_relabel_preserves_pass_alive_independent_life_score_an
     life = independent_life_analysis(state.board, t)
     rlife = independent_life_analysis(rs.board, rt)
     assert len(life.black_territory) == len(rlife.black_territory)
-    score, _, _ = final_v3_score(state, t, 7.5)
-    rscore, _, _ = final_v3_score(rs, rt, 7.5)
+    score, _, _ = final_v3_score(state, t, 0.5)
+    rscore, _, _ = final_v3_score(rs, rt, 0.5)
     assert score.black == rscore.black
     assert score.white == rscore.white
     assert score.winner == rscore.winner
