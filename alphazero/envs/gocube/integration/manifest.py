@@ -54,7 +54,7 @@ class RunManifest:
         topology: str,
         size: int,
         rule_set: str = "japanese",
-        komi: float = 7.5,
+        komi: float = 0.5,
         terminal_adjudicator: str | None = None,
         search_contract: str | None = None,
         search_settings: dict[str, object] | None = None,
