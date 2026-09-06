@@ -1,0 +1,38 @@
+{
+  "action_temperature": 0.0,
+  "balanced_colors": true,
+  "batched": false,
+  "candidate": {
+    "id": "D@6",
+    "path": "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-d/iteration-0006.pkl",
+    "sha256": "6e10d19c16e24f72e7e682557015f34df409baaae32fbb6793da3e628f77dfbf"
+  },
+  "candidate_score_ci95_approx": [
+    0.3142742581957335,
+    0.6857257418042665
+  ],
+  "candidate_score_rate": 0.5,
+  "candidate_wins": 12,
+  "draws": 0,
+  "elapsed_seconds": 2180.901130437851,
+  "fast_probability": 0.0,
+  "games_effective": 24,
+  "games_requested": 24,
+  "mcts_sims": 100,
+  "no_results": 0,
+  "reference": {
+    "id": "B@6",
+    "path": "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-b/iteration-0006.pkl",
+    "sha256": "f091b877c821dc16f4cc975d781d24783f428569243dad8749e09cd1ccb0e8a4"
+  },
+  "reference_score_rate": 0.5,
+  "reference_wins": 12,
+  "root_noise": false,
+  "root_temperature": false,
+  "ruleset": "japanese",
+  "schema_version": 1,
+  "seconds_per_game": 90.87088043491046,
+  "seed": 21230474,
+  "size": 4,
+  "topology": "cube"
+}
