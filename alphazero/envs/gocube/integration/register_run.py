@@ -46,7 +46,7 @@ def parse_args(argv=None):
     parser.add_argument("--topology", choices=("torus", "cube"), required=True)
     parser.add_argument("--size", type=int, required=True)
     parser.add_argument("--rule-set", default="chinese")
-    parser.add_argument("--komi", type=float, default=7.5)
+    parser.add_argument("--komi", type=float, default=0.5)
     parser.add_argument("--force", action="store_true")
     return parser.parse_args(argv)
 
