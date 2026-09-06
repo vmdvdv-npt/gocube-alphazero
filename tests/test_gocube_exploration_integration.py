@@ -5,7 +5,7 @@ from alphazero.envs.gocube.katago_train import build_katago_training_args, parse
 from alphazero.search_contract import SearchOutput
 
 
-def test_pinned_exploration_changes_root_search_and_is_removed_from_policy_target():
+def test_pinned_exploration_changes_root_search_and_policy_target_uses_post_lcb_weights():
     game_cls, args = build_katago_training_args(parse_args([]))
     args._num_players = game_cls.num_players() + game_cls.has_draw()
     game = game_cls()
@@ -46,6 +46,8 @@ def test_pinned_exploration_changes_root_search_and_is_removed_from_policy_targe
     target = np.asarray(telemetry["policy_training_target"], dtype=np.float64)
     forced = np.asarray(telemetry["forced_exploration_visits"], dtype=np.int32)
     corrected_counts = np.asarray(mcts.counts(game), dtype=np.int32)
+    pre_lcb = np.asarray(telemetry["play_selection_pre_lcb"], dtype=np.float64)
+    post_lcb = np.asarray(telemetry["play_selection_post_lcb"], dtype=np.float64)
 
     assert raw_counts.sum() == test_sims - 1  # first simulation evaluates the root itself
     assert not np.allclose(nn_policy, explored_policy)
@@ -54,7 +56,49 @@ def test_pinned_exploration_changes_root_search_and_is_removed_from_policy_targe
     assert np.all(corrected_counts <= raw_counts)
     assert corrected_counts.sum() < raw_counts.sum()
     assert np.isclose(target.sum(), 1.0)
-    assert np.allclose(target, corrected_counts / corrected_counts.sum())
+    assert np.all(post_lcb >= 0.0)
+    assert np.all(pre_lcb >= 0.0)
+    assert np.allclose(target, post_lcb / post_lcb.sum())
+    assert telemetry["lcb_values"] is not None
+    assert telemetry["lcb_radii"] is not None
+    assert telemetry["lcb_best_action"] is not None
+
+
+def test_played_selfplay_move_disables_lcb_but_policy_target_keeps_it():
+    game_cls, args = build_katago_training_args(parse_args([]))
+    args._num_players = game_cls.num_players() + game_cls.has_draw()
+    game = game_cls()
+    action_size = game.action_size()
+    point_count = game.logical_topology().point_count
+
+    class StubNet:
+        def predict_for_search(self, _observation):
+            return SearchOutput(
+                policy=np.full(action_size, 1.0 / action_size, dtype=np.float32),
+                value=np.array([0.5, 0.5, 0.0], dtype=np.float32),
+                score=np.array([0.0], dtype=np.float32),
+                ownership=np.tile(
+                    np.array([[0.0, 0.0, 1.0]], dtype=np.float32),
+                    (point_count, 1),
+                ),
+            )
+
+    np.random.seed(20260907)
+    mcts = MCTS(args)
+    mcts.search(game, StubNet(), 24, False, False)
+
+    # Sub-1 chosen-move temperatures are the pinned self-play path. The default
+    # dispatch must match an explicit LCB-off request. Policy supervision uses
+    # temp=1, which must match explicit LCB-on selection.
+    played_default = np.asarray(mcts.probs(game, 0.75), dtype=np.float64)
+    played_explicit = np.asarray(mcts.probs(game, 0.75, apply_lcb=False), dtype=np.float64)
+    target_default = np.asarray(mcts.probs(game, 1.0), dtype=np.float64)
+    target_explicit = np.asarray(mcts.probs(game, 1.0, apply_lcb=True), dtype=np.float64)
+
+    assert np.allclose(played_default, played_explicit)
+    assert np.allclose(target_default, target_explicit)
+    assert np.isclose(played_default.sum(), 1.0)
+    assert np.isclose(target_default.sum(), 1.0)
 
 
 def test_arena_contract_disables_selfplay_randomization():
