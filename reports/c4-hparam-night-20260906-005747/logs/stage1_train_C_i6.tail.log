@@ -1,0 +1,400 @@
+[KGenerating Samples |#############                   | (106/256) Sample Time: 5.248s | Infer Batch: 42.0 | Total: 0:09:17 | ETA: 0:00:02
+[KGenerating Samples |#############                   | (106/256) Sample Time: 5.248s | Infer Batch: 42.0 | Total: 0:09:18 | ETA: 0:00:02
+[KGenerating Samples |#############                   | (107/256) Sample Time: 5.227s | Infer Batch: 42.0 | Total: 0:09:19 | ETA: 0:00:02
+[KGenerating Samples |#############                   | (108/256) Sample Time: 5.186s | Infer Batch: 42.0 | Total: 0:09:20 | ETA: 0:00:02
+[KGenerating Samples |#############                   | (111/256) Sample Time: 5.060s | Infer Batch: 42.0 | Total: 0:09:21 | ETA: 0:00:03
+[KGenerating Samples |##############                  | (112/256) Sample Time: 5.026s | Infer Batch: 42.0 | Total: 0:09:22 | ETA: 0:00:03
+[KGenerating Samples |##############                  | (112/256) Sample Time: 5.026s | Infer Batch: 42.0 | Total: 0:09:24 | ETA: 0:00:03
+[KGenerating Samples |##############                  | (114/256) Sample Time: 4.950s | Infer Batch: 42.0 | Total: 0:09:25 | ETA: 0:00:02
+[KGenerating Samples |##############                  | (114/256) Sample Time: 4.950s | Infer Batch: 42.0 | Total: 0:09:26 | ETA: 0:00:02
+[KGenerating Samples |##############                  | (114/256) Sample Time: 4.950s | Infer Batch: 42.0 | Total: 0:09:27 | ETA: 0:00:02
+[KGenerating Samples |##############                  | (114/256) Sample Time: 4.950s | Infer Batch: 42.0 | Total: 0:09:28 | ETA: 0:00:02
+[KGenerating Samples |##############                  | (117/256) Sample Time: 4.863s | Infer Batch: 42.0 | Total: 0:09:29 | ETA: 0:00:02
+[KGenerating Samples |##############                  | (119/256) Sample Time: 4.784s | Infer Batch: 42.0 | Total: 0:09:30 | ETA: 0:00:03
+[KGenerating Samples |###############                 | (121/256) Sample Time: 4.718s | Infer Batch: 42.0 | Total: 0:09:31 | ETA: 0:00:02
+[KGenerating Samples |###############                 | (122/256) Sample Time: 4.682s | Infer Batch: 42.0 | Total: 0:09:32 | ETA: 0:00:02
+[KGenerating Samples |###############                 | (124/256) Sample Time: 4.620s | Infer Batch: 42.0 | Total: 0:09:33 | ETA: 0:00:02
+[KGenerating Samples |###############                 | (124/256) Sample Time: 4.620s | Infer Batch: 42.0 | Total: 0:09:34 | ETA: 0:00:02
+[KGenerating Samples |###############                 | (125/256) Sample Time: 4.600s | Infer Batch: 42.0 | Total: 0:09:35 | ETA: 0:00:02
+[KGenerating Samples |###############                 | (126/256) Sample Time: 4.570s | Infer Batch: 42.0 | Total: 0:09:36 | ETA: 0:00:02
+[KGenerating Samples |################                | (128/256) Sample Time: 4.507s | Infer Batch: 42.0 | Total: 0:09:37 | ETA: 0:00:02
+[KGenerating Samples |################                | (128/256) Sample Time: 4.507s | Infer Batch: 42.0 | Total: 0:09:38 | ETA: 0:00:02
+[KGenerating Samples |################                | (128/256) Sample Time: 4.507s | Infer Batch: 42.0 | Total: 0:09:39 | ETA: 0:00:02
+[KGenerating Samples |################                | (130/256) Sample Time: 4.459s | Infer Batch: 42.0 | Total: 0:09:40 | ETA: 0:00:02
+[KGenerating Samples |################                | (132/256) Sample Time: 4.398s | Infer Batch: 42.0 | Total: 0:09:41 | ETA: 0:00:02
+[KGenerating Samples |################                | (135/256) Sample Time: 4.310s | Infer Batch: 42.0 | Total: 0:09:42 | ETA: 0:00:02
+[KGenerating Samples |#################               | (136/256) Sample Time: 4.283s | Infer Batch: 42.0 | Total: 0:09:43 | ETA: 0:00:02
+[KGenerating Samples |#################               | (137/256) Sample Time: 4.263s | Infer Batch: 42.0 | Total: 0:09:44 | ETA: 0:00:02
+[KGenerating Samples |#################               | (138/256) Sample Time: 4.239s | Infer Batch: 42.0 | Total: 0:09:45 | ETA: 0:00:02
+[KGenerating Samples |#################               | (138/256) Sample Time: 4.239s | Infer Batch: 42.0 | Total: 0:09:46 | ETA: 0:00:02
+[KGenerating Samples |#################               | (139/256) Sample Time: 4.219s | Infer Batch: 42.1 | Total: 0:09:47 | ETA: 0:00:02
+[KGenerating Samples |#################               | (142/256) Sample Time: 4.142s | Infer Batch: 42.0 | Total: 0:09:48 | ETA: 0:00:02
+[KGenerating Samples |#################               | (142/256) Sample Time: 4.142s | Infer Batch: 42.0 | Total: 0:09:49 | ETA: 0:00:02
+[KGenerating Samples |##################              | (145/256) Sample Time: 4.065s | Infer Batch: 42.0 | Total: 0:09:50 | ETA: 0:00:02
+[KGenerating Samples |##################              | (146/256) Sample Time: 4.048s | Infer Batch: 42.0 | Total: 0:09:51 | ETA: 0:00:02
+[KGenerating Samples |##################              | (147/256) Sample Time: 4.022s | Infer Batch: 42.0 | Total: 0:09:52 | ETA: 0:00:02
+[KGenerating Samples |##################              | (149/256) Sample Time: 3.975s | Infer Batch: 42.0 | Total: 0:09:53 | ETA: 0:00:02
+[KGenerating Samples |##################              | (151/256) Sample Time: 3.931s | Infer Batch: 42.1 | Total: 0:09:54 | ETA: 0:00:02
+[KGenerating Samples |###################             | (154/256) Sample Time: 3.864s | Infer Batch: 42.1 | Total: 0:09:55 | ETA: 0:00:02
+[KGenerating Samples |###################             | (155/256) Sample Time: 3.843s | Infer Batch: 42.1 | Total: 0:09:56 | ETA: 0:00:02
+[KGenerating Samples |###################             | (156/256) Sample Time: 3.827s | Infer Batch: 42.1 | Total: 0:09:57 | ETA: 0:00:02
+[KGenerating Samples |###################             | (156/256) Sample Time: 3.827s | Infer Batch: 42.1 | Total: 0:09:58 | ETA: 0:00:02
+[KGenerating Samples |###################             | (156/256) Sample Time: 3.827s | Infer Batch: 42.1 | Total: 0:09:59 | ETA: 0:00:02
+[KGenerating Samples |####################            | (160/256) Sample Time: 3.749s | Infer Batch: 42.1 | Total: 0:10:00 | ETA: 0:00:02
+[KGenerating Samples |####################            | (160/256) Sample Time: 3.749s | Infer Batch: 42.0 | Total: 0:10:01 | ETA: 0:00:02
+[KGenerating Samples |####################            | (160/256) Sample Time: 3.749s | Infer Batch: 42.1 | Total: 0:10:02 | ETA: 0:00:02
+[KGenerating Samples |####################            | (162/256) Sample Time: 3.718s | Infer Batch: 42.1 | Total: 0:10:03 | ETA: 0:00:02
+[KGenerating Samples |####################            | (162/256) Sample Time: 3.718s | Infer Batch: 42.0 | Total: 0:10:04 | ETA: 0:00:02
+[KGenerating Samples |####################            | (162/256) Sample Time: 3.718s | Infer Batch: 42.0 | Total: 0:10:05 | ETA: 0:00:02
+[KGenerating Samples |####################            | (163/256) Sample Time: 3.717s | Infer Batch: 42.1 | Total: 0:10:06 | ETA: 0:00:02
+[KGenerating Samples |####################            | (163/256) Sample Time: 3.717s | Infer Batch: 42.0 | Total: 0:10:07 | ETA: 0:00:02
+[KGenerating Samples |####################            | (163/256) Sample Time: 3.717s | Infer Batch: 42.0 | Total: 0:10:08 | ETA: 0:00:02
+[KGenerating Samples |####################            | (164/256) Sample Time: 3.713s | Infer Batch: 42.0 | Total: 0:10:09 | ETA: 0:00:02
+[KGenerating Samples |####################            | (166/256) Sample Time: 3.671s | Infer Batch: 42.1 | Total: 0:10:10 | ETA: 0:00:02
+[KGenerating Samples |####################            | (166/256) Sample Time: 3.671s | Infer Batch: 42.1 | Total: 0:10:11 | ETA: 0:00:02
+[KGenerating Samples |####################            | (166/256) Sample Time: 3.671s | Infer Batch: 42.1 | Total: 0:10:12 | ETA: 0:00:02
+[KGenerating Samples |####################            | (167/256) Sample Time: 3.672s | Infer Batch: 42.1 | Total: 0:10:13 | ETA: 0:00:02
+[KGenerating Samples |####################            | (167/256) Sample Time: 3.672s | Infer Batch: 42.1 | Total: 0:10:14 | ETA: 0:00:02
+[KGenerating Samples |####################            | (167/256) Sample Time: 3.672s | Infer Batch: 42.1 | Total: 0:10:15 | ETA: 0:00:02
+[KGenerating Samples |####################            | (167/256) Sample Time: 3.672s | Infer Batch: 42.1 | Total: 0:10:16 | ETA: 0:00:02
+[KGenerating Samples |#####################           | (168/256) Sample Time: 3.674s | Infer Batch: 42.1 | Total: 0:10:17 | ETA: 0:00:02
+[KGenerating Samples |#####################           | (170/256) Sample Time: 3.635s | Infer Batch: 42.1 | Total: 0:10:18 | ETA: 0:00:01
+[KGenerating Samples |#####################           | (171/256) Sample Time: 3.622s | Infer Batch: 42.1 | Total: 0:10:19 | ETA: 0:00:01
+[KGenerating Samples |#####################           | (173/256) Sample Time: 3.586s | Infer Batch: 42.1 | Total: 0:10:20 | ETA: 0:00:01
+[KGenerating Samples |#####################           | (174/256) Sample Time: 3.569s | Infer Batch: 42.1 | Total: 0:10:21 | ETA: 0:00:01
+[KGenerating Samples |#####################           | (174/256) Sample Time: 3.569s | Infer Batch: 42.1 | Total: 0:10:22 | ETA: 0:00:01
+[KGenerating Samples |#####################           | (175/256) Sample Time: 3.562s | Infer Batch: 42.1 | Total: 0:10:23 | ETA: 0:00:01
+[KGenerating Samples |#####################           | (175/256) Sample Time: 3.562s | Infer Batch: 42.1 | Total: 0:10:24 | ETA: 0:00:01
+[KGenerating Samples |######################          | (176/256) Sample Time: 3.552s | Infer Batch: 42.1 | Total: 0:10:25 | ETA: 0:00:01
+[KGenerating Samples |######################          | (176/256) Sample Time: 3.552s | Infer Batch: 42.1 | Total: 0:10:26 | ETA: 0:00:01
+[KGenerating Samples |######################          | (177/256) Sample Time: 3.544s | Infer Batch: 42.1 | Total: 0:10:27 | ETA: 0:00:01
+[KGenerating Samples |######################          | (178/256) Sample Time: 3.527s | Infer Batch: 42.1 | Total: 0:10:28 | ETA: 0:00:01
+[KGenerating Samples |######################          | (178/256) Sample Time: 3.527s | Infer Batch: 42.1 | Total: 0:10:29 | ETA: 0:00:01
+[KGenerating Samples |######################          | (178/256) Sample Time: 3.527s | Infer Batch: 42.1 | Total: 0:10:30 | ETA: 0:00:01
+[KGenerating Samples |######################          | (178/256) Sample Time: 3.527s | Infer Batch: 42.1 | Total: 0:10:31 | ETA: 0:00:01
+[KGenerating Samples |######################          | (179/256) Sample Time: 3.529s | Infer Batch: 42.1 | Total: 0:10:32 | ETA: 0:00:01
+[KGenerating Samples |######################          | (180/256) Sample Time: 3.518s | Infer Batch: 42.1 | Total: 0:10:33 | ETA: 0:00:01
+[KGenerating Samples |######################          | (180/256) Sample Time: 3.518s | Infer Batch: 42.1 | Total: 0:10:34 | ETA: 0:00:01
+[KGenerating Samples |######################          | (180/256) Sample Time: 3.518s | Infer Batch: 42.1 | Total: 0:10:35 | ETA: 0:00:01
+[KGenerating Samples |######################          | (181/256) Sample Time: 3.513s | Infer Batch: 42.1 | Total: 0:10:36 | ETA: 0:00:01
+[KGenerating Samples |######################          | (182/256) Sample Time: 3.500s | Infer Batch: 42.1 | Total: 0:10:37 | ETA: 0:00:01
+[KGenerating Samples |######################          | (182/256) Sample Time: 3.500s | Infer Batch: 42.1 | Total: 0:10:38 | ETA: 0:00:01
+[KGenerating Samples |######################          | (182/256) Sample Time: 3.500s | Infer Batch: 42.1 | Total: 0:10:39 | ETA: 0:00:01
+[KGenerating Samples |######################          | (183/256) Sample Time: 3.499s | Infer Batch: 42.1 | Total: 0:10:40 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (184/256) Sample Time: 3.484s | Infer Batch: 42.1 | Total: 0:10:41 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (184/256) Sample Time: 3.484s | Infer Batch: 42.1 | Total: 0:10:42 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (184/256) Sample Time: 3.484s | Infer Batch: 42.1 | Total: 0:10:43 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (184/256) Sample Time: 3.484s | Infer Batch: 42.1 | Total: 0:10:44 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (185/256) Sample Time: 3.489s | Infer Batch: 42.1 | Total: 0:10:45 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (187/256) Sample Time: 3.453s | Infer Batch: 42.1 | Total: 0:10:46 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (187/256) Sample Time: 3.453s | Infer Batch: 42.1 | Total: 0:10:47 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (187/256) Sample Time: 3.453s | Infer Batch: 42.1 | Total: 0:10:48 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (187/256) Sample Time: 3.453s | Infer Batch: 42.1 | Total: 0:10:49 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (188/256) Sample Time: 3.461s | Infer Batch: 42.1 | Total: 0:10:50 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (189/256) Sample Time: 3.444s | Infer Batch: 42.1 | Total: 0:10:51 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (191/256) Sample Time: 3.413s | Infer Batch: 42.1 | Total: 0:10:52 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (191/256) Sample Time: 3.413s | Infer Batch: 42.1 | Total: 0:10:53 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (191/256) Sample Time: 3.413s | Infer Batch: 42.1 | Total: 0:10:54 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (191/256) Sample Time: 3.413s | Infer Batch: 42.1 | Total: 0:10:55 | ETA: 0:00:01
+[KGenerating Samples |#######################         | (191/256) Sample Time: 3.413s | Infer Batch: 42.1 | Total: 0:10:56 | ETA: 0:00:01
+[KGenerating Samples |########################        | (192/256) Sample Time: 3.424s | Infer Batch: 42.1 | Total: 0:10:57 | ETA: 0:00:01
+[KGenerating Samples |########################        | (192/256) Sample Time: 3.424s | Infer Batch: 42.1 | Total: 0:10:58 | ETA: 0:00:01
+[KGenerating Samples |########################        | (192/256) Sample Time: 3.424s | Infer Batch: 42.0 | Total: 0:10:59 | ETA: 0:00:01
+[KGenerating Samples |########################        | (193/256) Sample Time: 3.419s | Infer Batch: 42.1 | Total: 0:11:00 | ETA: 0:00:01
+[KGenerating Samples |########################        | (194/256) Sample Time: 3.410s | Infer Batch: 42.0 | Total: 0:11:01 | ETA: 0:00:01
+[KGenerating Samples |########################        | (194/256) Sample Time: 3.410s | Infer Batch: 42.0 | Total: 0:11:02 | ETA: 0:00:01
+[KGenerating Samples |########################        | (194/256) Sample Time: 3.410s | Infer Batch: 42.0 | Total: 0:11:03 | ETA: 0:00:01
+[KGenerating Samples |########################        | (196/256) Sample Time: 3.389s | Infer Batch: 42.0 | Total: 0:11:04 | ETA: 0:00:01
+[KGenerating Samples |########################        | (199/256) Sample Time: 3.346s | Infer Batch: 42.0 | Total: 0:11:05 | ETA: 0:00:01
+[KGenerating Samples |########################        | (199/256) Sample Time: 3.346s | Infer Batch: 42.0 | Total: 0:11:06 | ETA: 0:00:01
+[KGenerating Samples |########################        | (199/256) Sample Time: 3.346s | Infer Batch: 42.1 | Total: 0:11:07 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (200/256) Sample Time: 3.342s | Infer Batch: 42.0 | Total: 0:11:08 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (200/256) Sample Time: 3.342s | Infer Batch: 42.0 | Total: 0:11:09 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (202/256) Sample Time: 3.320s | Infer Batch: 42.0 | Total: 0:11:10 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (203/256) Sample Time: 3.309s | Infer Batch: 42.0 | Total: 0:11:11 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (203/256) Sample Time: 3.309s | Infer Batch: 42.0 | Total: 0:11:12 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (203/256) Sample Time: 3.309s | Infer Batch: 42.0 | Total: 0:11:13 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (203/256) Sample Time: 3.309s | Infer Batch: 42.0 | Total: 0:11:14 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (204/256) Sample Time: 3.311s | Infer Batch: 42.0 | Total: 0:11:15 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (204/256) Sample Time: 3.311s | Infer Batch: 42.0 | Total: 0:11:16 | ETA: 0:00:01
+[KGenerating Samples |#########################       | (205/256) Sample Time: 3.303s | Infer Batch: 42.0 | Total: 0:11:17 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (208/256) Sample Time: 3.263s | Infer Batch: 42.0 | Total: 0:11:18 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (209/256) Sample Time: 3.250s | Infer Batch: 42.1 | Total: 0:11:19 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (209/256) Sample Time: 3.250s | Infer Batch: 42.1 | Total: 0:11:20 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (210/256) Sample Time: 3.244s | Infer Batch: 42.1 | Total: 0:11:21 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (211/256) Sample Time: 3.234s | Infer Batch: 42.1 | Total: 0:11:22 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (211/256) Sample Time: 3.234s | Infer Batch: 42.1 | Total: 0:11:23 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (211/256) Sample Time: 3.234s | Infer Batch: 42.0 | Total: 0:11:24 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (211/256) Sample Time: 3.234s | Infer Batch: 42.1 | Total: 0:11:25 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (211/256) Sample Time: 3.234s | Infer Batch: 42.1 | Total: 0:11:26 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (211/256) Sample Time: 3.234s | Infer Batch: 42.0 | Total: 0:11:27 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (211/256) Sample Time: 3.234s | Infer Batch: 42.0 | Total: 0:11:28 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:29 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:30 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:31 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:33 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:34 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:35 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:36 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:37 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:38 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:39 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:40 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (212/256) Sample Time: 3.253s | Infer Batch: 42.0 | Total: 0:11:41 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (213/256) Sample Time: 3.294s | Infer Batch: 42.0 | Total: 0:11:42 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (213/256) Sample Time: 3.294s | Infer Batch: 42.0 | Total: 0:11:43 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (213/256) Sample Time: 3.294s | Infer Batch: 42.0 | Total: 0:11:44 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (213/256) Sample Time: 3.294s | Infer Batch: 42.0 | Total: 0:11:45 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (213/256) Sample Time: 3.294s | Infer Batch: 42.0 | Total: 0:11:46 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (213/256) Sample Time: 3.294s | Infer Batch: 42.0 | Total: 0:11:47 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (213/256) Sample Time: 3.294s | Infer Batch: 42.0 | Total: 0:11:48 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (213/256) Sample Time: 3.294s | Infer Batch: 42.0 | Total: 0:11:49 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (214/256) Sample Time: 3.314s | Infer Batch: 42.0 | Total: 0:11:50 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (215/256) Sample Time: 3.305s | Infer Batch: 42.0 | Total: 0:11:51 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (215/256) Sample Time: 3.305s | Infer Batch: 42.0 | Total: 0:11:52 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (215/256) Sample Time: 3.305s | Infer Batch: 42.0 | Total: 0:11:53 | ETA: 0:00:01
+[KGenerating Samples |##########################      | (215/256) Sample Time: 3.305s | Infer Batch: 42.0 | Total: 0:11:54 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (216/256) Sample Time: 3.310s | Infer Batch: 42.0 | Total: 0:11:55 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (216/256) Sample Time: 3.310s | Infer Batch: 42.0 | Total: 0:11:56 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (216/256) Sample Time: 3.310s | Infer Batch: 42.0 | Total: 0:11:57 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (217/256) Sample Time: 3.308s | Infer Batch: 42.0 | Total: 0:11:58 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (218/256) Sample Time: 3.297s | Infer Batch: 42.0 | Total: 0:11:59 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (218/256) Sample Time: 3.297s | Infer Batch: 42.0 | Total: 0:12:00 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (218/256) Sample Time: 3.297s | Infer Batch: 42.0 | Total: 0:12:01 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (219/256) Sample Time: 3.298s | Infer Batch: 42.0 | Total: 0:12:02 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (219/256) Sample Time: 3.298s | Infer Batch: 42.0 | Total: 0:12:03 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (219/256) Sample Time: 3.298s | Infer Batch: 42.0 | Total: 0:12:04 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (219/256) Sample Time: 3.298s | Infer Batch: 42.0 | Total: 0:12:05 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (220/256) Sample Time: 3.299s | Infer Batch: 42.0 | Total: 0:12:06 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (220/256) Sample Time: 3.299s | Infer Batch: 42.0 | Total: 0:12:07 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (221/256) Sample Time: 3.291s | Infer Batch: 42.1 | Total: 0:12:08 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (221/256) Sample Time: 3.291s | Infer Batch: 42.1 | Total: 0:12:09 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (221/256) Sample Time: 3.291s | Infer Batch: 42.1 | Total: 0:12:10 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (221/256) Sample Time: 3.291s | Infer Batch: 42.1 | Total: 0:12:11 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (221/256) Sample Time: 3.291s | Infer Batch: 42.1 | Total: 0:12:12 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (223/256) Sample Time: 3.287s | Infer Batch: 42.1 | Total: 0:12:13 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (223/256) Sample Time: 3.287s | Infer Batch: 42.0 | Total: 0:12:14 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (223/256) Sample Time: 3.287s | Infer Batch: 42.1 | Total: 0:12:15 | ETA: 0:00:01
+[KGenerating Samples |###########################     | (223/256) Sample Time: 3.287s | Infer Batch: 42.1 | Total: 0:12:16 | ETA: 0:00:01
+[KGenerating Samples |############################    | (224/256) Sample Time: 3.287s | Infer Batch: 42.1 | Total: 0:12:17 | ETA: 0:00:01
+[KGenerating Samples |############################    | (224/256) Sample Time: 3.287s | Infer Batch: 42.1 | Total: 0:12:18 | ETA: 0:00:01
+[KGenerating Samples |############################    | (225/256) Sample Time: 3.282s | Infer Batch: 42.1 | Total: 0:12:19 | ETA: 0:00:01
+[KGenerating Samples |############################    | (225/256) Sample Time: 3.282s | Infer Batch: 42.1 | Total: 0:12:20 | ETA: 0:00:01
+[KGenerating Samples |############################    | (225/256) Sample Time: 3.282s | Infer Batch: 42.1 | Total: 0:12:21 | ETA: 0:00:01
+[KGenerating Samples |############################    | (226/256) Sample Time: 3.281s | Infer Batch: 42.1 | Total: 0:12:22 | ETA: 0:00:01
+[KGenerating Samples |############################    | (226/256) Sample Time: 3.281s | Infer Batch: 42.0 | Total: 0:12:23 | ETA: 0:00:01
+[KGenerating Samples |############################    | (228/256) Sample Time: 3.264s | Infer Batch: 42.0 | Total: 0:12:24 | ETA: 0:00:01
+[KGenerating Samples |############################    | (228/256) Sample Time: 3.264s | Infer Batch: 42.0 | Total: 0:12:25 | ETA: 0:00:01
+[KGenerating Samples |############################    | (229/256) Sample Time: 3.256s | Infer Batch: 42.0 | Total: 0:12:26 | ETA: 0:00:01
+[KGenerating Samples |############################    | (229/256) Sample Time: 3.256s | Infer Batch: 42.0 | Total: 0:12:27 | ETA: 0:00:01
+[KGenerating Samples |############################    | (229/256) Sample Time: 3.256s | Infer Batch: 42.0 | Total: 0:12:28 | ETA: 0:00:01
+[KGenerating Samples |############################    | (229/256) Sample Time: 3.256s | Infer Batch: 42.0 | Total: 0:12:29 | ETA: 0:00:01
+[KGenerating Samples |############################    | (229/256) Sample Time: 3.256s | Infer Batch: 42.0 | Total: 0:12:30 | ETA: 0:00:01
+[KGenerating Samples |############################    | (229/256) Sample Time: 3.256s | Infer Batch: 42.0 | Total: 0:12:31 | ETA: 0:00:01
+[KGenerating Samples |############################    | (229/256) Sample Time: 3.256s | Infer Batch: 42.0 | Total: 0:12:32 | ETA: 0:00:01
+[KGenerating Samples |############################    | (230/256) Sample Time: 3.273s | Infer Batch: 42.0 | Total: 0:12:33 | ETA: 0:00:01
+[KGenerating Samples |############################    | (230/256) Sample Time: 3.273s | Infer Batch: 42.0 | Total: 0:12:34 | ETA: 0:00:01
+[KGenerating Samples |############################    | (230/256) Sample Time: 3.273s | Infer Batch: 42.0 | Total: 0:12:35 | ETA: 0:00:01
+[KGenerating Samples |############################    | (231/256) Sample Time: 3.272s | Infer Batch: 42.1 | Total: 0:12:36 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (232/256) Sample Time: 3.265s | Infer Batch: 42.1 | Total: 0:12:37 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (232/256) Sample Time: 3.265s | Infer Batch: 42.0 | Total: 0:12:38 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (232/256) Sample Time: 3.265s | Infer Batch: 42.0 | Total: 0:12:39 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (232/256) Sample Time: 3.265s | Infer Batch: 42.0 | Total: 0:12:40 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:41 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:42 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:43 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:44 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:45 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:46 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:47 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:48 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:49 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (233/256) Sample Time: 3.268s | Infer Batch: 42.0 | Total: 0:12:50 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (234/256) Sample Time: 3.293s | Infer Batch: 42.0 | Total: 0:12:51 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (234/256) Sample Time: 3.293s | Infer Batch: 42.0 | Total: 0:12:52 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (234/256) Sample Time: 3.293s | Infer Batch: 42.0 | Total: 0:12:53 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (234/256) Sample Time: 3.293s | Infer Batch: 42.0 | Total: 0:12:54 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (234/256) Sample Time: 3.293s | Infer Batch: 42.0 | Total: 0:12:55 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (234/256) Sample Time: 3.293s | Infer Batch: 42.0 | Total: 0:12:56 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (234/256) Sample Time: 3.293s | Infer Batch: 42.0 | Total: 0:12:57 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (235/256) Sample Time: 3.310s | Infer Batch: 42.0 | Total: 0:12:58 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (235/256) Sample Time: 3.310s | Infer Batch: 42.0 | Total: 0:12:59 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (235/256) Sample Time: 3.310s | Infer Batch: 42.0 | Total: 0:13:00 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (235/256) Sample Time: 3.310s | Infer Batch: 42.0 | Total: 0:13:01 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (235/256) Sample Time: 3.310s | Infer Batch: 42.0 | Total: 0:13:02 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (236/256) Sample Time: 3.317s | Infer Batch: 42.0 | Total: 0:13:03 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (236/256) Sample Time: 3.317s | Infer Batch: 42.0 | Total: 0:13:04 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (236/256) Sample Time: 3.317s | Infer Batch: 42.0 | Total: 0:13:05 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.0 | Total: 0:13:06 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.0 | Total: 0:13:07 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.1 | Total: 0:13:08 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.1 | Total: 0:13:09 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.1 | Total: 0:13:10 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.1 | Total: 0:13:11 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.1 | Total: 0:13:12 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.1 | Total: 0:13:13 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.1 | Total: 0:13:14 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (237/256) Sample Time: 3.318s | Infer Batch: 42.1 | Total: 0:13:15 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (238/256) Sample Time: 3.346s | Infer Batch: 42.1 | Total: 0:13:16 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (238/256) Sample Time: 3.346s | Infer Batch: 42.1 | Total: 0:13:17 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (238/256) Sample Time: 3.346s | Infer Batch: 42.1 | Total: 0:13:18 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (238/256) Sample Time: 3.346s | Infer Batch: 42.1 | Total: 0:13:19 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (239/256) Sample Time: 3.349s | Infer Batch: 42.1 | Total: 0:13:20 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (239/256) Sample Time: 3.349s | Infer Batch: 42.1 | Total: 0:13:21 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (239/256) Sample Time: 3.349s | Infer Batch: 42.1 | Total: 0:13:22 | ETA: 0:00:01
+[KGenerating Samples |#############################   | (239/256) Sample Time: 3.349s | Infer Batch: 42.1 | Total: 0:13:23 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (240/256) Sample Time: 3.352s | Infer Batch: 42.1 | Total: 0:13:24 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (240/256) Sample Time: 3.352s | Infer Batch: 42.1 | Total: 0:13:25 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (240/256) Sample Time: 3.352s | Infer Batch: 42.1 | Total: 0:13:26 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (240/256) Sample Time: 3.352s | Infer Batch: 42.1 | Total: 0:13:27 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (240/256) Sample Time: 3.352s | Infer Batch: 42.1 | Total: 0:13:28 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (241/256) Sample Time: 3.358s | Infer Batch: 42.1 | Total: 0:13:29 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (241/256) Sample Time: 3.358s | Infer Batch: 42.1 | Total: 0:13:30 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (241/256) Sample Time: 3.358s | Infer Batch: 42.1 | Total: 0:13:31 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (242/256) Sample Time: 3.357s | Infer Batch: 42.1 | Total: 0:13:32 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (242/256) Sample Time: 3.357s | Infer Batch: 42.1 | Total: 0:13:33 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (242/256) Sample Time: 3.357s | Infer Batch: 42.1 | Total: 0:13:34 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (243/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:35 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (243/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:36 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (243/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:37 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:38 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:39 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:40 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:41 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:42 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:44 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:45 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:46 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:47 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:48 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:49 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (244/256) Sample Time: 3.355s | Infer Batch: 42.1 | Total: 0:13:50 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (245/256) Sample Time: 3.391s | Infer Batch: 42.1 | Total: 0:13:51 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (245/256) Sample Time: 3.391s | Infer Batch: 42.1 | Total: 0:13:52 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (245/256) Sample Time: 3.391s | Infer Batch: 42.1 | Total: 0:13:53 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (245/256) Sample Time: 3.391s | Infer Batch: 42.1 | Total: 0:13:54 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (245/256) Sample Time: 3.391s | Infer Batch: 42.1 | Total: 0:13:55 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (245/256) Sample Time: 3.391s | Infer Batch: 42.1 | Total: 0:13:56 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:13:57 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:13:58 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:13:59 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:00 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:01 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:02 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:03 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:04 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:05 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:06 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:07 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:08 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:09 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (246/256) Sample Time: 3.402s | Infer Batch: 42.1 | Total: 0:14:10 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:11 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:12 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:13 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:14 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:15 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:16 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:17 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:18 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:19 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:20 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:21 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:22 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:23 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:24 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:25 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:26 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:27 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:28 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:29 | ETA: 0:00:01
+[KGenerating Samples |##############################  | (247/256) Sample Time: 3.442s | Infer Batch: 42.1 | Total: 0:14:30 | ETA: 0:00:01
+[KGenerating Samples |############################### | (249/256) Sample Time: 3.499s | Infer Batch: 42.1 | Total: 0:14:31 | ETA: 0:00:01
+[KGenerating Samples |############################### | (249/256) Sample Time: 3.499s | Infer Batch: 42.1 | Total: 0:14:32 | ETA: 0:00:01
+[KGenerating Samples |############################### | (249/256) Sample Time: 3.499s | Infer Batch: 42.1 | Total: 0:14:33 | ETA: 0:00:01
+[KGenerating Samples |############################### | (249/256) Sample Time: 3.499s | Infer Batch: 42.1 | Total: 0:14:34 | ETA: 0:00:01
+[KGenerating Samples |############################### | (249/256) Sample Time: 3.499s | Infer Batch: 42.1 | Total: 0:14:35 | ETA: 0:00:01
+[KGenerating Samples |############################### | (250/256) Sample Time: 3.504s | Infer Batch: 42.1 | Total: 0:14:36 | ETA: 0:00:01
+[KGenerating Samples |############################### | (250/256) Sample Time: 3.504s | Infer Batch: 42.1 | Total: 0:14:37 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:38 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:39 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:40 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:41 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:42 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:43 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:44 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:45 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:46 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:47 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:48 | ETA: 0:00:01
+[KGenerating Samples |############################### | (251/256) Sample Time: 3.496s | Infer Batch: 42.1 | Total: 0:14:49 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:50 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:51 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:52 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:53 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:54 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:55 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:56 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:57 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:58 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:14:59 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:15:00 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:15:01 | ETA: 0:00:01
+[KGenerating Samples |############################### | (252/256) Sample Time: 3.532s | Infer Batch: 42.1 | Total: 0:15:02 | ETA: 0:00:01
+[KGenerating Samples |############################### | (253/256) Sample Time: 3.570s | Infer Batch: 42.1 | Total: 0:15:03 | ETA: 0:00:01
+[KGenerating Samples |############################### | (253/256) Sample Time: 3.570s | Infer Batch: 42.1 | Total: 0:15:04 | ETA: 0:00:01
+[KGenerating Samples |############################### | (253/256) Sample Time: 3.570s | Infer Batch: 42.1 | Total: 0:15:05 | ETA: 0:00:01
+[KGenerating Samples |############################### | (253/256) Sample Time: 3.570s | Infer Batch: 42.1 | Total: 0:15:06 | ETA: 0:00:01
+[KGenerating Samples |############################### | (253/256) Sample Time: 3.570s | Infer Batch: 42.1 | Total: 0:15:07 | ETA: 0:00:01
+[KGenerating Samples |############################### | (253/256) Sample Time: 3.570s | Infer Batch: 42.1 | Total: 0:15:08 | ETA: 0:00:01
+[KGenerating Samples |############################### | (254/256) Sample Time: 3.578s | Infer Batch: 42.1 | Total: 0:15:09 | ETA: 0:00:01
+[KGenerating Samples |############################### | (254/256) Sample Time: 3.578s | Infer Batch: 42.1 | Total: 0:15:10 | ETA: 0:00:01
+[KGenerating Samples |############################### | (254/256) Sample Time: 3.578s | Infer Batch: 42.1 | Total: 0:15:11 | ETA: 0:00:01
+[KGenerating Samples |############################### | (254/256) Sample Time: 3.578s | Infer Batch: 42.1 | Total: 0:15:12 | ETA: 0:00:01
+[KGenerating Samples |############################### | (254/256) Sample Time: 3.578s | Infer Batch: 42.1 | Total: 0:15:13 | ETA: 0:00:01
+[KGenerating Samples |############################### | (255/256) Sample Time: 3.586s | Infer Batch: 42.1 | Total: 0:15:14 | ETA: 0:00:01
+[KGenerating Samples |############################### | (255/256) Sample Time: 3.586s | Infer Batch: 42.1 | Total: 0:15:15 | ETA: 0:00:01
+[KGenerating Samples |############################### | (255/256) Sample Time: 3.586s | Infer Batch: 42.1 | Total: 0:15:16 | ETA: 0:00:01
+[KGenerating Samples |############################### | (255/256) Sample Time: 3.586s | Infer Batch: 42.1 | Total: 0:15:17 | ETA: 0:00:01
+[KGenerating Samples |############################### | (255/256) Sample Time: 3.586s | Infer Batch: 42.1 | Total: 0:15:18 | ETA: 0:00:01
+[KGenerating Samples |################################| (256/256) Sample Time: 3.593s | Infer Batch: 42.1 | Total: 0:15:19 | ETA: 0:00:01
+[KGenerating Samples |################################| (256/256) Sample Time: 3.593s | Infer Batch: 42.1 | Total: 0:15:20 | ETA: 0:00:00
+[KGenerating Samples |################################| (256/256) Sample Time: 3.593s | Infer Batch: 42.1 | Total: 0:15:21 | ETA: 0:00:00
+[KGenerating Samples |################################| (256/256) Sample Time: 3.593s | Infer Batch: 42.0 | Total: 0:15:22 | ETA: 0:00:00
+[KGenerating Samples |################################| (256/256) Sample Time: 3.593s | Infer Batch: 42.0 | Total: 0:15:23 | ETA: 0:00:00
+[KGenerating Samples |################################| (256/256) Sample Time: 3.593s | Infer Batch: 42.0 | Total: 0:15:24 | ETA: 0:00:00
+[KGenerating Samples |################################| (256/256) Sample Time: 3.593s | Infer Batch: 42.0 | Total: 0:15:26 | ETA: 0:00:00
+[KGenerating Samples |################################| (256/256) Sample Time: 3.593s | Infer Batch: 42.0 | Total: 0:15:26 | ETA: 0:00:00
+[?25h
+Saving 15108 KataGo Japanese V3 scored samples
+/home/codex/projects/gocube-alphazero/alphazero/envs/gocube/train.py:462: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  torch.load(filename + suffix)
+
+[KTraining Net |                                | (1/59) Data: 0.002s | Batch: 0.484s | Total: 0:00:01 | ETA: 0:00:00 | Loss_pi: 3.0164 | Loss_v: 0.787 | Loss_owner: 0.491 | Loss_score: 0.124
+[KTraining Net |#################               | (32/59) Data: 0.006s | Batch: 0.042s | Total: 0:00:02 | ETA: 0:00:01 | Loss_pi: 3.0070 | Loss_v: 0.801 | Loss_owner: 0.476 | Loss_score: 0.109
+[KTraining Net |################################| (59/59) Data: 0.007s | Batch: 0.035s | Total: 0:00:02 | ETA: 0:00:01 | Loss_pi: 3.0063 | Loss_v: 0.803 | Loss_owner: 0.476 | Loss_score: 0.111
+[?25h
+=== V3 iteration 6 training summary ===
+Games:                    256
+Regular decisions:        23888
+Fast decisions:           24640
+Fast fraction:            50.77%
+
+Base positions:           15108
+Base endgame:             1835
+Endgame weight:           1
+Extra weighted samples:   0
+Saved samples:            15108
+
+History datasets:         6
+Window samples:           141793
+Latest iteration samples: 15108
+Batch size:               256
+
+Optimizer steps planned:  59
+Optimizer steps actual:   59
+Examples seen:            15104
+Effective passes:         0.107
+LR:                       0.01
+
+

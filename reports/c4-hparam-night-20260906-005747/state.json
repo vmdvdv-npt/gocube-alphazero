@@ -41,6 +41,13 @@
       "kind": "checkpoint",
       "path": "checkpoint/c4-hparam-night-20260906-005747-b/iteration-0006.pkl",
       "sha256": "f091b877c821dc16f4cc975d781d24783f428569243dad8749e09cd1ccb0e8a4"
+    },
+    {
+      "branch": "C",
+      "iteration": 6,
+      "kind": "checkpoint",
+      "path": "checkpoint/c4-hparam-night-20260906-005747-c/iteration-0006.pkl",
+      "sha256": "849ae2b29690a6bbfc6eee748caf70cf823c84449e0abff1127185ce77b25a05"
     }
   ],
   "branches": {
@@ -68,11 +75,11 @@
       "axis": "pfast",
       "games": 256,
       "label": "more fast search",
-      "latest_iteration": 5,
+      "latest_iteration": 6,
       "pfast": 0.5,
       "run_name": "c4-hparam-night-20260906-005747-c",
       "sims": 100,
-      "status": "FORKED"
+      "status": "ACTIVE"
     },
     "D": {
       "axis": "sims",
@@ -466,6 +473,49 @@
       "white_wins": 150,
       "window_samples": 159477,
       "workers": 16
+    },
+    {
+      "average_game_length": 120.9375,
+      "base_endgame_positions": 1835,
+      "base_positions": 15108,
+      "batch_size": 256,
+      "black_wins": 105,
+      "branch": "C",
+      "checkpoint_sha256": "849ae2b29690a6bbfc6eee748caf70cf823c84449e0abff1127185ce77b25a05",
+      "draws": 0,
+      "effective_passes": 0.107,
+      "examples_seen": 15104,
+      "fast_decisions": 24640,
+      "fast_sims": 20,
+      "games": 256,
+      "games_per_iteration": 256,
+      "history_datasets": 6,
+      "iteration": 6,
+      "last_reported_inference_batch": 42.0,
+      "latest_iteration_samples": 15108,
+      "learning_rate": 0.01,
+      "loss_ownership": 0.476,
+      "loss_policy": 3.0063,
+      "loss_score": 0.111,
+      "loss_value": 0.803,
+      "no_result_games": 0,
+      "optimizer_steps_actual": 59,
+      "optimizer_steps_planned": 59,
+      "pfast": 0.5,
+      "process_batch_size": 16,
+      "realized_fast_fraction": 0.5077,
+      "regular_decisions": 23888,
+      "run_name": "c4-hparam-night-20260906-005747-c",
+      "saved_samples": 15108,
+      "sims": 100,
+      "stage_id": "stage1_train_C_i6",
+      "tensor_rows": 15108,
+      "train_batch_size": 256,
+      "training_valid_fraction": 1.0,
+      "wall_seconds": 936.9386539459229,
+      "white_wins": 151,
+      "window_samples": 141793,
+      "workers": 16
     }
   ],
   "notes": [
@@ -695,6 +745,38 @@
       "started_at": "2026-09-06T04:12:55+04:00",
       "status": "COMPLETED"
     },
+    "stage1_eval_C_i6_vs_parent5": {
+      "candidate": "C",
+      "candidate_iteration": 6,
+      "command": [
+        "/home/codex/projects/gocube-alphazero/.venv/bin/python",
+        "/home/codex/.cache/gocube-night-tools-d1e63d0f6bd6fdecce5887af97bdb5e3cc166f89/evaluate_gocube_checkpoints.py",
+        "--candidate",
+        "/home/codex/projects/gocube-alphazero/checkpoint/c4-hparam-night-20260906-005747-c/iteration-0006.pkl",
+        "--reference",
+        "/home/codex/projects/gocube-alphazero/checkpoint/c4-t001-c4-c001/iteration-0005.pkl",
+        "--output",
+        "/home/codex/projects/gocube-alphazero/training_reports/c4-hparam-night-20260906-005747/evaluations/stage1_eval_C_i6_vs_parent5.json",
+        "--candidate-id",
+        "C@6",
+        "--reference-id",
+        "parent@5",
+        "--topology",
+        "cube",
+        "--size",
+        "4",
+        "--games",
+        "24",
+        "--sims",
+        "100",
+        "--seed",
+        "20261573"
+      ],
+      "games": 24,
+      "reference": "parent@5",
+      "started_at": "2026-09-06T04:55:22+04:00",
+      "status": "RUNNING"
+    },
     "stage1_train_A_i6": {
       "branch": "A",
       "checkpoint_sha256": "1083dd246f5b0fda4877eecf603ce1049456b86f40d14e0a9986317732d27706",
@@ -771,6 +853,7 @@
     },
     "stage1_train_C_i6": {
       "branch": "C",
+      "checkpoint_sha256": "849ae2b29690a6bbfc6eee748caf70cf823c84449e0abff1127185ce77b25a05",
       "command": [
         "/home/codex/projects/gocube-alphazero/.venv/bin/python",
         "/home/codex/projects/gocube-alphazero/alphazero/envs/gocube/train.py",
@@ -798,9 +881,12 @@
         "--run-name",
         "c4-hparam-night-20260906-005747-c"
       ],
+      "elapsed_seconds": 936.9386539459229,
+      "ended_at": "2026-09-06T04:55:22+04:00",
+      "exit_code": 0,
       "iteration": 6,
       "started_at": "2026-09-06T04:39:45+04:00",
-      "status": "RUNNING"
+      "status": "COMPLETED"
     }
   },
   "started_at": "2026-09-06T00:59:07+04:00",
