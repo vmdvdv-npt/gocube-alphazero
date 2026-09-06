@@ -9,10 +9,13 @@ from torch import multiprocessing as mp
 
 from alphazero.Coach import TrainState, _set_state
 from alphazero.NNetWrapper import NNetWrapper
-from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
 from alphazero.envs.gocube.pinned_game import pinned_game_class
-from alphazero.envs.gocube.selfplay_semantics import KATAGO_CLEANUP_TRAINING_DEFAULTS
+from alphazero.envs.gocube.pinned_selfplay import PinnedSelfPlayAgent
+from alphazero.envs.gocube.selfplay_semantics import (
+    KATAGO_CLEANUP_TRAINING_DEFAULTS,
+    KATAGO_PINNED_SELFPLAY_DEFAULTS,
+)
 from alphazero.envs.gocube.train import GoCubeCoach, build_training_args, print_training_configuration
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
@@ -79,7 +82,7 @@ class KataGoSearchCoach(GoCubeCoach):
                 self.ownership_tensors[i].pin_memory()
 
             self.agents.append(
-                SelfPlayAgent(
+                PinnedSelfPlayAgent(
                     i,
                     self.game_cls,
                     self.ready_queue,
@@ -205,6 +208,7 @@ def build_katago_training_args(cli):
     game_cls = pinned_game_class(base_game_cls)
     defaults = KATAGO_SEARCH_DEFAULTS
     cleanup_defaults = KATAGO_CLEANUP_TRAINING_DEFAULTS
+    selfplay_defaults = KATAGO_PINNED_SELFPLAY_DEFAULTS
 
     args.search_utility_mode = KATAGO_PINNED_SEARCH_UTILITY_MODE
     # This is intentionally metadata only here. The checkpoint already saves the
@@ -240,6 +244,13 @@ def build_katago_training_args(cli):
     args.gocube_cleanup_training_prelude_area_prop = float(cli.cleanup_training_prelude_area_prop)
     args.gocube_cleanup_training_gamma_shape = cleanup_defaults["prelude_gamma_shape"]
     args.gocube_cleanup_training_policy_temperature = cleanup_defaults["policy_temperature"]
+
+    # Remaining pinned self-play semantics from play.cpp/selfplay8b20.cfg.
+    args.gocube_pass_alive_auto_end_probability = selfplay_defaults[
+        "pass_alive_auto_end_probability"
+    ]
+    args.gocube_root_prune_useless_moves = selfplay_defaults["root_prune_useless_moves"]
+    args.gocube_seki_fork_hack_probability = selfplay_defaults["seki_fork_hack_probability"]
 
     # Keep the framework fields aligned with the pinned KataGo values that are
     # actually consumed by MCTS. The experiment dimensions requested by the user
@@ -295,6 +306,9 @@ def print_katago_search_configuration(args):
     print(f"  cleanup prelude area proportion = {args.gocube_cleanup_training_prelude_area_prop:g}")
     print(f"  cleanup prelude gamma shape = {args.gocube_cleanup_training_gamma_shape:g}")
     print(f"  cleanup policy temperature = {args.gocube_cleanup_training_policy_temperature:g}")
+    print(f"  pass-alive auto-end probability = {args.gocube_pass_alive_auto_end_probability:g}")
+    print(f"  root prune useless moves = {args.gocube_root_prune_useless_moves}")
+    print(f"  seki fork hack probability = {args.gocube_seki_fork_hack_probability:g}")
 
 
 def main(argv=None):
