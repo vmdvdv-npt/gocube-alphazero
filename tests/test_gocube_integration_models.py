@@ -20,7 +20,7 @@ def descriptor(checkpoint_id="run@5"):
         topology="cube",
         size=4,
         rule_set="chinese",
-        komi=7.5,
+        komi=0.5,
         terminal_adjudicator="gocube-conservative-area-v1",
         path="/tmp/iteration-0005.pkl",
     )
