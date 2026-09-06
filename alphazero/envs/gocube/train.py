@@ -1014,7 +1014,7 @@ def main():
     cli = parse_args()
     game_cls, args = build_training_args(cli)
     print_training_configuration(args)
-    ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
+    ensure_training_manifest(args.checkpoint, args.run_name, game_cls, args)
     network = NNetWrapper(game_cls, args)
     coach = GoCubeCoach(game_cls, network, args)
     coach.learn()
