@@ -439,7 +439,9 @@ class Torus13JapaneseGame(GoGame): TOPOLOGY = torus_topology(13)
 class Torus19JapaneseGame(GoGame): TOPOLOGY = torus_topology(19)
 class Cube2JapaneseGame(GoGame): TOPOLOGY = cube_topology(2)
 class Cube3JapaneseGame(GoGame): TOPOLOGY = cube_topology(3)
-class Cube4JapaneseGame(GoGame): TOPOLOGY = cube_topology(4)
+class Cube4JapaneseGame(GoGame):
+    TOPOLOGY = cube_topology(4)
+    KOMI = 0.5
 class Cube5JapaneseGame(GoGame): TOPOLOGY = cube_topology(5)
 class Cube6JapaneseGame(GoGame): TOPOLOGY = cube_topology(6)
 class Cube7JapaneseGame(GoGame): TOPOLOGY = cube_topology(7)
