@@ -11,9 +11,9 @@ You may join the [Discord server](https://discord.gg/MVaHwGZpRC) if you wish to 
 ### Current differences from the above repos
 1. **Cython:** The most computationally intensive components are written in Cython to be compiled for a runtime speedup of [up to 30x](https://towardsdatascience.com/use-cython-to-get-more-than-30x-speedup-on-your-python-code-f6cb337919b6) compared to pure python.
 2. **GUI:** Includes a graphical user interface for easier training and arena comparisons. It also allows for games to be played visually (agent-agent, agent-human, human-human) instead of through a command line interface (work-in-progress). Custom environments must implement their own GUI naturally.
-3. **Node-based MCTS:** Uses a better implementation of MCTS that uses nodes instead of dictionary lookups. This allows for a huge increase in performance and much less RAM usage than what the previous implementation used, about 30-50% speed increase and 95% less RAM usage from experimental data. The base code for this was provided by [bhandsconnect](https://github.com/bhandsconnect).
+3. **Node-based MCTS:** Uses a better implementation of MCTS that uses nodes instead of dictionary lookups. This allows for a huge increase in performance and much less RAM usage than what the previous implementation used, about 30-50% speed increase and 95% less RAM usage from experimental data. The base code for this was provided by [bhandsconnect](https://github.com/bhansconnect).
 4. **Model Gating:** After each iteration, the model is compared to the previous iteration. The model that performs better continues forward based on an adjustable minimum winrate parameter.
-5. **Batched MCTS:** [bhandsconnect's repo](https://github.com/bhandsconnect/fast-alphazero-general) already includes this for self play, but it has been expanded upon to be included in Arena for faster comparison of models.
+5. **Batched MCTS:** [bhandsconnect's repo](https://github.com/bhansconnect/fast-alphazero-general) already includes this for self play, but it has been expanded upon to be included in Arena for faster comparison of models.
 6. **N-Player Support:** Any number of players are supported! This allows for training on a greater variety of games such as many types of card games or something like Catan.
 7. **Warmup Iterations:** A few self play iterations in the beginning of training can optionnally be done using random policy and value to speed up initial generation of training data instead of using a model that is initally random anyways. This makes these iterations purely CPU-bound.
 8. **Root Dirichlet Noise & Root Temperature, Discount:** Allows for better exploration and MCTS doesn't get stuck in local minima as often. Discount allows AlphaZero to "understand" the concept of time and chooses actions which lead to a win more quickly/efficiently as opposed to choosing a win that would occur later on in the game.
@@ -74,7 +74,7 @@ After that, the controls are generally intuitive. Default/saved arguments can be
 
 At the top left, the Arena tab can be toggled as seen above. Here, a separate set of args & env can be loaded and the type of players can be selected. For example, in the above image the brandubh environment was loaded and an MCTS Player with a model is pitted against a human player.
 
-For now, Arena is still displayed in the console, but eventually there will be support for each environment to implement its own graphical interface to play games (agent-agent, agent-player, player-player).
+For now, Arena is still displayed in the console, but eventually there will be support for each environment to implement their own graphical interface to play games (agent-agent, agent-player, player-player).
 
 ### Try one of the existing examples
 1. Adjust the hyperparameters in one of the examples to your preference (in the GUI editor, or path is ```alphazero/envs/<env name>/train.py```). Take a look at Coach.py where the default arguments are stored to see the available options. For example, edit ```alphazero/envs/connect4/train.py```.
