@@ -24,6 +24,7 @@ def _bare_agent(*, is_arena, prob_fast, arena_sims=100, include_arena_sims=True)
     agent.args = args
     agent._is_arena = is_arena
     agent._is_warmup = False
+    agent.score_aware = False
     agent.fast = False
     return agent
 
@@ -74,6 +75,7 @@ def test_arena_process_results_forces_root_noise_and_temp_off():
     agent = SelfPlayAgent.__new__(SelfPlayAgent)
     agent._is_arena = True
     agent._is_warmup = True
+    agent.score_aware = False
     agent.batch_size = 1
     agent.batch_indices = [0]
     agent.games = [SimpleNamespace(player=0)]
