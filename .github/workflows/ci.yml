@@ -41,7 +41,8 @@ jobs:
             tests/test_gocube_katago_v3_scoring.py \
             tests/test_gocube_katago_v3_benson_topology.py \
             tests/test_gocube_train_entrypoint.py \
-            tests/test_gocube_training_budget_telemetry.py
+            tests/test_gocube_training_budget_telemetry.py \
+            tests/test_gocube_final_training_hardening.py
 
       - name: Run full pytest
         run: python -m pytest -q
@@ -94,6 +95,36 @@ jobs:
           assert len(set(rows)) == 1 and rows[0] > 0, rows
           print('Torus 9 tensor rows:', rows[0])
           PY
+
+      - name: Run hardened production smoke and recovery check
+        run: |
+          python -m alphazero.envs.gocube.production_hardening \
+            --topology cube --size 4 --workers 1 --sims 1 --arena-sims 1 \
+            --games-per-iteration 2 --iterations 1 --train-batch-size 256 \
+            --endgame-sample-weight 1 --smoke --run-name ci-cube4-final-hardening-smoke \
+            | tee /tmp/final-hardening-smoke.log
+          python - <<'PY'
+          import json
+          import os
+          marker = 'data/ci-cube4-final-hardening-smoke/iteration-0001-complete.json'
+          assert os.path.exists(marker), marker
+          with open(marker, encoding='utf-8') as f:
+              payload = json.load(f)
+          assert payload['recovery_contract'] == 'gocube-atomic-recovery-v1', payload
+          assert payload['row_count'] > 0, payload
+          for iteration in (0, 1):
+              path = f'checkpoint/ci-cube4-final-hardening-smoke/iteration-{iteration:04d}.pkl'
+              assert os.path.exists(path), path
+          print('Hardening marker rows:', payload['row_count'])
+          PY
+          printf 'corrupt trailing checkpoint' > checkpoint/ci-cube4-final-hardening-smoke/iteration-0002.pkl
+          python -m alphazero.envs.gocube.production_hardening \
+            --topology cube --size 4 --workers 1 --sims 1 --arena-sims 1 \
+            --games-per-iteration 2 --iterations 1 --train-batch-size 256 \
+            --endgame-sample-weight 1 --smoke --allow-existing-run \
+            --run-name ci-cube4-final-hardening-smoke \
+            | tee /tmp/final-hardening-resume.log
+          grep -Fq 'ignoring trailing checkpoint iterations' /tmp/final-hardening-resume.log
 
       - name: Print rules fingerprints and git status
         run: |

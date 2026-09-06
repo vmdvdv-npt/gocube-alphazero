@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-RUN_NAME="${RUN_NAME:-gocube-cube-4-katago-pinned-s50-fast025-20260906}"
+RUN_NAME="${RUN_NAME:-gocube-cube-4-katago-final-s50-20260907}"
 
 for path in "checkpoint/$RUN_NAME" "data/$RUN_NAME" "runs/$RUN_NAME"; do
   if [[ -e "$path" ]]; then
@@ -14,7 +14,7 @@ for path in "checkpoint/$RUN_NAME" "data/$RUN_NAME" "runs/$RUN_NAME"; do
   fi
 done
 
-python -m alphazero.envs.gocube.katago_train \
+python -m alphazero.envs.gocube.production_hardening \
   --topology cube \
   --size 4 \
   --workers 16 \

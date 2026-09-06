@@ -4,6 +4,7 @@ import numpy as np
 
 from alphazero.SelfPlayAgent import SelfPlayAgent
 
+from .exploration_contract import KATAGO_PINNED_EXPLORATION_DEFAULTS, chosen_move_temperature
 from .selfplay_semantics import KATAGO_PINNED_SELFPLAY_DEFAULTS
 
 
@@ -86,3 +87,39 @@ class PinnedSelfPlayAgent(SelfPlayAgent):
                 started_from_seki_fork=bool(config["started_from_seki_fork"]),
             )
         return result
+
+    def playMoves(self):
+        """Use pinned chosenMoveTemperature for the actually played self-play move.
+
+        KataGo disables LCB while choosing the self-play action but restores it
+        when extracting the policy target. MCTS.probs distinguishes those two
+        calls by this sub-1 chosen-move temperature versus the target's temp=1.
+        """
+
+        if getattr(self, "score_aware", False) and not self._is_arena and not self._is_warmup:
+            defaults = KATAGO_PINNED_EXPLORATION_DEFAULTS
+            early = float(_optional_arg(
+                self.args,
+                "gocube_chosen_move_temperature_early",
+                defaults["chosen_move_temperature_early"],
+            ))
+            late = float(_optional_arg(
+                self.args,
+                "gocube_chosen_move_temperature",
+                defaults["chosen_move_temperature"],
+            ))
+            halflife = float(_optional_arg(
+                self.args,
+                "gocube_chosen_move_temperature_halflife",
+                defaults["chosen_move_temperature_halflife"],
+            ))
+            point_count = int(self.game_cls.logical_topology().point_count)
+            for index in range(self.batch_size):
+                self.temps[index] = chosen_move_temperature(
+                    int(self.games[index].turns),
+                    point_count,
+                    early_temperature=early,
+                    temperature=late,
+                    halflife=halflife,
+                )
+        return super().playMoves()

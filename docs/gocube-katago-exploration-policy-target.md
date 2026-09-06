@@ -4,52 +4,51 @@
 
 This block is derived from KataGo commit `f6bc4b19a1686caa2d088b56251e8c11c8be6d51`, the same pinned commit used by the GoCube search contract introduced in PR #32.
 
-Relevant KataGo behavior is taken from:
+Production contract: `katago-pinned-exploration-v2`.
 
-- `cpp/configs/training/selfplay8b20.cfg`
-- `cpp/search/searchhelpers.cpp` (`computeDirichletAlphaDistribution`, root policy temperature/noise)
-- `cpp/search/searchexplorehelpers.cpp` (`rootDesiredPerChildVisitsCoeff`, inverse PUCT reduction)
-- `cpp/search/searchresults.cpp` (retrospective root play-selection-weight reduction)
+Relevant KataGo behavior comes from `selfplay8b20.cfg`, `searchhelpers.cpp`, `searchexplorehelpers.cpp`, `searchupdatehelpers.cpp`, `searchresults.cpp`, and `play.cpp`.
 
-Pinned values used by GoCube production self-play:
+Pinned production values:
 
-- `rootDirichletNoiseTotalConcentration = 10.83`
-- `rootDirichletNoiseWeight = 0.25`
-- `rootPolicyTemperatureEarly = 1.25`
-- `rootPolicyTemperature = 1.10`
-- temperature halflife = `19`
-- `rootDesiredPerChildVisitsCoeff = 2.0`
+- root Dirichlet total concentration 10.83, weight 0.25;
+- root policy temperature 1.25 -> 1.10, halflife 19;
+- root desired child visits coeff 2.0;
+- chosen move temperature 0.75 -> 0.15, halflife 19;
+- chosen move subtract 0, prune 1;
+- value weight exponent 0.5;
+- LCB enabled, 5.0 stdevs, minimum visit proportion 0.15.
 
-## Ported semantics
+## Search and policy-target order
 
 At a self-play root GoCube now:
 
-1. masks/normalizes the raw NN policy over legal actions;
-2. applies KataGo's early root policy temperature;
-3. applies KataGo's shaped Dirichlet distribution (half uniform alpha mass, half shaped by the low-policy log distribution);
-4. uses `rootDesiredPerChildVisitsCoeff` during root selection to force underexplored policy children to receive search attention;
-5. retains the actual raw visit counts for diagnostics;
-6. derives the policy training target from retrospectively reduced root counts using KataGo's inverse-PUCT calculation, so exploration-forced overspend is not supervised as ordinary MCTS evidence.
+1. masks/normalizes raw NN policy over legal actions;
+2. applies pinned early root-policy temperature;
+3. applies shaped Dirichlet root noise;
+4. searches using root desired-child forcing, KataGo PUCT/FPU and value-weighted child statistics;
+5. retains raw edge visits for diagnostics;
+6. obtains root play-selection weights from child `weightSum`;
+7. retrospectively reduces over-explored child weights with inverse PUCT;
+8. applies LCB for policy-target extraction;
+9. applies chosen-move prune/subtract;
+10. normalizes the resulting weights as the training policy target.
 
-The correction is intentionally separate from PASS/endgame behavior. Existing score utility, root ending bonus, FPU, PUCT, and PASS semantics from the pinned search contract are not redefined here.
+For the actual self-play action, step 8 is deliberately skipped, matching KataGo's `play.cpp` self-play hack that temporarily disables LCB for move choice. The action is then sampled with the chosen-move temperature schedule 0.75 -> 0.15. Policy supervision still uses LCB.
 
-Arena disables root temperature and Dirichlet noise but otherwise keeps the same deterministic search contract for both checkpoint opponents.
+## Value aggregation
+
+The old GoCube backup gave every leaf equal statistical weight and averaged utility directly. Production now retains utility-square and effective-weight statistics and ports pinned `valueWeightExponent=0.5` child downweighting. Bad children receive less aggregation weight; adjusted child weights are normalized back to the same total child weight.
+
+Because current GoCube search has no transpositions, child edge visits equal child visits and KataGo's edge-adjusted child weight specializes exactly to the child's aggregate `weightSum`.
+
+## LCB
+
+LCB is computed from child utility mean, utility-square mean and effective sample size, with KataGo's small variance prior. Root ending-score utility changes are added to the mean before the confidence comparison. Only children above `minVisitPropForLCB` relative to the non-LCB best are eligible. The best-LCB move receives the same bounded multiplicative play-selection-weight bonus used by pinned KataGo.
 
 ## Topology-specific substitution
 
-KataGo's `interpolateEarly` scales elapsed halflives by `19 / sqrt(board_x * board_y)`. Cube and torus positions do not have a single planar `x*y` rectangle. GoCube substitutes the logical graph point count and therefore uses `19 / sqrt(logical_point_count)`.
-
-This is the only topology-specific change in this exploration/policy-target block. Dirichlet shaping, mixture weight, desired-child-visits forcing, and retrospective inverse-PUCT reduction are topology-independent and retain the pinned formulas.
+KataGo's `interpolateEarly` scales elapsed halflives by `19 / sqrt(board_x * board_y)`. Cube and torus use `19 / sqrt(logical_point_count)`. No other formula is topology-specific in this block.
 
 ## Telemetry
 
-For each regular self-play training position, game records can include:
-
-- legal normalized NN root policy before exploration;
-- policy after root temperature/noise;
-- raw root visit counts;
-- final policy training target;
-- per-action and total retrospectively removed exploration visits;
-- PASS-suppressed visits separately, so PASS/endgame suppression is not misreported as exploration correction.
-
-Iteration manifests and TensorBoard contain aggregate raw visits, removed exploration visits, target visits, and removed-visit fraction.
+Regular self-play records retain raw NN root policy, exploration-modified policy and raw visits, and now also expose pre-LCB and post-LCB play-selection weights, LCB values/radii, chosen LCB action, final normalized policy target, retrospectively removed exploration visits, and PASS-suppressed visits.
