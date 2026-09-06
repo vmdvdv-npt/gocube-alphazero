@@ -41,6 +41,8 @@ jobs:
             tests/test_gocube_katago_v3_scoring.py \
             tests/test_gocube_katago_v3_benson_topology.py \
             tests/test_gocube_score_aware_search.py \
+            tests/test_gocube_ownership_search_helpers.py \
+            tests/test_gocube_phase_sampling.py \
             tests/test_gocube_search_audit_telemetry.py \
             tests/test_gocube_selfplay_guard.py \
             tests/test_gocube_search_contract_metadata.py \
