@@ -76,6 +76,7 @@ def _decision_agent(prob_fast):
     })
     agent._is_arena = False
     agent._is_warmup = False
+    agent.score_aware = False
     agent.fast = False
     agent.batch_size = 1
     agent.games = [_DecisionGame()]
