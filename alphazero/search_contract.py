@@ -127,16 +127,31 @@ def exact_player_score_points(game: Any, player: int) -> float | None:
 
 
 def equivalent_win_probability(value: Any, player: int, num_players: int) -> float:
-    """Legacy-compatible win estimate, treating a draw as half a win."""
+    """Win estimate with a draw treated as an equal fractional win.
+
+    GoCube's framework historically stores ``args._num_players`` as the width
+    of the result vector, i.e. Black, White, and draw (3), while some callers
+    pass the actual number of players (2). Accept both forms so score-aware
+    search cannot silently drop the draw probability when it receives the
+    framework's result-vector width.
+    """
 
     arr = np.asarray(value, dtype=np.float64).reshape(-1)
     player = int(player)
     num_players = int(num_players)
-    if player < 0 or player >= num_players:
+
+    actual_players = num_players
+    if arr.size == 3 and num_players == 3:
+        actual_players = 2
+
+    if player < 0 or player >= actual_players:
         raise ValueError("player index outside value vector")
+    if arr.size < actual_players:
+        raise ValueError("value vector is shorter than the player count")
+
     result = float(arr[player])
-    if arr.size > num_players:
-        result += float(arr[num_players]) / float(num_players)
+    if arr.size > actual_players:
+        result += float(arr[actual_players]) / float(actual_players)
     return result
 
 
