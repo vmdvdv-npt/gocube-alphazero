@@ -161,14 +161,26 @@ class SelfPlayAgent(mp.Process):
         finally:
             lock.release()
 
+    def _cleanup_training_active(self, index):
+        phases = getattr(self, 'cleanup_training_phase', None)
+        return phases is not None and index < len(phases) and phases[index] is not None
+
+    def _cleanup_slot_set(self, name, index, value):
+        slots = getattr(self, name, None)
+        if slots is not None and index < len(slots):
+            slots[index] = value
+
     def _cancel_cleanup_training_plan(self, index):
-        self.cleanup_training_phase[index] = None
-        self.cleanup_training_moves_left[index] = 0
-        self.cleanup_training_prelude_total[index] = 0
-        self.root_policy_cache[index] = None
+        self._cleanup_slot_set('cleanup_training_phase', index, None)
+        self._cleanup_slot_set('cleanup_training_moves_left', index, 0)
+        self._cleanup_slot_set('cleanup_training_prelude_total', index, 0)
+        self._cleanup_slot_set('root_policy_cache', index, None)
 
     def _start_cleanup_training(self, index):
-        phase = self.cleanup_training_phase[index]
+        phases = getattr(self, 'cleanup_training_phase', None)
+        if phases is None or index >= len(phases):
+            return False
+        phase = phases[index]
         if phase not in (CLEANUP_1, CLEANUP_2):
             return False
         game = self.games[index]
@@ -183,27 +195,33 @@ class SelfPlayAgent(mp.Process):
         self.temps[index] = self.args.startTemp
         self.mcts[index] = self._get_mcts()
         self.next_reset[index] = 0
-        self.root_policy_cache[index] = None
-        self.cleanup_training_metadata[index] = {
+        self._cleanup_slot_set('root_policy_cache', index, None)
+        prelude_totals = getattr(self, 'cleanup_training_prelude_total', None)
+        prelude_total = prelude_totals[index] if prelude_totals is not None and index < len(prelude_totals) else 0
+        metadata = {
             'mode': 'cleanup_training',
             'began_in_phase': phase,
-            'prelude_moves': int(self.cleanup_training_prelude_total[index]),
+            'prelude_moves': int(prelude_total),
             'initial_player': int(rebased_state.current_player),
             'initial_board': [int(v) for v in np.asarray(rebased_state.board).reshape(-1)],
         }
-        self.cleanup_training_phase[index] = None
-        self.cleanup_training_moves_left[index] = 0
-        if self.recording_enabled:
+        self._cleanup_slot_set('cleanup_training_metadata', index, metadata)
+        self._cleanup_slot_set('cleanup_training_phase', index, None)
+        self._cleanup_slot_set('cleanup_training_moves_left', index, 0)
+        if getattr(self, 'recording_enabled', False):
             self.game_ids[index] = None
             self.move_histories[index] = []
             self.game_start_times[index] = None
         return True
 
     def _sample_cleanup_training_plan(self, index):
+        phases = getattr(self, 'cleanup_training_phase', None)
+        if phases is None or index >= len(phases):
+            return
         self._cancel_cleanup_training_plan(index)
-        self.cleanup_training_metadata[index] = None
+        self._cleanup_slot_set('cleanup_training_metadata', index, None)
         if (
-            not self.score_aware
+            not getattr(self, 'score_aware', False)
             or self._is_arena
             or self._is_warmup
             or self.cleanup_training_prob <= 0.0
@@ -224,14 +242,15 @@ class SelfPlayAgent(mp.Process):
                 self.cleanup_training_gamma_shape,
                 mean / self.cleanup_training_gamma_shape,
             )))
-        self.cleanup_training_phase[index] = phase
-        self.cleanup_training_moves_left[index] = moves
-        self.cleanup_training_prelude_total[index] = moves
+        self._cleanup_slot_set('cleanup_training_phase', index, phase)
+        self._cleanup_slot_set('cleanup_training_moves_left', index, moves)
+        self._cleanup_slot_set('cleanup_training_prelude_total', index, moves)
         if moves <= 0:
             self._start_cleanup_training(index)
 
     def _cleanup_prelude_policy(self, index, fallback_policy):
-        raw = self.root_policy_cache[index]
+        caches = getattr(self, 'root_policy_cache', None)
+        raw = caches[index] if caches is not None and index < len(caches) else None
         if raw is None:
             raw = fallback_policy
         policy = np.asarray(raw, dtype=np.float64).reshape(-1).copy()
@@ -331,9 +350,11 @@ class SelfPlayAgent(mp.Process):
             self._check_pause()
             index = self.batch_indices[i] if self._is_arena else i
             if getattr(self, 'score_aware', False):
-                if self.cleanup_training_phase[i] is not None and self._mcts(i).depth == 0:
-                    self.root_policy_cache[i] = np.array(
-                        self.policy_tensor[index].data.numpy(), dtype=np.float64, copy=True
+                if self._cleanup_training_active(i) and self._mcts(i).depth == 0:
+                    self._cleanup_slot_set(
+                        'root_policy_cache',
+                        i,
+                        np.array(self.policy_tensor[index].data.numpy(), dtype=np.float64, copy=True),
                     )
                 self._mcts(i).process_search_results(
                     self.games[i],
@@ -361,7 +382,7 @@ class SelfPlayAgent(mp.Process):
                 self.temps[i], self.games[i].turns, self.game_cls.max_turns()
             ) if not self._is_arena else self.args.arenaTemp
             policy = self._mcts(i).probs(self.games[i], self.temps[i])
-            in_cleanup_prelude = self.cleanup_training_phase[i] is not None
+            in_cleanup_prelude = self._cleanup_training_active(i)
             if in_cleanup_prelude:
                 prelude_policy = self._cleanup_prelude_policy(i, policy)
                 if prelude_policy is None:
@@ -383,24 +404,30 @@ class SelfPlayAgent(mp.Process):
                     "action": int(action),
                     "move": "PASS" if action == self.game_cls.pass_action() else self.game_cls.point_id_for_action(int(action)),
                 }
-                if not self.move_histories[i] and self.cleanup_training_metadata[i] is not None:
-                    move_record["training_start"] = self.cleanup_training_metadata[i]
+                metadata_slots = getattr(self, 'cleanup_training_metadata', None)
+                metadata = metadata_slots[i] if metadata_slots is not None and i < len(metadata_slots) else None
+                if not self.move_histories[i] and metadata is not None:
+                    move_record["training_start"] = metadata
                 self.move_histories[i].append(move_record)
             if self._is_arena:
                 [mcts.update_root(self.games[i], action) for mcts in self.mcts[i]]
             else:
                 self._mcts(i).update_root(self.games[i], action)
             self.games[i].play_action(action)
-            self.root_policy_cache[i] = None
+            self._cleanup_slot_set('root_policy_cache', i, None)
 
             if in_cleanup_prelude:
-                self.cleanup_training_moves_left[i] = max(0, self.cleanup_training_moves_left[i] - 1)
+                moves_left_slots = getattr(self, 'cleanup_training_moves_left', None)
+                moves_left = 0
+                if moves_left_slots is not None and i < len(moves_left_slots):
+                    moves_left = max(0, moves_left_slots[i] - 1)
+                    moves_left_slots[i] = moves_left
                 state = getattr(self.games[i], 'semantic_state', None)
                 if (
                     state is not None
                     and getattr(state, 'terminal_kind', None) is None
                     and getattr(state, 'phase', None) == 'main'
-                    and self.cleanup_training_moves_left[i] <= 0
+                    and moves_left <= 0
                 ):
                     if self._start_cleanup_training(i):
                         continue
@@ -496,6 +523,7 @@ class SelfPlayAgent(mp.Process):
                 self.game_start_times[i] = None
             self.temps[i] = self.args.startTemp
             self.mcts[i] = self._get_mcts()
-            self.cleanup_training_metadata[i] = None
-            self.root_policy_cache[i] = None
-            self._sample_cleanup_training_plan(i)
+            self._cleanup_slot_set('cleanup_training_metadata', i, None)
+            self._cleanup_slot_set('root_policy_cache', i, None)
+            if getattr(self, 'cleanup_training_phase', None) is not None:
+                self._sample_cleanup_training_plan(i)
