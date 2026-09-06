@@ -16,30 +16,37 @@ import time
 import os
 
 
+_MISSING = object()
 _SEARCH_CONTRACT_ARG_KEYS = (
-    'gocube_search_contract',
+    'gocube_katago_search_contract',
+    'gocube_katago_search_reference_commit',
     'search_utility_mode',
     'gocube_win_loss_utility_factor',
     'gocube_static_score_utility_factor',
     'gocube_dynamic_score_utility_factor',
     'gocube_dynamic_score_center_zero_weight',
     'gocube_dynamic_score_center_scale',
+    'gocube_cpuct_exploration',
+    'gocube_cpuct_exploration_log',
+    'gocube_cpuct_exploration_base',
+    'gocube_root_fpu_reduction',
+    'gocube_fpu_parent_weight_by_visited_policy',
+    'gocube_fpu_parent_weight_by_visited_policy_pow',
     'gocube_root_ending_bonus_points',
     'gocube_fill_dame_before_pass',
     'gocube_conservative_pass',
-    'gocube_score_improvement_threshold_points',
-    'gocube_win_probability_tolerance',
-    'gocube_main_after_pass_weight',
-    'gocube_cleanup1_weight',
-    'gocube_cleanup2_weight',
-    'gocube_guard_min_games',
-    'gocube_early_double_pass_warning_rate',
-    'gocube_early_double_pass_fatal_rate',
-    'gocube_cleanup2_warning_fraction',
-    'gocube_cleanup2_fatal_fraction',
-    'gocube_score_dominated_pass_fatal_rate',
-    'gocube_score_audit_min_positions',
+    'cpuct',
+    'fpu_reduction',
 )
+
+
+def _optional_arg(args, name, default=None):
+    if hasattr(args, 'get'):
+        return args.get(name, default)
+    try:
+        return getattr(args, name)
+    except (AttributeError, KeyError):
+        return default
 
 
 class BaseWrapper(ABC):
@@ -299,11 +306,15 @@ class NNetWrapper(BaseWrapper):
             fields['gocube_rules_fingerprint'] = self.game_cls.rules_fingerprint()
 
         configured_args = getattr(self, 'args', None)
-        if configured_args is not None and getattr(configured_args, 'gocube_search_contract', None):
+        configured_contract = _optional_arg(
+            configured_args, 'gocube_katago_search_contract', None
+        ) if configured_args is not None else None
+        if configured_contract:
             for key in _SEARCH_CONTRACT_ARG_KEYS:
-                if not hasattr(configured_args, key):
+                value = _optional_arg(configured_args, key, _MISSING)
+                if value is _MISSING:
                     raise ValueError(f'Missing required configured search-contract field: {key}')
-                fields[key] = getattr(configured_args, key)
+                fields[key] = value
         return fields
 
     def _validate_saved_contract(self, saved_args, allow_legacy_search_contract=False):
