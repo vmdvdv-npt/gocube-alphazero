@@ -16,8 +16,9 @@ from alphazero.mcts_policy import normalize_masked_policy
 from alphazero.search_contract import (
     GOCUBE_KATAGO_V3_SEARCH_UTILITY_MODE,
     SearchOutput,
-    combined_utility,
     equivalent_win_probability,
+    ownership_root_ending_bonus_points,
+    ownership_root_move_useful,
     player_score_points,
     recent_score_center,
     score_utility,
@@ -282,14 +283,14 @@ cdef class MCTS:
             return float(gs.search_root_ending_bonus_points(
                 int(action), self._root_ownership, self.root_ending_bonus_points
             ))
-        if hasattr(gs, 'pass_action') and action == gs.pass_action():
-            return -self.root_ending_bonus_points * (2.0 / 3.0)
-        return 0.0
+        return float(ownership_root_ending_bonus_points(
+            gs, int(action), self._root_ownership, self.root_ending_bonus_points
+        ))
 
     cdef bint _root_move_useful(self, object gs, int action):
         if hasattr(gs, 'search_root_move_useful'):
             return bool(gs.search_root_move_useful(int(action), self._root_ownership))
-        return True
+        return bool(ownership_root_move_useful(gs, int(action), self._root_ownership))
 
     cdef Node _forced_nonpass_child(self, object gs):
         cdef Node c
