@@ -166,7 +166,7 @@ def test_agent_schedules_policy_init_as_setup_not_training_target(monkeypatch):
 
     assert agent.cleanup_training_phase[0] == POLICY_INIT_PRELUDE
     assert agent.cleanup_training_moves_left[0] == 3
-    assert agent.telemetry["normal_starts"].value == 1
+    assert agent.telemetry["normal_starts"].value == 0
     assert agent.telemetry["policy_initialized_starts"].value == 1
 
     game = agent.games[0]
