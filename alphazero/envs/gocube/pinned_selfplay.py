@@ -144,12 +144,12 @@ class PinnedSelfPlayAgent(SelfPlayAgent):
             )
             return
 
-        self._telemetry_add("normal_starts")
         defaults = KATAGO_PINNED_SELFPLAY_DEFAULTS
         init_enabled = bool(_optional_arg(
             self.args, "gocube_init_games_with_policy", defaults["init_games_with_policy"]
         ))
         if not init_enabled:
+            self._telemetry_add("normal_starts")
             return
         area_prop = float(_optional_arg(
             self.args, "gocube_policy_init_area_prop", defaults["policy_init_area_prop"]
@@ -163,6 +163,7 @@ class PinnedSelfPlayAgent(SelfPlayAgent):
             np.random, int(self.game_cls.logical_topology().point_count), area_prop, gamma_shape
         )
         if moves <= 0:
+            self._telemetry_add("normal_starts")
             return
         self._telemetry_add("policy_initialized_starts")
         self._set_setup_prelude(
@@ -226,17 +227,33 @@ class PinnedSelfPlayAgent(SelfPlayAgent):
             return self._setup_policy(index, fallback_policy, temperature)
         if phase == FORK_PRELUDE:
             metadata = self.cleanup_training_metadata[index] or {}
-            return self._setup_policy(
+            policy = self._setup_policy(
                 index,
                 fallback_policy,
                 defaults["policy_init_temperature"],
                 fork_mode=metadata.get("fork_mode", "ordinary"),
             )
+            if policy is not None:
+                # KataGo's experimental fork move is applied directly to the
+                # replayed BoardHistory, outside GameRunner's all-pass-alive
+                # auto-end shortcut. Suppress only that one setup move.
+                game = self.games[index]
+                if hasattr(game, "_pinned_auto_end_pass_alive"):
+                    metadata = dict(metadata)
+                    metadata["restore_auto_end_pass_alive"] = bool(game._pinned_auto_end_pass_alive)
+                    game._pinned_auto_end_pass_alive = False
+                    self.cleanup_training_metadata[index] = metadata
+            return policy
         return super()._cleanup_prelude_policy(index, fallback_policy)
 
     def _start_cleanup_training(self, index):
         phase = self.cleanup_training_phase[index]
         if phase in (POLICY_INIT_PRELUDE, FORK_PRELUDE):
+            metadata = self.cleanup_training_metadata[index] or {}
+            if phase == FORK_PRELUDE and "restore_auto_end_pass_alive" in metadata:
+                game = self.games[index]
+                if hasattr(game, "_pinned_auto_end_pass_alive"):
+                    game._pinned_auto_end_pass_alive = bool(metadata["restore_auto_end_pass_alive"])
             state = getattr(self.games[index], "semantic_state", None)
             if state is None or getattr(state, "terminal_kind", None) is not None or getattr(state, "phase", None) != "main":
                 self._cancel_cleanup_training_plan(index)
