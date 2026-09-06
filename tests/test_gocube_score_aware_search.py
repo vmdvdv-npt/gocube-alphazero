@@ -51,12 +51,8 @@ class _SecondPassNet:
         cleanup1 = bool(np.max(observation[8, :, 0]) > 0.5)
         white_stones = int(np.sum(observation[1, :, 0]))
         if self.pass_is_good:
-            # White is to move at the tested root. Entering CLEANUP_1 is good
-            # for White, while playing a stone is worse.
             black_minus_white = -12.0 if cleanup1 else (8.0 if white_stones else -12.0)
         else:
-            # Reproduce the adversarial shape: the second PASS is much worse by
-            # score while value is indistinguishable and PASS owns the prior.
             black_minus_white = 22.32 if cleanup1 else (5.59 if white_stones else 22.32)
         score = np.array([black_minus_white / point_count], dtype=np.float32)
         return SearchOutput(policy=policy, value=value, score=score, ownership=ownership)
@@ -91,11 +87,12 @@ def test_score_aware_search_rejects_score_dominated_second_pass(sims):
     mcts.search(game, _SecondPassNet(pass_is_good=False), sims, False, False)
 
     diagnostic = mcts.pass_diagnostic(game)
-    assert diagnostic["score_dominated_pass"] is True
-    assert diagnostic["pass_suppressed"] is True
-    assert diagnostic["best_nonpass_score_gain"] >= 1.0
-    assert mcts.best_action(game) != game.pass_action()
-    assert np.asarray(mcts.counts(game))[game.pass_action()] == 0
+    assert diagnostic["best_nonpass_score_gain"] >= 1.0, diagnostic
+    assert diagnostic["best_nonpass_win_delta"] >= -0.005, diagnostic
+    assert diagnostic["score_dominated_pass"] is True, diagnostic
+    assert diagnostic["pass_suppressed"] is True, diagnostic
+    assert mcts.best_action(game) != game.pass_action(), diagnostic
+    assert np.asarray(mcts.counts(game))[game.pass_action()] == 0, diagnostic
 
 
 @pytest.mark.parametrize("sims", [20, 50])
@@ -105,9 +102,9 @@ def test_pass_remains_selectable_when_nonpass_does_not_improve_score(sims):
     mcts.search(game, _SecondPassNet(pass_is_good=True), sims, False, False)
 
     diagnostic = mcts.pass_diagnostic(game)
-    assert diagnostic["score_dominated_pass"] is False
-    assert diagnostic["pass_suppressed"] is False
-    assert mcts.best_action(game) == game.pass_action()
+    assert diagnostic["score_dominated_pass"] is False, diagnostic
+    assert diagnostic["pass_suppressed"] is False, diagnostic
+    assert mcts.best_action(game) == game.pass_action(), diagnostic
 
 
 def test_terminal_search_uses_exact_formal_score_not_nn_score():
