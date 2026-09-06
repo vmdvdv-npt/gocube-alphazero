@@ -199,6 +199,10 @@ def build_hardened_training_args(cli):
     game_cls, args = build_katago_training_args(cli)
     args = args.copy()
     defaults = KATAGO_PINNED_EXPLORATION_DEFAULTS
+    # build_katago_training_args starts from the base topology class and then
+    # wraps it with the diversified pinned class. The checkpoint contract must
+    # fingerprint the class that is actually used for training and resume.
+    args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
     args.gocube_recovery_contract = RECOVERY_CONTRACT
     args.gocube_chosen_move_temperature_early = defaults["chosen_move_temperature_early"]
     args.gocube_chosen_move_temperature = defaults["chosen_move_temperature"]
