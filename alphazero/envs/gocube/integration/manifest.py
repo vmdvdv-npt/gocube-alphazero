@@ -70,6 +70,14 @@ class RunManifest:
         else:
             raise ManifestError(f"Unsupported terminalAdjudicator: {terminal_adjudicator!r}")
 
+        # Preserve the public validation contract before resolving a concrete
+        # game class. Otherwise an unsupported topology degrades into the less
+        # specific "No game" error from legacy_game_class().
+        if not isinstance(topology, str):
+            raise ManifestError("Run manifest topology must be a string")
+        if topology not in {"cube", "torus"}:
+            raise ManifestError(f"Unsupported topology: {topology!r}")
+
         try:
             game_cls = legacy_game_class(topology, size, terminal_adjudicator)
         except ValueError as exc:
