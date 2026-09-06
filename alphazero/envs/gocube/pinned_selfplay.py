@@ -4,6 +4,7 @@ import numpy as np
 
 from alphazero.SelfPlayAgent import SelfPlayAgent
 
+from .exploration_contract import KATAGO_PINNED_EXPLORATION_DEFAULTS, chosen_move_temperature
 from .selfplay_semantics import KATAGO_PINNED_SELFPLAY_DEFAULTS
 
 
@@ -14,6 +15,12 @@ def _optional_arg(args, name, default):
         return getattr(args, name)
     except (AttributeError, KeyError):
         return default
+
+
+def _keep_current_temperature(current_temperature, _turn_number, _max_turns):
+    """Identity adapter used after the pinned schedule has already been applied."""
+
+    return float(current_temperature)
 
 
 class PinnedSelfPlayAgent(SelfPlayAgent):
@@ -86,3 +93,57 @@ class PinnedSelfPlayAgent(SelfPlayAgent):
                 started_from_seki_fork=bool(config["started_from_seki_fork"]),
             )
         return result
+
+    def playMoves(self):
+        """Apply pinned chosenMoveTemperature to the actually played self-play move.
+
+        KataGo disables LCB while choosing the self-play action but restores it
+        for policy-target extraction. ``MCTS.probs`` distinguishes those calls
+        by the sub-1 chosen-move temperature versus the target's temp=1.
+
+        The generic SelfPlayAgent normally applies ``args.temp_scaling_fn``
+        inside ``playMoves``. Since this method has already computed the pinned
+        schedule exactly, temporarily replace that callback with an identity
+        function so the legacy schedule cannot distort it a second time.
+        """
+
+        pinned_schedule = (
+            getattr(self, "score_aware", False)
+            and not self._is_arena
+            and not self._is_warmup
+        )
+        original_scaling_fn = None
+        if pinned_schedule:
+            defaults = KATAGO_PINNED_EXPLORATION_DEFAULTS
+            early = float(_optional_arg(
+                self.args,
+                "gocube_chosen_move_temperature_early",
+                defaults["chosen_move_temperature_early"],
+            ))
+            late = float(_optional_arg(
+                self.args,
+                "gocube_chosen_move_temperature",
+                defaults["chosen_move_temperature"],
+            ))
+            halflife = float(_optional_arg(
+                self.args,
+                "gocube_chosen_move_temperature_halflife",
+                defaults["chosen_move_temperature_halflife"],
+            ))
+            point_count = int(self.game_cls.logical_topology().point_count)
+            for index in range(self.batch_size):
+                self.temps[index] = chosen_move_temperature(
+                    int(self.games[index].turns),
+                    point_count,
+                    early_temperature=early,
+                    temperature=late,
+                    halflife=halflife,
+                )
+            original_scaling_fn = self.args.temp_scaling_fn
+            self.args.temp_scaling_fn = _keep_current_temperature
+
+        try:
+            return super().playMoves()
+        finally:
+            if pinned_schedule:
+                self.args.temp_scaling_fn = original_scaling_fn
