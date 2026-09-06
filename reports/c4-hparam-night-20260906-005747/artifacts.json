@@ -68,5 +68,12 @@
     "kind": "checkpoint",
     "path": "checkpoint/c4-hparam-night-20260906-005747-f/iteration-0006.pkl",
     "sha256": "743705f7f23d0fdf60f29778d85c8b96520abebd373edaaf45804d7b9bb1c135"
+  },
+  {
+    "branch": "G",
+    "iteration": 6,
+    "kind": "checkpoint",
+    "path": "checkpoint/c4-hparam-night-20260906-005747-g/iteration-0006.pkl",
+    "sha256": "36c3afceed55de58b80ff48223aeaeb6cbc913913bfa916e406bc5a9e6e41a0f"
   }
 ]
