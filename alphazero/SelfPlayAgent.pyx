@@ -6,6 +6,7 @@ import torch
 import traceback
 import itertools
 import time
+import os
 
 from alphazero.MCTS import MCTS
 from alphazero.envs.gocube.records import reserve_game_id
@@ -32,7 +33,8 @@ class SelfPlayAgent(mp.Process):
     def __init__(self, id, game_cls, ready_queue, batch_ready, batch_tensor, policy_tensor,
                  value_tensor, output_queue, result_queue, complete_count, games_played,
                  stop_event: mp.Event, pause_event: mp.Event(), args, _is_arena=False, _is_warmup=False,
-                 telemetry=None, score_tensor=None, ownership_tensor=None):
+                 telemetry=None, score_tensor=None, ownership_tensor=None,
+                 worker_error_queue=None, iteration=0):
         super().__init__()
         self.id = id
         self.game_cls = game_cls
@@ -59,6 +61,10 @@ class SelfPlayAgent(mp.Process):
         self.complete_count = complete_count
         self.stop_event = stop_event
         self.pause_event = pause_event
+        self.worker_error_queue = worker_error_queue
+        self.iteration = int(iteration)
+        self._current_game_slot = None
+        self._current_stage = 'initialization'
         self.args = args
         self._is_arena = _is_arena
         self._is_warmup = _is_warmup
@@ -146,8 +152,29 @@ class SelfPlayAgent(mp.Process):
         return mcts
 
     def _check_pause(self):
-        while self.pause_event.is_set():
+        while self.pause_event.is_set() and not self.stop_event.is_set():
             time.sleep(.1)
+
+    def _set_worker_context(self, game_slot, stage):
+        self._current_game_slot = None if game_slot is None else int(game_slot)
+        self._current_stage = str(stage)
+
+    def _worker_error_payload(self, exc):
+        game_slot = self._current_game_slot
+        game_id = None
+        if game_slot is not None and 0 <= game_slot < len(self.game_ids):
+            game_id = self.game_ids[game_slot]
+        return {
+            'worker_id': int(self.id),
+            'pid': int(os.getpid()),
+            'iteration': int(self.iteration),
+            'game_slot': game_slot,
+            'game_id': game_id,
+            'stage': self._current_stage,
+            'exception_type': type(exc).__name__,
+            'exception_message': str(exc),
+            'traceback': traceback.format_exc(),
+        }
 
     def _telemetry_add(self, key, amount=1):
         if self.telemetry is None:
@@ -287,8 +314,10 @@ class SelfPlayAgent(mp.Process):
         try:
             np.random.seed()
             for i in range(self.batch_size):
+                self._set_worker_context(i, 'initialization')
                 self._sample_cleanup_training_plan(i)
             while not self.stop_event.is_set() and self.games_played.value < self.args.gamesPerIteration:
+                self._set_worker_context(0 if self.batch_size else None, 'search_generate')
                 self._check_pause()
                 sims = self._select_search_sims()
                 for _ in range(sims):
@@ -298,19 +327,32 @@ class SelfPlayAgent(mp.Process):
                     self.processBatch()
                 if self.stop_event.is_set(): break
                 self.playMoves()
-            with self.complete_count.get_lock():
-                self.complete_count.value += 1
             if not self._is_arena:
                 self.output_queue.close()
                 self.output_queue.join_thread()
-        except Exception:
-            print(traceback.format_exc())
+            if not self.stop_event.is_set():
+                with self.complete_count.get_lock():
+                    self.complete_count.value += 1
+        except Exception as exc:
+            payload = self._worker_error_payload(exc)
+            try:
+                try:
+                    if self.worker_error_queue is not None:
+                        self.worker_error_queue.put(payload)
+                except Exception:
+                    # The original worker failure must remain the process
+                    # exception even if IPC is already unavailable.
+                    pass
+            finally:
+                self.stop_event.set()
+            raise
 
     def generateBatch(self):
         if self._is_arena:
             batch_tensor = [[] for _ in range(self.game_cls.num_players())]
             arena_slots_by_player = [[] for _ in range(self.game_cls.num_players())]
         for i in range(self.batch_size):
+            self._set_worker_context(i, 'search_generate')
             self._check_pause()
             state = self._mcts(i).find_leaf(self.games[i])
             self.search_states[i] = state
@@ -355,9 +397,15 @@ class SelfPlayAgent(mp.Process):
 
     def processBatch(self):
         if not self._is_warmup:
-            self.batch_ready.wait()
+            self._set_worker_context(0 if self.batch_size else None, 'inference_wait')
+            while not self.batch_ready.wait(timeout=0.1):
+                if self.stop_event.is_set():
+                    return
+            if self.stop_event.is_set():
+                return
             self.batch_ready.clear()
         for i in range(self.batch_size):
+            self._set_worker_context(i, 'search_process')
             self._check_pause()
             index = self.batch_indices[i] if self._is_arena else i
             state = self.search_states[i]
@@ -392,6 +440,7 @@ class SelfPlayAgent(mp.Process):
     def playMoves(self):
         recording_enabled = getattr(self, "recording_enabled", False)
         for i in range(self.batch_size):
+            self._set_worker_context(i, 'play_move')
             self._check_pause()
             self.temps[i] = self.args.temp_scaling_fn(
                 self.temps[i], self.games[i].turns, self.game_cls.max_turns()
@@ -473,6 +522,7 @@ class SelfPlayAgent(mp.Process):
             if not winstate.any():
                 continue
 
+            self._set_worker_context(i, 'finish_game')
             final_game = self.games[i].clone()
             if recording_enabled:
                 lock = self.games_played.get_lock()
@@ -485,6 +535,7 @@ class SelfPlayAgent(mp.Process):
                 if not accepted:
                     continue
                 self.game_ids[i] = reserve_game_id(self.record_registry, self.record_id_prefix)
+                self._set_worker_context(i, 'enqueue_result')
                 self.result_queue.put((
                     final_game, winstate, self.id, {
                         "game_id": self.game_ids[i],
@@ -495,6 +546,7 @@ class SelfPlayAgent(mp.Process):
                     }
                 ))
             else:
+                self._set_worker_context(i, 'enqueue_result')
                 self.result_queue.put((final_game, winstate, self.id))
                 lock = self.games_played.get_lock()
                 lock.acquire()
@@ -543,6 +595,7 @@ class SelfPlayAgent(mp.Process):
                                 if ownership_mask is not None:
                                     sample = sample + (ownership_mask,)
                             for _ in range(repeat):
+                                self._set_worker_context(i, 'enqueue_samples')
                                 self.output_queue.put(sample)
                             if repeat > 1:
                                 self._telemetry_add('endgame_extra_samples', repeat - 1)

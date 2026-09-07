@@ -66,6 +66,7 @@ class _PinnedPassWouldEndPhaseMixin:
         self._pinned_start_phase = self._state.phase
         self._pinned_move_history = ()
         self._pinned_state_history = (self._state,)
+        self._pinned_state_history_offset = 0
 
     def observation(self):
         # Base GoGame.observation() allocates using self.observation_size(), so
@@ -99,6 +100,7 @@ class _PinnedPassWouldEndPhaseMixin:
         clone._pinned_start_phase = self._pinned_start_phase
         clone._pinned_move_history = self._pinned_move_history
         clone._pinned_state_history = self._pinned_state_history
+        clone._pinned_state_history_offset = self._pinned_state_history_offset
         # MCTS clones are search states. KataGo does not call the game-level
         # all-pass-alive auto-terminal inside search. Root pruning is also root-only.
         clone._pinned_is_search_clone = True
@@ -129,6 +131,55 @@ class _PinnedPassWouldEndPhaseMixin:
             "seki_fork_hack_prob": self._pinned_seki_fork_hack_prob,
             "started_from_seki_fork": self._pinned_started_from_seki_fork,
         }
+
+    def _assert_pinned_history_alignment(self) -> None:
+        """Check the compact state-history segment used by fork sampling.
+
+        The check is intentionally limited to the real-game history path; MCTS
+        clones do not append to this history and should not pay for a deep
+        consistency check on every search action.
+        """
+
+        offset = int(self._pinned_state_history_offset)
+        move_history_length = len(self._pinned_move_history)
+        state_history_length = len(self._pinned_state_history)
+        if offset < 0 or offset > move_history_length:
+            raise RuntimeError(
+                "Invalid pinned state-history offset: "
+                f"offset={offset}, state_history_length={state_history_length}, "
+                f"move_history_length={move_history_length}"
+            )
+        expected_states = move_history_length - offset + 1
+        if state_history_length != expected_states:
+            raise RuntimeError(
+                "Pinned state/move history length mismatch: "
+                f"offset={offset}, state_history_length={state_history_length}, "
+                f"move_history_length={move_history_length}, expected_state_history_length={expected_states}"
+            )
+
+    def _pinned_state_for_history_len(self, absolute_history_len):
+        """Return the saved V3 state for an absolute move-history prefix length."""
+
+        absolute_history_len = int(absolute_history_len)
+        offset = int(self._pinned_state_history_offset)
+        state_history_length = len(self._pinned_state_history)
+        move_history_length = len(self._pinned_move_history)
+        local_state_index = absolute_history_len - offset
+        if (
+            absolute_history_len < 0
+            or absolute_history_len > move_history_length
+            or local_state_index < 0
+            or local_state_index >= state_history_length
+        ):
+            raise RuntimeError(
+                "Pinned state-history lookup is out of range: "
+                f"requested_absolute_history_len={absolute_history_len}, "
+                f"state_history_offset={offset}, "
+                f"state_history_length={state_history_length}, "
+                f"move_history_length={move_history_length}, "
+                f"local_state_index={local_state_index}"
+            )
+        return self._pinned_state_history[local_state_index]
 
     def _last_four_opponent_moves_are_passes(self) -> bool:
         history = self._pinned_move_history
@@ -195,6 +246,7 @@ class _PinnedPassWouldEndPhaseMixin:
 
         if not self._pinned_is_search_clone:
             self._pinned_state_history = self._pinned_state_history + (self._state,)
+            self._assert_pinned_history_alignment()
             self._maybe_store_seki_forks()
 
     def _has_unowned_final_spot(self) -> bool:
@@ -213,8 +265,18 @@ class _PinnedPassWouldEndPhaseMixin:
         ):
             return
 
-        move_count = len(self._pinned_move_history)
-        if move_count <= 0:
+        self._assert_pinned_history_alignment()
+        segment_start = int(self._pinned_state_history_offset)
+        segment_end = len(self._pinned_move_history)
+        segment_move_count = segment_end - segment_start
+        if segment_move_count != len(self._pinned_state_history) - 1:
+            raise RuntimeError(
+                "Seki fork state-history segment mismatch: "
+                f"segment_start={segment_start}, segment_end={segment_end}, "
+                f"segment_move_count={segment_move_count}, "
+                f"state_history_length={len(self._pinned_state_history)}"
+            )
+        if segment_move_count <= 0:
             return
         pool = type(self)._seki_pool()
         capacity = int(defaults["seki_fork_pool_capacity"])
@@ -222,14 +284,16 @@ class _PinnedPassWouldEndPhaseMixin:
         tail_scale = float(defaults["seki_fork_tail_scale"])
 
         for _ in range(candidates):
-            move_idx = int(math.floor(
-                move_count * (1.0 - tail_scale * np.random.exponential()) - 1.0
+            local_state_index = int(math.floor(
+                segment_move_count * (1.0 - tail_scale * np.random.exponential()) - 1.0
             ))
-            move_idx = max(0, min(move_count, move_idx))
-            candidate_state = self._pinned_state_history[move_idx]
+            local_state_index = max(0, min(segment_move_count, local_state_index))
+            absolute_history_len = segment_start + local_state_index
+            candidate_state = self._pinned_state_for_history_len(absolute_history_len)
             if candidate_state.terminal_kind is not None:
                 continue
-            candidate = (candidate_state, self._pinned_move_history[:move_idx])
+            candidate_history = self._pinned_move_history[:absolute_history_len]
+            candidate = (candidate_state, candidate_history)
             if len(pool) < capacity:
                 pool.append(candidate)
             else:
@@ -249,10 +313,15 @@ class _PinnedPassWouldEndPhaseMixin:
         self.last_action = candidate_history[-1][1] if candidate_history else None
         self._pinned_move_history = tuple(candidate_history)
         self._pinned_state_history = (candidate_state,)
+        self._pinned_state_history_offset = len(candidate_history)
+        self._assert_pinned_history_alignment()
         self._pinned_start_phase = candidate_state.phase
         self._pinned_started_from_seki_fork = True
         self._pinned_is_search_clone = False
         self._pinned_at_search_root = False
+        assert self.semantic_state == candidate_state
+        assert self.player == candidate_state.current_player
+        assert self.last_action == (candidate_history[-1][1] if candidate_history else None)
         return True
 
 
