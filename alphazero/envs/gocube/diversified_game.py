@@ -188,12 +188,17 @@ class _DiversifiedStartMixin:
         self.last_action = candidate_history[-1][1] if candidate_history else None
         self._pinned_move_history = tuple(candidate_history)
         self._pinned_state_history = (candidate_state,)
+        self._pinned_state_history_offset = len(candidate_history)
         self._pinned_start_phase = candidate_state.phase
         self._pinned_started_from_seki_fork = False
         self._diverse_started_from_plain_fork = True
         self._diverse_suppress_plain_fork_generation = True
         self._diverse_train_state_history = (candidate_state,)
         self._diverse_training_history_offset = len(candidate_history)
+        self._assert_pinned_history_alignment()
+        assert self.semantic_state == candidate_state
+        assert self.player == candidate_state.current_player
+        assert self.last_action == (candidate_history[-1][1] if candidate_history else None)
         return {"mode": kind, "fork_depth": int(depth)}
 
 

@@ -7,6 +7,7 @@ from alphazero.utils import get_iter_file, dotdict, get_game_results, default_te
 from alphazero.Arena import Arena
 from alphazero.GenericPlayers import RawMCTSPlayer, NNPlayer, MCTSPlayer
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
+from alphazero.worker_errors import SelfPlayWorkerError, unexpected_worker_exit_payload
 
 from torch import multiprocessing as mp
 from torch.utils.data import TensorDataset, ConcatDataset, DataLoader
@@ -194,6 +195,7 @@ class Coach:
         self.policy_tensors = []
         self.value_tensors = []
         self.batch_ready = []
+        self.last_worker_error = None
         self.stop_train = mp.Event()
         self.pause_train = mp.Event()
         self.stop_agents = mp.Event()
@@ -202,6 +204,7 @@ class Coach:
         self.ready_queue = mp.Queue()
         self.file_queue = mp.Queue()
         self.result_queue = mp.Queue()
+        self.worker_error_queue = mp.Queue()
         self.completed = mp.Value('i', 0)
         self.games_played = mp.Value('i', 0)
         if self.args.run_name != '':
@@ -281,16 +284,168 @@ class Coach:
 
         except KeyboardInterrupt:
             pass
+        finally:
+            print()
+            self.writer.close()
+            if self.agents:
+                # Preserve the original exception while ensuring a failed
+                # training iteration never leaves child processes behind.
+                self._abort_selfplay_agents()
 
-        print()
-        self.writer.close()
-        if self.agents:
-            self.killSelfPlayAgents()
+    def _drain_worker_error_queue(self):
+        payloads = []
+        while True:
+            try:
+                payload = self.worker_error_queue.get_nowait()
+            except Empty:
+                break
+            if isinstance(payload, dict):
+                payloads.append(payload)
+            else:
+                payloads.append({
+                    "worker_id": -1,
+                    "pid": None,
+                    "iteration": int(getattr(self, "model_iter", 0)),
+                    "game_slot": None,
+                    "game_id": None,
+                    "stage": "shutdown",
+                    "exception_type": "InvalidWorkerErrorPayload",
+                    "exception_message": repr(payload),
+                    "traceback": "",
+                })
+        return payloads
+
+    def _check_selfplay_workers(self, iteration):
+        """Raise as soon as a child reports or suffers an abnormal exit."""
+
+        payloads = self._drain_worker_error_queue()
+        if payloads:
+            self.last_worker_error = payloads[0]
+            raise SelfPlayWorkerError(payloads[0])
+
+        for agent in self.agents:
+            exitcode = agent.exitcode
+            if exitcode is not None and exitcode != 0:
+                payload = unexpected_worker_exit_payload(
+                    worker_id=int(agent.id),
+                    iteration=int(iteration),
+                    exitcode=int(exitcode),
+                    pid=agent.pid,
+                )
+                self.last_worker_error = payload
+                raise SelfPlayWorkerError(payload)
+
+    @staticmethod
+    def _annotate_parent_exception(exc, iteration, worker_ids):
+        message = (
+            f"parent inference failure: iteration={iteration}, "
+            f"worker_ids={list(worker_ids)}"
+        )
+        add_note = getattr(exc, "add_note", None)
+        if add_note is not None:
+            add_note(message)
+        else:
+            # Keep the original exception type on Python versions without
+            # BaseException.add_note while still exposing the context.
+            exc.args = tuple(getattr(exc, "args", (str(exc),))) + (message,)
+
+    @staticmethod
+    def _close_ipc_queue(queue):
+        if queue is None:
+            return
+        try:
+            queue.cancel_join_thread()
+        except (AttributeError, OSError):
+            pass
+        try:
+            queue.close()
+        except (AttributeError, OSError):
+            pass
+
+    def _reset_selfplay_ipc(self):
+        for name in (
+            "ready_queue", "file_queue", "result_queue", "worker_error_queue",
+        ):
+            self._close_ipc_queue(getattr(self, name, None))
+        self.ready_queue = mp.Queue()
+        self.file_queue = mp.Queue()
+        self.result_queue = mp.Queue()
+        self.worker_error_queue = mp.Queue()
+        self.completed = mp.Value('i', 0)
+        self.games_played = mp.Value('i', 0)
+
+    def _shutdown_selfplay_agents(self):
+        """Bounded process shutdown shared by normal and emergency paths."""
+
+        agents = list(self.agents)
+        for agent in agents:
+            try:
+                agent.join(timeout=0.5)
+            except (AssertionError, OSError):
+                pass
+
+        alive = []
+        for agent in agents:
+            try:
+                if agent.is_alive():
+                    alive.append(agent)
+                    agent.terminate()
+            except (AssertionError, OSError):
+                pass
+        for agent in alive:
+            try:
+                agent.join(timeout=0.5)
+            except (AssertionError, OSError):
+                pass
+
+        still_alive = []
+        for agent in alive:
+            try:
+                if agent.is_alive():
+                    still_alive.append(agent)
+                    kill = getattr(agent, "kill", None)
+                    if kill is not None:
+                        kill()
+            except (AssertionError, OSError):
+                pass
+        for agent in still_alive:
+            try:
+                agent.join(timeout=0.5)
+            except (AssertionError, OSError):
+                pass
+
+        exitcodes = [(int(agent.id), agent.exitcode) for agent in agents]
+        self.agents = []
+        self.input_tensors = []
+        self.policy_tensors = []
+        self.value_tensors = []
+        self.batch_ready = []
+        if hasattr(self, "score_tensors"):
+            self.score_tensors = []
+        if hasattr(self, "ownership_tensors"):
+            self.ownership_tensors = []
+        self._reset_selfplay_ipc()
+        return exitcodes
+
+    def _abort_selfplay_agents(self):
+        """Abort every self-play child in a bounded, fixed order."""
+
+        if not self.agents:
+            return
+        self.stop_agents.set()
+        self.pause_train.clear()
+        for event in self.batch_ready:
+            event.set()
+        # stop_agents prevents further ready-queue/inference issuance. The
+        # bounded shutdown below then handles children in every lifecycle state.
+        self._shutdown_selfplay_agents()
 
     @_set_state(TrainState.INIT_AGENTS)
     def generateSelfPlayAgents(self):
         self.stop_agents = mp.Event()
         self.ready_queue = mp.Queue()
+        self._close_ipc_queue(getattr(self, "worker_error_queue", None))
+        self.worker_error_queue = mp.Queue()
         for i in range(self.args.workers):
             self.input_tensors.append(torch.zeros(
                 [self.args.process_batch_size, *self.game_cls.observation_size()]
@@ -317,7 +472,9 @@ class Coach:
                 SelfPlayAgent(i, self.game_cls, self.ready_queue, self.batch_ready[i],
                               self.input_tensors[i], self.policy_tensors[i], self.value_tensors[i], self.file_queue,
                               self.result_queue, self.completed, self.games_played, self.stop_agents, self.pause_train,
-                              self.args, _is_warmup=self.warmup)
+                              self.args, _is_warmup=self.warmup,
+                              worker_error_queue=self.worker_error_queue,
+                              iteration=int(self.model_iter))
             )
             self.agents[i].daemon = True
             self.agents[i].start()
@@ -329,30 +486,42 @@ class Coach:
         end = time()
 
         n = 0
-        while self.completed.value != self.args.workers:
-            if self.stop_train.is_set() and not self.stop_agents.is_set():
-                self.stop_agents.set()
+        try:
+            while self.completed.value != self.args.workers:
+                self._check_selfplay_workers(iteration)
+                if self.stop_train.is_set():
+                    self.stop_agents.set()
+                    break
 
-            try:
-                id = self.ready_queue.get(timeout=1)
-                nnet = self.self_play_net if self.args.model_gating else self.train_net
-                policy, value = nnet.process(self.input_tensors[id])
-                self.policy_tensors[id].copy_(policy)
-                self.value_tensors[id].copy_(value)
-                self.batch_ready[id].set()
-            except Empty:
-                pass
+                try:
+                    id = self.ready_queue.get(timeout=1)
+                    self._check_selfplay_workers(iteration)
+                    nnet = self.self_play_net if self.args.model_gating else self.train_net
+                    try:
+                        policy, value = nnet.process(self.input_tensors[id])
+                    except Exception as exc:
+                        self._annotate_parent_exception(exc, iteration, [id])
+                        raise
+                    self.policy_tensors[id].copy_(policy)
+                    self.value_tensors[id].copy_(value)
+                    self.batch_ready[id].set()
+                except Empty:
+                    pass
 
-            size = self.games_played.value
-            if size > n:
-                sample_time.update((time() - end) / (size - n), size - n)
-                n = size
-                end = time()
-            bar.suffix = f'({size}/{self.args.gamesPerIteration}) Sample Time: {sample_time.avg:.3f}s | Total: {bar.elapsed_td} | ETA: {bar.eta_td:}'
-            bar.goto(size)
-            self.sample_time = sample_time.avg
-            self.iter_time = bar.elapsed_td
-            self.eta = bar.eta_td
+                size = self.games_played.value
+                if size > n:
+                    sample_time.update((time() - end) / (size - n), size - n)
+                    n = size
+                    end = time()
+                bar.suffix = f'({size}/{self.args.gamesPerIteration}) Sample Time: {sample_time.avg:.3f}s | Total: {bar.elapsed_td} | ETA: {bar.eta_td:}'
+                bar.goto(size)
+                self.sample_time = sample_time.avg
+                self.iter_time = bar.elapsed_td
+                self.eta = bar.eta_td
+            self._check_selfplay_workers(iteration)
+        except BaseException:
+            self._abort_selfplay_agents()
+            raise
 
         if not self.stop_agents.is_set(): self.stop_agents.set()
         bar.update()
@@ -399,40 +568,29 @@ class Coach:
 
     @_set_state(TrainState.KILL_AGENTS)
     def killSelfPlayAgents(self):
-        # clear queues to prevent deadlocking
-        for _ in range(self.ready_queue.qsize()):
-            try:
-                self.ready_queue.get_nowait()
-            except Empty:
-                break
-        for _ in range(self.file_queue.qsize()):
-            try:
-                self.file_queue.get_nowait()
-            except Empty:
-                break
-        for _ in range(self.result_queue.qsize()):
-            try:
-                self.result_queue.get_nowait()
-            except Empty:
-                break
-
-        for agent in self.agents:
-            agent.join()
-            del self.input_tensors[0]
-            del self.policy_tensors[0]
-            del self.value_tensors[0]
-            del self.batch_ready[0]
-
-        self.agents = []
-        self.input_tensors = []
-        self.policy_tensors = []
-        self.value_tensors = []
-        self.batch_ready = []
-        self.ready_queue = mp.Queue()
-        self.file_queue = mp.Queue()
-        self.result_queue = mp.Queue()
-        self.completed = mp.Value('i', 0)
-        self.games_played = mp.Value('i', 0)
+        if not self.agents:
+            return
+        payloads = self._drain_worker_error_queue()
+        self.stop_agents.set()
+        self.pause_train.clear()
+        for event in self.batch_ready:
+            event.set()
+        agent_pids = {int(agent.id): agent.pid for agent in self.agents}
+        exitcodes = self._shutdown_selfplay_agents()
+        if payloads:
+            self.last_worker_error = payloads[0]
+            raise SelfPlayWorkerError(payloads[0])
+        abnormal = [(worker_id, code) for worker_id, code in exitcodes if code not in (0, None)]
+        if abnormal:
+            worker_id, exitcode = abnormal[0]
+            payload = unexpected_worker_exit_payload(
+                worker_id=worker_id,
+                iteration=int(getattr(self, "model_iter", 0)),
+                exitcode=int(exitcode),
+                pid=agent_pids.get(worker_id),
+            )
+            self.last_worker_error = payload
+            raise SelfPlayWorkerError(payload)
 
     @_set_state(TrainState.TRAIN)
     def train(self, iteration):

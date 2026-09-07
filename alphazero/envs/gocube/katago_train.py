@@ -649,6 +649,8 @@ class KataGoSearchCoach(GoCubeCoach):
         self._iteration_record_context = self._build_iteration_record_context(self.model_iter)
         self.stop_agents = mp.Event()
         self.ready_queue = mp.Queue()
+        self._close_ipc_queue(getattr(self, "worker_error_queue", None))
+        self.worker_error_queue = mp.Queue()
         point_count = self.game_cls.logical_topology().point_count
 
         for i in range(self.args.workers):
@@ -706,6 +708,8 @@ class KataGoSearchCoach(GoCubeCoach):
                     telemetry=telemetry,
                     score_tensor=self.score_tensors[i],
                     ownership_tensor=self.ownership_tensors[i],
+                    worker_error_queue=self.worker_error_queue,
+                    iteration=int(self.model_iter),
                 )
             )
             self.agents[i].daemon = True
@@ -725,44 +729,55 @@ class KataGoSearchCoach(GoCubeCoach):
         bar = Bar("Generating Samples", max=self.args.gamesPerIteration)
         end = time()
         n = 0
+        try:
+            while self.completed.value != self.args.workers:
+                self._check_selfplay_workers(iteration)
+                if self.stop_train.is_set():
+                    self.stop_agents.set()
+                    break
 
-        while self.completed.value != self.args.workers:
-            if self.stop_train.is_set() and not self.stop_agents.is_set():
-                self.stop_agents.set()
-
-            worker_ids = collect_ready_worker_ids(
-                self.ready_queue,
-                self.args.workers,
-                self.args.inference_batch_wait_ms,
-            )
-            if worker_ids:
-                nnet = self.self_play_net if self.args.model_gating else self.train_net
-                rows = process_coalesced_inference(
-                    nnet,
-                    worker_ids,
-                    self.input_tensors,
-                    self.policy_tensors,
-                    self.value_tensors,
-                    self.batch_ready,
-                    score_tensors=self.score_tensors,
-                    ownership_tensors=self.ownership_tensors,
+                worker_ids = collect_ready_worker_ids(
+                    self.ready_queue,
+                    self.args.workers,
+                    self.args.inference_batch_wait_ms,
                 )
-                inference_batch_size.update(rows)
+                self._check_selfplay_workers(iteration)
+                if worker_ids:
+                    nnet = self.self_play_net if self.args.model_gating else self.train_net
+                    try:
+                        rows = process_coalesced_inference(
+                            nnet,
+                            worker_ids,
+                            self.input_tensors,
+                            self.policy_tensors,
+                            self.value_tensors,
+                            self.batch_ready,
+                            score_tensors=self.score_tensors,
+                            ownership_tensors=self.ownership_tensors,
+                        )
+                    except Exception as exc:
+                        self._annotate_parent_exception(exc, iteration, worker_ids)
+                        raise
+                    inference_batch_size.update(rows)
 
-            size = self.games_played.value
-            if size > n:
-                sample_time.update((time() - end) / (size - n), size - n)
-                n = size
-                end = time()
+                size = self.games_played.value
+                if size > n:
+                    sample_time.update((time() - end) / (size - n), size - n)
+                    n = size
+                    end = time()
 
-            bar.suffix = (
-                f"({size}/{self.args.gamesPerIteration}) Sample Time: {sample_time.avg:.3f}s | "
-                f"Infer Batch: {inference_batch_size.avg:.1f} | Total: {bar.elapsed_td} | ETA: {bar.eta_td:}"
-            )
-            bar.goto(size)
-            self.sample_time = sample_time.avg
-            self.iter_time = bar.elapsed_td
-            self.eta = bar.eta_td
+                bar.suffix = (
+                    f"({size}/{self.args.gamesPerIteration}) Sample Time: {sample_time.avg:.3f}s | "
+                    f"Infer Batch: {inference_batch_size.avg:.1f} | Total: {bar.elapsed_td} | ETA: {bar.eta_td:}"
+                )
+                bar.goto(size)
+                self.sample_time = sample_time.avg
+                self.iter_time = bar.elapsed_td
+                self.eta = bar.eta_td
+            self._check_selfplay_workers(iteration)
+        except BaseException:
+            self._abort_selfplay_agents()
+            raise
 
         if not self.stop_agents.is_set():
             self.stop_agents.set()
