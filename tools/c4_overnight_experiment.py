@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single public entrypoint for the crash-resumable Cube-4 P1..P5 sweep."""
+"""Single public entrypoint for the hardened Cube-4 P1..P5 production sweep."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pathlib import Path
 from tools.gocube_experiment_runner import *  # noqa: F401,F403
 from tools import gocube_experiment_runner as _runner
 from tools.gocube_experiment_storage import StorageEfficientExperiment
+from tools import gocube_production_preflight as _preflight
 
 
 _RESUME_OPTION_TO_ATTR = {
@@ -54,7 +55,13 @@ Experiment = StorageEfficientExperiment
 
 
 def main(argv=None) -> int:
-    Experiment(parse_args(argv)).run()
+    cli = parse_args(argv)
+    repo = Path.cwd().resolve()
+    if not _preflight.is_supervised_invocation():
+        return _preflight.launch_under_systemd(repo, cli)
+    experiment = Experiment(cli)
+    _preflight.apply_production_preflight(experiment)
+    experiment.run()
     return 0
 
 
