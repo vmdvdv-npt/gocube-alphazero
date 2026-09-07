@@ -331,7 +331,11 @@ class KataGoSearchCoach(GoCubeCoach):
         os.replace(temporary, path)
 
     def _replay_iterations(self, iteration):
-        explicit_window = self.args.get("gocube_replay_window_iters", None)
+        explicit_window = (
+            self.args.get("gocube_replay_window_iters", None)
+            if isinstance(self.args, dict)
+            else getattr(self.args, "gocube_replay_window_iters", None)
+        )
         if explicit_window is not None:
             start = max(1, int(iteration) - int(explicit_window) + 1)
             return range(start, int(iteration) + 1)
@@ -496,7 +500,11 @@ class KataGoSearchCoach(GoCubeCoach):
         )
         current_player = MCTSPlayer(self.train_net, self.game_cls, arena_args)
         opponent_player = MCTSPlayer(self.self_play_net, self.game_cls, arena_args)
-        use_batched = bool(self.args.get("gocube_arena_batched", False))
+        use_batched = bool(
+            self.args.get("gocube_arena_batched", False)
+            if isinstance(self.args, dict)
+            else getattr(self.args, "gocube_arena_batched", False)
+        )
         arena = Arena(
             [current_player, opponent_player],
             self.game_cls,
@@ -569,7 +577,7 @@ class KataGoSearchCoach(GoCubeCoach):
             "move_temperature": 0.0,
             "alternating_colors": not use_batched,
             "batched": use_batched,
-            "workers": int(self.args.get("workers", 1)),
+            "workers": int(self.args.get("workers", 1)) if isinstance(self.args, dict) else int(getattr(self.args, "workers", 1)),
             "seed": int(self.args.gocube_arena_seed),
             "rules_fingerprint": self.args.gocube_rules_fingerprint,
             "komi": float(self.args.gocube_komi),
