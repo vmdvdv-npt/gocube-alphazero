@@ -24,6 +24,7 @@ from alphazero.envs.gocube.katago_v3 import (
     V3IllegalMove,
     _pseudolegal_candidate,
     apply_v3_action,
+    all_points_pass_alive,
     initial_v3_state,
     terminal_from_state,
     v3_state_from_board,
@@ -130,7 +131,7 @@ def _local_state_from_setup(topology: Topology, setup: dict[str, Any]):
 
 
 def _local_simple_ko(state, topology: Topology):
-    if state.phase != MAIN or state.previous_board is None:
+    if state.phase not in (MAIN, NO_RESULT) or state.previous_board is None:
         return None
     old = np.asarray(state.previous_board)
     current = np.asarray(state.board)
@@ -178,13 +179,14 @@ def local_snapshot(state, topology: Topology) -> dict[str, Any]:
             [int(point) % topology.size, int(point) // topology.size]
             for point in state.ko_recap_blocked
         ],
-        "is_game_finished": state.terminal_kind == SCORED,
+        "is_game_finished": state.terminal_kind in (SCORED, NO_RESULT),
         "is_no_result": state.terminal_kind == NO_RESULT,
         "winner": winner,
         "final_score": score,
         # KataGo exposes prisoner counters by captured colour, while GoCube's
         # state stores captures by capturing player.
         "captures": {"black": int(state.captures[1]), "white": int(state.captures[0])},
+        "all_points_pass_alive": all_points_pass_alive(state.board, topology),
         "encore_phase": {MAIN: 0, CLEANUP_1: 1, CLEANUP_2: 2, SCORED: 2, NO_RESULT: 0}[state.phase],
     }
 
@@ -201,6 +203,7 @@ SNAPSHOT_FIELDS = (
     "winner",
     "final_score",
     "captures",
+    "all_points_pass_alive",
 )
 
 
@@ -215,6 +218,64 @@ def assert_snapshot_equal(reference: dict[str, Any], local: dict[str, Any], *, c
             raise AssertionError(f"{context} field={field}: KataGo={expected!r}, GoCube={actual!r}")
 
 
+def _assert_postconditions(
+    fixture: dict[str, Any],
+    snapshots: list[dict[str, Any]],
+    move_results: list[bool],
+) -> None:
+    for condition in fixture.get("postconditions", []):
+        after = int(condition["after"])
+        if after < 0 or after >= len(snapshots):
+            raise AssertionError(f"{fixture['id']}: postcondition points outside snapshots: {after}")
+        snapshot = snapshots[after]
+        context = f"{fixture['id']} postcondition after={after}"
+        if "move_ok" in condition and bool(move_results[after]) != bool(condition["move_ok"]):
+            raise AssertionError(f"{context}: move_ok={move_results[after]!r}")
+        for field in (
+            "phase",
+            "simple_ko",
+            "ko_recap_blocked",
+            "is_game_finished",
+            "is_no_result",
+            "winner",
+            "captures",
+            "all_points_pass_alive",
+        ):
+            if field in condition and snapshot.get(field) != condition[field]:
+                raise AssertionError(
+                    f"{context}: field={field}, expected={condition[field]!r}, actual={snapshot.get(field)!r}"
+                )
+        if "final_score" in condition:
+            expected = condition["final_score"]
+            actual = snapshot.get("final_score")
+            if expected is None:
+                if actual is not None:
+                    raise AssertionError(f"{context}: final_score expected None, got {actual!r}")
+            elif actual is None or not np.isclose(float(actual), float(expected), rtol=0.0, atol=1e-6):
+                raise AssertionError(f"{context}: final_score expected {expected!r}, got {actual!r}")
+        for relation in ("board_unchanged_from", "captures_unchanged_from"):
+            if relation not in condition:
+                continue
+            source = snapshots[int(condition[relation])]
+            field = "board" if relation.startswith("board") else "captures"
+            if snapshot.get(field) != source.get(field):
+                raise AssertionError(f"{context}: {field} changed from snapshot {condition[relation]}" )
+        for field, expected in (("legal_at", 1), ("illegal_at", 0)):
+            for point in condition.get(field, []):
+                x, y = (int(point[0]), int(point[1]))
+                width = int(fixture["board_size"][0])
+                index = y * width + x
+                actual = int(snapshot["legal_mask"][index])
+                if actual != expected:
+                    raise AssertionError(f"{context}: {field} {point} has legal_mask={actual}")
+        for point, expected in condition.get("board_points", {}).items():
+            x, y = (int(value) for value in point.split(","))
+            width = int(fixture["board_size"][0])
+            actual = int(snapshot["board"][y * width + x])
+            if actual != int(expected):
+                raise AssertionError(f"{context}: board point {point} expected {expected}, got {actual}")
+
+
 def run_fixture(fixture: dict[str, Any]) -> list[dict[str, Any]]:
     if fixture.get("katago_commit") != KATAGO_REFERENCE_COMMIT:
         raise AssertionError(f"Fixture {fixture.get('id')} is not pinned to the required KataGo commit")
@@ -223,6 +284,7 @@ def run_fixture(fixture: dict[str, Any]) -> list[dict[str, Any]]:
     setup = fixture.get("setup", {})
     local_state = _local_state_from_setup(topology, setup)
     snapshots = []
+    move_results = [True]
     with KatagoOracleProcess(x_size=width, y_size=height, komi=0.5) as oracle:
         reference = oracle.setup(setup) if setup else oracle.request({"op": "snapshot"})
         assert_snapshot_equal(reference, local_snapshot(local_state, topology), context=f"{fixture['id']} before")
@@ -246,4 +308,6 @@ def run_fixture(fixture: dict[str, Any]) -> list[dict[str, Any]]:
                 context=f"{fixture['id']} move={move_number} move={move!r}",
             )
             snapshots.append(response_snapshot)
+            move_results.append(bool(reference.get("ok", True)))
+    _assert_postconditions(fixture, snapshots, move_results)
     return snapshots

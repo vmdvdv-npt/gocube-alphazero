@@ -16,6 +16,9 @@ from alphazero.envs.gocube.katago_v3 import (
 )
 
 
+pytestmark = pytest.mark.katago_reference
+
+
 def _torus_permutations(size):
     result = []
     for transform in (

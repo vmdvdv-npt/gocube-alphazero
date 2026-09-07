@@ -27,11 +27,12 @@ def test_static_fixture_inventory_is_pinned_and_complete():
         "repeated-ko-prevention", "pass-alive-terminal", "territory-scoring", "seki-tax",
         "prisoner-capture-contribution", "cleanup-2-compensation", "no-result-cycle-repetition",
     }
-    assert len(fixtures) >= 25
+    assert len(fixtures) == 25
     assert {fixture["id"] for fixture in fixtures} >= required
     for fixture in fixtures:
         assert fixture["katago_commit"] == "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
         assert set(("id", "katago_commit", "source_file", "source_test", "board_size", "setup", "moves")) <= set(fixture)
+        assert fixture.get("postconditions"), f"{fixture['id']} has no semantic postcondition"
 
 
 @pytest.mark.parametrize("fixture", _fixtures(), ids=lambda fixture: fixture["id"])

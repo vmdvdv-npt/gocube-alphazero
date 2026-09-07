@@ -58,6 +58,24 @@ struct OracleGame {
 
   json snapshot() const {
     json result;
+    Color area[Board::MAX_ARR_SIZE];
+    bool nonPassAliveStones = false;
+    bool safeBigTerritories = false;
+    bool unsafeBigTerritories = false;
+    board.calculateArea(
+      area,
+      nonPassAliveStones,
+      safeBigTerritories,
+      unsafeBigTerritories,
+      false
+    );
+    bool allPointsPassAlive = true;
+    for(int y = 0; y < ySize && allPointsPassAlive; y++)
+      for(int x = 0; x < xSize; x++)
+        if(area[point(x, y)] == C_EMPTY) {
+          allPointsPassAlive = false;
+          break;
+        }
     result["ok"] = true;
     result["katago_commit"] = PINNED_COMMIT;
     result["board"] = json::array();
@@ -108,6 +126,7 @@ struct OracleGame {
       {"black", board.numBlackCaptures},
       {"white", board.numWhiteCaptures}
     };
+    result["all_points_pass_alive"] = allPointsPassAlive;
     result["encore_phase"] = history.encorePhase;
     return result;
   }

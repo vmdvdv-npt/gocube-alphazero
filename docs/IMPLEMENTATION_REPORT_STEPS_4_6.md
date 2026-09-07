@@ -4,24 +4,21 @@
 
 Проект: `gocube-alphazero`
 
-Статус публикации: локальный working tree; изменения не закоммичены и не
-отправлены в GitHub.
+Статус публикации: этот отчёт обновлён вместе с исправлениями и публикуется в
+ветке `main` после текущего commit/push.
 
 ## 0. Статус относительно `main`
 
-Этот документ описывает локальный результат разработки, а не состояние
-опубликованной ветки `main`. На момент составления отчёта:
+В текущем batch исправлены расхождения между отчётом и GitHub `main`:
 
-- `HEAD` и `origin/main` указывают на
-  `cdd4aff015455299e0439abcdb3e942d46c3fe29`;
-- изменения шагов 4–6 находятся в рабочем дереве как modified/untracked;
-- `docs/KATAGO_RULE_REFERENCE.md` и `tools/katago_reference/` существуют
-  локально, но ещё не входят в Git history;
-- поэтому отчёт не является подтверждением того, что шаги 4–6 уже доступны
-  в GitHub `main`.
+- reference job запускает корректную команду без лишнего аргумента `PY`;
+- bridge и symmetry tests помечены `katago_reference`;
+- 25 fixtures требуют явного `postconditions` блока;
+- bridge cases теперь создают реальные seam/wrap позиции, а не одну star-позицию;
+- после push подтверждением публикации является commit в GitHub и его CI.
 
-Для публикационного подтверждения требуется отдельно закоммитить изменения,
-отправить их в remote и пройти CI уже на commit, доступном в GitHub.
+Фактическое прохождение CI фиксируется отдельно результатом GitHub Actions;
+локальный тестовый прогон не подменяет этот результат.
 
 ## 1. Итог
 
@@ -184,7 +181,7 @@ CI не устанавливает системные пакеты и не тр�
 ### Полный regression suite
 
 ```text
-505 passed, 7 warnings
+507 passed, 7 warnings
 ```
 
 Предупреждения относятся только к будущему изменению default-поведения
@@ -194,10 +191,14 @@ CI не устанавливает системные пакеты и не тр�
 
 Проверены:
 
-- 26 pinned static KataGo fixtures;
+- 25 pinned static KataGo fixtures; static test module содержит 26 tests,
+  включая inventory check;
 - 32 детерминированные random oracle-driven игры для размеров
   `3×3`, `5×3`, `5×5`, `7×4`;
-- planar KataGo bridge для Cube/Torus topology;
+- 22 реальные Cube/Torus seam/wrap bridge cases для group/liberty/capture/
+  multi-capture/suicide/ko/cleanup-ko/pass-for-ko/pass-alive/scoring;
+- 19 topology symmetry/metamorphic cases;
+- semantic postconditions для всех 25 fixtures;
 - D4/translations для Torus;
 - graph automorphisms для Cube;
 - scoring/Benson/seki/cleanup differential cases;
@@ -211,6 +212,10 @@ CI не устанавливает системные пакеты и не тр�
 ```bash
 .venv/bin/python -m pytest -m katago_reference
 ```
+
+Последний локальный запуск marker suite: `99 passed, 408 deselected`.
+
+Последний полный regression suite: `507 passed, 7 warnings`.
 
 Сборка oracle:
 

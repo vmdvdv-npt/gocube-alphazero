@@ -178,4 +178,3 @@ jobs:
 
       - name: Run pinned KataGo differential, bridge, and symmetry suites
         run: python -m pytest -q -m katago_reference
-          PY
