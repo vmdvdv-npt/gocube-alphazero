@@ -69,6 +69,8 @@ def test_obsolete_runtime_entrypoints_are_deleted():
 def test_active_cube4_runtime_contains_no_obsolete_komi_literal_or_a_to_g_surface():
     active_paths = (
         "tools/c4_overnight_experiment.py",
+        "tools/gocube_experiment_runner.py",
+        "tools/gocube_experiment_resume.py",
         "tools/_c4_overnight_runtime.py",
         "alphazero/envs/gocube/production_contract.py",
         "alphazero/envs/gocube/game.py",
