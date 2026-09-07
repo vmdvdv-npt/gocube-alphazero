@@ -65,8 +65,10 @@ class _FakePause:
 class _FakeMCTS:
     def __init__(self):
         self.flags = None
+        self.state = None
 
-    def process_results(self, _game, _value, _policy, add_root_noise, add_root_temp):
+    def process_results(self, game, _value, _policy, add_root_noise, add_root_temp):
+        self.state = game
         self.flags = (add_root_noise, add_root_temp)
 
 
@@ -76,7 +78,10 @@ def test_arena_process_results_forces_root_noise_and_temp_off():
     agent._is_warmup = True
     agent.batch_size = 1
     agent.batch_indices = [0]
-    agent.games = [SimpleNamespace(player=0)]
+    root_game = SimpleNamespace(player=0)
+    leaf_state = SimpleNamespace(player=1)
+    agent.games = [root_game]
+    agent.search_states = [leaf_state]
     agent.pause_event = _FakePause()
     agent.args = SimpleNamespace(add_root_noise=True, add_root_temp=True)
     agent.value_tensor = torch.zeros((1, 3), dtype=torch.float32)
@@ -87,6 +92,8 @@ def test_arena_process_results_forces_root_noise_and_temp_off():
     agent.processBatch()
 
     assert mcts.flags == (False, False)
+    assert mcts.state is leaf_state
+    assert agent.search_states == [None]
 
 
 class _DummyGame:
