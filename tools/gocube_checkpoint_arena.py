@@ -8,9 +8,11 @@ from tools.gocube_balanced_arena import (
     arena_worker_assignments,
     install_balanced_checkpoint_arena,
 )
+from tools.gocube_overnight_safety import install_fresh_heldout_contract
 
 
 install_balanced_checkpoint_arena(_impl)
+install_fresh_heldout_contract(_impl)
 
 ARENA_SIMS = _impl.ARENA_SIMS
 DEFAULT_SEED = _impl.DEFAULT_SEED
