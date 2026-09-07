@@ -2,7 +2,10 @@
 """Compatibility entrypoint for the complete GoCube adaptive sweep."""
 
 from tools.c4_overnight_complete import *  # noqa: F401,F403
-from tools.c4_overnight_experiment import Experiment as _CompleteExperiment
+from tools.c4_overnight_experiment import (
+    Experiment as _CompleteExperiment,
+    build_frozen_heldout_suite as build_frozen_heldout_suite,
+)
 from tools import c4_overnight_complete as _impl
 
 

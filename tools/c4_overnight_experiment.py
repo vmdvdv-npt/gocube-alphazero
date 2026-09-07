@@ -19,12 +19,25 @@ experiment.json state.json artifacts.json events.jsonl summary.md
 from __future__ import annotations
 
 import math
+import os
+import subprocess
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from tools.c4_overnight_complete import *  # noqa: F401,F403
 from tools import c4_overnight_complete as _impl
+from tools.gocube_overnight_safety import (
+    build_fresh_heldout_suite,
+    extract_last_progress_metrics,
+)
+
+
+# Canonical public helper: despite the historical name, this now generates
+# evaluation-only fresh rollouts and never reads training records/replay data.
+build_frozen_heldout_suite = build_fresh_heldout_suite
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +115,62 @@ class Experiment(_impl.Experiment):
         if not hasattr(self, "selfplay_wait_ms"):
             self.selfplay_wait_ms = _impl.SELFPLAY_BATCH_WAIT_MS
         return super().training_command(*args, **kwargs)
+
+    def stream_command(self, command: list[str], log_path: Path, phase: str):
+        """Stream a child process and keep the final CR-redrawn perf metrics."""
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(self.repo)
+        env["PYTHONUNBUFFERED"] = "1"
+        self.telemetry.set_phase(phase)
+        self.telemetry.start()
+        sample_time = None
+        infer_batch = None
+        started = time.perf_counter()
+        with log_path.open("a", encoding="utf-8", errors="replace") as log:
+            log.write("\n=== COMMAND ===\n" + " ".join(command) + "\n")
+            log.flush()
+            process = subprocess.Popen(
+                command,
+                cwd=self.repo,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                errors="replace",
+            )
+            assert process.stdout is not None
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                log.write(line)
+                log.flush()
+                self._phase_from_line(line, phase)
+                line_sample_time, line_infer_batch = extract_last_progress_metrics(line)
+                if line_sample_time is not None:
+                    sample_time = line_sample_time
+                if line_infer_batch is not None:
+                    infer_batch = line_infer_batch
+            return_code = process.wait()
+        wall = time.perf_counter() - started
+        if return_code != 0:
+            raise RuntimeError(f"Command failed with exit code {return_code}: {' '.join(command)}")
+        return _impl.CommandMetrics(wall, sample_time, infer_batch)
+
+    def run(self):
+        """Run with a fresh evaluation-only heldout generator bound to CLI device."""
+
+        original_builder = _impl.build_frozen_heldout_suite
+
+        def fresh_builder(**kwargs):
+            return build_fresh_heldout_suite(**kwargs, device=self.cli.device)
+
+        _impl.build_frozen_heldout_suite = fresh_builder
+        try:
+            return super().run()
+        finally:
+            _impl.build_frozen_heldout_suite = original_builder
 
     def _legacy_eval_score(self, branch: str, iteration: int, reference_id: str) -> float | None:
         matches = [
