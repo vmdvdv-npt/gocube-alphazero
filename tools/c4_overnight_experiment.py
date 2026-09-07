@@ -9,6 +9,7 @@ from pathlib import Path
 
 from tools.gocube_experiment_runner import *  # noqa: F401,F403
 from tools import gocube_experiment_runner as _runner
+from tools.gocube_experiment_storage import StorageEfficientExperiment
 
 
 _RESUME_OPTION_TO_ATTR = {
@@ -49,7 +50,7 @@ def parse_args(argv=None):
     return _restore_saved_resume_arguments(cli, raw)
 
 
-Experiment = _runner.Experiment
+Experiment = StorageEfficientExperiment
 
 
 def main(argv=None) -> int:
