@@ -1,26 +1,12 @@
 #!/usr/bin/env python3
-"""Compatibility entrypoint for the complete GoCube adaptive sweep."""
+"""Deprecated command alias for the canonical Cube-4 overnight sweep.
 
-from tools.c4_overnight_complete import *  # noqa: F401,F403
-from tools.c4_overnight_experiment import (
-    Experiment as _CompleteExperiment,
-    build_frozen_heldout_suite as build_frozen_heldout_suite,
-)
-from tools import c4_overnight_complete as _impl
+Keep this filename only so old shell history does not break. All behavior and
+state live in ``tools.c4_overnight_experiment``; no second orchestration path is
+implemented here.
+"""
 
-
-class Experiment(_CompleteExperiment):
-    """Backward-compatible facade used by existing tests and commands."""
-
-    def training_command(self, *args, **kwargs):
-        if not hasattr(self, "selfplay_wait_ms"):
-            self.selfplay_wait_ms = _impl.SELFPLAY_BATCH_WAIT_MS
-        return super().training_command(*args, **kwargs)
-
-
-def main(argv=None) -> int:
-    Experiment(_impl.parse_args(argv)).run()
-    return 0
+from tools.c4_overnight_experiment import *  # noqa: F401,F403
 
 
 if __name__ == "__main__":
