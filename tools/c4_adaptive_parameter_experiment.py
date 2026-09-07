@@ -2,10 +2,11 @@
 """Compatibility entrypoint for the complete GoCube adaptive sweep."""
 
 from tools.c4_overnight_complete import *  # noqa: F401,F403
+from tools.c4_overnight_experiment import Experiment as _CompleteExperiment
 from tools import c4_overnight_complete as _impl
 
 
-class Experiment(_impl.Experiment):
+class Experiment(_CompleteExperiment):
     """Backward-compatible facade used by existing tests and commands."""
 
     def training_command(self, *args, **kwargs):
