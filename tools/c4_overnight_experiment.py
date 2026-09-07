@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Canonical entrypoint for the current autonomous Cube-4 P1..P5 sweep.
+"""Single public entrypoint for the autonomous Cube-4 P1..P5 sweep.
 
-Historical A-G/deadline orchestration is intentionally not supported here.
-The immutable Cube-4 settings come from one production contract; this module
-contains only runtime adaptations that are specific to the sweep entrypoint.
+Normal production use is intentionally one command with no required arguments:
+
+    .venv/bin/python tools/c4_overnight_experiment.py
+
+The runner generates its experiment id automatically, bootstraps when no
+compatible C7 run is supplied, performs the health gate and performance
+benchmark, runs P1..P5, confirms the champion, and writes final reports.
+Historical aliases and A-G/deadline orchestration are intentionally unsupported.
 """
 
 from __future__ import annotations
@@ -16,16 +21,18 @@ import time
 from pathlib import Path
 
 from alphazero.envs.gocube.production_contract import CUBE4_PRODUCTION
-from tools.c4_overnight_complete import *  # noqa: F401,F403
-from tools import c4_overnight_complete as _impl
+from tools._c4_overnight_runtime import *  # noqa: F401,F403
+from tools import _c4_overnight_runtime as _impl
 from tools.gocube_overnight_safety import (
     build_fresh_heldout_suite,
     extract_last_progress_metrics,
 )
 
 
-# c4_overnight_complete contains the orchestration implementation. Bind every
-# fixed production value to the single authoritative contract before runtime.
+CANONICAL_COMMAND = ".venv/bin/python tools/c4_overnight_experiment.py"
+
+# Bind every fixed production value to the single authoritative contract before
+# the private orchestration runtime is used.
 WORKERS = _impl.WORKERS = CUBE4_PRODUCTION.workers
 REGULAR_SIMS = _impl.REGULAR_SIMS = CUBE4_PRODUCTION.regular_sims
 FAST_SIMS = _impl.FAST_SIMS = CUBE4_PRODUCTION.fast_sims
@@ -34,14 +41,31 @@ TRAIN_BATCH_SIZE = _impl.TRAIN_BATCH_SIZE = CUBE4_PRODUCTION.train_batch_size
 ARENA_SIMS = _impl.ARENA_SIMS = CUBE4_PRODUCTION.arena_sims
 EXPECTED_KOMI = _impl.EXPECTED_KOMI = CUBE4_PRODUCTION.komi
 
-# Historical name retained only because the implementation calls this symbol.
-# The builder itself creates fresh evaluation-only rollouts and never samples
-# training replay records.
+# Historical function name retained only as an internal API expected by the
+# runtime. The implementation creates fresh evaluation-only rollouts and never
+# samples training replay records.
 build_frozen_heldout_suite = build_fresh_heldout_suite
 
 
+def _default_experiment_id() -> str:
+    return time.strftime("c4-sweep-%Y%m%d-%H%M%S")
+
+
+def _has_option(argv: list[str], option: str) -> bool:
+    return any(token == option or token.startswith(option + "=") for token in argv)
+
+
+def parse_args(argv=None):
+    """Parse the runtime CLI while making the normal zero-argument path valid."""
+
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if not _has_option(raw, "--experiment-id"):
+        raw = ["--experiment-id", _default_experiment_id(), *raw]
+    return _impl.parse_args(raw)
+
+
 class Experiment(_impl.Experiment):
-    """Current sweep plus entrypoint-only benchmark and heldout safeguards."""
+    """Current sweep plus benchmark-resume and fresh-heldout safeguards."""
 
     def training_command(self, *args, **kwargs):
         """Ensure benchmark inference-wait overrides survive checkpoint resume."""
@@ -133,7 +157,7 @@ class Experiment(_impl.Experiment):
 
 
 def main(argv=None) -> int:
-    Experiment(_impl.parse_args(argv)).run()
+    Experiment(parse_args(argv)).run()
     return 0
 
 

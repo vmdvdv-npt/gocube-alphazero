@@ -2,41 +2,66 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from pathlib import Path
 
 import pytest
 import torch
 
 from alphazero.search_contract import SearchOutput
-from tools import c4_adaptive_parameter_experiment as adaptive
-from tools import c4_overnight_experiment as overnight_entrypoint
+from tools import c4_overnight_experiment as runner
 from tools import gocube_checkpoint_arena as checkpoint_arena
 from tools import gocube_overnight_safety as overnight_safety
 from tools.hardware_telemetry import HardwareTelemetry
 
 
-def test_adaptive_runner_keeps_fixed_production_contract_and_has_no_deadline():
-    assert adaptive.WORKERS == 16
-    assert adaptive.REGULAR_SIMS == 50
-    assert adaptive.FAST_SIMS == 20
-    assert adaptive.GAMES_PER_ITERATION == 256
-    assert adaptive.TRAIN_BATCH_SIZE == 1024
-    assert adaptive.SELFPLAY_BATCH_WAIT_MS == 1.0
-    assert adaptive.EXPECTED_KOMI == 0.5
-    assert [spec["id"] for spec in adaptive.PARAMETER_SPECS] == ["P1", "P2", "P3", "P4", "P5"]
-    assert [spec["flag"] for spec in adaptive.PARAMETER_SPECS] == [
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_single_runner_keeps_fixed_production_contract_and_has_no_deadline():
+    assert runner.WORKERS == 16
+    assert runner.REGULAR_SIMS == 50
+    assert runner.FAST_SIMS == 20
+    assert runner.GAMES_PER_ITERATION == 256
+    assert runner.TRAIN_BATCH_SIZE == 1024
+    assert runner.SELFPLAY_BATCH_WAIT_MS == 1.0
+    assert runner.EXPECTED_KOMI == 0.5
+    assert [spec["id"] for spec in runner.PARAMETER_SPECS] == ["P1", "P2", "P3", "P4", "P5"]
+    assert [spec["flag"] for spec in runner.PARAMETER_SPECS] == [
         "--chosen-move-temperature-halflife",
         "--root-dirichlet-noise-weight",
         "--fast-game-prob",
         "--train-samples-per-new-sample",
         "--replay-window-iters",
     ]
-    source = Path(adaptive.__file__).read_text(encoding="utf-8")
+    source = Path(runner.__file__).read_text(encoding="utf-8")
     assert "--max-hours" not in source
 
 
+def test_zero_argument_cli_is_the_normal_end_to_end_path(monkeypatch):
+    monkeypatch.setattr(runner.time, "strftime", lambda _fmt: "c4-sweep-20260907-123456")
+    cli = runner.parse_args([])
+    assert cli.experiment_id == "c4-sweep-20260907-123456"
+    assert cli.bootstrap_run is None
+    assert cli.device == "auto"
+    assert runner.CANONICAL_COMMAND == ".venv/bin/python tools/c4_overnight_experiment.py"
+
+
+def test_explicit_experiment_id_is_still_supported_for_reproducibility():
+    cli = runner.parse_args(["--experiment-id", "fixed-id", "--device", "cpu"])
+    assert cli.experiment_id == "fixed-id"
+    assert cli.device == "cpu"
+
+
+def test_only_one_public_c4_sweep_entrypoint_exists():
+    assert (ROOT / "tools/c4_overnight_experiment.py").exists()
+    assert (ROOT / "tools/_c4_overnight_runtime.py").exists()
+    assert not (ROOT / "tools/c4_overnight_complete.py").exists()
+    assert not (ROOT / "tools/c4_adaptive_parameter_experiment.py").exists()
+
+
 def test_training_command_carries_cumulative_sweep_overrides():
-    experiment = object.__new__(adaptive.Experiment)
+    experiment = object.__new__(runner.Experiment)
     experiment.python = Path(".venv/bin/python")
     command = experiment.training_command(
         run_name="candidate",
@@ -70,14 +95,14 @@ def test_clone_run_namespace_copies_checkpoint_and_replay_without_mutating_paren
     )
     (tmp_path / "data" / parent / "iteration-0007-data.pkl").write_bytes(b"data")
 
-    adaptive.clone_run_namespace(parent, target)
+    runner.clone_run_namespace(parent, target)
 
     assert (tmp_path / "checkpoint" / target / "iteration-0007.pkl").read_bytes() == b"checkpoint"
     assert (tmp_path / "data" / target / "iteration-0007-data.pkl").read_bytes() == b"data"
     assert not (tmp_path / "checkpoint" / target / "gocube-run.json").exists()
     assert (tmp_path / "checkpoint" / parent / "iteration-0007.pkl").read_bytes() == b"checkpoint"
     with pytest.raises(FileExistsError):
-        adaptive.clone_run_namespace(parent, target)
+        runner.clone_run_namespace(parent, target)
 
 
 def test_frozen_heldout_suite_is_fresh_and_never_requires_training_records(tmp_path, monkeypatch):
@@ -118,7 +143,7 @@ def test_frozen_heldout_suite_is_fresh_and_never_requires_training_records(tmp_p
 
     monkeypatch.setattr(overnight_safety, "_generate_rollout_positions", fake_generate)
     suite_path = tmp_path / "suite.json"
-    first = adaptive.build_frozen_heldout_suite(
+    first = runner.build_frozen_heldout_suite(
         run_name=run,
         iteration=7,
         output_path=suite_path,
@@ -126,7 +151,7 @@ def test_frozen_heldout_suite_is_fresh_and_never_requires_training_records(tmp_p
         seed=123,
         device="cpu",
     )
-    second = adaptive.build_frozen_heldout_suite(
+    second = runner.build_frozen_heldout_suite(
         run_name=run,
         iteration=7,
         output_path=suite_path,
@@ -179,7 +204,7 @@ def test_progress_metric_parser_uses_final_carriage_return_redraw():
         "Generating Samples Sample Time: 0.500s | Infer Batch: 8.0\n"
     )
     assert overnight_safety.extract_last_progress_metrics(line) == (0.5, 8.0)
-    assert "extract_last_progress_metrics" in inspect.getsource(overnight_entrypoint.Experiment.stream_command)
+    assert "extract_last_progress_metrics" in inspect.getsource(runner.Experiment.stream_command)
 
 
 def test_checkpoint_arena_resolves_device_and_reports_wilson_interval(monkeypatch):
