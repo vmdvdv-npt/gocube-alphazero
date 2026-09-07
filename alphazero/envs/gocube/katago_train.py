@@ -760,6 +760,8 @@ class KataGoSearchCoach(GoCubeCoach):
                         raise
                     inference_batch_size.update(rows)
 
+                self._drain_iteration_samples()
+
                 size = self.games_played.value
                 if size > n:
                     sample_time.update((time() - end) / (size - n), size - n)
@@ -775,6 +777,7 @@ class KataGoSearchCoach(GoCubeCoach):
                 self.iter_time = bar.elapsed_td
                 self.eta = bar.eta_td
             self._check_selfplay_workers(iteration)
+            self._drain_iteration_samples()
         except BaseException:
             self._abort_selfplay_agents()
             raise

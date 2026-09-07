@@ -154,7 +154,9 @@ def _set_state(state: TrainState):
 class Coach:
     @_set_state(TrainState.INIT)
     def __init__(self, game_cls, nnet, args):
-        master_seed = getattr(args, "master_seed", None)
+        # ``dotdict.__getattr__`` raises KeyError for a missing optional key,
+        # so use mapping lookup for the argument objects produced by get_args.
+        master_seed = args.get("master_seed") if isinstance(args, dict) else getattr(args, "master_seed", None)
         if master_seed is not None:
             from alphazero.envs.gocube.reproducibility import seed_process
             seed_process(int(master_seed))

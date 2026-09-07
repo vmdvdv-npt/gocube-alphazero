@@ -4,6 +4,7 @@ from argparse import Namespace
 import pytest
 
 from alphazero.Coach import Coach
+from alphazero.utils import dotdict
 from alphazero.envs.gocube.katago_v3 import KATAGO_REFERENCE_COMMIT, KATAGO_RULES_VERSION
 from alphazero.envs.gocube.train import (
     GoCubeCoach,
@@ -26,6 +27,11 @@ def cli_args(**overrides):
     }
     values.update(overrides)
     return Namespace(**values)
+
+
+def test_training_args_without_optional_master_seed_do_not_fail_lookup():
+    args = dotdict({"run_name": "smoke"})
+    assert args.get("master_seed") is None
 
 
 def test_v3_contract_and_training_controls_are_forwarded():

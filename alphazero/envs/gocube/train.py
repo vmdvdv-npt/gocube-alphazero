@@ -4,6 +4,7 @@ import os
 import pickle
 from glob import glob
 from math import ceil
+from queue import Empty
 from time import time
 
 import pyximport
@@ -148,6 +149,11 @@ class GoCubeCoach(Coach):
             self.self_play_iter = current_self_play_iter
 
     def _reset_selfplay_telemetry(self):
+        # Workers publish replay samples through an IPC queue.  Drain that
+        # queue while self-play is running; otherwise a worker can block in
+        # Queue.join_thread() before it can report completion once the V3
+        # seven-tensor payloads fill the pipe.
+        self._pending_iteration_samples = []
         telemetry = getattr(self, "selfplay_telemetry", None)
         if telemetry is None:
             telemetry = {key: mp.Value('q', 0) for key in _TELEMETRY_COUNTER_KEYS}
@@ -169,6 +175,20 @@ class GoCubeCoach(Coach):
             "saved_total": 0,
         }
         return telemetry
+
+    def _drain_iteration_samples(self):
+        pending = getattr(self, "_pending_iteration_samples", None)
+        if pending is None:
+            pending = []
+            self._pending_iteration_samples = pending
+        getter = getattr(self.file_queue, "get_nowait", None)
+        if getter is None:
+            return
+        while True:
+            try:
+                pending.append(getter())
+            except Empty:
+                return
 
     def _snapshot_selfplay_telemetry(self, iteration):
         snapshot = {
@@ -277,6 +297,8 @@ class GoCubeCoach(Coach):
                         self._annotate_parent_exception(exc, iteration, worker_ids)
                         raise
                     inference_batch_size.update(rows)
+
+                self._drain_iteration_samples()
                 size = self.games_played.value
                 if size > n:
                     sample_time.update((time() - end) / (size - n), size - n)
@@ -291,6 +313,7 @@ class GoCubeCoach(Coach):
                 self.iter_time = bar.elapsed_td
                 self.eta = bar.eta_td
             self._check_selfplay_workers(iteration)
+            self._drain_iteration_samples()
         except BaseException:
             self._abort_selfplay_agents()
             raise
@@ -305,7 +328,12 @@ class GoCubeCoach(Coach):
 
     @_set_state(TrainState.SAVE_SAMPLES)
     def saveIterationSamples(self, iteration):
-        num_samples = self.file_queue.qsize()
+        self._drain_iteration_samples()
+        pending = getattr(self, "_pending_iteration_samples", None)
+        if pending is None:
+            num_samples = self.file_queue.qsize()
+        else:
+            num_samples = len(pending)
         base_positions = int(self._iteration_telemetry["base_positions"])
         base_endgame = int(self._iteration_telemetry["base_endgame_positions"])
         extra_samples = int(self._iteration_telemetry["endgame_extra_samples"])
@@ -330,7 +358,7 @@ class GoCubeCoach(Coach):
         ownership_tensor = torch.zeros([num_samples, self.game_cls.logical_topology().point_count, 3])
         ownership_mask_tensor = torch.zeros([num_samples, self.game_cls.logical_topology().point_count])
         for i in range(num_samples):
-            sample = self.file_queue.get()
+            sample = pending[i] if pending is not None else self.file_queue.get()
             if len(sample) != 7:
                 raise ValueError(f"V3 training sample must contain 7 tensors, got {len(sample)}")
             data, policy, value, score, score_mask, ownership, ownership_mask = sample
