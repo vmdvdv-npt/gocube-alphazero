@@ -3,6 +3,7 @@ from alphazero.Game import GameState
 from alphazero.GenericPlayers import BasePlayer
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
+from alphazero.search_contract import KATAGO_PINNED_SEARCH_UTILITY_MODE, SearchOutput
 from alphazero.utils import dotdict
 
 from typing import Callable, List, Tuple, Optional
@@ -69,17 +70,6 @@ class Arena:
             display: Callable[[GameState, Optional[int]], None] = None,
             args: dotdict = None
     ):
-        """
-        Input:
-            player 1,2: two functions that takes board as input, return action
-            game: Game object
-            display: a function that takes board as input and prints it (e.g.
-                     display in othello/OthelloGame). Is necessary for verbose
-                     mode.
-
-        see othello/OthelloPlayers.py for an example. See pit.py for pitting
-        human players/other baselines with each other.
-        """
         num_players = game_cls.num_players()
         if len(players) != num_players:
             raise ValueError('Argument `players` must have the same amount of players as the game supports. '
@@ -113,9 +103,11 @@ class Arena:
         self.game_state = None
         self.draws = 0
         self.no_results = 0
+        self._player_color_results = []
         self._agents = []
         self.stop_event = mp.Event()
         self.pause_event = mp.Event()
+        self.__reset_color_results()
 
     @property
     def players(self) -> List[BasePlayer]:
@@ -134,11 +126,29 @@ class Arena:
     def __check_players_valid(self):
         if self.use_batched_mcts and not all(p.supports_process() for p in self.players):
             raise ValueError('Batched MCTS is not supported for players that do not support batch processing.')
+        score_aware = (
+            self.args.get('search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
+            if hasattr(self.args, 'get')
+            else getattr(self.args, 'search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
+        )
+        if self.use_batched_mcts and score_aware:
+            if not all(hasattr(p, 'nn') and hasattr(p.nn, 'process_for_search') for p in self.players):
+                raise ValueError('KataGo-derived batched Arena requires four-head process_for_search().')
+
+    def __reset_color_results(self):
+        self._player_color_results = [
+            {
+                'black': {'games': 0, 'wins': 0, 'losses': 0, 'draws': 0, 'no_results': 0},
+                'white': {'games': 0, 'wins': 0, 'losses': 0, 'draws': 0, 'no_results': 0},
+            }
+            for _ in range(len(self.players))
+        ]
 
     def __reset_stats(self):
         self.draws = 0
         self.no_results = 0
         [s.reset_wins() for s in self.__player_stats]
+        self.__reset_color_results()
 
     def __update_winrates(self):
         num_games = sum([s.wins for s in self.__player_stats]) + (
@@ -148,6 +158,41 @@ class Arena:
             num_games, self.draws if self.args.use_draws_for_winrate else 0
         ) for s in self.__player_stats]
 
+    def __record_batched_color_result(self, state, winstate, agent_id):
+        if self.game_cls.num_players() != 2:
+            return
+        player_to_index = list(self._agents[agent_id].player_to_index)
+        if len(player_to_index) < 2:
+            return
+        color_by_index = {
+            int(player_to_index[0]): 'black',
+            int(player_to_index[1]): 'white',
+        }
+        has_draw_slot = len(winstate) > self.game_cls.num_players()
+        is_draw_slot = has_draw_slot and bool(winstate[-1])
+        if is_draw_slot:
+            result_key = 'no_results' if getattr(state, 'terminal_kind', None) == 'no_result' else 'draws'
+            for player_index in range(2):
+                bucket = self._player_color_results[player_index][color_by_index[player_index]]
+                bucket['games'] += 1
+                bucket[result_key] += 1
+            return
+
+        winner_color = next(
+            (color for color, won in enumerate(winstate[:2]) if bool(won)),
+            None,
+        )
+        winner_index = None if winner_color is None else int(player_to_index[winner_color])
+        for player_index in range(2):
+            bucket = self._player_color_results[player_index][color_by_index[player_index]]
+            bucket['games'] += 1
+            if winner_index is None:
+                bucket['no_results'] += 1
+            elif player_index == winner_index:
+                bucket['wins'] += 1
+            else:
+                bucket['losses'] += 1
+
     def __collect_batched_results(self, result_queue):
         num_games = result_queue.qsize()
         wins = [0] * self.game_cls.num_players()
@@ -155,6 +200,7 @@ class Arena:
         no_results = 0
         for _ in range(num_games):
             state, winstate, agent_id = result_queue.get()
+            self.__record_batched_color_result(state, winstate, agent_id)
             has_draw_slot = len(winstate) > self.game_cls.num_players()
             if has_draw_slot and winstate[-1]:
                 if getattr(state, 'terminal_kind', None) == 'no_result':
@@ -174,21 +220,22 @@ class Arena:
     def winrates(self) -> List[float]:
         return [s.winrate for s in self.__player_stats]
 
+    def player_color_results(self, player_index: int):
+        player_index = int(player_index)
+        if player_index < 0 or player_index >= len(self._player_color_results):
+            raise IndexError('Arena player index out of range')
+        return {
+            color: dict(values)
+            for color, values in self._player_color_results[player_index].items()
+        }
+
     @_set_state(ArenaState.SINGLE_GAME)
     def play_game(self, verbose=False, _player_to_index: List[int] = None) -> Tuple[GameState, np.ndarray]:
-        """
-        Executes one episode of a game.
-
-        Returns:
-            state: the last state in the game
-            result: the value of the game result (based on last state)
-        """
         if verbose: assert self.display
 
         self.stop_event = mp.Event()
         self.pause_event = mp.Event()
 
-        # Reset the state of the players if needed
         [p.reset() for p in self.players]
         self.game_state = self.game_cls()
         player_to_index = _player_to_index or list(range(self.game_state.num_players()))
@@ -201,9 +248,6 @@ class Arena:
             if self.stop_event.is_set() or not isinstance(action, int):
                 break
 
-            # valids = state.valid_moves()
-            # assert valids[action] > 0, ' '.join(map(str, [action, index, state.player, turns, valids]))
-
             if verbose:
                 print(f'Turn {self.game_state.turns}, Player {self.game_state.player}')
 
@@ -212,7 +256,7 @@ class Arena:
 
             if verbose:
                 self.display(self.game_state, action)
-            
+
             winstate = self.game_state.win_state()
 
             if winstate.any():
@@ -226,18 +270,6 @@ class Arena:
 
     @_set_state(ArenaState.PLAY_GAMES)
     def play_games(self, num: int, verbose=False, shuffle_players=True) -> Tuple[List[int], int, List[float]]:
-        """
-        Plays num games in which the order of the players
-        is randomized for each game. The order is simply switched
-        if there are only two players.
-
-        Returns:
-            wins: number of wins for each player in self.players
-            draws: number of true scored draws that occurred in total. Games
-                   exposing terminal_kind == 'no_result' are counted separately
-                   in self.no_results and excluded from win rates.
-            winrates: the win rates for each player in self.players
-        """
         self.total_games = num
         self.stop_event = mp.Event()
         self.pause_event = mp.Event()
@@ -247,7 +279,6 @@ class Arena:
         self.__reset_stats()
 
         if self.use_batched_mcts:
-            # TODO: fix batched arena possibly taking up to ~10x longer than normal self play
             self.__check_players_valid()
 
             def empty_queue(q: mp.Queue):
@@ -257,10 +288,25 @@ class Arena:
                     except Empty:
                         break
 
+            score_aware = (
+                self.args.get('search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
+                if hasattr(self.args, 'get')
+                else getattr(self.args, 'search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
+            )
+            point_count = int(self.game_cls.logical_topology().point_count) if score_aware else 0
+            if score_aware:
+                # The historical batched Arena's row->game mapping becomes
+                # ambiguous once multiple game slots in one worker finish at
+                # different times. One active game per worker preserves the
+                # existing scheduling while making the mapping exact.
+                self.args.arena_batch_size = 1
+
             self.args.gamesPerIteration = num
             self._agents = []
             policy_tensors = []
             value_tensors = []
+            score_tensors = []
+            ownership_tensors = []
             batch_ready = []
             batch_queues = []
             self.stop_event = mp.Event()
@@ -269,10 +315,6 @@ class Arena:
             result_queue = mp.Queue()
             completed = mp.Value('i', 0)
             games_played = mp.Value('i', 0)
-
-            # self.args.expertValueWeight.current = self.args.expertValueWeight.start
-            # if self.args.workers >= mp.cpu_count():
-            #    self.args.workers = mp.cpu_count() - 1
 
             for i in range(self.args.workers):
                 input_tensors = [[] for _ in range(self.game_cls.num_players())]
@@ -286,16 +328,32 @@ class Arena:
                 value_tensors.append(torch.zeros([self.args.arena_batch_size, self.game_cls.num_players() + 1]))
                 value_tensors[i].share_memory_()
 
+                if score_aware:
+                    score_tensors.append(torch.zeros([self.args.arena_batch_size, 1]))
+                    score_tensors[i].share_memory_()
+                    ownership_tensors.append(torch.zeros([
+                        self.args.arena_batch_size, point_count, 3
+                    ]))
+                    ownership_tensors[i].share_memory_()
+
                 batch_ready.append(mp.Event())
                 if self.args.cuda:
                     policy_tensors[i].pin_memory()
                     value_tensors[i].pin_memory()
+                    if score_aware:
+                        score_tensors[i].pin_memory()
+                        ownership_tensors[i].pin_memory()
 
                 self._agents.append(
-                    SelfPlayAgent(i, self.game_cls, ready_queue, batch_ready[i],
-                                  input_tensors, policy_tensors[i], value_tensors[i], batch_queues[i],
-                                  result_queue, completed, games_played, self.stop_event, self.pause_event, self.args,
-                                  _is_arena=True))
+                    SelfPlayAgent(
+                        i, self.game_cls, ready_queue, batch_ready[i],
+                        input_tensors, policy_tensors[i], value_tensors[i], batch_queues[i],
+                        result_queue, completed, games_played, self.stop_event, self.pause_event, self.args,
+                        _is_arena=True,
+                        score_tensor=score_tensors[i] if score_aware else None,
+                        ownership_tensor=ownership_tensors[i] if score_aware else None,
+                    )
+                )
                 self._agents[i].daemon = True
                 self._agents[i].start()
 
@@ -309,16 +367,34 @@ class Arena:
 
                     policy = []
                     value = []
+                    score = []
+                    ownership = []
                     data = batch_queues[id].get()
                     for player in range(len(self.players)):
                         batch = data[player]
                         if not isinstance(batch, list):
-                            p, v = self.players[player].process(batch)
-                            policy.append(p.to(policy_tensors[id].device))
-                            value.append(v.to(value_tensors[id].device))
+                            if score_aware:
+                                out = self.players[player].nn.process_for_search(batch)
+                                if not isinstance(out, SearchOutput):
+                                    raise RuntimeError('process_for_search() must return SearchOutput')
+                                if out.score is None or out.ownership is None:
+                                    raise RuntimeError(
+                                        'KataGo-derived batched Arena requires score and ownership heads'
+                                    )
+                                policy.append(out.policy.to(policy_tensors[id].device))
+                                value.append(out.value.to(value_tensors[id].device))
+                                score.append(out.score.to(score_tensors[id].device))
+                                ownership.append(out.ownership.to(ownership_tensors[id].device))
+                            else:
+                                p, v = self.players[player].process(batch)
+                                policy.append(p.to(policy_tensors[id].device))
+                                value.append(v.to(value_tensors[id].device))
 
                     policy_tensors[id].copy_(torch.cat(policy))
                     value_tensors[id].copy_(torch.cat(value))
+                    if score_aware:
+                        score_tensors[id].copy_(torch.cat(score))
+                        ownership_tensors[id].copy_(torch.cat(ownership))
                     batch_ready[id].set()
                 except Empty:
                     pass
@@ -352,17 +428,18 @@ class Arena:
             bar.update()
             bar.finish()
 
-            # empty queues to prevent deadlock
             empty_queue(ready_queue)
             empty_queue(result_queue)
             for q in batch_queues:
                 empty_queue(q)
 
-            # wait for all processes to finish
             for agent in self._agents:
                 agent.join()
                 del policy_tensors[0]
                 del value_tensors[0]
+                if score_aware:
+                    del score_tensors[0]
+                    del ownership_tensors[0]
                 del batch_ready[0]
 
         else:
@@ -378,15 +455,12 @@ class Arena:
                 if self.stop_event.is_set():
                     break
 
-                # Get a new lookup for self.players, randomized or reversed from original
                 get_player_order()
 
-                # Play a single game with the current player order
                 final_state, winstate = self.play_game(verbose, players)
                 if self.stop_event.is_set():
                     break
 
-                # Bookkeeping + plot progress
                 for player, is_win in enumerate(winstate):
                     if is_win:
                         if player >= self.game_cls.num_players():

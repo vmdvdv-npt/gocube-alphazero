@@ -5,6 +5,7 @@ import json
 import math
 import os
 import random
+import sys
 from glob import glob
 from time import time
 
@@ -67,6 +68,18 @@ DEFAULT_ARENA_ANCHOR_PERIOD = 10
 DEFAULT_ARENA_REGRESSION_WIN_RATE = 0.45
 DEFAULT_ARENA_SEED = 20260906
 
+_SWEEP_FLAG_TO_ARG_KEYS = {
+    "--chosen-move-temperature-halflife": ("gocube_chosen_move_temperature_halflife",),
+    "--root-dirichlet-noise-weight": (
+        "gocube_root_dirichlet_noise_weight",
+        "root_noise_frac",
+    ),
+    "--replay-window-iters": ("gocube_replay_window_iters",),
+    "--fast-game-prob": ("probFastSim",),
+    "--train-samples-per-new-sample": ("gocube_train_samples_per_new_sample",),
+    "--arena-batched": ("gocube_arena_batched", "arenaBatched"),
+}
+
 _DIVERSIFICATION_COUNTER_KEYS = (
     "normal_starts",
     "early_forks",
@@ -95,6 +108,24 @@ def _sample_milestones(value: str) -> tuple[int, ...]:
     return milestones
 
 
+def checkpoint_arg_overrides(cli, args) -> dict[str, object]:
+    """Return only sweep values that the user explicitly supplied on the CLI.
+
+    Ordinary production resume keeps its historical strict saved-args behavior.
+    Explicit sweep flags opt a cloned run into retaining just those configured
+    overrides while all checkpoint compatibility validation remains active.
+    """
+
+    explicit = getattr(cli, "_explicit_sweep_flags", frozenset())
+    overrides = {}
+    for flag, keys in _SWEEP_FLAG_TO_ARG_KEYS.items():
+        if flag not in explicit:
+            continue
+        for key in keys:
+            overrides[key] = args[key]
+    return overrides
+
+
 class KataGoSearchCoach(GoCubeCoach):
     """Pinned GoCube search with sample-ratio training and observational Arena."""
 
@@ -103,6 +134,39 @@ class KataGoSearchCoach(GoCubeCoach):
         self.score_tensors = []
         self.ownership_tensors = []
         self._arena_telemetry = None
+
+    def _load_model(self, model, iteration):
+        overrides = getattr(self.train_net, "_gocube_checkpoint_arg_overrides", None)
+        if not overrides:
+            return super()._load_model(model, iteration)
+
+        folder = os.path.join(self.args.checkpoint, self.args.run_name)
+        filename = get_iter_file(iteration)
+        checkpoint = torch.load(os.path.join(folder, filename), map_location="cpu")
+        saved_args = checkpoint.get("args")
+        if not isinstance(saved_args, dict):
+            return super()._load_model(model, iteration)
+
+        restored = {}
+        for key in overrides:
+            if key not in saved_args:
+                continue
+            restored[key] = (key in model.args, model.args.get(key))
+            model.args[key] = saved_args[key]
+        try:
+            model.load_checkpoint(
+                folder=folder,
+                filename=filename,
+                use_saved_args=False,
+            )
+        finally:
+            for key, (was_present, value) in restored.items():
+                if was_present:
+                    model.args[key] = value
+                else:
+                    model.args.pop(key, None)
+        for key, value in overrides.items():
+            model.args[key] = value
 
     def _reset_selfplay_telemetry(self):
         # Arena results belong to the iteration that produced them. Clear the
@@ -266,9 +330,16 @@ class KataGoSearchCoach(GoCubeCoach):
             os.fsync(handle.fileno())
         os.replace(temporary, path)
 
-    def _load_replay_datasets(self, iteration):
-        datasets = []
-        loaded_samples = {}
+    def _replay_iterations(self, iteration):
+        explicit_window = (
+            self.args.get("gocube_replay_window_iters", None)
+            if isinstance(self.args, dict)
+            else getattr(self.args, "gocube_replay_window_iters", None)
+        )
+        if explicit_window is not None:
+            start = max(1, int(iteration) - int(explicit_window) + 1)
+            return range(start, int(iteration) + 1)
+
         current_history_size = min(
             max(
                 self.args.minTrainHistoryWindow,
@@ -276,7 +347,12 @@ class KataGoSearchCoach(GoCubeCoach):
             ),
             self.args.maxTrainHistoryWindow,
         )
-        for train_iter in range(max(1, iteration - current_history_size), iteration + 1):
+        return range(max(1, iteration - current_history_size), iteration + 1)
+
+    def _load_replay_datasets(self, iteration):
+        datasets = []
+        loaded_samples = {}
+        for train_iter in self._replay_iterations(iteration):
             filename = os.path.join(
                 self.args.data,
                 self.args.run_name,
@@ -418,54 +494,90 @@ class KataGoSearchCoach(GoCubeCoach):
         arena_args.add_root_temp = False
         arena_args.startTemp = 0.0
         arena_args.arenaTemp = 0.0
+        arena_args.arena_batch_size = max(
+            1,
+            math.ceil(games / max(1, int(arena_args.get("workers", 1)))),
+        )
         current_player = MCTSPlayer(self.train_net, self.game_cls, arena_args)
         opponent_player = MCTSPlayer(self.self_play_net, self.game_cls, arena_args)
+        use_batched = bool(
+            self.args.get("gocube_arena_batched", False)
+            if isinstance(self.args, dict)
+            else getattr(self.args, "gocube_arena_batched", False)
+        )
         arena = Arena(
             [current_player, opponent_player],
             self.game_cls,
-            use_batched_mcts=False,
+            use_batched_mcts=use_batched,
             args=arena_args,
         )
 
-        outcomes = []
-        for game_index in range(games):
+        if use_batched:
             seed = (
                 int(self.args.gocube_arena_seed)
                 + int(current_iteration) * 100_003
                 + int(opponent_iteration) * 1_009
-                + game_index
             )
             np.random.seed(seed & 0xFFFFFFFF)
             random.seed(seed)
-            order = [0, 1] if game_index % 2 == 0 else [1, 0]
-            current_color = "black" if order[0] == 0 else "white"
-            final_state, winstate = arena.play_game(False, order)
-            has_draw_slot = len(winstate) > self.game_cls.num_players()
-            if has_draw_slot and bool(winstate[-1]):
-                result = "no_result" if getattr(final_state, "terminal_kind", None) == "no_result" else "draw"
-            else:
-                winner_color = next(
-                    (idx for idx, won in enumerate(winstate[:self.game_cls.num_players()]) if bool(won)),
-                    None,
+            torch.manual_seed(seed & 0x7FFFFFFF)
+            wins, draws, _ = arena.play_games(games, verbose=False, shuffle_players=True)
+            no_results = int(arena.no_results)
+            scored = int(sum(wins) + draws)
+            summary = {
+                "games": int(scored + no_results),
+                "scored_games": scored,
+                "wins": int(wins[0]),
+                "losses": int(wins[1]),
+                "draws": int(draws),
+                "no_results": no_results,
+                "win_rate": (
+                    (float(wins[0]) + 0.5 * float(draws)) / scored if scored else 0.0
+                ),
+                "by_color": arena.player_color_results(0),
+            }
+        else:
+            outcomes = []
+            for game_index in range(games):
+                seed = (
+                    int(self.args.gocube_arena_seed)
+                    + int(current_iteration) * 100_003
+                    + int(opponent_iteration) * 1_009
+                    + game_index
                 )
-                if winner_color is None:
-                    result = "no_result"
+                np.random.seed(seed & 0xFFFFFFFF)
+                random.seed(seed)
+                order = [0, 1] if game_index % 2 == 0 else [1, 0]
+                current_color = "black" if order[0] == 0 else "white"
+                final_state, winstate = arena.play_game(False, order)
+                has_draw_slot = len(winstate) > self.game_cls.num_players()
+                if has_draw_slot and bool(winstate[-1]):
+                    result = "no_result" if getattr(final_state, "terminal_kind", None) == "no_result" else "draw"
                 else:
-                    result = "win" if order[winner_color] == 0 else "loss"
-            outcomes.append((current_color, result))
-            if self.stop_train.is_set():
-                break
+                    winner_color = next(
+                        (idx for idx, won in enumerate(winstate[:self.game_cls.num_players()]) if bool(won)),
+                        None,
+                    )
+                    if winner_color is None:
+                        result = "no_result"
+                    else:
+                        result = "win" if order[winner_color] == 0 else "loss"
+                outcomes.append((current_color, result))
+                if self.stop_train.is_set():
+                    break
+            summary = summarize_arena_outcomes(outcomes)
 
-        summary = summarize_arena_outcomes(outcomes)
         summary["opponent_checkpoint"] = self._checkpoint_descriptor(opponent_iteration)
         summary["evaluation_contract"] = {
-            "deterministic": True,
+            "deterministic": not use_batched,
             "search_sims": int(self.args.arenaMCTSSims),
             "fast_search": False,
             "root_noise": False,
             "root_policy_temperature": False,
             "move_temperature": 0.0,
-            "alternating_colors": True,
+            "alternating_colors": not use_batched,
+            "batched": use_batched,
+            "workers": int(self.args.get("workers", 1)) if isinstance(self.args, dict) else int(getattr(self.args, "workers", 1)),
             "seed": int(self.args.gocube_arena_seed),
             "rules_fingerprint": self.args.gocube_rules_fingerprint,
             "komi": float(self.args.gocube_komi),
@@ -665,6 +777,8 @@ class KataGoSearchCoach(GoCubeCoach):
 def parse_args(argv=None):
     cleanup_defaults = KATAGO_CLEANUP_TRAINING_DEFAULTS
     diverse = KATAGO_PINNED_DIVERSIFICATION_DEFAULTS
+    exploration = KATAGO_PINNED_EXPLORATION_DEFAULTS
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
         description="Train GoCube from scratch with search semantics ported from pinned KataGo"
     )
@@ -682,7 +796,18 @@ def parse_args(argv=None):
         type=float,
         default=DEFAULT_TRAIN_SAMPLES_PER_NEW_SAMPLE,
     )
+    parser.add_argument("--replay-window-iters", type=int, default=None)
     parser.add_argument("--fast-game-prob", type=float, default=0.25)
+    parser.add_argument(
+        "--chosen-move-temperature-halflife",
+        type=float,
+        default=exploration["chosen_move_temperature_halflife"],
+    )
+    parser.add_argument(
+        "--root-dirichlet-noise-weight",
+        type=float,
+        default=exploration["root_dirichlet_noise_weight"],
+    )
     parser.add_argument("--endgame-sample-weight", type=int, default=1)
     parser.add_argument("--inference-batch-wait-ms", type=float, default=1.0)
     parser.add_argument(
@@ -727,6 +852,7 @@ def parse_args(argv=None):
         default=DEFAULT_ARENA_REGRESSION_WIN_RATE,
     )
     parser.add_argument("--arena-seed", type=int, default=DEFAULT_ARENA_SEED)
+    parser.add_argument("--arena-batched", action="store_true")
     parser.add_argument("--no-arena", action="store_true")
     parser.add_argument("--model-gating", action="store_true")
     parser.add_argument("--smoke", action="store_true")
@@ -736,7 +862,13 @@ def parse_args(argv=None):
         action="store_true",
         help="Allow resuming an existing namespace. The checkpoint must satisfy the new training contract.",
     )
-    return parser.parse_args(argv)
+    parsed = parser.parse_args(raw_argv)
+    parsed._explicit_sweep_flags = frozenset(
+        flag
+        for flag in _SWEEP_FLAG_TO_ARG_KEYS
+        if any(token == flag or token.startswith(flag + "=") for token in raw_argv)
+    )
+    return parsed
 
 
 def build_katago_training_args(cli):
@@ -752,6 +884,16 @@ def build_katago_training_args(cli):
         raise ValueError("arena-anchor-period must be positive")
     if not 0.0 <= cli.arena_regression_win_rate <= 0.5:
         raise ValueError("arena-regression-win-rate must be within [0,0.5]")
+    if not math.isfinite(float(cli.chosen_move_temperature_halflife)) or float(
+        cli.chosen_move_temperature_halflife
+    ) <= 0.0:
+        raise ValueError("chosen-move-temperature-halflife must be finite and positive")
+    if not math.isfinite(float(cli.root_dirichlet_noise_weight)) or not 0.0 <= float(
+        cli.root_dirichlet_noise_weight
+    ) <= 1.0:
+        raise ValueError("root-dirichlet-noise-weight must be finite and within [0,1]")
+    if cli.replay_window_iters is not None and int(cli.replay_window_iters) < 1:
+        raise ValueError("replay-window-iters must be positive")
     build_replay_training_plan(
         new_selfplay_samples=1,
         replay_window_samples=1,
@@ -795,7 +937,7 @@ def build_katago_training_args(cli):
     args.gocube_root_dirichlet_noise_total_concentration = exploration[
         "root_dirichlet_noise_total_concentration"
     ]
-    args.gocube_root_dirichlet_noise_weight = exploration["root_dirichlet_noise_weight"]
+    args.gocube_root_dirichlet_noise_weight = float(cli.root_dirichlet_noise_weight)
     args.gocube_root_policy_temperature_early = exploration["root_policy_temperature_early"]
     args.gocube_root_policy_temperature = exploration["root_policy_temperature"]
     args.gocube_root_policy_temperature_halflife = exploration[
@@ -804,7 +946,8 @@ def build_katago_training_args(cli):
     args.gocube_root_desired_per_child_visits_coeff = exploration[
         "root_desired_per_child_visits_coeff"
     ]
-    args.root_noise_frac = exploration["root_dirichlet_noise_weight"]
+    args.gocube_chosen_move_temperature_halflife = float(cli.chosen_move_temperature_halflife)
+    args.root_noise_frac = float(cli.root_dirichlet_noise_weight)
     args.root_policy_temp = exploration["root_policy_temperature"]
 
     args.gocube_cleanup_training_prob = float(cli.cleanup_training_prob)
@@ -830,6 +973,9 @@ def build_katago_training_args(cli):
 
     args.gocube_training_contract = TRAINING_CONTRACT
     args.gocube_train_samples_per_new_sample = float(cli.train_samples_per_new_sample)
+    args.gocube_replay_window_iters = (
+        None if cli.replay_window_iters is None else int(cli.replay_window_iters)
+    )
     args.gocube_lr_warmup_samples = int(cli.lr_warmup_samples)
     args.gocube_lr_warmup_start_factor = float(cli.lr_warmup_start_factor)
     args.gocube_lr_milestone_samples = tuple(int(x) for x in cli.lr_milestone_samples)
@@ -840,6 +986,7 @@ def build_katago_training_args(cli):
     args.gocube_arena_anchor_period = int(cli.arena_anchor_period)
     args.gocube_arena_regression_win_rate = float(cli.arena_regression_win_rate)
     args.gocube_arena_seed = int(cli.arena_seed)
+    args.gocube_arena_batched = bool(cli.arena_batched)
 
     args.cpuct = defaults["cpuct_exploration"]
     args.fpu_reduction = defaults["fpu_reduction_max"]
@@ -853,7 +1000,7 @@ def build_katago_training_args(cli):
     args.compareWithPast = not cli.no_arena and not cli.smoke
     args.pastCompareFreq = 1
     args.model_gating = False
-    args.arenaBatched = False
+    args.arenaBatched = bool(cli.arena_batched)
     args.arenaTemp = 0.0
     args.startTemp = 1.0
     args.pop("train_sample_ratio", None)
@@ -897,6 +1044,7 @@ def print_katago_search_configuration(args):
     print(f"  contract = {args.gocube_katago_exploration_contract}")
     print(f"  Dirichlet total concentration = {args.gocube_root_dirichlet_noise_total_concentration:g}")
     print(f"  Dirichlet weight = {args.gocube_root_dirichlet_noise_weight:g}")
+    print(f"  chosen move temperature halflife = {args.gocube_chosen_move_temperature_halflife:g}")
     print(f"  root policy temp early/normal = {args.gocube_root_policy_temperature_early:g}/{args.gocube_root_policy_temperature:g}")
     print(f"  root desired child visits coeff = {args.gocube_root_desired_per_child_visits_coeff:g}")
     print("Pinned KataGo diversification:")
@@ -914,6 +1062,10 @@ def print_katago_search_configuration(args):
     print("Sample-based replay training:")
     print(f"  contract = {args.gocube_training_contract}")
     print(f"  train samples/new sample = {args.gocube_train_samples_per_new_sample:g}")
+    if args.gocube_replay_window_iters is None:
+        print("  replay window = production schedule")
+    else:
+        print(f"  replay window = last {args.gocube_replay_window_iters} iterations")
     print(f"  warmup samples = {args.gocube_lr_warmup_samples}")
     print(f"  warmup start factor = {args.gocube_lr_warmup_start_factor:g}")
     print(f"  LR sample milestones = {args.gocube_lr_milestone_samples}")
@@ -923,6 +1075,7 @@ def print_katago_search_configuration(args):
     print(f"  games/opponent = {args.gocube_arena_games_per_opponent}")
     print(f"  anchor period = {args.gocube_arena_anchor_period}")
     print(f"  arena sims = {args.arenaMCTSSims}")
+    print(f"  batched = {'ON' if args.gocube_arena_batched else 'OFF'}")
     print("  fast/noise/root-temp = OFF/OFF/OFF")
     print("  model gating = OFF")
 
@@ -935,6 +1088,7 @@ def main(argv=None):
     print_katago_search_configuration(args)
     ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
     network = SampleClockNNetWrapper(game_cls, args)
+    network._gocube_checkpoint_arg_overrides = checkpoint_arg_overrides(cli, args)
     coach = KataGoSearchCoach(game_cls, network, args)
     coach.learn()
 
