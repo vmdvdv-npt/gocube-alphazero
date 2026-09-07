@@ -4,12 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools import c4_adaptive_parameter_experiment as adaptive
-from tools import c4_overnight_complete as overnight
+from tools import c4_overnight_experiment as overnight
 from tools import gocube_checkpoint_arena as checkpoint_arena
 
 
-def test_second_four_use_exact_requested_parameter_grids_and_benchmark_matrix():
+def test_parameter_grids_and_benchmark_matrix_are_canonical():
     assert [spec["values"] for spec in overnight.PARAMETER_SPECS] == [
         (10.0, 19.0, 32.0),
         (0.15, 0.25, 0.35),
@@ -21,7 +20,6 @@ def test_second_four_use_exact_requested_parameter_grids_and_benchmark_matrix():
     assert overnight.ARENA_BENCHMARK_WAITS_MS == (0.5, 1.0, 2.0)
     assert overnight.ARENA_BENCHMARK_WORKERS == (4, 8, 16)
     assert max(overnight.ARENA_BENCHMARK_WORKERS) == 16
-    assert adaptive.PARAMETER_SPECS == overnight.PARAMETER_SPECS
 
 
 def test_confidence_decision_stops_only_on_supported_outcomes():

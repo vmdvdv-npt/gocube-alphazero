@@ -49,7 +49,7 @@ def test_v3_rules_fingerprint_default_is_point_five():
     assert rules_fingerprint(topology) == rules_fingerprint(topology, GOCUBE_KOMI)
 
 
-def test_obsolete_a_to_g_runtime_tools_are_deleted():
+def test_obsolete_runtime_entrypoints_are_deleted():
     obsolete = (
         "tools/c4_adaptive_finish.py",
         "tools/c4_overnight_hardened.py",
@@ -57,16 +57,19 @@ def test_obsolete_a_to_g_runtime_tools_are_deleted():
         "tools/preflight_c4_overnight.sh",
         "tools/resume_c4_adaptive.sh",
         "tools/resume_c4_overnight.sh",
+        "tools/c4_adaptive_parameter_experiment.py",
+        "tools/c4_overnight_complete.py",
     )
     for relative in obsolete:
         assert not (ROOT / relative).exists(), relative
+    assert (ROOT / "tools/c4_overnight_experiment.py").exists()
+    assert (ROOT / "tools/_c4_overnight_runtime.py").exists()
 
 
 def test_active_cube4_runtime_contains_no_obsolete_komi_literal_or_a_to_g_surface():
     active_paths = (
         "tools/c4_overnight_experiment.py",
-        "tools/c4_adaptive_parameter_experiment.py",
-        "tools/c4_overnight_complete.py",
+        "tools/_c4_overnight_runtime.py",
         "alphazero/envs/gocube/production_contract.py",
         "alphazero/envs/gocube/game.py",
         "alphazero/envs/gocube/katago_train.py",
