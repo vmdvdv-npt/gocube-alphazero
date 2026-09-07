@@ -54,6 +54,7 @@ class SelfPlayAgent(mp.Process):
         self.temps = []
         self.next_reset = []
         self.mcts = []
+        self.search_states = [None] * self.batch_size
         self.games_played = games_played
         self.complete_count = complete_count
         self.stop_event = stop_event
@@ -308,10 +309,11 @@ class SelfPlayAgent(mp.Process):
     def generateBatch(self):
         if self._is_arena:
             batch_tensor = [[] for _ in range(self.game_cls.num_players())]
-            self.batch_indices = [[] for _ in range(self.game_cls.num_players())]
+            arena_slots_by_player = [[] for _ in range(self.game_cls.num_players())]
         for i in range(self.batch_size):
             self._check_pause()
             state = self._mcts(i).find_leaf(self.games[i])
+            self.search_states[i] = state
             if self._is_warmup:
                 self.policy_tensor[i].copy_(self._WARMUP_POLICY)
                 self.value_tensor[i].copy_(self._WARMUP_VALUE)
@@ -328,7 +330,7 @@ class SelfPlayAgent(mp.Process):
                 data = data.view(-1, *state.observation_size())
                 player = self.player_to_index[self.games[i].player]
                 batch_tensor[player].append(data)
-                self.batch_indices[player].append(i)
+                arena_slots_by_player[player].append(i)
             else:
                 self.batch_tensor[i].copy_(data)
         if self._is_arena:
@@ -338,7 +340,16 @@ class SelfPlayAgent(mp.Process):
                 if data:
                     batch_tensor[player] = torch.cat(data)
             self.output_queue.put(batch_tensor)
-            self.batch_indices = list(itertools.chain.from_iterable(self.batch_indices))
+            row_to_slot = list(itertools.chain.from_iterable(arena_slots_by_player))
+            if len(row_to_slot) != self.batch_size:
+                raise RuntimeError(
+                    f'Arena batch row mapping has {len(row_to_slot)} rows for {self.batch_size} game slots'
+                )
+            self.batch_indices = [None] * self.batch_size
+            for row, slot in enumerate(row_to_slot):
+                if self.batch_indices[slot] is not None:
+                    raise RuntimeError(f'Arena batch slot {slot} was assigned more than once')
+                self.batch_indices[slot] = row
         if not self._is_warmup:
             self.ready_queue.put(self.id)
 
@@ -349,6 +360,9 @@ class SelfPlayAgent(mp.Process):
         for i in range(self.batch_size):
             self._check_pause()
             index = self.batch_indices[i] if self._is_arena else i
+            state = self.search_states[i]
+            if state is None:
+                raise RuntimeError(f'Missing find_leaf() state for batch slot {i}')
             if getattr(self, 'score_aware', False):
                 if self._cleanup_training_active(i) and self._mcts(i).depth == 0:
                     self._cleanup_slot_set(
@@ -357,7 +371,7 @@ class SelfPlayAgent(mp.Process):
                         np.array(self.policy_tensor[index].data.numpy(), dtype=np.float64, copy=True),
                     )
                 self._mcts(i).process_search_results(
-                    self.games[i],
+                    state,
                     self.value_tensor[index].data.numpy(),
                     self.policy_tensor[index].data.numpy(),
                     self.score_tensor[index].data.numpy(),
@@ -367,12 +381,13 @@ class SelfPlayAgent(mp.Process):
                 )
             else:
                 self._mcts(i).process_results(
-                    self.games[i],
+                    state,
                     self.value_tensor[index].data.numpy(),
                     self.policy_tensor[index].data.numpy(),
                     False if self._is_arena else self.args.add_root_noise,
                     False if self._is_arena else self.args.add_root_temp
                 )
+            self.search_states[i] = None
 
     def playMoves(self):
         recording_enabled = getattr(self, "recording_enabled", False)
