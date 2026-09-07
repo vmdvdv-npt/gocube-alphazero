@@ -18,6 +18,7 @@ from alphazero.envs.gocube.selfplay_semantics import (
     rebase_cleanup_training_state,
 )
 from alphazero.search_contract import KATAGO_PINNED_SEARCH_UTILITY_MODE
+from alphazero.envs.gocube.reproducibility import derive_worker_seed, seed_process
 
 
 def _optional_arg(args, name, default):
@@ -63,6 +64,8 @@ class SelfPlayAgent(mp.Process):
         self.pause_event = pause_event
         self.worker_error_queue = worker_error_queue
         self.iteration = int(iteration)
+        self.master_seed = _optional_arg(args, 'master_seed', None)
+        self.game_sequences = []
         self._current_game_slot = None
         self._current_stage = 'initialization'
         self.args = args
@@ -131,6 +134,7 @@ class SelfPlayAgent(mp.Process):
             self.game_ids.append(None)
             self.move_histories.append([])
             self.game_start_times.append(None)
+            self.game_sequences.append(0)
             self.temps.append(self.args.startTemp)
             self.next_reset.append(0)
             self.mcts.append(self._get_mcts())
@@ -312,8 +316,11 @@ class SelfPlayAgent(mp.Process):
 
     def run(self):
         try:
-            np.random.seed()
             for i in range(self.batch_size):
+                if self.master_seed is not None:
+                    seed_process(derive_worker_seed(
+                        self.master_seed, self.iteration, self.id, i, self.game_sequences[i]
+                    ))
                 self._set_worker_context(i, 'initialization')
                 self._sample_cleanup_training_plan(i)
             while not self.stop_event.is_set() and self.games_played.value < self.args.gamesPerIteration:
@@ -558,18 +565,22 @@ class SelfPlayAgent(mp.Process):
                     continue
 
             if not self._is_arena:
-                training_valid = True
-                if hasattr(final_game, "has_training_result"):
-                    training_valid = final_game.has_training_result()
+                # V3 value semantics are terminal-kind based.  In particular,
+                # NO_RESULT keeps policy/value examples while its auxiliary
+                # heads are masked.  Legacy games retain the old scored-only
+                # path below.
+                v3_targets = None
+                if hasattr(final_game, "training_target_bundle"):
+                    terminal = getattr(final_game, "terminal_adjudication", None)
+                    if terminal is not None and terminal.value_target_valid:
+                        v3_targets = final_game
+                training_valid = v3_targets is not None
+                if v3_targets is None:
+                    training_valid = True
+                    if hasattr(final_game, "has_training_result"):
+                        training_valid = final_game.has_training_result()
                 if training_valid:
                     auxiliary = bool(getattr(self.args, "gocube_auxiliary_targets", False))
-                    ownership_mask = None
-                    if auxiliary:
-                        targets = final_game.training_targets()
-                        if len(targets) == 3:
-                            score_target, ownership_target, ownership_mask = targets
-                        else:
-                            score_target, ownership_target = targets
                     for hist in self.histories[i]:
                         self._check_pause()
                         self._telemetry_add('base_positions')
@@ -589,11 +600,46 @@ class SelfPlayAgent(mp.Process):
                             observation = state.observation()
                             if getattr(self, 'score_aware', False):
                                 observation = apply_pass_would_end_phase_feature(state, observation)
-                            sample = (observation, pi, np.array(winstate, dtype=np.float32))
-                            if auxiliary:
-                                sample = sample + (score_target, ownership_target)
-                                if ownership_mask is not None:
-                                    sample = sample + (ownership_mask,)
+                            if v3_targets is not None:
+                                target_bundle = final_game.training_target_bundle(
+                                    side_to_move=int(state.player)
+                                )
+                                value_target = target_bundle.value_target
+                                score_target = target_bundle.score_target
+                                score_mask = target_bundle.score_mask
+                                ownership_target = target_bundle.ownership_target
+                                ownership_mask = target_bundle.ownership_mask
+                                if target_bundle.terminal_kind == "no_result":
+                                    self._telemetry_add('samples/value_no_result_rows')
+                                if bool(score_mask[0]):
+                                    self._telemetry_add('samples/score_active_rows')
+                                else:
+                                    self._telemetry_add('samples/score_masked_rows')
+                                if not bool(np.any(ownership_mask)):
+                                    self._telemetry_add('samples/ownership_fully_masked_rows')
+                            else:
+                                value_target = np.array(winstate, dtype=np.float32)
+                                score_target = ownership_target = ownership_mask = score_mask = None
+                            sample = (observation, pi, value_target)
+                            if auxiliary and v3_targets is not None:
+                                sample = sample + (
+                                    score_target,
+                                    score_mask,
+                                    ownership_target,
+                                    ownership_mask,
+                                )
+                            elif auxiliary:
+                                # The historical path has no score mask. It
+                                # is intentionally not used by production V3.
+                                targets = final_game.training_targets()
+                                if len(targets) == 3:
+                                    score_target, ownership_target, ownership_mask = targets
+                                sample = sample + (
+                                    score_target,
+                                    np.ones((1,), dtype=np.float32),
+                                    ownership_target,
+                                    ownership_mask,
+                                )
                             for _ in range(repeat):
                                 self._set_worker_context(i, 'enqueue_samples')
                                 self.output_queue.put(sample)
@@ -601,6 +647,11 @@ class SelfPlayAgent(mp.Process):
                                 self._telemetry_add('endgame_extra_samples', repeat - 1)
 
             self.games[i] = self.game_cls()
+            self.game_sequences[i] += 1
+            if self.master_seed is not None:
+                seed_process(derive_worker_seed(
+                    self.master_seed, self.iteration, self.id, i, self.game_sequences[i]
+                ))
             self.histories[i] = []
             if recording_enabled:
                 self.game_ids[i] = None

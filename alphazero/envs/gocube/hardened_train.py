@@ -30,7 +30,11 @@ from alphazero.envs.gocube.katago_train import (
     run_paths,
 )
 from alphazero.envs.gocube.sample_clock import SampleClockNNetWrapper
-from alphazero.envs.gocube.train import validate_tensor_row_counts
+from alphazero.envs.gocube.reproducible_manifest import (
+    create_reproducible_manifest,
+    validate_existing_reproducible_manifest,
+)
+from alphazero.envs.gocube.train import validate_v3_target_tensors
 from alphazero.utils import const_temp_scaling, get_iter_file
 
 
@@ -120,7 +124,7 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
             super().__init__(game_cls, nnet, args)
 
     def saveIterationSamples(self, iteration):
-        """Commit all six replay tensors as one recoverable logical unit."""
+        """Commit all seven replay tensors as one recoverable logical unit."""
 
         original_data = self.args.data
         final_folder = os.path.join(original_data, self.args.run_name)
@@ -183,7 +187,9 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
             except (FileNotFoundError, OSError, RuntimeError, EOFError) as exc:
                 print(f"Warning: ignoring unreadable replay iteration {train_iter}: {exc}")
                 continue
-            row_count = validate_tensor_row_counts(tensors, expected=int(marker["row_count"]))
+            row_count = validate_v3_target_tensors(tensors)
+            if row_count != int(marker["row_count"]):
+                raise ValueError("Replay marker row count does not match tensor rows")
             if tensors[0].shape[1:] != self.game_cls.observation_size():
                 raise ValueError("V3 dataset observation schema/shape mismatch")
             datasets.append(TensorDataset(*tensors))
@@ -248,7 +254,7 @@ def print_hardened_configuration(args):
     print("Crash recovery:")
     print(f"  contract = {args.gocube_recovery_contract}")
     print("  checkpoint writes = staging + fsync + atomic replace")
-    print("  replay commit = 6 tensors + completion marker")
+    print("  replay commit = 7 tensors + completion marker")
     print("  resume = last valid contiguous checkpoint")
 
 
@@ -257,8 +263,24 @@ def main(argv=None):
     game_cls, args = build_hardened_training_args(cli)
     if cli.allow_existing_run:
         assert_resumable_run(args)
+        manifest = validate_existing_reproducible_manifest(
+            checkpoint_dir=args.checkpoint,
+            run_name=args.run_name,
+            game_cls=game_cls,
+            args=args,
+            allow_dirty_source=bool(cli.allow_dirty_source),
+        )
     else:
         assert_fresh_run(args)
+        manifest = create_reproducible_manifest(
+            checkpoint_dir=args.checkpoint,
+            run_name=args.run_name,
+            game_cls=game_cls,
+            args=args,
+            argv=__import__("sys").argv,
+            allow_dirty_source=bool(cli.allow_dirty_source),
+        )
+    args.effective_config_sha256 = manifest["effective_config_sha256"]
     print_hardened_configuration(args)
     ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
     network = AtomicSampleClockNNetWrapper(game_cls, args)

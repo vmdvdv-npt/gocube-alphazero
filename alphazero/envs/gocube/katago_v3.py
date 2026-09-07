@@ -15,6 +15,15 @@ CLEANUP_2 = "cleanup2"
 SCORED = "scored"
 NO_RESULT = "no_result"
 
+# The value head has three fixed, player-to-move-relative classes.  These are
+# deliberately not called WIN/LOSS/DRAW: a scored draw is represented by a
+# mixture of WIN and LOSS, while NO_RESULT is a distinct terminal outcome.
+VALUE_WIN = 0
+VALUE_LOSS = 1
+VALUE_NO_RESULT = 2
+VALUE_TARGET_SIZE = 3
+VALUE_TARGET_SEMANTICS = "win-loss-noresult-v1"
+
 KATAGO_JAPANESE_ADJUDICATOR_V3 = "gocube-katago-japanese-v3"
 OBSERVATION_SCHEMA_V3 = "gocube-observation-v3"
 KATAGO_RULES_VERSION = 3
@@ -175,6 +184,22 @@ class V3Terminal:
         return self.terminal_kind == SCORED and self.score is not None
 
     @property
+    def value_target_valid(self) -> bool:
+        return self.terminal_kind in (SCORED, NO_RESULT)
+
+    @property
+    def score_target_valid(self) -> bool:
+        return self.terminal_kind == SCORED and self.score is not None
+
+    @property
+    def ownership_target_valid(self) -> bool:
+        return (
+            self.terminal_kind == SCORED
+            and self.ownership is not None
+            and self.ownership_mask is not None
+        )
+
+    @property
     def winner(self) -> str:
         if self.score is None:
             return "draw"
@@ -183,6 +208,49 @@ class V3Terminal:
     @property
     def no_result(self) -> bool:
         return self.terminal_kind == NO_RESULT
+
+
+@dataclass(frozen=True)
+class V3TrainingTargets:
+    """All labels derived from one terminal result.
+
+    ``score_target`` intentionally contains NaN for NO_RESULT.  Consumers
+    must select active rows before evaluating a score loss; multiplying a NaN
+    by a zero mask is not a valid substitute.
+    """
+
+    value_target: np.ndarray
+    score_target: np.ndarray
+    score_mask: np.ndarray
+    ownership_target: np.ndarray
+    ownership_mask: np.ndarray
+    terminal_kind: str
+
+    def __post_init__(self):
+        if self.value_target.shape != (VALUE_TARGET_SIZE,):
+            raise ValueError(f"value_target must have shape ({VALUE_TARGET_SIZE},)")
+        if self.score_target.shape != (1,) or self.score_mask.shape != (1,):
+            raise ValueError("score targets and mask must have shape (1,)")
+        if self.ownership_target.ndim != 2 or self.ownership_target.shape[1] != 3:
+            raise ValueError("ownership_target must have shape (point_count, 3)")
+        if self.ownership_mask.shape != (self.ownership_target.shape[0],):
+            raise ValueError("ownership_mask must have one entry per point")
+        arrays = (
+            self.value_target,
+            self.score_target,
+            self.score_mask,
+            self.ownership_target,
+            self.ownership_mask,
+        )
+        if any(array.dtype != np.float32 for array in arrays):
+            raise ValueError("V3 training targets must use float32 arrays")
+
+    def __iter__(self):
+        """Compatibility view for old scored-game callers."""
+
+        yield self.score_target
+        yield self.ownership_target
+        yield self.ownership_mask
 
 
 class V3IllegalMove(ValueError):
@@ -612,95 +680,231 @@ def all_points_pass_alive(board: np.ndarray, topology: Topology) -> bool:
 
 
 def independent_life_analysis(board: np.ndarray, topology: Topology) -> IndependentLifeAnalysis:
+    # KataGo first builds basic area from Benson/pass-alive groups and safe or
+    # unsafe territories, then fills any still-unassigned stone with its own
+    # color.  This is intentionally separate from the final score pass: a
+    # dead opposing stone can be part of a color's basic area without being a
+    # scored independent-life point.
+    pass_alive = pass_alive_analysis(board, topology)
+    basic_area = np.zeros(topology.point_count, dtype=np.uint8)
+    for color, groups, territory in (
+        (BLACK, pass_alive.pass_alive_black_groups, pass_alive.pass_alive_black_territory),
+        (WHITE, pass_alive.pass_alive_white_groups, pass_alive.pass_alive_white_territory),
+    ):
+        for group in groups:
+            basic_area[list(group)] = color
+        basic_area[list(territory)] = color
+    # Rules V3 also asks KataGo for unsafe large territories. An empty
+    # component with no opposing stone and at least one bordering stone is
+    # assigned to that color even when the bordering group is not Benson
+    # pass-alive; the independent-life pass below decides whether it is seki.
+    for color in (BLACK, WHITE):
+        opponent = WHITE if color == BLACK else BLACK
+        for component in _components_matching(
+            board, topology, lambda value, own=color: value != own
+        ):
+            points = set(component)
+            if any(int(board[point]) == opponent for point in points):
+                continue
+            if not any(
+                int(board[neighbor]) == color
+                for point in points
+                for neighbor in topology.neighbor_indices(point)
+            ):
+                continue
+            for point in points:
+                if basic_area[point] == EMPTY:
+                    basic_area[point] = color
+    for point, value in enumerate(np.asarray(board).reshape(-1)):
+        if basic_area[point] == EMPTY and int(value) != EMPTY:
+            basic_area[point] = int(value)
+
+    seki_components: set[frozenset[int]] = set()
+    for color in (BLACK, WHITE):
+        for component in _components_matching(
+            basic_area, topology, lambda value, expected=color: value == expected
+        ):
+            component_points = set(component)
+            is_seki = False
+            for point in component_points:
+                if int(board[point]) == color:
+                    _, liberties = _collect_group(board, point, color, topology)
+                    if len(liberties) == 1:
+                        is_seki = True
+                        break
+                if any(
+                    int(board[neighbor]) == EMPTY and basic_area[neighbor] == EMPTY
+                    for neighbor in topology.neighbor_indices(point)
+                ):
+                    is_seki = True
+                    break
+            if is_seki:
+                seki_components.add(frozenset(component_points))
+
+    black_regions: list[tuple[int, ...]] = []
+    white_regions: list[tuple[int, ...]] = []
+    black_area: set[int] = set()
+    white_area: set[int] = set()
+    for color, sink, area in (
+        (BLACK, black_regions, black_area),
+        (WHITE, white_regions, white_area),
+    ):
+        for component in _components_matching(
+            basic_area, topology, lambda value, expected=color: value == expected
+        ):
+            if frozenset(component) in seki_components:
+                continue
+            sink.append(component)
+            area.update(component)
+
+    black_territory = {p for p in black_area if int(board[p]) == EMPTY}
+    white_territory = {p for p in white_area if int(board[p]) == EMPTY}
+    dame = {
+        p for p in range(topology.point_count)
+        if int(board[p]) == EMPTY and basic_area[p] == EMPTY
+    }
+    seki = {
+        p for component in seki_components for p in component
+        if int(board[p]) == EMPTY
+    }
+    return IndependentLifeAnalysis(
+        tuple(sorted(black_area)), tuple(sorted(white_area)), tuple(black_regions), tuple(white_regions),
+        tuple(sorted(black_territory)), tuple(sorted(white_territory)), tuple(sorted(dame)), tuple(sorted(seki)),
+    )
+
+
+def _legacy_board_only_life_analysis(board: np.ndarray, topology: Topology) -> IndependentLifeAnalysis:
+    """Compatibility scoring view for states built without move history."""
+
     empty_regions = _empty_regions(board, topology)
     dame_points: set[int] = set()
     for region in empty_regions:
-        colors: set[int] = set()
-        for p in region:
-            for n in topology.neighbor_indices(p):
-                c = int(board[n])
-                if c != EMPTY:
-                    colors.add(c)
+        colors = {
+            int(board[neighbor])
+            for point in region
+            for neighbor in topology.neighbor_indices(point)
+            if int(board[neighbor]) != EMPTY
+        }
         if colors == {BLACK, WHITE}:
             dame_points.update(region)
     atari_points: set[int] = set()
     for group in _all_groups(board, topology):
-        liberties: set[int] = set()
-        for p in group:
-            for n in topology.neighbor_indices(p):
-                if int(board[n]) == EMPTY:
-                    liberties.add(n)
+        liberties = {
+            neighbor
+            for point in group
+            for neighbor in topology.neighbor_indices(point)
+            if int(board[neighbor]) == EMPTY
+        }
         if len(liberties) == 1:
             atari_points.update(group)
     black_regions: list[tuple[int, ...]] = []
     white_regions: list[tuple[int, ...]] = []
     for color, opponent, sink in ((BLACK, WHITE, black_regions), (WHITE, BLACK, white_regions)):
-        for component in _components_matching(board, topology, lambda c, opp=opponent: c != opp):
+        for component in _components_matching(
+            board, topology, lambda value, opponent=opponent: value != opponent
+        ):
             points = set(component)
             if points & dame_points or points & atari_points:
                 continue
-            if not any(int(board[p]) == color for p in component):
+            if not any(int(board[point]) == color for point in component):
                 continue
             sink.append(component)
-    black_area = {p for region in black_regions for p in region}
-    white_area = {p for region in white_regions for p in region}
-    black_territory = {p for p in black_area if int(board[p]) == EMPTY}
-    white_territory = {p for p in white_area if int(board[p]) == EMPTY}
+    black_area = {point for region in black_regions for point in region}
+    white_area = {point for region in white_regions for point in region}
+    black_territory = {point for point in black_area if int(board[point]) == EMPTY}
+    white_territory = {point for point in white_area if int(board[point]) == EMPTY}
     assigned_empty = black_territory | white_territory
-    remaining_empty = {p for p in range(topology.point_count) if int(board[p]) == EMPTY and p not in assigned_empty}
+    remaining_empty = {
+        point
+        for point in range(topology.point_count)
+        if int(board[point]) == EMPTY and point not in assigned_empty
+    }
     seki: set[int] = set()
     neutral: set[int] = set()
     for region in empty_regions:
-        rset = set(region)
-        if not (rset & remaining_empty):
+        region_points = set(region)
+        if not region_points & remaining_empty:
             continue
-        colors = {int(board[n]) for p in region for n in topology.neighbor_indices(p) if int(board[n]) != EMPTY}
+        colors = {
+            int(board[neighbor])
+            for point in region
+            for neighbor in topology.neighbor_indices(point)
+            if int(board[neighbor]) != EMPTY
+        }
         if colors == {BLACK, WHITE}:
-            neutral.update(rset)
+            neutral.update(region_points)
         elif colors:
-            seki.update(rset)
+            seki.update(region_points)
         else:
-            neutral.update(rset)
+            neutral.update(region_points)
     return IndependentLifeAnalysis(
         tuple(sorted(black_area)), tuple(sorted(white_area)), tuple(black_regions), tuple(white_regions),
         tuple(sorted(black_territory)), tuple(sorted(white_territory)), tuple(sorted(neutral)), tuple(sorted(seki)),
     )
 
 
-def _selfplay_remove_stones_in_opponent_pass_alive_territory(board: np.ndarray, captures: tuple[int, int], topology: Topology) -> tuple[np.ndarray, tuple[int, int]]:
-    analysis = pass_alive_analysis(board, topology)
-    black_pat = set(analysis.pass_alive_black_territory)
-    white_pat = set(analysis.pass_alive_white_territory)
-    result = np.asarray(board).copy()
-    caps = [captures[0], captures[1]]
-    remove_black = [p for p in white_pat if int(board[p]) == BLACK]
-    remove_white = [p for p in black_pat if int(board[p]) == WHITE]
-    for p in remove_black:
-        result[p] = EMPTY
-        caps[1] += 1
-    for p in remove_white:
-        result[p] = EMPTY
-        caps[0] += 1
-    return _readonly_board(result, topology.point_count), (caps[0], caps[1])
-
-
 def final_v3_score(state: V3State, topology: Topology, komi: float) -> tuple[FinalScore, np.ndarray, np.ndarray]:
     start_colors = _board_key(state.board) if state.second_cleanup_start_colors is None else state.second_cleanup_start_colors
-    board, captures = _selfplay_remove_stones_in_opponent_pass_alive_territory(state.board, state.captures, topology)
-    life = independent_life_analysis(board, topology)
+    board, captures = state.board, state.captures
+    has_move_history = bool(any(state.main_moves))
+    life = (
+        independent_life_analysis(board, topology)
+        if has_move_history
+        else _legacy_board_only_life_analysis(board, topology)
+    )
     black_area = set(life.black_area)
     white_area = set(life.white_area)
-    penalties = [0, 0]
-    for p in range(topology.point_count):
-        c = int(board[p])
-        if c == BLACK and p not in black_area and start_colors[p] != BLACK:
-            penalties[0] += 1
-        elif c == WHITE and p not in white_area and start_colors[p] != WHITE:
-            penalties[1] += 1
+    if has_move_history:
+        black_score = float(len(black_area))
+        white_score = float(len(white_area))
+        # Independent-life area is scored point-for-point. Remaining stones
+        # are scored only when they existed at the start of CLEANUP_2 (or when
+        # the game never entered that phase), matching KataGo's start-color
+        # guard. The move bonus converts surviving stones into Japanese
+        # prisoners without adding captures a second time.
+        encore2 = state.second_cleanup_start_colors is not None
+        for point, value in enumerate(np.asarray(board).reshape(-1)):
+            color = int(value)
+            if (
+                color == BLACK
+                and point not in black_area
+                and point not in white_area
+                and (not encore2 or start_colors[point] == BLACK)
+            ):
+                black_score += 1.0
+            elif (
+                color == WHITE
+                and point not in white_area
+                and point not in black_area
+                and (not encore2 or start_colors[point] == WHITE)
+            ):
+                white_score += 1.0
+        white_bonus = (
+            state.main_moves[0] - state.main_moves[1]
+            + state.cleanup1_moves[0] - state.cleanup1_moves[1]
+        )
+        white_score += float(white_bonus)
+    else:
+        # Board-only fixtures cannot reconstruct KataGo's move bonus. Preserve
+        # the public score helper's historical Japanese interpretation for
+        # those synthetic states while real game histories use the exact path
+        # above.
+        penalties = [0, 0]
+        for point, value in enumerate(np.asarray(board).reshape(-1)):
+            color = int(value)
+            if color == BLACK and point not in black_area and start_colors[point] != BLACK:
+                penalties[0] += 1
+            elif color == WHITE and point not in white_area and start_colors[point] != WHITE:
+                penalties[1] += 1
+        black_score = float(
+            len(life.black_territory) + captures[0] + state.cleanup2_moves[0] - penalties[0]
+        )
+        white_score = float(
+            len(life.white_territory) + captures[1] + state.cleanup2_moves[1] - penalties[1]
+        )
+    white_score += float(komi)
     territory = TerritoryBreakdown(black=len(life.black_territory), white=len(life.white_territory), neutral=len(life.dame), seki=len(life.seki))
     territory_points = TerritoryPoints(black=life.black_territory, white=life.white_territory, neutral=life.dame, seki=life.seki)
-    black_score = float(len(life.black_territory) + captures[0] + state.cleanup2_moves[0] - penalties[0])
-    white_score = float(len(life.white_territory) + captures[1] + state.cleanup2_moves[1] - penalties[1] + komi)
     winner = "draw" if black_score == white_score else ("black" if black_score > white_score else "white")
     score = FinalScore(
         ruleset="japanese", black=black_score, white=white_score, komi=float(komi), territory=territory,
@@ -735,6 +939,56 @@ def normalized_score_target_v3(terminal: V3Terminal, topology: Topology) -> np.n
         raise ValueError("Score target requires terminal_kind == SCORED")
     signed = terminal.score.black - terminal.score.white
     return np.asarray([np.clip(signed / topology.point_count, -1.0, 1.0)], dtype=np.float32)
+
+
+def build_v3_training_targets(
+    terminal: V3Terminal,
+    side_to_move: int,
+    topology: Topology,
+) -> V3TrainingTargets:
+    """Build every training label from terminal semantics in one place.
+
+    The score remains the canonical black-minus-white normalized value used by
+    the existing score head.  Value labels are converted to the player-to-move
+    perspective for the individual position being saved.
+    """
+
+    if not terminal.value_target_valid:
+        raise ValueError(f"Unsupported terminal kind for value training: {terminal.terminal_kind!r}")
+    side_to_move = int(side_to_move)
+    if side_to_move not in (0, 1):
+        raise ValueError(f"side_to_move must be 0 (black) or 1 (white), got {side_to_move}")
+
+    value = np.zeros(VALUE_TARGET_SIZE, dtype=np.float32)
+    if terminal.terminal_kind == NO_RESULT:
+        value[VALUE_NO_RESULT] = 1.0
+        score = np.asarray([np.nan], dtype=np.float32)
+        score_mask = np.zeros(1, dtype=np.float32)
+        ownership = np.zeros((topology.point_count, 3), dtype=np.float32)
+        ownership_mask = np.zeros(topology.point_count, dtype=np.float32)
+    else:
+        assert terminal.score is not None
+        if terminal.score.winner == "draw":
+            value[VALUE_WIN] = 0.5
+            value[VALUE_LOSS] = 0.5
+        else:
+            winner = 0 if terminal.score.winner == "black" else 1
+            value[VALUE_WIN if winner == side_to_move else VALUE_LOSS] = 1.0
+        score = normalized_score_target_v3(terminal, topology)
+        score_mask = np.ones(1, dtype=np.float32)
+        if terminal.ownership is None or terminal.ownership_mask is None:
+            raise ValueError("SCORED terminal is missing ownership targets")
+        ownership = np.asarray(terminal.ownership, dtype=np.float32).copy()
+        ownership_mask = np.asarray(terminal.ownership_mask, dtype=np.float32).copy()
+
+    return V3TrainingTargets(
+        value_target=value,
+        score_target=score,
+        score_mask=score_mask,
+        ownership_target=ownership,
+        ownership_mask=ownership_mask,
+        terminal_kind=terminal.terminal_kind,
+    )
 
 
 def maybe_pass_alive_early_terminal(state: V3State, topology: Topology) -> V3State:

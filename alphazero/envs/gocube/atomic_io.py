@@ -10,14 +10,22 @@ from glob import glob
 
 import torch
 
+from .contract_versions import (
+    OWNERSHIP_TARGET_SEMANTICS,
+    REPLAY_FORMAT_VERSION,
+    SCORE_TARGET_SEMANTICS,
+    VALUE_TARGET_SEMANTICS,
+)
+
 
 RECOVERY_CONTRACT = "gocube-atomic-recovery-v1"
-REPLAY_MARKER_SCHEMA_VERSION = 1
+REPLAY_MARKER_SCHEMA_VERSION = REPLAY_FORMAT_VERSION
 REPLAY_TENSOR_SUFFIXES = (
     "-data.pkl",
     "-policy.pkl",
     "-value.pkl",
     "-score.pkl",
+    "-score-mask.pkl",
     "-ownership.pkl",
     "-ownership-mask.pkl",
 )
@@ -111,7 +119,11 @@ def write_replay_marker(iteration_base: str, *, iteration: int, row_count: int) 
     atomic_json_write(
         {
             "schema_version": REPLAY_MARKER_SCHEMA_VERSION,
+            "replay_format_version": REPLAY_FORMAT_VERSION,
             "recovery_contract": RECOVERY_CONTRACT,
+            "value_target_semantics": VALUE_TARGET_SEMANTICS,
+            "score_target_semantics": SCORE_TARGET_SEMANTICS,
+            "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
             "iteration": int(iteration),
             "row_count": int(row_count),
             "tensor_suffixes": list(REPLAY_TENSOR_SUFFIXES),
@@ -125,13 +137,29 @@ def load_replay_marker(iteration_base: str | os.PathLike[str]) -> dict[str, obje
     marker = replay_marker_path(iteration_base)
     with open(marker, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
+    if payload.get("schema_version") == 1 or payload.get("replay_format_version") == 1:
+        raise ValueError(
+            "Replay v1 cannot be used with win/loss/no-result training contract: "
+            "NO_RESULT policy/value rows were not retained and cannot be reconstructed. "
+            "Use a fresh run or an explicit legacy evaluation path."
+        )
     if payload.get("schema_version") != REPLAY_MARKER_SCHEMA_VERSION:
         raise ValueError(f"Unsupported replay completion marker: {marker}")
+    if payload.get("replay_format_version") != REPLAY_FORMAT_VERSION:
+        raise ValueError(f"Replay format version mismatch: {marker}")
     if payload.get("recovery_contract") != RECOVERY_CONTRACT:
         raise ValueError(f"Replay marker does not use {RECOVERY_CONTRACT}: {marker}")
     suffixes = tuple(payload.get("tensor_suffixes", ()))
     if suffixes != REPLAY_TENSOR_SUFFIXES:
         raise ValueError(f"Replay marker tensor set mismatch: {marker}")
+    semantic_fields = {
+        "value_target_semantics": VALUE_TARGET_SEMANTICS,
+        "score_target_semantics": SCORE_TARGET_SEMANTICS,
+        "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
+    }
+    for key, expected in semantic_fields.items():
+        if payload.get(key) != expected:
+            raise ValueError(f"Replay marker {key} mismatch: {marker}")
     if int(payload.get("row_count", -1)) < 0:
         raise ValueError(f"Replay marker row count is invalid: {marker}")
     return payload

@@ -51,7 +51,12 @@ KataGo pass-for-ko has two board-point forms, both represented in the existing `
 
 ## Final Tax=SEKI scoring
 
-Before scoring, KataGo self-play semantics remove each color's stones located in the opponent's pass-alive territory; these removals count as captures.
+For a position that enters CLEANUP_2 and ends without a real CLEANUP_2 move,
+KataGo's Rules V3 scorer keeps the board and capture counters unchanged. If a
+real CLEANUP_2 move was played, the port applies the pinned self-play
+pass-alive prisoner accounting before independent-life scoring. This is the
+same distinction as KataGo's second-encore/start-color accounting and avoids
+inventing captures for an immediate pass-only phase.
 
 An independent-life region for a color is a maximal non-opponent region containing neither a dame region nor a stone region in atari. This is the V3 source of Tax=SEKI territory; no heuristic `seki` classifier is authoritative.
 
@@ -69,9 +74,9 @@ The implementation follows the corrected post-issue-#1158 behavior: unassigned s
 
 ## NO_RESULT and training targets
 
-Framework utility may expose `NO_RESULT` through the draw slot because MCTS requires a terminal utility vector. The training collector separately checks `training_valid`; a `NO_RESULT` game emits no ordinary policy/value/score/ownership terminal samples.
+Framework utility may expose `NO_RESULT` through its dedicated third value slot because MCTS requires a terminal utility vector. The training collector retains the policy and value samples from every visited `NO_RESULT` position, assigns value target `[0, 0, 1]`, and masks score and ownership targets. A `NO_RESULT` score target is stored as `NaN` with a zero score mask; loss code selects active rows before arithmetic.
 
-Only `terminal_kind == SCORED` can produce value and score targets. An actual scored draw is valid training data; `NO_RESULT` is not.
+Only `terminal_kind == SCORED` can produce score and ownership targets. An actual scored draw is valid training data and uses the win/loss mixture `[0.5, 0.5, 0]`; `NO_RESULT` is a separate value class, not a scored draw.
 
 Ownership labels are Black, White, or Neutral based on final formal independent-life/area results. Dame and seki are Neutral. The target includes a point mask so auxiliary loss can exclude points that cannot be authoritatively labeled without inventing alive/dead status.
 
@@ -83,6 +88,6 @@ This state exposes cleanup legality and score-relevant state used by the current
 
 ## Compatibility and fingerprint
 
-V1 Chinese, Japanese Cleanup V2, and V3 have separate Game classes and manifest versions. New `train.py` defaults only to V3 and the namespace `gocube-{topology}-{size}-japanese75-katago-v3`.
+V1 Chinese, Japanese Cleanup V2, and V3 have separate Game classes and manifest versions. New production training defaults only to V3 and the namespace `gocube-{topology}-{size}-katago-v3-pilot`.
 
 Checkpoint/run metadata records rule set, komi, terminal adjudicator, observation schema, topology, size, KataGo rules version, KataGo reference commit, and deterministic SHA-256 rules fingerprint. The rules implementation version is bumped whenever production move legality or adjudication semantics change; adding the second KataGo pass-for-ko form therefore changes the V3 fingerprint. V3 loading fails closed if required metadata is missing or differs. V2 samples/checkpoints are never silently resumed as V3.

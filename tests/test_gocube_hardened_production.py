@@ -196,7 +196,8 @@ def _write_complete_replay(base, rows=3):
         torch.zeros(rows, 2),
         torch.zeros(rows, 4),
         torch.zeros(rows, 3),
-        torch.zeros(rows, 1),
+        torch.ones(rows, 1),
+        torch.ones(rows, 1),
         torch.zeros(rows, 1, 3),
         torch.zeros(rows, 1),
     )
@@ -218,7 +219,7 @@ def _replay_loader_coach(tmp_path, run_name):
     return coach
 
 
-def test_replay_loader_requires_completion_marker_and_all_six_tensors(tmp_path):
+def test_replay_loader_requires_completion_marker_and_all_seven_tensors(tmp_path):
     run_name = "atomic-replay"
     base = _replay_base(tmp_path, run_name, 1)
     _write_complete_replay(base)

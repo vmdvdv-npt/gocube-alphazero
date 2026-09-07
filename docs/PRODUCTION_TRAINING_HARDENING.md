@@ -75,14 +75,15 @@ A process crash before the replace leaves the previous visible checkpoint unchan
 
 ## 5. Atomic replay logical commits
 
-Each iteration's six replay tensors are first written into a staging directory on the same filesystem:
+Each iteration's seven replay tensors are first written into a staging directory on the same filesystem:
 
 1. observation data;
 2. policy targets;
 3. value targets;
 4. score targets;
-5. ownership targets;
-6. ownership masks.
+5. score applicability masks;
+6. ownership targets;
+7. ownership point masks.
 
 Only after all six files exist are they promoted into the run directory. A completion marker `iteration-NNNN-complete.json` is written **last**.
 
@@ -95,6 +96,12 @@ Resume no longer derives the next iteration from `len(glob(checkpoints))`.
 The hardened coach scans `iteration-0000.pkl`, `iteration-0001.pkl`, ... in order and stops at the first missing or structurally unreadable checkpoint. Any later checkpoint files are treated as an untrusted trailing tail and ignored. The selected checkpoint is then loaded through the existing search/training contract validation, so a structurally readable but semantically incompatible checkpoint still fails.
 
 `--allow-existing-run` is fail-closed: it requires an existing namespace containing at least one checkpoint. It cannot silently turn a partially created directory into a new run.
+
+Before a resume loads any checkpoint, the immutable `run-manifest.json` and
+`effective-config.json` are compared with the current invocation. A changed
+effective parameter, topology, rules fingerprint, pinned KataGo commit, komi,
+master seed, target semantic, sample-clock contract, or replay version aborts
+the run. The rich manifest is never overwritten during resume.
 
 Old checkpoints are not silently reinterpreted under the new semantics. The exploration contract is versioned as `katago-pinned-exploration-v2`, and hardened checkpoints additionally persist the recovery and move/value/LCB fields.
 

@@ -221,7 +221,10 @@ def build_game_record(
     winner = getattr(terminal, "winner", None) if terminal is not None else None
     if winner is None:
         winner = "draw" if bool(np.asarray(winstate)[-1]) else None
-    result = "draw" if winner == "draw" else f"{winner}_win" if winner else None
+    if terminal_kind == "no_result":
+        result = "no_result"
+    else:
+        result = "draw" if winner == "draw" else f"{winner}_win" if winner else None
     no_result_reason = (
         getattr(terminal, "reason", None)
         or getattr(getattr(game, "semantic_state", None), "no_result_reason", None)

@@ -6,6 +6,13 @@ cd "$ROOT"
 
 RUN_NAME="${RUN_NAME:-gocube-cube-4-katago-hardened-s50-20260907}"
 RESUME="${RESUME:-0}"
+SEED="${SEED:-0}"
+PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
+
+if [[ ! -x "$PYTHON" ]]; then
+  echo "Project Python not found: $PYTHON" >&2
+  exit 2
+fi
 
 existing=0
 for path in "checkpoint/$RUN_NAME" "data/$RUN_NAME" "runs/$RUN_NAME"; do
@@ -27,7 +34,7 @@ elif [[ "$RESUME" == "1" ]]; then
   exit 2
 fi
 
-python -m alphazero.envs.gocube.hardened_train \
+"$PYTHON" -m alphazero.envs.gocube.hardened_train \
   --topology cube \
   --size 4 \
   --workers 16 \
@@ -38,5 +45,6 @@ python -m alphazero.envs.gocube.hardened_train \
   --train-batch-size 256 \
   --fast-game-prob 0.25 \
   --endgame-sample-weight 1 \
+  --seed "$SEED" \
   --run-name "$RUN_NAME" \
   "${extra_args[@]}"

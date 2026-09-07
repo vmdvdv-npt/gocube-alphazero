@@ -28,6 +28,14 @@ from alphazero.envs.gocube.records import (
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
 from alphazero.utils import get_iter_file
+from alphazero.envs.gocube.atomic_io import REPLAY_TENSOR_SUFFIXES
+from alphazero.envs.gocube.contract_versions import (
+    OWNERSHIP_TARGET_SEMANTICS,
+    REPLAY_FORMAT_VERSION,
+    SCORE_TARGET_SEMANTICS,
+    TRAINING_CONTRACT_VERSION,
+    VALUE_TARGET_SEMANTICS,
+)
 
 
 _TELEMETRY_COUNTER_KEYS = (
@@ -36,6 +44,10 @@ _TELEMETRY_COUNTER_KEYS = (
     "base_positions",
     "base_endgame_positions",
     "endgame_extra_samples",
+    "samples/value_no_result_rows",
+    "samples/score_masked_rows",
+    "samples/score_active_rows",
+    "samples/ownership_fully_masked_rows",
 )
 
 
@@ -48,6 +60,46 @@ def validate_tensor_row_counts(tensors, expected=None):
     if expected is not None and counts[0] != int(expected):
         raise ValueError(f"V3 tensor row count {counts[0]} != expected {int(expected)}")
     return counts[0]
+
+
+def validate_v3_target_tensors(tensors):
+    """Validate the seven-tensor V3 replay contract before training."""
+
+    if len(tensors) != len(REPLAY_TENSOR_SUFFIXES):
+        raise ValueError(
+            f"V3 replay requires {len(REPLAY_TENSOR_SUFFIXES)} tensors, got {len(tensors)}"
+        )
+    data, policy, value, score, score_mask, ownership, ownership_mask = tensors
+    rows = validate_tensor_row_counts(tensors)
+    if score.ndim != 2 or score.shape[1:] != (1,):
+        raise ValueError("V3 score target must have shape [N, 1]")
+    if score_mask.shape != score.shape:
+        raise ValueError("V3 score mask must have shape [N, 1]")
+    if ownership_mask.ndim != 2 or ownership_mask.shape[0] != rows:
+        raise ValueError("V3 ownership mask must have shape [N, point_count]")
+    if (
+        ownership.ndim != 3
+        or ownership.shape[:2] != ownership_mask.shape
+        or ownership.shape[2] != 3
+    ):
+        raise ValueError("V3 ownership target/mask shapes do not match")
+    active = score_mask > 0
+    if active.any() and not torch.isfinite(score[active]).all():
+        raise ValueError("Active V3 score targets must be finite")
+    inactive = ~active
+    if inactive.any() and not torch.isnan(score[inactive]).all():
+        raise ValueError("Inactive production V3 score targets must be NaN")
+    if not torch.isfinite(score_mask).all() or not torch.isfinite(ownership_mask).all():
+        raise ValueError("V3 masks must be finite")
+    if (
+        not torch.isfinite(data).all()
+        or not torch.isfinite(policy).all()
+        or not torch.isfinite(value).all()
+    ):
+        raise ValueError("V3 data, policy, and value tensors must be finite")
+    if not torch.isfinite(ownership).all():
+        raise ValueError("V3 ownership targets must be finite")
+    return rows
 
 
 def expected_saved_samples(base_positions, base_endgame_positions, endgame_weight):
@@ -269,29 +321,31 @@ class GoCubeCoach(Coach):
                 raise ValueError(
                     f"V3 saved sample accounting mismatch: queue={num_samples}, expected={expected_total}"
                 )
-        print(f"Saving {num_samples} KataGo Japanese V3 scored samples")
+        print(f"Saving {num_samples} KataGo Japanese V3 samples (scored + NO_RESULT)")
         data_tensor = torch.zeros([num_samples, *self.game_cls.observation_size()])
         policy_tensor = torch.zeros([num_samples, self.game_cls.action_size()])
         value_tensor = torch.zeros([num_samples, self.game_cls.num_players() + 1])
-        score_tensor = torch.zeros([num_samples, 1])
+        score_tensor = torch.full([num_samples, 1], float("nan"))
+        score_mask_tensor = torch.zeros([num_samples, 1])
         ownership_tensor = torch.zeros([num_samples, self.game_cls.logical_topology().point_count, 3])
         ownership_mask_tensor = torch.zeros([num_samples, self.game_cls.logical_topology().point_count])
         for i in range(num_samples):
             sample = self.file_queue.get()
-            if len(sample) != 6:
-                raise ValueError(f"V3 training sample must contain 6 tensors, got {len(sample)}")
-            data, policy, value, score, ownership, ownership_mask = sample
+            if len(sample) != 7:
+                raise ValueError(f"V3 training sample must contain 7 tensors, got {len(sample)}")
+            data, policy, value, score, score_mask, ownership, ownership_mask = sample
             data_tensor[i] = torch.from_numpy(data)
             policy_tensor[i] = torch.from_numpy(policy)
             value_tensor[i] = torch.from_numpy(value)
             score_tensor[i] = torch.from_numpy(score)
+            score_mask_tensor[i] = torch.from_numpy(score_mask)
             ownership_tensor[i] = torch.from_numpy(ownership)
             ownership_mask_tensor[i] = torch.from_numpy(ownership_mask)
         tensors = (
             data_tensor, policy_tensor, value_tensor, score_tensor,
-            ownership_tensor, ownership_mask_tensor,
+            score_mask_tensor, ownership_tensor, ownership_mask_tensor,
         )
-        validate_tensor_row_counts(tensors, expected=num_samples)
+        validate_v3_target_tensors(tensors)
         folder = os.path.join(self.args.data, self.args.run_name)
         filename = os.path.join(folder, get_iter_file(iteration).replace('.pkl', ''))
         os.makedirs(folder, exist_ok=True)
@@ -299,6 +353,7 @@ class GoCubeCoach(Coach):
         torch.save(policy_tensor, filename + '-policy.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
         torch.save(value_tensor, filename + '-value.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
         torch.save(score_tensor, filename + '-score.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
+        torch.save(score_mask_tensor, filename + '-score-mask.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
         torch.save(ownership_tensor, filename + '-ownership.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
         torch.save(ownership_mask_tensor, filename + '-ownership-mask.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
         self._iteration_telemetry["saved_total"] = num_samples
@@ -327,6 +382,11 @@ class GoCubeCoach(Coach):
             "terminal/ko_unblock_actions": 0,
             "terminal/cycle_no_result": 0,
             "terminal/training_valid_fraction": 0.0,
+            "terminal/scored_draw_games": 0,
+            "samples/value_no_result_rows": 0,
+            "samples/score_masked_rows": 0,
+            "samples/score_active_rows": 0,
+            "samples/ownership_fully_masked_rows": 0,
         }
         record_entries = []
         context = getattr(self, "_iteration_record_context", self._build_iteration_record_context(iteration))
@@ -344,8 +404,13 @@ class GoCubeCoach(Coach):
                 state, winstate, _agent_id = result
                 record_payload = None
             length_sum += state.turns
-            if winstate[-1]:
+            terminal_kind = getattr(state, "terminal_kind", None)
+            if terminal_kind == "no_result":
+                # NO_RESULT is an outcome class for training, not a scored draw.
+                pass
+            elif winstate[-1]:
                 draws += 1
+                counters["terminal/scored_draw_games"] += 1
             else:
                 for player in range(self.game_cls.num_players()):
                     wins[player] += int(bool(winstate[player]))
@@ -372,6 +437,13 @@ class GoCubeCoach(Coach):
                 entry = write_game_record(record_dir, record)
                 entry["game_number_inside_iteration"] = record["game_number_inside_iteration"]
                 record_entries.append(entry)
+        for key in (
+            "samples/value_no_result_rows",
+            "samples/score_masked_rows",
+            "samples/score_active_rows",
+            "samples/ownership_fully_masked_rows",
+        ):
+            counters[key] = int(self._iteration_telemetry.get(key, 0))
         denominator = max(1, num_games)
         for i in range(len(wins)):
             self.writer.add_scalar(
@@ -380,6 +452,11 @@ class GoCubeCoach(Coach):
                 iteration,
             )
         self.writer.add_scalar('win_rate/draws', draws / denominator, iteration)
+        self.writer.add_scalar(
+            'win_rate/no_results',
+            counters["terminal/no_result_games"] / denominator,
+            iteration,
+        )
         self.writer.add_scalar('win_rate/avg_game_length', length_sum / denominator, iteration)
         for key, value in counters.items():
             if key == "terminal/training_valid_fraction":
@@ -474,17 +551,11 @@ class GoCubeCoach(Coach):
             nonlocal num_train_steps, sample_counter
             filename = os.path.join(self.args.data, run_name, get_iter_file(train_iter).replace('.pkl', ''))
             try:
-                tensors = [
-                    torch.load(filename + suffix)
-                    for suffix in (
-                        '-data.pkl', '-policy.pkl', '-value.pkl', '-score.pkl',
-                        '-ownership.pkl', '-ownership-mask.pkl',
-                    )
-                ]
+                tensors = [torch.load(filename + suffix) for suffix in REPLAY_TENSOR_SUFFIXES]
             except FileNotFoundError as exc:
                 print('Warning: could not find complete V3 tensor data. ' + str(exc))
                 return
-            row_count = validate_tensor_row_counts(tensors)
+            row_count = validate_v3_target_tensors(tensors)
             if tensors[0].shape[1:] != self.game_cls.observation_size():
                 raise ValueError("V3 dataset observation schema/shape mismatch")
             tensor_dataset_list.append(TensorDataset(*tensors))
@@ -500,7 +571,7 @@ class GoCubeCoach(Coach):
             history_iterations = len(tensor_dataset_list)
             latest_iteration_samples = loaded_iteration_samples.get(iteration, 0)
             if not tensor_dataset_list or window_samples == 0:
-                print('No valid scored V3 samples in this window; skipping optimizer step.')
+                print('No valid V3 samples in this window; skipping optimizer step.')
                 self.train_net.last_train_planned_steps = 0
                 self.train_net.last_train_actual_steps = 0
                 self.train_net.last_train_examples_seen = 0
@@ -617,7 +688,7 @@ def build_training_args(cli):
     if cli.endgame_sample_weight < 1:
         raise ValueError("endgame-sample-weight must be at least 1")
     game_cls = game_class(cli.topology, cli.size, "japanese")
-    run_name = cli.run_name or f"gocube-{cli.topology}-{cli.size}-japanese75-katago-v3-pilot"
+    run_name = cli.run_name or f"gocube-{cli.topology}-{cli.size}-katago-v3-pilot"
     process_batch_size = max(1, math.ceil(cli.games_per_iteration / cli.workers))
     iterations = 1 if cli.smoke else cli.iterations
     arena_enabled = not (cli.smoke or cli.no_arena)
@@ -659,6 +730,11 @@ def build_training_args(cli):
         policy_dense_layers=[128],
         score_dense_layers=[64],
         gocube_auxiliary_targets=True,
+        gocube_replay_format_version=REPLAY_FORMAT_VERSION,
+        gocube_training_contract_version=TRAINING_CONTRACT_VERSION,
+        gocube_value_target_semantics=VALUE_TARGET_SEMANTICS,
+        gocube_score_target_semantics=SCORE_TARGET_SEMANTICS,
+        gocube_ownership_target_semantics=OWNERSHIP_TARGET_SEMANTICS,
         ownership_loss_weight=0.5,
         score_loss_weight=0.5,
         gocube_endgame_sample_weight=cli.endgame_sample_weight,

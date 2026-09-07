@@ -11,10 +11,25 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 
 from alphazero.NNetWrapper import NNetWrapper, _optional_arg
+from alphazero.envs.gocube.finite_guards import (
+    ensure_finite_gradients,
+    ensure_finite_losses,
+    ensure_finite_optimizer_state,
+    ensure_finite_outputs,
+    ensure_finite_parameters,
+)
 from alphazero.pytorch_classification.utils import AverageMeter, Bar
+from .contract_versions import SAMPLE_CLOCK_CONTRACT, SAMPLE_CLOCK_STATE_VERSION
+from .contract_versions import (
+    OWNERSHIP_TARGET_SEMANTICS,
+    REPLAY_FORMAT_VERSION,
+    SCORE_TARGET_SEMANTICS,
+    TRAINING_CONTRACT_VERSION,
+    VALUE_TARGET_SEMANTICS,
+)
 
 
-TRAINING_CONTRACT = "gocube-sample-clock-v2"
+TRAINING_CONTRACT = SAMPLE_CLOCK_CONTRACT
 
 
 @dataclass(frozen=True)
@@ -99,7 +114,7 @@ class SampleBasedLRScheduler:
 
     def state_dict(self) -> dict[str, object]:
         return {
-            "schema_version": 2,
+            "schema_version": SAMPLE_CLOCK_STATE_VERSION,
             "training_contract": TRAINING_CONTRACT,
             "base_lr": self.base_lr,
             "warmup_samples": self.warmup_samples,
@@ -184,6 +199,16 @@ class SampleClockNNetWrapper(NNetWrapper):
             if value is None:
                 raise ValueError(f"Missing required training-contract field: {key}")
             fields[key] = value
+        for key in (
+            "gocube_replay_format_version",
+            "gocube_training_contract_version",
+            "gocube_value_target_semantics",
+            "gocube_score_target_semantics",
+            "gocube_ownership_target_semantics",
+        ):
+            value = _optional_arg(self.args, key, None)
+            if value is not None:
+                fields[key] = value
         return fields
 
     def _validate_saved_contract(self, saved_args, allow_legacy_search_contract=False):
@@ -205,17 +230,27 @@ class SampleClockNNetWrapper(NNetWrapper):
                 raise ValueError(f"Checkpoint missing required sample-clock training metadata: {key}")
 
     def save_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar', make_dirs=True):
+        ensure_finite_parameters(self.nnet)
+        ensure_finite_optimizer_state(self.optimizer)
         filepath = os.path.join(folder, filename)
         if make_dirs and not os.path.exists(folder):
             os.makedirs(folder)
         training_state = {
-            "schema_version": 2,
+            "schema_version": SAMPLE_CLOCK_STATE_VERSION,
             "training_contract": TRAINING_CONTRACT,
             "train_samples_per_new_sample": float(self.args.gocube_train_samples_per_new_sample),
             "total_training_samples": self.total_training_samples,
             "total_optimizer_updates": self.total_optimizer_updates,
             "samples_since_lr_change": self.scheduler.samples_since_last_lr_change,
             "effective_lr": float(self.optimizer.param_groups[0]["lr"]),
+            "replay_format_version": REPLAY_FORMAT_VERSION,
+            "training_contract_version": TRAINING_CONTRACT_VERSION,
+            "value_target_semantics": VALUE_TARGET_SEMANTICS,
+            "score_target_semantics": SCORE_TARGET_SEMANTICS,
+            "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
+            "effective_config_sha256": _optional_arg(
+                self.args, "effective_config_sha256", None
+            ),
         }
         torch.save({
             'state_dict': self.nnet.state_dict(),
@@ -242,6 +277,18 @@ class SampleClockNNetWrapper(NNetWrapper):
                 raise ValueError(
                     f"Checkpoint predates {TRAINING_CONTRACT} and cannot be resumed under the new training contract"
                 )
+            expected_contract_fields = {
+                "replay_format_version": _optional_arg(self.args, "gocube_replay_format_version", None),
+                "training_contract_version": _optional_arg(self.args, "gocube_training_contract_version", None),
+                "value_target_semantics": _optional_arg(self.args, "gocube_value_target_semantics", None),
+                "score_target_semantics": _optional_arg(self.args, "gocube_score_target_semantics", None),
+                "ownership_target_semantics": _optional_arg(self.args, "gocube_ownership_target_semantics", None),
+            }
+            for key, expected in expected_contract_fields.items():
+                if expected is not None and training_state.get(key) != expected:
+                    raise ValueError(
+                        f"Checkpoint {key} is incompatible with the current training contract"
+                    )
         result = super().load_checkpoint(
             folder=folder,
             filename=filename,
@@ -309,13 +356,21 @@ class SampleClockNNetWrapper(NNetWrapper):
                 start = time.time()
                 self.current_step += 1
                 ownership_mask = None
+                score_mask = None
                 if auxiliary:
-                    if len(batch) == 6:
+                    if len(batch) == 7:
+                        (
+                            boards, target_pis, target_vs, target_scores,
+                            score_mask, target_ownership, ownership_mask,
+                        ) = batch
+                    elif len(batch) == 6:
                         boards, target_pis, target_vs, target_scores, target_ownership, ownership_mask = batch
+                        score_mask = torch.ones_like(target_scores)
                     elif len(batch) == 5:
                         boards, target_pis, target_vs, target_scores, target_ownership = batch
+                        score_mask = torch.ones_like(target_scores)
                     else:
-                        raise ValueError(f"Expected 5 or 6 auxiliary tensors, got {len(batch)}")
+                        raise ValueError(f"Expected 5, 6, or 7 auxiliary tensors, got {len(batch)}")
                 else:
                     boards, target_pis, target_vs = batch
 
@@ -325,12 +380,14 @@ class SampleClockNNetWrapper(NNetWrapper):
                     target_vs = target_vs.contiguous().cuda()
                     if auxiliary:
                         target_scores = target_scores.contiguous().cuda()
+                        score_mask = score_mask.contiguous().cuda()
                         target_ownership = target_ownership.contiguous().cuda()
                         if ownership_mask is not None:
                             ownership_mask = ownership_mask.contiguous().cuda()
                 data_time.update(time.time() - start)
 
                 outputs = self.nnet(boards)
+                ensure_finite_outputs(outputs)
                 out_pi, out_v = outputs[0], outputs[1]
                 l_pi = self.loss_pi(target_pis, out_pi)
                 l_v = self.loss_v(target_vs, out_v)
@@ -338,21 +395,32 @@ class SampleClockNNetWrapper(NNetWrapper):
                 if auxiliary:
                     out_ownership, out_score = outputs[2], outputs[3]
                     l_ownership = self.loss_ownership(target_ownership, out_ownership, ownership_mask)
-                    l_score = self.loss_score(target_scores, out_score)
+                    l_score = self.loss_score(target_scores, out_score, score_mask)
                     total_loss = total_loss + l_ownership + l_score
                     ownership_losses.update(l_ownership.item(), boards.size(0))
                     score_losses.update(l_score.item(), boards.size(0))
                 pi_losses.update(l_pi.item(), boards.size(0))
                 v_losses.update(l_v.item(), boards.size(0))
+                ensure_finite_losses({
+                    "policy": l_pi,
+                    "value": l_v,
+                    "total": total_loss,
+                    **({"ownership": l_ownership, "score": l_score} if auxiliary else {}),
+                })
 
                 self.optimizer.zero_grad()
                 total_loss.backward()
+                ensure_finite_gradients(self.nnet)
                 grad_norm = float(clip_grad_norm_(self.nnet.parameters(), self.gradient_clip_norm))
+                if not math.isfinite(grad_norm):
+                    raise RuntimeError("Non-finite gradient norm; optimizer step refused")
                 gradient_norm_sum += grad_norm
                 gradient_norm_max = max(gradient_norm_max, grad_norm)
                 if math.isfinite(grad_norm) and grad_norm > self.gradient_clip_norm:
                     clipping_events += 1
                 self.optimizer.step()
+                ensure_finite_parameters(self.nnet)
+                ensure_finite_optimizer_state(self.optimizer)
 
                 actual_batch_size = int(boards.size(0))
                 self.scheduler.step_samples(actual_batch_size)

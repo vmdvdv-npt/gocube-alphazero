@@ -3,9 +3,8 @@ from __future__ import annotations
 import traceback
 from dataclasses import dataclass
 
-import numpy as np
-
 from alphazero.SelfPlayAgent import SelfPlayAgent
+from alphazero.envs.gocube.reproducibility import derive_worker_seed, seed_process
 
 
 @dataclass(frozen=True)
@@ -92,7 +91,8 @@ class BalancedArenaSelfPlayAgent(SelfPlayAgent):
         if not self._is_arena:
             return super().run()
         try:
-            np.random.seed()
+            master_seed = int(getattr(self.args, "gocube_arena_seed", 0))
+            seed_process(derive_worker_seed(master_seed, self.iteration, int(self.id), 0, 0))
             local_completed = 0
             while not self.stop_event.is_set() and local_completed < self._arena_game_quota:
                 self._check_pause()

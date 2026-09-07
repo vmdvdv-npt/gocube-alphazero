@@ -1,0 +1,22 @@
+[
+  {
+    "id": "coordinate-encoding",
+    "difference": "KataGo uses rectangular Loc coordinates; GoCube uses [x,y] fixtures and integer action indices.",
+    "adapter_only": true
+  },
+  {
+    "id": "action-indexing",
+    "difference": "The PASS action is encoded as point_count in GoCube and as KataGo's pass Loc in the oracle adapter.",
+    "adapter_only": true
+  },
+  {
+    "id": "graph-neighbor-source",
+    "difference": "KataGo derives rectangular four-neighbor edges from board coordinates; GoCube obtains the same logical edges from Topology.neighbor_indices().",
+    "adapter_only": true
+  },
+  {
+    "id": "score-sign",
+    "difference": "The adapter normalizes both engines to white_minus_black for comparison; rule engines are not changed.",
+    "adapter_only": true
+  }
+]

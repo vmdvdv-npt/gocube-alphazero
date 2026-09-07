@@ -35,6 +35,11 @@ from alphazero.envs.gocube.production_training import (
 )
 from alphazero.envs.gocube.records import ITERATION_MANIFEST_FILENAME
 from alphazero.envs.gocube.sample_clock import SampleClockNNetWrapper, TRAINING_CONTRACT
+from alphazero.envs.gocube.contract_versions import (
+    DEFAULT_MASTER_SEED,
+    SEED_DERIVATION_CONTRACT,
+)
+from alphazero.envs.gocube.atomic_io import REPLAY_TENSOR_SUFFIXES
 from alphazero.envs.gocube.selfplay_semantics import (
     KATAGO_CLEANUP_TRAINING_DEFAULTS,
     KATAGO_PINNED_SELFPLAY_DEFAULTS,
@@ -44,6 +49,7 @@ from alphazero.envs.gocube.train import (
     build_training_args,
     print_training_configuration,
     validate_tensor_row_counts,
+    validate_v3_target_tensors,
 )
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
@@ -359,17 +365,11 @@ class KataGoSearchCoach(GoCubeCoach):
                 get_iter_file(train_iter).replace('.pkl', ''),
             )
             try:
-                tensors = [
-                    torch.load(filename + suffix)
-                    for suffix in (
-                        '-data.pkl', '-policy.pkl', '-value.pkl', '-score.pkl',
-                        '-ownership.pkl', '-ownership-mask.pkl',
-                    )
-                ]
+                tensors = [torch.load(filename + suffix) for suffix in REPLAY_TENSOR_SUFFIXES]
             except FileNotFoundError as exc:
                 print('Warning: could not find complete V3 tensor data. ' + str(exc))
                 continue
-            row_count = validate_tensor_row_counts(tensors)
+            row_count = validate_v3_target_tensors(tensors)
             if tensors[0].shape[1:] != self.game_cls.observation_size():
                 raise ValueError("V3 dataset observation schema/shape mismatch")
             datasets.append(TensorDataset(*tensors))
@@ -877,6 +877,8 @@ def parse_args(argv=None):
         action="store_true",
         help="Allow resuming an existing namespace. The checkpoint must satisfy the new training contract.",
     )
+    parser.add_argument("--seed", type=int, default=DEFAULT_MASTER_SEED)
+    parser.add_argument("--allow-dirty-source", action="store_true")
     parsed = parser.parse_args(raw_argv)
     parsed._explicit_sweep_flags = frozenset(
         flag
@@ -893,6 +895,8 @@ def build_katago_training_args(cli):
         )
     if cli.model_gating:
         raise ValueError("Production checkpoint Arena is observational; model gating is disabled")
+    if int(cli.seed) < 0:
+        raise ValueError("seed must be non-negative")
     if cli.arena_games_per_opponent < 1:
         raise ValueError("arena-games-per-opponent must be positive")
     if cli.arena_anchor_period < 1:
@@ -987,6 +991,8 @@ def build_katago_training_args(cli):
     args.gocube_plain_fork_pool_capacity = diverse["plain_fork_pool_capacity"]
 
     args.gocube_training_contract = TRAINING_CONTRACT
+    args.master_seed = int(cli.seed)
+    args.seed_derivation_contract = SEED_DERIVATION_CONTRACT
     args.gocube_train_samples_per_new_sample = float(cli.train_samples_per_new_sample)
     args.gocube_replay_window_iters = (
         None if cli.replay_window_iters is None else int(cli.replay_window_iters)

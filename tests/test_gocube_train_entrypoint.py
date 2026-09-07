@@ -79,7 +79,7 @@ def test_v3_cli_defaults_are_conservative_pilot_defaults(monkeypatch):
 
 def test_default_run_name_uses_new_pilot_methodology_namespace():
     _, args = build_training_args(cli_args(run_name=None))
-    assert args.run_name == "gocube-torus-9-japanese75-katago-v3-pilot"
+    assert args.run_name == "gocube-torus-9-katago-v3-pilot"
 
 
 def test_smoke_mode_is_one_iteration_without_arena_comparisons():

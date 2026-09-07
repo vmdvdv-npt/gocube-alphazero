@@ -32,6 +32,7 @@ from .katago_v3 import (
     SCORED,
     V3State,
     apply_v3_action,
+    build_v3_training_targets,
     initial_v3_state,
     ko_repeat_forbidden_mask,
     maybe_pass_alive_early_terminal,
@@ -40,6 +41,7 @@ from .katago_v3 import (
     rules_fingerprint,
     terminal_from_state,
     v3_valid_moves,
+    V3TrainingTargets,
 )
 from .terminal import (
     CONSERVATIVE_AREA_ADJUDICATOR_V1,
@@ -191,14 +193,24 @@ class GoGame(_TopologyAdapter):
     def has_training_result(self) -> bool:
         return self._terminal is not None and self._terminal.training_valid
 
+    def training_target_bundle(self, side_to_move: int | None = None) -> V3TrainingTargets:
+        if self._terminal is None or not self._terminal.value_target_valid:
+            raise ValueError("V3 training targets require a terminal value result")
+        if side_to_move is None:
+            side_to_move = self._state.current_player
+        return build_v3_training_targets(self._terminal, side_to_move, self.logical_topology())
+
     def training_targets(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Legacy scored-only auxiliary target view.
+
+        New self-play code uses ``training_target_bundle`` so NO_RESULT can
+        retain policy/value samples while masking auxiliary heads.  Keeping
+        this method scored-only preserves the historical public API for
+        evaluation callers.
+        """
         if not self.has_training_result() or self._terminal is None:
             raise ValueError("V3 training targets require terminal_kind == SCORED")
-        return (
-            normalized_score_target_v3(self._terminal, self.logical_topology()),
-            self._terminal.ownership.copy(),
-            self._terminal.ownership_mask.copy(),
-        )
+        return tuple(self.training_target_bundle())
 
     def is_endgame_training_state(self) -> bool:
         return self._state.phase in (CLEANUP_1, CLEANUP_2) or (

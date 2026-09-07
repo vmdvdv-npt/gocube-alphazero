@@ -1,0 +1,67 @@
+{
+  "baseline_commit": "cdd4aff015455299e0439abcdb3e942d46c3fe29",
+  "architecture": {
+    "network_class": "alphazero.envs.gocube.network.GraphNet",
+    "observation_shape": [18, 96, 1],
+    "action_size": 97,
+    "value_output_size": 3,
+    "auxiliary_heads": ["ownership", "score"],
+    "num_channels": 64,
+    "depth": 6,
+    "value_dense_layers": [128, 64],
+    "score_dense_layers": [64]
+  },
+  "optimizer_training": {
+    "optimizer": "torch.optim.sgd.SGD",
+    "learning_rate": 0.01,
+    "batch_size": 256,
+    "optimizer_args": {"momentum": 0.9, "weight_decay": 0.0001},
+    "sample_clock_contract": "gocube-sample-clock-v2",
+    "sample_clock_state_version": 2,
+    "replay_window": {"min": 4, "max": 20, "increment_iters": 2},
+    "train_samples_per_new_sample": 1.0,
+    "lr_warmup_samples": 2000000,
+    "lr_milestone_samples": [20000000, 40000000],
+    "lr_decay_gamma": 0.1
+  },
+  "search_selfplay": {
+    "regular_sims": 50,
+    "fast_sims": 20,
+    "arena_sims": 50,
+    "fast_probability": 0.25,
+    "cpuct": 1.1,
+    "fpu_reduction": 0.0,
+    "root_policy_temperature": 1.1,
+    "chosen_move_temperature": {"early": 0.75, "late": 0.15, "halflife": 19.0},
+    "cleanup_training_probability": 0.04,
+    "pass_alive_probability": 0.98,
+    "seki_fork_probability": 0.02,
+    "games_per_iteration": 256,
+    "workers": 16,
+    "process_batch_size": 16
+  },
+  "rules": {
+    "katago_reference_commit": "f6bc4b19a1686caa2d088b56251e8c11c8be6d51",
+    "rules_version": 3,
+    "rules_implementation_version": 3,
+    "ko_rule": "SIMPLE",
+    "scoring_rule": "TERRITORY",
+    "tax_rule": "SEKI",
+    "komi": 0.5,
+    "multi_stone_suicide": false,
+    "button": false,
+    "white_handicap_bonus": 0,
+    "topology": "cube",
+    "size": 4,
+    "point_count": 96
+  },
+  "allowed_changes": [
+    "replay_format_version",
+    "training_target_semantics",
+    "sample_clock_contract_version",
+    "auxiliary_target_masks",
+    "metadata_schema",
+    "seed_contract",
+    "finite_validation_contract"
+  ]
+}

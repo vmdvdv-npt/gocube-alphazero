@@ -14,6 +14,13 @@ import torch
 import pickle
 import time
 import os
+from alphazero.envs.gocube.finite_guards import (
+    ensure_finite_gradients,
+    ensure_finite_losses,
+    ensure_finite_optimizer_state,
+    ensure_finite_outputs,
+    ensure_finite_parameters,
+)
 
 
 _MISSING = object()
@@ -149,13 +156,21 @@ class NNetWrapper(BaseWrapper):
                 start = time.time()
                 self.current_step += 1
                 ownership_mask = None
+                score_mask = None
                 if auxiliary:
-                    if len(batch) == 6:
+                    if len(batch) == 7:
+                        (
+                            boards, target_pis, target_vs, target_scores,
+                            score_mask, target_ownership, ownership_mask,
+                        ) = batch
+                    elif len(batch) == 6:
                         boards, target_pis, target_vs, target_scores, target_ownership, ownership_mask = batch
+                        score_mask = torch.ones_like(target_scores)
                     elif len(batch) == 5:
                         boards, target_pis, target_vs, target_scores, target_ownership = batch
+                        score_mask = torch.ones_like(target_scores)
                     else:
-                        raise ValueError(f'Expected 5 or 6 auxiliary tensors, got {len(batch)}')
+                        raise ValueError(f'Expected 5, 6, or 7 auxiliary tensors, got {len(batch)}')
                 else:
                     boards, target_pis, target_vs = batch
                 if self.args.cuda:
@@ -164,11 +179,13 @@ class NNetWrapper(BaseWrapper):
                     target_vs = target_vs.contiguous().cuda()
                     if auxiliary:
                         target_scores = target_scores.contiguous().cuda()
+                        score_mask = score_mask.contiguous().cuda()
                         target_ownership = target_ownership.contiguous().cuda()
                         if ownership_mask is not None:
                             ownership_mask = ownership_mask.contiguous().cuda()
                 data_time.update(time.time() - start)
                 outputs = self.nnet(boards)
+                ensure_finite_outputs(outputs)
                 out_pi, out_v = outputs[0], outputs[1]
                 l_pi = self.loss_pi(target_pis, out_pi)
                 l_v = self.loss_v(target_vs, out_v)
@@ -176,15 +193,24 @@ class NNetWrapper(BaseWrapper):
                 if auxiliary:
                     out_ownership, out_score = outputs[2], outputs[3]
                     l_ownership = self.loss_ownership(target_ownership, out_ownership, ownership_mask)
-                    l_score = self.loss_score(target_scores, out_score)
+                    l_score = self.loss_score(target_scores, out_score, score_mask)
                     total_loss = total_loss + l_ownership + l_score
                     ownership_losses.update(l_ownership.item(), boards.size(0))
                     score_losses.update(l_score.item(), boards.size(0))
                 pi_losses.update(l_pi.item(), boards.size(0))
                 v_losses.update(l_v.item(), boards.size(0))
+                ensure_finite_losses({
+                    "policy": l_pi,
+                    "value": l_v,
+                    "total": total_loss,
+                    **({"ownership": l_ownership, "score": l_score} if auxiliary else {}),
+                })
                 self.optimizer.zero_grad()
                 total_loss.backward()
+                ensure_finite_gradients(self.nnet)
                 self.optimizer.step()
+                ensure_finite_parameters(self.nnet)
+                ensure_finite_optimizer_state(self.optimizer)
                 self.last_train_actual_steps += 1
                 self.last_train_examples_seen += int(boards.size(0))
                 batch_time.update(time.time() - start)
@@ -282,16 +308,25 @@ class NNetWrapper(BaseWrapper):
 
     def loss_ownership(self, targets, outputs, mask=None):
         weight = float(getattr(self.args, 'ownership_loss_weight', 0.5))
-        point_loss = -torch.sum(targets * outputs, dim=2)
         if mask is None:
+            point_loss = -torch.sum(targets * outputs, dim=2)
             return weight * torch.mean(point_loss)
-        mask = mask.to(point_loss.dtype)
-        denominator = torch.clamp(mask.sum(), min=1.0)
-        return weight * torch.sum(point_loss * mask) / denominator
+        mask = mask.to(outputs.dtype)
+        active = mask > 0
+        if not torch.any(active):
+            return outputs.sum() * 0.0
+        active_targets = targets[active]
+        active_outputs = outputs[active]
+        return weight * (-torch.sum(active_targets * active_outputs, dim=1)).mean()
 
-    def loss_score(self, targets, outputs):
+    def loss_score(self, targets, outputs, mask=None):
         weight = float(getattr(self.args, 'score_loss_weight', 0.5))
-        return weight * torch.mean((targets - outputs) ** 2)
+        if mask is None:
+            return weight * torch.mean((targets - outputs) ** 2)
+        active = mask.reshape(-1) > 0
+        if not torch.any(active):
+            return outputs.sum() * 0.0
+        return weight * torch.mean((targets.reshape(-1)[active] - outputs.reshape(-1)[active]) ** 2)
 
     def _checkpoint_contract(self):
         fields = {}
@@ -334,6 +369,8 @@ class NNetWrapper(BaseWrapper):
                 )
 
     def save_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar', make_dirs=True):
+        ensure_finite_parameters(self.nnet)
+        ensure_finite_optimizer_state(self.optimizer)
         filepath = os.path.join(folder, filename)
         if make_dirs and not os.path.exists(folder):
             os.makedirs(folder)

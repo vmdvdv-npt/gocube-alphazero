@@ -154,7 +154,10 @@ def _set_state(state: TrainState):
 class Coach:
     @_set_state(TrainState.INIT)
     def __init__(self, game_cls, nnet, args):
-        np.random.seed()
+        master_seed = getattr(args, "master_seed", None)
+        if master_seed is not None:
+            from alphazero.envs.gocube.reproducibility import seed_process
+            seed_process(int(master_seed))
         self.game_cls = game_cls
         self.train_net = nnet
         self.self_play_net = nnet.__class__(game_cls, args)
