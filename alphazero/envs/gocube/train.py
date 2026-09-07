@@ -601,7 +601,7 @@ def build_training_args(cli):
     if cli.endgame_sample_weight < 1:
         raise ValueError("endgame-sample-weight must be at least 1")
     game_cls = game_class(cli.topology, cli.size, "japanese")
-    run_name = cli.run_name or f"gocube-{cli.topology}-{cli.size}-japanese75-katago-v3-pilot"
+    run_name = cli.run_name or f"gocube-{cli.topology}-{cli.size}-japanese-komi05-katago-v3-pilot"
     process_batch_size = max(1, math.ceil(cli.games_per_iteration / cli.workers))
     iterations = 1 if cli.smoke else cli.iterations
     arena_enabled = not (cli.smoke or cli.no_arena)
