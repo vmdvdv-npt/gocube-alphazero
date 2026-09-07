@@ -29,6 +29,7 @@ from alphazero.search_contract import (
     combined_white_utility,
     conservative_root_observation,
     normalized_black_minus_white_to_white_score,
+    player_relative_value_to_absolute,
     recent_score_center,
     root_ending_white_score_bonuses,
     score_utility_diff,
@@ -731,6 +732,7 @@ cdef class MCTS:
             else:
                 white_score = float(exact_score.white) - float(exact_score.black)
         else:
+            value = player_relative_value_to_absolute(value, int(gs.player))
             score_arr = np.asarray(score, dtype=np.float32).reshape(-1)
             if score_arr.size != 1:
                 raise ValueError(f'GoCube score head must contain one value, got size={score_arr.size}')

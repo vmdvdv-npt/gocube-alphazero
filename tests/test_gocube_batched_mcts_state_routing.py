@@ -65,6 +65,58 @@ class _DeterministicSearchNet:
         )
 
 
+class _PlayerRelativeWhiteWinNet:
+    """Return a White-win target in the V3 player-to-move value encoding."""
+
+    def __init__(self, game_cls, preferred_action):
+        self.action_size = int(game_cls.action_size())
+        self.point_count = int(game_cls.logical_topology().point_count)
+        self.preferred_action = int(preferred_action)
+
+    def _policy(self):
+        policy = np.zeros(self.action_size, dtype=np.float32)
+        policy[self.preferred_action] = 1.0
+        return policy
+
+    def _numpy_output(self, player):
+        # V3 value is WIN/LOSS for the player to move. A White win is therefore
+        # WIN when White moves and LOSS when Black moves.
+        value = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        if int(player) == 0:
+            value = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        return SearchOutput(
+            policy=self._policy(),
+            value=value,
+            score=np.array([0.0], dtype=np.float32),
+            ownership=np.tile(
+                np.array([[0.0, 0.0, 1.0]], dtype=np.float32),
+                (self.point_count, 1),
+            ),
+        )
+
+    def predict_for_search(self, observation):
+        player = 1 if float(observation[4, 0, 0]) < 0.0 else 0
+        return self._numpy_output(player)
+
+    def process_for_search(self, batch):
+        rows = int(batch.shape[0])
+        values = torch.zeros(rows, 3, dtype=torch.float32)
+        white_to_move = batch[:, 4, 0, 0] < 0.0
+        values[white_to_move, 0] = 1.0
+        values[~white_to_move, 1] = 1.0
+        return SearchOutput(
+            policy=torch.as_tensor(self._policy()).view(1, -1).repeat(rows, 1),
+            value=values,
+            score=torch.zeros(rows, 1, dtype=torch.float32),
+            ownership=torch.tensor(
+                np.tile(
+                    np.array([[0.0, 0.0, 1.0]], dtype=np.float32),
+                    (self.point_count, 1),
+                )
+            ).view(1, self.point_count, 3).repeat(rows, 1, 1),
+        )
+
+
 def _new_agent(args, game, *, arena=False, batch_size=1):
     action_size = int(GAME.action_size())
     point_count = int(GAME.logical_topology().point_count)
@@ -248,6 +300,25 @@ def test_batched_cleanup_phase_transition_matches_single_search():
     assert cleanup_leaf.last_action == game.pass_action()
     assert cleanup_leaf.semantic_state.phase == CLEANUP_2
     assert cleanup_leaf.terminal_kind is None
+    _assert_searches_match(single, batched, game)
+
+
+def test_batched_white_to_move_value_conversion_matches_single_search():
+    args = _search_args()
+    args.gocube_win_loss_utility_factor = 1.0
+    args.gocube_static_score_utility_factor = 0.0
+    args.gocube_dynamic_score_utility_factor = 0.0
+    topology = GAME.logical_topology()
+    state = replace(initial_v3_state(topology), current_player=1)
+    game = GAME(state)
+    net = _PlayerRelativeWhiteWinNet(GAME, 0)
+
+    single = _run_single(game, net, args)
+    batched, leaves = _run_batched(game, net, args)
+
+    assert leaves[0].player == 1
+    assert np.isclose(single._root.q, 1.0)
+    assert np.isclose(batched._root.q, 1.0)
     _assert_searches_match(single, batched, game)
 
 

@@ -1,15 +1,18 @@
 import math
 
 import numpy as np
+import pytest
 
 from alphazero.MCTS import MCTS
 from alphazero.envs.gocube.katago_train import build_katago_training_args, parse_args
 from alphazero.search_contract import (
     KATAGO_PINNED_SEARCH_UTILITY_MODE,
     KATAGO_REFERENCE_COMMIT,
+    KATAGO_SEARCH_CONTRACT,
     KATAGO_SEARCH_DEFAULTS,
     SearchOutput,
     combined_white_utility,
+    player_relative_value_to_absolute,
     recent_score_center,
     score_value,
     white_owner_map,
@@ -26,6 +29,7 @@ def _cube4_args():
 
 def test_pinned_reference_and_defaults_are_explicit():
     assert KATAGO_REFERENCE_COMMIT == "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
+    assert KATAGO_SEARCH_CONTRACT == "katago-pinned-search-v2"
     assert KATAGO_SEARCH_DEFAULTS["win_loss_utility_factor"] == 1.0
     assert KATAGO_SEARCH_DEFAULTS["dynamic_score_utility_factor"] == 0.30
     assert KATAGO_SEARCH_DEFAULTS["dynamic_score_center_zero_weight"] == 0.25
@@ -77,6 +81,42 @@ def test_white_result_utility_uses_white_win_minus_black_win():
         dynamic_score_scale=0.50,
     )
     assert np.isclose(utility, 0.50)
+
+
+@pytest.mark.parametrize(
+    "player_to_move, neural_value, expected_absolute, expected_utility",
+    [
+        (0, [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], -1.0),
+        (0, [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], 1.0),
+        (1, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 1.0),
+        (1, [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], -1.0),
+        (0, [0.5, 0.5, 0.0], [0.5, 0.5, 0.0], 0.0),
+        (1, [0.5, 0.5, 0.0], [0.5, 0.5, 0.0], 0.0),
+        (0, [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 0.0),
+        (1, [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 0.0),
+    ],
+)
+def test_player_relative_value_is_adapted_once(
+    player_to_move, neural_value, expected_absolute, expected_utility
+):
+    source = np.asarray(neural_value, dtype=np.float32)
+    converted = player_relative_value_to_absolute(source, player_to_move)
+
+    np.testing.assert_array_equal(converted, expected_absolute)
+    assert np.isclose(white_win_loss_value(converted), expected_utility)
+    np.testing.assert_array_equal(source, neural_value)
+    assert not np.shares_memory(source, converted)
+
+
+def test_player_relative_value_rejects_invalid_player():
+    with pytest.raises(ValueError, match="player_to_move"):
+        player_relative_value_to_absolute([1.0, 0.0, 0.0], 2)
+
+
+@pytest.mark.parametrize("value", [[1.0, 0.0], [1.0, 0.0, 0.0, 0.0]])
+def test_player_relative_value_rejects_non_v3_vector_length(value):
+    with pytest.raises(ValueError, match="V3 value contract"):
+        player_relative_value_to_absolute(value, 0)
 
 
 def test_ownership_conversion_is_only_signed_white_minus_black():

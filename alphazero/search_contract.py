@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import operator
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,7 +10,7 @@ import numpy as np
 KATAGO_REFERENCE_COMMIT = "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
 LEGACY_SEARCH_UTILITY_MODE = "legacy"
 KATAGO_PINNED_SEARCH_UTILITY_MODE = "katago-pinned-f6bc4b19"
-KATAGO_SEARCH_CONTRACT = "katago-pinned-search-v1"
+KATAGO_SEARCH_CONTRACT = "katago-pinned-search-v2"
 
 # Values explicitly set in cpp/configs/training/selfplay8b20.cfg are copied
 # from the pinned commit. conservativePass and fillDameBeforePass are omitted
@@ -41,6 +42,39 @@ class SearchOutput:
     value: Any
     score: Any | None = None
     ownership: Any | None = None
+
+
+def player_relative_value_to_absolute(value: Any, player_to_move: Any) -> np.ndarray:
+    """Convert a V3 player-relative value vector to ``[Black, White, NO_RESULT]``.
+
+    V3's neural value head encodes WIN and LOSS for the player to move.  The
+    search contract instead stores those probabilities in absolute Black and
+    White slots.  Exact terminal vectors do not use this adapter; callers only
+    apply it to nonterminal neural evaluations.
+    """
+
+    try:
+        player = operator.index(player_to_move)
+    except TypeError as exc:
+        raise ValueError("player_to_move must be 0 (black) or 1 (white)") from exc
+    if player not in (0, 1):
+        raise ValueError(f"player_to_move must be 0 (black) or 1 (white), got {player}")
+
+    try:
+        arr = np.asarray(value).reshape(-1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "V3 value contract requires exactly 3 components "
+            "[player-to-move WIN, player-to-move LOSS, NO_RESULT]"
+        ) from exc
+    if arr.size != 3:
+        raise ValueError(
+            "V3 value contract requires exactly 3 components "
+            "[player-to-move WIN, player-to-move LOSS, NO_RESULT]"
+        )
+    if player == 0:
+        return arr.copy()
+    return arr[[1, 0, 2]].copy()
 
 
 def white_win_loss_value(value: Any) -> float:

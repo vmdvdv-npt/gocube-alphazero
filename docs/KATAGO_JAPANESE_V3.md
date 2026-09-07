@@ -78,6 +78,8 @@ Framework utility may expose `NO_RESULT` through its dedicated third value slot 
 
 Only `terminal_kind == SCORED` can produce score and ownership targets. An actual scored draw is valid training data and uses the win/loss mixture `[0.5, 0.5, 0]`; `NO_RESULT` is a separate value class, not a scored draw.
 
+The V3 neural value head is player-to-move-relative: its first two classes are `[WIN for side to move, LOSS for side to move]`, followed by `NO_RESULT`. Thus a Black-to-move and White-to-move position encode the same absolute winner in different first/second slots. A scored draw is `[0.5, 0.5, 0]`; `NO_RESULT` is `[0, 0, 1]`.
+
 Ownership labels are Black, White, or Neutral based on final formal independent-life/area results. Dame and seki are Neutral. The target includes a point mask so auxiliary loss can exclude points that cannot be authoritatively labeled without inventing alive/dead status.
 
 ## Observation V3

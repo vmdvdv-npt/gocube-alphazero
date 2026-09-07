@@ -50,6 +50,8 @@ def test_coalesced_search_inference_splits_all_four_heads_from_one_forward():
     assert rows == 5
     assert net.calls == 1
     assert ready[0].is_set() and ready[1].is_set()
+    assert torch.allclose(value[0], torch.tensor([[0.0, 1.0, 2.0], [1.0, 2.0, 3.0]]))
+    assert torch.allclose(value[1], torch.tensor([[2.0, 3.0, 4.0], [3.0, 4.0, 5.0], [4.0, 5.0, 6.0]]))
     assert torch.allclose(score[0].flatten(), torch.tensor([0.0, 0.1]))
     assert torch.allclose(score[1].flatten(), torch.tensor([0.2, 0.3, 0.4]))
     assert torch.allclose(ownership[0][0, 0], torch.tensor([0.2, 0.3, 0.5]))

@@ -8,6 +8,8 @@ The rules and terminal state machine remain the existing GoCube Japanese V3 impl
 
 `f6bc4b19a1686caa2d088b56251e8c11c8be6d51`
 
+The search contract version is `katago-pinned-search-v2`.
+
 The new search layer ports the relevant behavior from that same pinned source. Cube and Torus topology differences remain isolated behind `Topology.neighbor_indices(...)` and the existing graph Benson/pass-alive implementation.
 
 ## Pinned self-play search semantics
@@ -38,6 +40,25 @@ From `cpp/configs/training/selfplay8b20.cfg` and the pinned search sources:
 KataGo enables those two behaviors in some GTP/analysis configurations; those analysis defaults must not be mistaken for self-play training settings.
 
 Search utility is stored from White's perspective, like KataGo. Selection converts it to the player-to-move perspective only at the final PUCT comparison.
+
+### Value perspective boundary
+
+The V3 neural value head is player-to-move-relative:
+
+`[player-to-move WIN, player-to-move LOSS, NO_RESULT]`
+
+For every nonterminal neural leaf, the search adapter uses that leaf's actual
+`player` value. Black to move passes the first two components through; White to
+move swaps WIN and LOSS into the absolute `[Black win, White win, NO_RESULT]`
+slots. The internal win/loss utility remains:
+
+`White win probability - Black win probability`
+
+The `NO_RESULT` component is copied unchanged and is never part of the swap.
+
+An exact terminal `win_state` is already absolute and bypasses this conversion.
+Score and ownership retain their existing normalized Black-minus-White and
+absolute Black/White/Neutral semantics; neither head is perspective-swapped.
 
 The PUCT exploration term follows KataGo's `sqrt(totalChildWeight + 0.01)` form. FPU uses visited policy mass and the pinned parent-NN/parent-average blend rather than the previous framework-only FPU formula.
 
