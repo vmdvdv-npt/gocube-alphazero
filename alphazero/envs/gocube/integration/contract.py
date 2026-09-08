@@ -101,20 +101,37 @@ def _rules_fingerprint(game_cls, topology) -> str:
     })
 
 
-def _architecture_config(args: Any) -> dict[str, object]:
+def _architecture_config(args: Any, game_cls=None) -> dict[str, object]:
     nnet_type = _get(args, "nnet_type", None)
-    if nnet_type is None:
-        return {}
     keys = (
         "nnet_type", "num_channels", "depth", "value_head_channels",
         "policy_head_channels", "input_fc_layers", "value_dense_layers",
         "policy_dense_layers", "score_dense_layers", "gocube_auxiliary_targets",
+        "gocube_network_architecture", "gocube_structural_feature_schema",
+        "gocube_structural_feature_channels",
     )
-    return {key: _get(args, key) for key in keys if _get(args, key, None) is not None}
+    result = (
+        {key: _get(args, key) for key in keys if _get(args, key, None) is not None}
+        if nnet_type is not None
+        else {}
+    )
+    if game_cls is not None and getattr(game_cls, "STRUCTURAL_FEATURE_SCHEMA", None):
+        result.setdefault(
+            "gocube_structural_feature_schema",
+            str(game_cls.STRUCTURAL_FEATURE_SCHEMA),
+        )
+        result.setdefault(
+            "gocube_structural_feature_channels",
+            int(getattr(game_cls, "STRUCTURAL_FEATURE_CHANNELS", 2)),
+        )
+    return result
 
 
-def _architecture_id(args: Any) -> str:
+def _architecture_id(args: Any, game_cls=None) -> str:
     configured = _get(args, "gocube_network_architecture", None)
+    if configured:
+        return str(configured)
+    configured = getattr(game_cls, "GOCUBE_NETWORK_ARCHITECTURE_ID", None)
     if configured:
         return str(configured)
     nnet_type = _get(args, "nnet_type", None)
@@ -318,7 +335,7 @@ def resolve_model_contract(game_cls, args: Any = None) -> ResolvedGoCubeContract
         raise ContractError(f"Cannot resolve GoCube contract from game class: {exc}") from exc
     if len(observation_shape) != 3:
         raise ContractError("GoCube observations must have three dimensions")
-    architecture = _architecture_config(args)
+    architecture = _architecture_config(args, game_cls)
     target_schema = _target_schema(args)
     output_heads = 4 if bool(_get(args, "gocube_auxiliary_targets", False)) else 2
     # A concrete V3 game class has auxiliary heads even when an old caller did
@@ -341,7 +358,7 @@ def resolve_model_contract(game_cls, args: Any = None) -> ResolvedGoCubeContract
         point_order_fingerprint=point_order_fingerprint(topology),
         adjacency_fingerprint=adjacency_fingerprint(topology),
         topology_fingerprint=topology_fingerprint(topology),
-        network_architecture_id=_architecture_id(args),
+        network_architecture_id=_architecture_id(args, game_cls),
         network_architecture_fingerprint=_fingerprint(architecture),
         search_contract_id=_search_contract_id(args),
         terminal_adjudicator_id=str(game_cls.TERMINAL_ADJUDICATOR_ID),
@@ -354,13 +371,19 @@ def resolve_model_contract(game_cls, args: Any = None) -> ResolvedGoCubeContract
 
 def _candidate_game_classes() -> tuple[type, ...]:
     # Imports stay local: this module is used by manifest code during startup.
-    from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
+    from alphazero.envs.gocube.diversified_game import (
+        diversified_pinned_game_class,
+        diversified_structural_pinned_game_class,
+    )
     from alphazero.envs.gocube.game import (
         SUPPORTED_CHINESE_GAMES,
         SUPPORTED_JAPANESE_GAMES,
         SUPPORTED_JAPANESE_V2_GAMES,
     )
-    from alphazero.envs.gocube.pinned_game import pinned_game_class
+    from alphazero.envs.gocube.pinned_game import (
+        structural_pinned_game_class,
+        pinned_game_class,
+    )
 
     result = []
     for mapping in (SUPPORTED_JAPANESE_GAMES, SUPPORTED_JAPANESE_V2_GAMES, SUPPORTED_CHINESE_GAMES):
@@ -380,6 +403,14 @@ def _candidate_game_classes() -> tuple[type, ...]:
                     diversified = None
                 if diversified is not None and diversified not in result:
                     result.append(diversified)
+                try:
+                    structural_pinned = structural_pinned_game_class(base)
+                    diversified_structural = diversified_structural_pinned_game_class(base)
+                except ValueError:
+                    structural_pinned = diversified_structural = None
+                for candidate in (structural_pinned, diversified_structural):
+                    if candidate is not None and candidate not in result:
+                        result.append(candidate)
     return tuple(result)
 
 

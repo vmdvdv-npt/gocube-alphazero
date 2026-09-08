@@ -31,10 +31,28 @@ topology/size-only resolver is reserved for explicit historical V1/V2/V3
 manifests, where the terminal-adjudicator version is part of the legacy
 semantics.
 
-The current pinned training builder records the V4 observation contract with
-shape `(18, 96, 1)`.  This shape is metadata-derived and is not a universal
-assumption for historical models.  Historical checkpoints remain loadable only
-under their actual saved semantics; no metadata is renamed in place.
+The current pinned training builder records the G1 structural observation
+contract with shape `(20, 96, 1)` for Cube 4 and architecture ID
+`gocube-graph-structural-v1`.  The first 18 channels retain the pinned V3
+observation; channels 18 and 19 are, respectively, binary graph-triangle
+membership and normalized shortest-path distance to the triangle point set.
+The feature matrix is computed once per topology from canonical adjacency and
+is cached; it is independent of stones and contains no PointId embedding.
+
+For a topology with triangles, normalization is
+`distance / max(1, max_distance)`, where `max_distance` is the largest BFS
+distance in that topology.  A topology without triangles gets zeros in both
+channels.  Cube 4 has 8 triangles and 24 participating points; Cube 2--7 and
+the supported Torus topologies use the same graph algorithm without a
+Cube-4-specific special case.
+
+G1 is rotation/permutation equivariant: all point-indexed inputs and outputs
+use the same canonical permutation, while value, score, and PASS remain
+invariant.  `gocube-observation-v5-structural-features` and
+`gocube-graph-structural-v1` are new identities.  Historical V1/V2/V3/V4
+models keep their original identities and shapes.  Old checkpoints and replay
+observations are not exact-resume compatible with G1; no input-weight padding
+or silent replay migration is performed.
 
 Inference and training curriculum are separate.  Service and evaluation use
 the resolved observation/rules/action/topology/network/search contract, but do

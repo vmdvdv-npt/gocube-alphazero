@@ -17,7 +17,13 @@ from torch.utils.data import ConcatDataset, DataLoader, RandomSampler, TensorDat
 from alphazero.Arena import Arena
 from alphazero.Coach import TrainState, _set_state
 from alphazero.GenericPlayers import MCTSPlayer
-from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
+from alphazero.envs.gocube.diversified_game import (
+    diversified_structural_pinned_game_class,
+)
+from alphazero.envs.gocube.pinned_game import (
+    G1_NETWORK_ARCHITECTURE_ID,
+)
+from alphazero.envs.gocube.structural import STRUCTURAL_FEATURE_SCHEMA
 from alphazero.envs.gocube.diversified_selfplay import (
     DiversifiedPinnedSelfPlayAgent,
     KATAGO_PINNED_DIVERSIFICATION_DEFAULTS,
@@ -925,7 +931,7 @@ def build_katago_training_args(cli):
 
     base_game_cls, args = build_training_args(cli)
     args = args.copy()
-    game_cls = diversified_pinned_game_class(base_game_cls)
+    game_cls = diversified_structural_pinned_game_class(base_game_cls)
     defaults = KATAGO_SEARCH_DEFAULTS
     cleanup_defaults = KATAGO_CLEANUP_TRAINING_DEFAULTS
     selfplay_defaults = KATAGO_PINNED_SELFPLAY_DEFAULTS
@@ -936,6 +942,10 @@ def build_katago_training_args(cli):
         raise ValueError(f"Production GoCube contract requires komi 0.5, got {args.gocube_komi}")
 
     args.search_utility_mode = KATAGO_PINNED_SEARCH_UTILITY_MODE
+    args.gocube_network_architecture = G1_NETWORK_ARCHITECTURE_ID
+    args.gocube_structural_feature_schema = STRUCTURAL_FEATURE_SCHEMA
+    args.gocube_structural_feature_channels = 2
+    args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
     args.gocube_katago_search_contract = KATAGO_SEARCH_CONTRACT
     args.gocube_katago_search_reference_commit = KATAGO_REFERENCE_COMMIT
     args.gocube_katago_exploration_contract = KATAGO_PINNED_EXPLORATION_CONTRACT

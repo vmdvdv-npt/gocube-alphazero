@@ -35,6 +35,31 @@ from .game import (
     Torus19ChineseGame, Torus19JapaneseGame, Torus19JapaneseV2Game,
     game_class, legacy_game_class,
 )
+from .rotations import (
+    CubeRotation,
+    all_cube_rotations,
+    cube_rotation_permutations,
+    cube_rotations,
+    permute_point_axis,
+    rotate_action,
+    rotate_board,
+    rotate_point_set,
+)
+from .pinned_game import G1_NETWORK_ARCHITECTURE_ID, G1_OBSERVATION_SCHEMA
+from .structural import (
+    DISTANCE_TO_TRIANGLE_CHANNEL,
+    STRUCTURAL_FEATURE_CHANNELS,
+    STRUCTURAL_FEATURE_SCHEMA,
+    TRIANGLE_MEMBERSHIP_CHANNEL,
+    StructuralFeatureMetadata,
+    compute_structural_features,
+    distance_to_vertex_triangle,
+    find_graph_triangles,
+    graph_triangles,
+    structural_feature_matrix,
+    structural_feature_metadata,
+    triangle_membership,
+)
 from .terminal import (
     CONSERVATIVE_AREA_ADJUDICATOR_V1, JAPANESE_CLEANUP_ADJUDICATOR_V2,
     TerminalAdjudication, TerminalGroupResolution, UnsupportedSelfPlayRuleset,

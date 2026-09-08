@@ -61,8 +61,9 @@ def real_checkpoint(tmp_path_factory):
 def test_real_training_checkpoint_round_trips_all_four_heads_and_both_perspectives(real_checkpoint):
     root, game_cls, _args, model, manifest, descriptor = real_checkpoint
     assert manifest.version == 4
-    assert manifest.observation_schema == "gocube-observation-v4-pass-would-end-phase"
-    assert tuple(manifest.model_contract["observationShape"]) == (18, 96, 1)
+    assert manifest.observation_schema == "gocube-observation-v5-structural-features"
+    assert tuple(manifest.model_contract["observationShape"]) == (20, 96, 1)
+    assert manifest.model_contract["networkArchitectureId"] == "gocube-graph-structural-v1"
     assert descriptor.model_contract["pointOrderFingerprint"]
     assert descriptor.model_contract["adjacencyFingerprint"]
 
@@ -76,7 +77,7 @@ def test_real_training_checkpoint_round_trips_all_four_heads_and_both_perspectiv
     for observation in observations:
         direct = model.predict_for_search(observation)
         reloaded = loaded.predict_for_search(observation)
-        assert observation.shape == (18, 96, 1)
+        assert observation.shape == (20, 96, 1)
         assert direct.policy.shape == reloaded.policy.shape == (97,)
         assert direct.value.shape == reloaded.value.shape == (3,)
         assert direct.ownership.shape == reloaded.ownership.shape == (96, 3)

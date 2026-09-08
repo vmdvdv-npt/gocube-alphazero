@@ -14,7 +14,7 @@ def test_production_baseline_keeps_protected_architecture_and_hyperparameters():
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     game_cls, args = build_hardened_training_args(parse_args([]))
 
-    assert game_cls.__name__ == "DiversifiedPinnedCube4JapaneseGame"
+    assert game_cls.__name__ == "G1DiversifiedPinnedCube4JapaneseGame"
     assert list(game_cls.observation_size()) == baseline["architecture"]["observation_shape"]
     assert game_cls.action_size() == baseline["architecture"]["action_size"]
     assert game_cls.KOMI == baseline["rules"]["komi"]
