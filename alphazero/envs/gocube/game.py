@@ -30,6 +30,11 @@ from .katago_v3 import (
     MAIN,
     NO_RESULT,
     OBSERVATION_SCHEMA_V3,
+    CYCLE,
+    EPISODE_MOVE_LIMIT,
+    FORMAL_PASS,
+    PASS_ALIVE,
+    RESULT_PROVENANCE_RUNTIME,
     SCORED,
     V3State,
     apply_v3_action,
@@ -155,6 +160,14 @@ class GoGame(_TopologyAdapter):
     def terminal_kind(self) -> str | None:
         return self._state.terminal_kind
 
+    @property
+    def termination_reason(self) -> str | None:
+        return self._state.termination_reason
+
+    @property
+    def result_provenance(self) -> str | None:
+        return self._state.result_provenance
+
     def __eq__(self, other: object) -> bool:
         return isinstance(other, self.__class__) and self._state == other._state
 
@@ -260,6 +273,13 @@ class GoGame(_TopologyAdapter):
             "terminal/cleanup_captures": state.cleanup_captures,
             "terminal/ko_unblock_actions": state.ko_unblock_actions,
             "terminal/cycle_no_result": int(state.no_result_reason == "cycle"),
+            "termination/formal_pass": int(state.termination_reason == FORMAL_PASS),
+            "termination/pass_alive": int(state.termination_reason == PASS_ALIVE),
+            "termination/cycle": int(state.termination_reason == CYCLE),
+            "termination/episode_move_limit": int(state.termination_reason == EPISODE_MOVE_LIMIT),
+            "termination/runtime_forced": int(
+                state.result_provenance == RESULT_PROVENANCE_RUNTIME
+            ),
             "terminal/training_valid_fraction": float(self.has_training_result()),
         }
 

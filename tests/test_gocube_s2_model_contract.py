@@ -8,6 +8,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+import torch
 
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.envs.gocube.evaluate import resolve_game_class
@@ -171,3 +172,23 @@ def test_fingerprints_are_deterministic_and_geometry_sensitive(real_checkpoint):
     assert first.adjacency_fingerprint == second.adjacency_fingerprint
     assert first.topology_fingerprint == second.topology_fingerprint
     assert first.point_order_fingerprint != first.adjacency_fingerprint
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["gocube_target_provenance_semantics", "gocube_termination_contract"],
+)
+def test_current_pinned_loader_rejects_missing_s3_checkpoint_markers(
+    real_checkpoint, tmp_path, missing_field
+):
+    _root, _game_cls, _args, _model, _manifest, descriptor = real_checkpoint
+    payload = torch.load(descriptor.path, map_location="cpu")
+    payload["args"].pop(missing_field, None)
+    broken_path = tmp_path / "missing-s3-marker.pkl"
+    torch.save(payload, broken_path)
+    broken = replace(descriptor, path=str(broken_path))
+
+    with pytest.raises(CheckpointMetadataInvalid, match=missing_field):
+        CheckpointModelLoader(_Catalog(broken), device="cpu").load(
+            descriptor.checkpoint_id
+        )

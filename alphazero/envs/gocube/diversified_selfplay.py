@@ -336,4 +336,6 @@ class DiversifiedPinnedSelfPlayAgent(PinnedSelfPlayAgent):
                 self._cleanup_slot_set("cleanup_training_metadata", index, cleanup_meta)
             if hasattr(self.games[index], "mark_diversified_training_start"):
                 self.games[index].mark_diversified_training_start()
+            if hasattr(self.games[index], "mark_synthetic_cleanup_episode"):
+                self.games[index].mark_synthetic_cleanup_episode()
         return result

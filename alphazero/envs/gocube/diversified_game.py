@@ -123,6 +123,9 @@ class _DiversifiedStartMixin:
         self._diverse_train_state_history = (self._state,)
         self._diverse_training_history_offset = len(self._pinned_move_history)
         self._diverse_suppress_plain_fork_generation = False
+        # Setup moves are not part of the synthetic episode whose budget is
+        # enforced by the runner.
+        self._reset_episode_runtime()
 
     def play_action(self, action: int) -> None:
         was_search_clone = bool(getattr(self, "_pinned_is_search_clone", False))
@@ -191,6 +194,7 @@ class _DiversifiedStartMixin:
         self._pinned_move_history = tuple(candidate_history)
         self._pinned_state_history = (candidate_state,)
         self._pinned_state_history_offset = len(candidate_history)
+        self._reset_episode_runtime(episode_type="fork")
         self._pinned_start_phase = candidate_state.phase
         self._pinned_started_from_seki_fork = False
         self._diverse_started_from_plain_fork = True

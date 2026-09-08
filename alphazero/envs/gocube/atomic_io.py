@@ -15,6 +15,8 @@ from .contract_versions import (
     REPLAY_FORMAT_VERSION,
     SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
     VALUE_TARGET_SEMANTICS,
 )
 
@@ -126,6 +128,8 @@ def write_replay_marker(iteration_base: str, *, iteration: int, row_count: int) 
             "value_target_semantics": VALUE_TARGET_SEMANTICS,
             "score_target_semantics": SCORE_TARGET_SEMANTICS,
             "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
+            "target_provenance_semantics": TARGET_PROVENANCE_SEMANTICS,
+            "termination_contract": TERMINATION_CONTRACT,
             "iteration": int(iteration),
             "row_count": int(row_count),
             "tensor_suffixes": list(REPLAY_TENSOR_SUFFIXES),
@@ -159,6 +163,8 @@ def load_replay_marker(iteration_base: str | os.PathLike[str]) -> dict[str, obje
         "score_target_semantics": SCORE_TARGET_SEMANTICS,
         "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
         "score_initialization_contract": SCORE_INITIALIZATION_CONTRACT,
+        "target_provenance_semantics": TARGET_PROVENANCE_SEMANTICS,
+        "termination_contract": TERMINATION_CONTRACT,
     }
     for key, expected in semantic_fields.items():
         if payload.get(key) != expected:

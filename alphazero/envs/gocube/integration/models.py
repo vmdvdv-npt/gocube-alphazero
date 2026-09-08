@@ -8,6 +8,11 @@ import torch
 
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.envs.gocube.game import legacy_game_class
+from alphazero.envs.gocube.contract_versions import (
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
+)
+from alphazero.search_contract import KATAGO_SEARCH_CONTRACT
 
 from .catalog import CheckpointCatalog, CheckpointDescriptor
 from .contract import (
@@ -98,6 +103,20 @@ def _validate_saved_gocube_metadata(
                 f"Checkpoint GoCube contract mismatch for {key}: "
                 f"saved={actual!r}, expected={expected_value!r}"
             )
+    if expected_contract.search_contract_id == KATAGO_SEARCH_CONTRACT:
+        # S3 changes the meaning of a pinned search result.  These fields are
+        # not network architecture fields, so they live beside the model
+        # contract, but a current pinned loader must still require them.
+        for key, expected_value in (
+            ("gocube_target_provenance_semantics", TARGET_PROVENANCE_SEMANTICS),
+            ("gocube_termination_contract", TERMINATION_CONTRACT),
+        ):
+            actual = _metadata_value(args, key, None)
+            if actual != expected_value:
+                raise CheckpointMetadataInvalid(
+                    f"Checkpoint missing or mismatched S3 contract field {key}: "
+                    f"saved={actual!r}, expected={expected_value!r}"
+                )
 
 
 def _read_checkpoint_args(path: str):

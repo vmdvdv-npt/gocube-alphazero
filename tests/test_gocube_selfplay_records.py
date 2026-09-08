@@ -97,7 +97,8 @@ def test_record_contains_replay_moves_final_position_and_terminal_metadata(tmp_p
         "duration_seconds", "topology", "size", "rules", "effective_parameters",
         "moves", "number_of_moves", "final_position", "winner", "result",
         "final_score", "final_score_margin", "terminal_kind", "no_result_reason",
-        "terminal", "cleanup_endgame_diagnostics", "record_path",
+        "termination_reason", "result_provenance", "target_provenance",
+        "termination", "terminal", "cleanup_endgame_diagnostics", "record_path",
     }
     assert required <= set(record)
     assert record["game_id"] == "C4-000001"
@@ -109,7 +110,7 @@ def test_record_contains_replay_moves_final_position_and_terminal_metadata(tmp_p
     assert record["final_score"] is not None
     assert record["final_score_margin"] == record["final_score"]["margin"]
     assert record["effective_parameters"] == {"sims": 1, "workers": 2}
-    assert record["schema_version"] == 2
+    assert record["schema_version"] == 3
     assert record["rules"]["replay_format_version"] == 3
     assert record["rules"]["score_initialization_contract"] == "katago-boardhistory-clear-v1"
     assert "white_bonus_score" in record["final_position"]

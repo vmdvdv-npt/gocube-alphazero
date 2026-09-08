@@ -13,6 +13,8 @@ from alphazero.envs.gocube.reproducibility import derive_worker_seed
 from alphazero.envs.gocube.contract_versions import (
     REPLAY_FORMAT_VERSION,
     SCORE_INITIALIZATION_CONTRACT,
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
     VALUE_TARGET_SEMANTICS,
 )
 
@@ -62,4 +64,6 @@ def test_effective_config_contains_pinned_immutable_fields():
     assert config["replay_format_version"] == REPLAY_FORMAT_VERSION == 3
     assert config["value_target_semantics"] == VALUE_TARGET_SEMANTICS
     assert config["score_initialization_contract"] == SCORE_INITIALIZATION_CONTRACT
+    assert config["target_provenance_semantics"] == TARGET_PROVENANCE_SEMANTICS
+    assert config["termination_contract"] == TERMINATION_CONTRACT
     assert config["sample_clock_contract"] == "sample-clock-v2"

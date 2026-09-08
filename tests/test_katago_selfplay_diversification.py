@@ -138,6 +138,7 @@ def test_plain_fork_restore_preserves_v3_history_ko_and_pass_state():
     assert target.semantic_state.white_pass_states == candidate_state.white_pass_states
     assert target.semantic_state.ko_recap_blocked == candidate_state.ko_recap_blocked
     assert target._pinned_move_history == candidate_history
+    assert target.episode_type == "fork"
 
 
 def test_all_setup_modes_are_seen_as_non_training_preludes():

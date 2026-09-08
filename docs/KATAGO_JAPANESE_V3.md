@@ -21,7 +21,7 @@ Rule semantics operate only on occupancy plus `Topology.neighbor_indices(...)`. 
 
 `MAIN -> CLEANUP_1 -> CLEANUP_2 -> SCORED`, with `NO_RESULT` as a separate terminal kind.
 
-MAIN and each cleanup phase can end through formal pass/repetition rules. A cycle that reaches the Rules V3 repeated-state termination condition is `NO_RESULT`. The emergency move cap also produces only `NO_RESULT`; it never forces a score.
+MAIN and each cleanup phase can end through formal pass/repetition rules. A cycle that reaches the Rules V3 repeated-state termination condition is `NO_RESULT`. The self-play episode budget is not a rule transition: the runner may force-score at `256 + 24 * point_count`, with `termination_reason=episode_move_limit` and runtime provenance. Search clones never apply that budget.
 
 With self-play optimization enabled, if every logical point belongs to a pass-alive group or pass-alive territory, MAIN may terminate directly with the score-equivalent result.
 
@@ -83,7 +83,7 @@ is computed as follows:
    `second_cleanup_start_colors` in CLEANUP_2;
 3. White additionally receives the explicit bonus and komi.
 
-Winner, margin, score-head target, and ownership target derive only from this final V3 calculation. Cleanup captures are therefore part of the formal final result.
+Winner, margin, score-head target, and ownership target derive only from this final V3 calculation. Cleanup captures are therefore part of the formal final result. A formal cleanup score uses `termination_reason=formal_pass`; an early pass-alive score uses `pass_alive`.
 
 The implementation follows the corrected post-issue-#1158 behavior: unassigned
 single-color empty components are not silently dropped, and scoring is based
@@ -93,7 +93,7 @@ on the complete final position rather than a `main_moves`-selected fallback.
 
 Framework utility may expose `NO_RESULT` through its dedicated third value slot because MCTS requires a terminal utility vector. The training collector retains the policy and value samples from every visited `NO_RESULT` position, assigns value target `[0, 0, 1]`, and masks score and ownership targets. A `NO_RESULT` score target is stored as `NaN` with a zero score mask; loss code selects active rows before arithmetic.
 
-Only `terminal_kind == SCORED` can produce score and ownership targets. An actual scored draw is valid training data and uses the win/loss mixture `[0.5, 0.5, 0]`; `NO_RESULT` is a separate value class, not a scored draw.
+Only `terminal_kind == SCORED` can produce score and ownership targets. An actual scored draw is valid training data and uses the win/loss mixture `[0.5, 0.5, 0]`; `NO_RESULT` is a separate value class, not a scored draw. A runner force-score also uses the scored targets, but its `result_provenance=runtime` and `termination_reason=episode_move_limit` are retained in the terminal, target bundle, and game record.
 
 The V3 neural value head is player-to-move-relative: its first two classes are `[WIN for side to move, LOSS for side to move]`, followed by `NO_RESULT`. Thus a Black-to-move and White-to-move position encode the same absolute winner in different first/second slots. A scored draw is `[0.5, 0.5, 0]`; `NO_RESULT` is `[0, 0, 1]`.
 
@@ -109,4 +109,4 @@ This state exposes cleanup legality and score-relevant state used by the current
 
 V1 Chinese, Japanese Cleanup V2, and V3 have separate Game classes and manifest versions. New production training defaults only to V3 and the namespace `gocube-{topology}-{size}-katago-v3-pilot`.
 
-Checkpoint/run metadata records rule set, komi, terminal adjudicator, observation schema, topology, size, KataGo rules version, KataGo reference commit, score initialization contract, target contracts, and deterministic SHA-256 rules fingerprint. The local rules implementation version is `4` for S1. V3 loading fails closed if required metadata is missing or differs. Replay/checkpoint artifacts from pre-S1 contracts are never silently resumed as S1.
+Checkpoint/run metadata records rule set, komi, terminal adjudicator, observation schema, topology, size, KataGo rules version, KataGo reference commit, score initialization contract, target contracts, deterministic SHA-256 rules fingerprint, search contract, and the termination contract. The local rules implementation version is `4` for S1. The pinned search contract is `katago-pinned-search-v3`; replay format is v3 and training contract is v3. V3 loading fails closed if required metadata is missing or differs. Replay/checkpoint artifacts from pre-S1 contracts, and old search semantics, are never silently resumed under the new boundary.

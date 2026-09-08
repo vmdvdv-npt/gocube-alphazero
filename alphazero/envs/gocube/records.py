@@ -26,11 +26,23 @@ from .contract_versions import (
     REPLAY_FORMAT_VERSION,
     SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
     TRAINING_CONTRACT_VERSION,
     VALUE_TARGET_SEMANTICS,
 )
+from .katago_v3 import (
+    CYCLE,
+    EPISODE_MOVE_LIMIT,
+    PASS_ALIVE,
+    NO_RESULT,
+    RESULT_PROVENANCE_FORMAL,
+    RESULT_PROVENANCE_RULE_NO_RESULT,
+    RESULT_PROVENANCE_RUNTIME,
+    UNKNOWN_LEGACY_TERMINATION,
+)
 
-GAME_RECORD_SCHEMA_VERSION = 2
+GAME_RECORD_SCHEMA_VERSION = 3
 ITERATION_MANIFEST_SCHEMA_VERSION = 1
 ITERATION_MANIFEST_FILENAME = "iteration-manifest.json"
 _COUNTER_FILENAME = "game-id-counter.json"
@@ -150,14 +162,45 @@ def _terminal_to_dict(terminal: Any) -> dict[str, Any] | None:
     if terminal is None:
         return None
     score = getattr(terminal, "score", None)
+    is_no_result = bool(getattr(terminal, "no_result", False))
     return {
         "kind": getattr(terminal, "terminal_kind", None),
         "winner": getattr(terminal, "winner", None),
-        "no_result": bool(getattr(terminal, "no_result", False)),
-        "no_result_reason": getattr(terminal, "reason", None),
+        "no_result": is_no_result,
+        "no_result_reason": getattr(terminal, "reason", None) if is_no_result else None,
+        "termination_reason": getattr(terminal, "reason", None),
+        "result_provenance": getattr(terminal, "result_provenance", None),
         "score": _score_to_dict(score),
         "adjudicator": getattr(terminal, "adjudicator_id", None),
     }
+
+
+def _termination_metadata(game: Any, terminal: Any) -> tuple[str, str]:
+    state = getattr(game, "semantic_state", None)
+    terminal_kind = getattr(game, "terminal_kind", None)
+    reason = (
+        getattr(terminal, "reason", None)
+        or getattr(state, "termination_reason", None)
+        or getattr(state, "no_result_reason", None)
+    )
+    provenance = (
+        getattr(terminal, "result_provenance", None)
+        or getattr(state, "result_provenance", None)
+    )
+
+    # Explicit provenance is mandatory for new V3 records.  The fallback is
+    # intentionally conservative for records assembled from old/manual state
+    # fixtures: absence is not evidence of a formal pass.
+    if reason is None:
+        reason = UNKNOWN_LEGACY_TERMINATION
+    if provenance is None:
+        if terminal_kind == "no_result" and reason == CYCLE:
+            provenance = RESULT_PROVENANCE_RULE_NO_RESULT
+        elif terminal_kind == "scored" and reason != UNKNOWN_LEGACY_TERMINATION:
+            provenance = RESULT_PROVENANCE_FORMAL
+        else:
+            provenance = UNKNOWN_LEGACY_TERMINATION
+    return str(reason), str(provenance)
 
 
 def _final_position(game: Any) -> dict[str, Any]:
@@ -169,12 +212,23 @@ def _final_position(game: Any) -> dict[str, Any]:
         "board": _board_values(board, topology.point_ids),
         "turns": int(getattr(game, "turns", getattr(state, "turns", 0))),
         "current_player": getattr(state, "current_player", getattr(game, "player", None)),
+        "episode_move_count": int(
+            getattr(game, "episode_move_count", getattr(game, "turns", 0))
+        ),
+        "episode_move_limit": (
+            int(getattr(game, "episode_move_limit"))
+            if hasattr(state, "termination_reason")
+            and getattr(game, "episode_move_limit", None) is not None
+            else None
+        ),
+        "episode_type": getattr(game, "episode_type", "ordinary"),
     }
     if state is not None:
         for field in (
             "consecutive_passes", "captures", "phase", "cleanup_stage",
             "ko_recap_blocked", "cleanup2_moves", "main_moves", "cleanup1_moves",
             "terminal_kind", "no_result_reason", "pass_alive_early_end",
+            "termination_reason", "result_provenance",
             "entered_cleanup1", "entered_cleanup2", "cleanup_captures",
             "ko_unblock_actions", "white_bonus_score",
         ):
@@ -233,16 +287,26 @@ def build_game_record(
         result = "no_result"
     else:
         result = "draw" if winner == "draw" else f"{winner}_win" if winner else None
+    termination_reason, result_provenance = _termination_metadata(game, terminal)
+    if terminal_data is not None:
+        terminal_data["termination_reason"] = termination_reason
+        terminal_data["result_provenance"] = result_provenance
     no_result_reason = (
-        getattr(terminal, "reason", None)
-        or getattr(getattr(game, "semantic_state", None), "no_result_reason", None)
+        getattr(getattr(game, "semantic_state", None), "no_result_reason", None)
+        if terminal_kind == "no_result"
+        else None
     )
     field_notes: dict[str, str] = {}
     if score is None:
         field_notes["final_score"] = "No score exists for this terminal result."
         field_notes["final_score_margin"] = "No score exists for this terminal result."
-    if no_result_reason is None:
-        field_notes["no_result_reason"] = "Not applicable because the terminal result is not no-result."
+    if terminal_kind == "no_result" and no_result_reason is None:
+        field_notes["no_result_reason"] = "No no-result reason was stored for this terminal."
+    if termination_reason == UNKNOWN_LEGACY_TERMINATION:
+        field_notes["termination_reason"] = (
+            "Termination cause was not recoverable from the source state; this is a legacy classification."
+        )
+    target_provenance = result_provenance
     record = {
         "schema_version": GAME_RECORD_SCHEMA_VERSION,
         "game_id": game_id,
@@ -274,16 +338,32 @@ def build_game_record(
             "value_target_semantics": VALUE_TARGET_SEMANTICS,
             "score_target_semantics": SCORE_TARGET_SEMANTICS,
             "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
+            "target_provenance_semantics": TARGET_PROVENANCE_SEMANTICS,
+            "termination_contract": TERMINATION_CONTRACT,
         },
         "effective_parameters": _json_safe(dict(parameters)),
         "moves": [_json_safe(dict(move)) for move in moves],
         "number_of_moves": len(moves),
         "final_position": _final_position(game),
+        "episode_type": getattr(game, "episode_type", "ordinary"),
         "winner": winner,
         "result": result,
         "final_score": _score_to_dict(score),
         "final_score_margin": getattr(score, "margin", None),
         "terminal_kind": terminal_kind,
+        "termination_reason": termination_reason,
+        "result_provenance": result_provenance,
+        "target_provenance": target_provenance,
+        "termination": {
+            "contract": TERMINATION_CONTRACT,
+            "reason": termination_reason,
+            "result_provenance": result_provenance,
+            "formal_terminal": result_provenance in {
+                RESULT_PROVENANCE_FORMAL,
+                RESULT_PROVENANCE_RULE_NO_RESULT,
+            },
+            "runtime_forced": result_provenance == RESULT_PROVENANCE_RUNTIME,
+        },
         "no_result_reason": no_result_reason,
         "terminal": terminal_data,
         "cleanup_endgame_diagnostics": _cleanup_diagnostics(game),
@@ -291,6 +371,64 @@ def build_game_record(
         "field_notes": field_notes,
     }
     return record
+
+
+def classify_termination(record: Mapping[str, Any]) -> str:
+    """Classify a record without mutating it or guessing missing history."""
+
+    terminal = record.get("terminal") or {}
+    final_position = record.get("final_position") or {}
+    explicit = (
+        record.get("termination_reason")
+        or terminal.get("termination_reason")
+        or final_position.get("termination_reason")
+    )
+    if explicit:
+        return str(explicit)
+    terminal_kind = record.get("terminal_kind") or terminal.get("kind")
+    no_result_reason = (
+        record.get("no_result_reason")
+        or terminal.get("no_result_reason")
+        or final_position.get("no_result_reason")
+    )
+    if terminal_kind == NO_RESULT and no_result_reason == CYCLE:
+        return CYCLE
+    if final_position.get("pass_alive_early_end"):
+        return PASS_ALIVE
+    return UNKNOWN_LEGACY_TERMINATION
+
+
+def audit_termination_records(record_paths: Iterable[str | os.PathLike[str]]) -> dict[str, Any]:
+    """Read-only audit of historical JSON records grouped by termination cause."""
+
+    counts: dict[str, int] = {}
+    by_episode_type: dict[str, dict[str, int]] = {}
+    total = 0
+    for path in record_paths:
+        with open(path, "r", encoding="utf-8") as handle:
+            record = json.load(handle)
+        reason = classify_termination(record)
+        counts[reason] = counts.get(reason, 0) + 1
+        episode_type = str(record.get("episode_type", "ordinary"))
+        category = by_episode_type.setdefault(episode_type, {})
+        category[reason] = category.get(reason, 0) + 1
+        total += 1
+    return {
+        "total": total,
+        "counts": counts,
+        "by_episode_type": by_episode_type,
+        "episode_move_limit_count": counts.get(EPISODE_MOVE_LIMIT, 0),
+        "episode_move_limit_fraction": (
+            counts.get(EPISODE_MOVE_LIMIT, 0) / total if total else 0.0
+        ),
+        "episode_move_limit_by_episode_type": {
+            episode_type: int(
+                by_episode_type.get(episode_type, {}).get(EPISODE_MOVE_LIMIT, 0)
+            )
+            for episode_type in ("ordinary", "synthetic_cleanup", "fork")
+        },
+        "target_provenance_contract": TARGET_PROVENANCE_SEMANTICS,
+    }
 
 
 def _sha256_bytes(data: bytes) -> str:

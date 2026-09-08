@@ -36,6 +36,34 @@ KATAGO_REFERENCE_VERSION = "1.18.0+ Rules Version 3"
 EMERGENCY_MOVE_CAP_FACTOR = 24
 EMERGENCY_MOVE_CAP_BASE = 256
 
+# Termination is deliberately represented as two dimensions.  ``terminal_kind``
+# describes the value returned by the rule engine, while these values describe
+# why that terminal was reached.  Runtime force-scoring is never a formal rule
+# result even though it has the same scored terminal kind and numeric labels.
+FORMAL_PASS = "formal_pass"
+PASS_ALIVE = "pass_alive"
+CYCLE = "cycle"
+EPISODE_MOVE_LIMIT = "episode_move_limit"
+UNKNOWN_LEGACY_TERMINATION = "unknown_legacy_termination"
+
+RESULT_PROVENANCE_FORMAL = "formal"
+RESULT_PROVENANCE_RULE_NO_RESULT = "rule_no_result"
+RESULT_PROVENANCE_RUNTIME = "runtime"
+
+
+def episode_move_limit(topology: Topology) -> int:
+    """Return the production self-play budget for ``topology``.
+
+    This is a runner budget, not a rule transition.  The legacy constant names
+    remain above as import compatibility for diagnostics and old callers, but
+    no formal transition consults them.
+    """
+
+    point_count = int(topology.point_count)
+    if point_count <= 0:
+        raise ValueError("topology must contain at least one point")
+    return EMERGENCY_MOVE_CAP_BASE + EMERGENCY_MOVE_CAP_FACTOR * point_count
+
 
 def rules_fingerprint(topology: Topology, komi: float = 0.5) -> str:
     payload = {
@@ -107,6 +135,8 @@ class V3State:
     cleanup1_moves: tuple[int, int] = (0, 0)
     terminal_kind: str | None = None
     no_result_reason: str | None = None
+    termination_reason: str | None = None
+    result_provenance: str | None = None
     pass_alive_early_end: bool = False
     entered_cleanup1: bool = False
     entered_cleanup2: bool = False
@@ -135,6 +165,8 @@ class V3State:
             and self.cleanup1_moves == other.cleanup1_moves
             and self.terminal_kind == other.terminal_kind
             and self.no_result_reason == other.no_result_reason
+            and self.termination_reason == other.termination_reason
+            and self.result_provenance == other.result_provenance
             and self.pass_alive_early_end == other.pass_alive_early_end
             and self.entered_cleanup1 == other.entered_cleanup1
             and self.entered_cleanup2 == other.entered_cleanup2
@@ -186,6 +218,7 @@ class V3Terminal:
     ownership: np.ndarray | None
     ownership_mask: np.ndarray | None
     reason: str | None = None
+    result_provenance: str | None = None
 
     @property
     def training_valid(self) -> bool:
@@ -217,6 +250,16 @@ class V3Terminal:
     def no_result(self) -> bool:
         return self.terminal_kind == NO_RESULT
 
+    @property
+    def termination_reason(self) -> str | None:
+        """Named view used by record/target consumers."""
+
+        return self.reason
+
+    @property
+    def target_provenance(self) -> str | None:
+        return self.result_provenance
+
 
 @dataclass(frozen=True)
 class V3TrainingTargets:
@@ -233,6 +276,8 @@ class V3TrainingTargets:
     ownership_target: np.ndarray
     ownership_mask: np.ndarray
     terminal_kind: str
+    termination_reason: str | None = None
+    result_provenance: str | None = None
 
     def __post_init__(self):
         if self.value_target.shape != (VALUE_TARGET_SIZE,):
@@ -259,6 +304,12 @@ class V3TrainingTargets:
         yield self.score_target
         yield self.ownership_target
         yield self.ownership_mask
+
+    @property
+    def target_provenance(self) -> str | None:
+        """Provenance of every target in this bundle."""
+
+        return self.result_provenance
 
 
 class V3IllegalMove(ValueError):
@@ -614,6 +665,8 @@ def _phase_reset(state: V3State, phase: str, *, second_start: bytes | None = Non
         white_pass_states=(),
         ko_capture_history=(),
         second_cleanup_start_colors=second_start if phase == CLEANUP_2 else state.second_cleanup_start_colors,
+        termination_reason=None,
+        result_provenance=None,
         entered_cleanup1=state.entered_cleanup1 or phase in (CLEANUP_1, CLEANUP_2),
         entered_cleanup2=state.entered_cleanup2 or phase == CLEANUP_2,
     )
@@ -622,7 +675,14 @@ def _phase_reset(state: V3State, phase: str, *, second_start: bytes | None = Non
 def _cycle_check_and_record(state: V3State, *, after_pass: bool) -> V3State:
     key = _state_key(state.board, state.current_player, state.ko_recap_blocked)
     if not after_pass and state.history_since_pass.count(key) >= 2:
-        return replace(state, phase=NO_RESULT, terminal_kind=NO_RESULT, no_result_reason="cycle")
+        return replace(
+            state,
+            phase=NO_RESULT,
+            terminal_kind=NO_RESULT,
+            no_result_reason=CYCLE,
+            termination_reason=CYCLE,
+            result_provenance=RESULT_PROVENANCE_RULE_NO_RESULT,
+        )
     phase_history = state.phase_history + (key,)
     since_pass = (key,) if after_pass else state.history_since_pass + (key,)
     return replace(state, phase_history=phase_history, history_since_pass=since_pass)
@@ -634,7 +694,13 @@ def _finish_phase_after_pass(state: V3State) -> V3State:
     if state.phase == CLEANUP_1:
         return _phase_reset(state, CLEANUP_2, second_start=_board_key(state.board))
     if state.phase == CLEANUP_2:
-        return replace(state, phase=SCORED, terminal_kind=SCORED)
+        return replace(
+            state,
+            phase=SCORED,
+            terminal_kind=SCORED,
+            termination_reason=FORMAL_PASS,
+            result_provenance=RESULT_PROVENANCE_FORMAL,
+        )
     return state
 
 
@@ -729,8 +795,6 @@ def apply_v3_action(state: V3State, action: int, topology: Topology) -> V3State:
         next_state = _unblock(state, action, topology)
     else:
         next_state = _placement(state, action, topology)
-    if next_state.terminal_kind is None and next_state.turns >= EMERGENCY_MOVE_CAP_BASE + EMERGENCY_MOVE_CAP_FACTOR * topology.point_count:
-        return replace(next_state, phase=NO_RESULT, terminal_kind=NO_RESULT, no_result_reason="move-cap")
     return next_state
 
 
@@ -1057,11 +1121,25 @@ def final_v3_score(state: V3State, topology: Topology, komi: float) -> tuple[Fin
 
 def terminal_from_state(state: V3State, topology: Topology, komi: float) -> V3Terminal | None:
     if state.terminal_kind == NO_RESULT:
-        return V3Terminal(NO_RESULT, None, None, None, state.no_result_reason)
+        return V3Terminal(
+            NO_RESULT,
+            None,
+            None,
+            None,
+            state.termination_reason or state.no_result_reason,
+            state.result_provenance or RESULT_PROVENANCE_RULE_NO_RESULT,
+        )
     if state.terminal_kind != SCORED:
         return None
     score, ownership, ownership_mask = final_v3_score(state, topology, komi)
-    return V3Terminal(SCORED, score, ownership, ownership_mask)
+    return V3Terminal(
+        SCORED,
+        score,
+        ownership,
+        ownership_mask,
+        state.termination_reason,
+        state.result_provenance or RESULT_PROVENANCE_FORMAL,
+    )
 
 
 def normalized_score_target_v3(terminal: V3Terminal, topology: Topology) -> np.ndarray:
@@ -1111,6 +1189,14 @@ def build_v3_training_targets(
         ownership = np.asarray(terminal.ownership, dtype=np.float32).copy()
         ownership_mask = np.asarray(terminal.ownership_mask, dtype=np.float32).copy()
 
+    result_provenance = terminal.result_provenance
+    if result_provenance is None:
+        result_provenance = (
+            RESULT_PROVENANCE_RULE_NO_RESULT
+            if terminal.terminal_kind == NO_RESULT
+            else RESULT_PROVENANCE_FORMAL
+        )
+
     return V3TrainingTargets(
         value_target=value,
         score_target=score,
@@ -1118,6 +1204,8 @@ def build_v3_training_targets(
         ownership_target=ownership,
         ownership_mask=ownership_mask,
         terminal_kind=terminal.terminal_kind,
+        termination_reason=terminal.reason,
+        result_provenance=result_provenance,
     )
 
 
@@ -1129,6 +1217,8 @@ def maybe_pass_alive_early_terminal(state: V3State, topology: Topology) -> V3Sta
             state,
             phase=SCORED,
             terminal_kind=SCORED,
+            termination_reason=PASS_ALIVE,
+            result_provenance=RESULT_PROVENANCE_FORMAL,
             second_cleanup_start_colors=_board_key(state.board),
             pass_alive_early_end=True,
         )

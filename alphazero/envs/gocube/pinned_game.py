@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
 import math
 
@@ -21,19 +20,21 @@ from .game import (
 )
 from .katago_v3 import (
     CLEANUP_2,
-    NO_RESULT,
     SCORED,
     apply_v3_action,
     independent_life_analysis,
     maybe_pass_alive_early_terminal,
     pass_alive_analysis,
     terminal_from_state,
+    episode_move_limit as production_episode_move_limit,
 )
 from .selfplay_semantics import (
     KATAGO_PINNED_SELFPLAY_DEFAULTS,
     PASS_WOULD_END_PHASE_CHANNEL,
     PINNED_OBSERVATION_SCHEMA,
     apply_pass_would_end_phase_feature,
+    finalize_episode_due_to_runtime_limit,
+    resolve_episode_move_limit,
 )
 from .structural import (
     STRUCTURAL_FEATURE_CHANNELS,
@@ -77,6 +78,9 @@ class _PinnedPassWouldEndPhaseMixin:
         self._pinned_move_history = ()
         self._pinned_state_history = (self._state,)
         self._pinned_state_history_offset = 0
+        self._pinned_episode_move_count = 0
+        self._pinned_episode_type = "ordinary"
+        self._pinned_episode_limit_override = None
 
     def observation(self):
         # Base GoGame.observation() allocates using self.observation_size(), so
@@ -111,6 +115,9 @@ class _PinnedPassWouldEndPhaseMixin:
         clone._pinned_move_history = self._pinned_move_history
         clone._pinned_state_history = self._pinned_state_history
         clone._pinned_state_history_offset = self._pinned_state_history_offset
+        clone._pinned_episode_move_count = self._pinned_episode_move_count
+        clone._pinned_episode_type = self._pinned_episode_type
+        clone._pinned_episode_limit_override = self._pinned_episode_limit_override
         # MCTS clones are search states. KataGo does not call the game-level
         # all-pass-alive auto-terminal inside search. Root pruning is also root-only.
         clone._pinned_is_search_clone = True
@@ -141,6 +148,58 @@ class _PinnedPassWouldEndPhaseMixin:
             "seki_fork_hack_prob": self._pinned_seki_fork_hack_prob,
             "started_from_seki_fork": self._pinned_started_from_seki_fork,
         }
+
+    @property
+    def episode_move_count(self) -> int:
+        """Number of actions in the current runner episode.
+
+        This is separate from ``V3State.turns`` because a fork can preserve
+        formal history and cleanup training deliberately rebases it.
+        """
+
+        return int(self._pinned_episode_move_count)
+
+    @property
+    def episode_type(self) -> str:
+        return str(self._pinned_episode_type)
+
+    @property
+    def episode_move_limit(self) -> int:
+        if self._pinned_episode_limit_override is not None:
+            return int(self._pinned_episode_limit_override)
+        return production_episode_move_limit(self.logical_topology())
+
+    def _reset_episode_runtime(self, *, episode_type: str | None = None) -> None:
+        self._pinned_episode_move_count = 0
+        self._pinned_episode_limit_override = None
+        if episode_type is not None:
+            self._pinned_episode_type = str(episode_type)
+
+    def mark_synthetic_cleanup_episode(self) -> None:
+        self._reset_episode_runtime(episode_type="synthetic_cleanup")
+
+    def finalize_episode_due_to_runtime_limit(self, episode_limit: int | None = None) -> bool:
+        """Apply runner force-score semantics to this real game only."""
+
+        if self._pinned_is_search_clone:
+            return False
+        if episode_limit is not None:
+            self._pinned_episode_limit_override = resolve_episode_move_limit(
+                self.logical_topology(), episode_limit
+            )
+        next_state = finalize_episode_due_to_runtime_limit(
+            self._state,
+            self.logical_topology(),
+            episode_move_count=self.episode_move_count,
+            episode_limit=episode_limit,
+        )
+        if next_state is self._state:
+            return False
+        self._state = next_state
+        self._terminal = terminal_from_state(next_state, self.logical_topology(), self.KOMI)
+        self._sync_framework_fields()
+        self._pinned_at_search_root = False
+        return True
 
     def _assert_pinned_history_alignment(self) -> None:
         """Check the compact state-history segment used by fork sampling.
@@ -234,18 +293,6 @@ class _PinnedPassWouldEndPhaseMixin:
         GameState.play_action(self, action)
         state = apply_v3_action(self._state, int(action), self.logical_topology())
 
-        # KataGo's GameRunner does NOT train a move-limit crossing as no-result.
-        # After maxMovesPerGame it calls BoardHistory::endAndScoreGameNow(),
-        # scoring the current board as-is and emitting ordinary win/loss/score
-        # targets. Keep genuine cycle/triple-ko NO_RESULT semantics untouched.
-        if state.terminal_kind == NO_RESULT and state.no_result_reason == "move-cap":
-            state = replace(
-                state,
-                phase=SCORED,
-                terminal_kind=SCORED,
-                no_result_reason=None,
-            )
-
         if not self._pinned_is_search_clone and self._pinned_auto_end_pass_alive:
             state = maybe_pass_alive_early_terminal(state, self.logical_topology())
         self._state = state
@@ -253,6 +300,8 @@ class _PinnedPassWouldEndPhaseMixin:
         self._sync_framework_fields()
         self._pinned_move_history = self._pinned_move_history + ((player_before, int(action)),)
         self._pinned_at_search_root = False
+        if not self._pinned_is_search_clone:
+            self._pinned_episode_move_count += 1
 
         if not self._pinned_is_search_clone:
             self._pinned_state_history = self._pinned_state_history + (self._state,)
@@ -324,6 +373,7 @@ class _PinnedPassWouldEndPhaseMixin:
         self._pinned_move_history = tuple(candidate_history)
         self._pinned_state_history = (candidate_state,)
         self._pinned_state_history_offset = len(candidate_history)
+        self._reset_episode_runtime(episode_type="fork")
         self._assert_pinned_history_alignment()
         self._pinned_start_phase = candidate_state.phase
         self._pinned_started_from_seki_fork = True

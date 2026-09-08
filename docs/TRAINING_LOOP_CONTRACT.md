@@ -45,6 +45,11 @@ starts all initialize the equivalent of KataGo
 `BoardHistory::clear(..., encorePhase)`, including setup stones and capture
 counters. `main_moves` is telemetry and never selects a scoring algorithm.
 
+Replay v3 (the S1 tensor-format identifier) also records the termination/target provenance contract; missing S3 marker fields are rejected. Per-game
+records carry the exact `termination_reason`, `result_provenance`, episode
+type, and runtime move count; historical records without enough information
+are classified as `unknown_legacy_termination` rather than rewritten.
+
 ## Target semantics
 
 The value target contract is `win-loss-noresult-s1-v2`. A scored win/loss is a
@@ -57,6 +62,11 @@ mask `0`. Losses select active rows or points before arithmetic, so masked
 The score contract is
 `normalized-score-with-applicability-mask-s1-v2`; the ownership contract is
 `formal-v3-s1-with-point-mask-v2`.
+
+The target provenance contract is `formal-runtime-result-provenance-v1`.
+`episode_move_limit` uses scored value/score/ownership targets produced by the
+current position, but remains explicitly marked as runtime-forced. A genuine
+cycle remains `NO_RESULT` with its existing masked auxiliary targets.
 
 ## Immutable run identity
 

@@ -25,6 +25,8 @@ from .contract_versions import (
     REPLAY_FORMAT_VERSION,
     SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
     TRAINING_CONTRACT_VERSION,
     VALUE_TARGET_SEMANTICS,
 )
@@ -207,6 +209,8 @@ class SampleClockNNetWrapper(NNetWrapper):
             "gocube_score_target_semantics",
             "gocube_ownership_target_semantics",
             "gocube_score_initialization_contract",
+            "gocube_target_provenance_semantics",
+            "gocube_termination_contract",
         ):
             value = _optional_arg(self.args, key, None)
             if value is not None:
@@ -251,6 +255,8 @@ class SampleClockNNetWrapper(NNetWrapper):
             "score_target_semantics": SCORE_TARGET_SEMANTICS,
             "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
             "score_initialization_contract": SCORE_INITIALIZATION_CONTRACT,
+            "target_provenance_semantics": TARGET_PROVENANCE_SEMANTICS,
+            "termination_contract": TERMINATION_CONTRACT,
             "effective_config_sha256": _optional_arg(
                 self.args, "effective_config_sha256", None
             ),
@@ -287,6 +293,12 @@ class SampleClockNNetWrapper(NNetWrapper):
                 "score_target_semantics": _optional_arg(self.args, "gocube_score_target_semantics", None),
                 "ownership_target_semantics": _optional_arg(self.args, "gocube_ownership_target_semantics", None),
                 "score_initialization_contract": _optional_arg(self.args, "gocube_score_initialization_contract", None),
+                "target_provenance_semantics": _optional_arg(
+                    self.args, "gocube_target_provenance_semantics", None
+                ),
+                "termination_contract": _optional_arg(
+                    self.args, "gocube_termination_contract", None
+                ),
             }
             for key, expected in expected_contract_fields.items():
                 if expected is not None and training_state.get(key) != expected:

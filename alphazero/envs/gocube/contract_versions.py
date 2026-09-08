@@ -18,6 +18,8 @@ OWNERSHIP_TARGET_SEMANTICS = "formal-v3-s1-with-point-mask-v2"
 TRAINING_CONTRACT_VERSION = 3
 
 SCORE_INITIALIZATION_CONTRACT = "katago-boardhistory-clear-v1"
+TARGET_PROVENANCE_SEMANTICS = "formal-runtime-result-provenance-v1"
+TERMINATION_CONTRACT = "gocube-termination-provenance-v1"
 
 SEED_DERIVATION_CONTRACT = "gocube-seed-derivation-v1"
 DEFAULT_MASTER_SEED = 0

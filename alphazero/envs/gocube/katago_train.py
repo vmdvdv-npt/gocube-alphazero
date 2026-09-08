@@ -48,6 +48,8 @@ from alphazero.envs.gocube.sample_clock import SampleClockNNetWrapper, TRAINING_
 from alphazero.envs.gocube.contract_versions import (
     DEFAULT_MASTER_SEED,
     SEED_DERIVATION_CONTRACT,
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
 )
 from alphazero.envs.gocube.atomic_io import REPLAY_TENSOR_SUFFIXES
 from alphazero.envs.gocube.selfplay_semantics import (
@@ -1006,6 +1008,8 @@ def build_katago_training_args(cli):
     args.gocube_structural_feature_channels = profile.structural_feature_channels
     args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
     args.gocube_katago_search_contract = KATAGO_SEARCH_CONTRACT
+    args.gocube_target_provenance_semantics = TARGET_PROVENANCE_SEMANTICS
+    args.gocube_termination_contract = TERMINATION_CONTRACT
     args.gocube_katago_search_reference_commit = KATAGO_REFERENCE_COMMIT
     args.gocube_katago_exploration_contract = KATAGO_PINNED_EXPLORATION_CONTRACT
     args.gocube_observation_schema = game_cls.OBSERVATION_SCHEMA

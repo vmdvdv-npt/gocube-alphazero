@@ -8,7 +8,11 @@ import numpy as np
 from .katago_v3 import (
     CLEANUP_1,
     CLEANUP_2,
+    EPISODE_MOVE_LIMIT,
     MAIN,
+    RESULT_PROVENANCE_RUNTIME,
+    SCORED,
+    episode_move_limit,
     V3State,
     _boardhistory_clear_white_bonus,
     _board_key,
@@ -34,6 +38,67 @@ KATAGO_PINNED_SELFPLAY_DEFAULTS = {
 
 PINNED_OBSERVATION_SCHEMA = "gocube-observation-v4-pass-would-end-phase"
 PASS_WOULD_END_PHASE_CHANNEL = 17
+
+def resolve_episode_move_limit(topology, configured_limit: int | None = None) -> int:
+    """Resolve the runner budget, with an explicit test/config override."""
+
+    if configured_limit is None:
+        return episode_move_limit(topology)
+    limit = int(configured_limit)
+    if limit < 1:
+        raise ValueError("episode move limit must be positive")
+    return limit
+
+
+def should_stop_episode(
+    episode_move_count: int,
+    topology,
+    *,
+    episode_limit: int | None = None,
+) -> bool:
+    """Return whether the real runner has exhausted its episode budget.
+
+    ``episode_move_count`` is intentionally not read from ``V3State.turns``:
+    fork and cleanup-training episodes can start from a state with historical
+    moves already in that formal counter.
+    """
+
+    count = int(episode_move_count)
+    if count < 0:
+        raise ValueError("episode move count cannot be negative")
+    return count >= resolve_episode_move_limit(topology, episode_limit)
+
+
+def finalize_episode_due_to_runtime_limit(
+    state: V3State,
+    topology,
+    *,
+    episode_move_count: int,
+    episode_limit: int | None = None,
+) -> V3State:
+    """Force-score a real episode at the runner boundary.
+
+    The scorer still only receives the board/rule state.  The returned state
+    carries the separate runtime provenance so records and targets can tell a
+    forced score from a formal pass terminal.
+    """
+
+    if state.terminal_kind is not None:
+        return state
+    if not should_stop_episode(
+        episode_move_count,
+        topology,
+        episode_limit=episode_limit,
+    ):
+        return state
+    return replace(
+        state,
+        phase=SCORED,
+        terminal_kind=SCORED,
+        no_result_reason=None,
+        termination_reason=EPISODE_MOVE_LIMIT,
+        result_provenance=RESULT_PROVENANCE_RUNTIME,
+    )
 
 
 def pass_would_end_phase(state: V3State) -> bool:
@@ -112,6 +177,8 @@ def rebase_cleanup_training_state(state: V3State, target_phase: str) -> V3State:
         cleanup1_moves=(0, 0),
         terminal_kind=None,
         no_result_reason=None,
+        termination_reason=None,
+        result_provenance=None,
         pass_alive_early_end=False,
         entered_cleanup1=True,
         entered_cleanup2=target_phase == CLEANUP_2,

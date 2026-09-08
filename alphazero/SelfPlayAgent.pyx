@@ -211,6 +211,10 @@ class SelfPlayAgent(mp.Process):
         finally:
             lock.release()
 
+    def _after_game_action(self, index):
+        """Hook for game runners that own runtime-only termination policy."""
+        return None
+
     def _cleanup_training_active(self, index):
         phases = getattr(self, 'cleanup_training_phase', None)
         return phases is not None and index < len(phases) and phases[index] is not None
@@ -520,6 +524,7 @@ class SelfPlayAgent(mp.Process):
             else:
                 self._mcts(i).update_root(self.games[i], action)
             self.games[i].play_action(action)
+            self._after_game_action(i)
             self._cleanup_slot_set('root_policy_cache', i, None)
 
             if in_cleanup_prelude:

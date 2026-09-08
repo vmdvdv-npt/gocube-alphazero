@@ -48,6 +48,11 @@ _SEARCH_CONTRACT_ARG_KEYS = (
     'fpu_reduction',
 )
 
+_TERMINATION_CONTRACT_ARG_KEYS = (
+    "gocube_target_provenance_semantics",
+    "gocube_termination_contract",
+)
+
 # These fields were added by S2.  A checkpoint from before S2 can still be
 # loaded when its older explicit schema/adjudicator metadata proves the same
 # historical inference semantics; missing S2 fingerprints are not silently
@@ -366,7 +371,7 @@ class NNetWrapper(BaseWrapper):
             configured_args, 'gocube_katago_search_contract', None
         ) if configured_args is not None else None
         if configured_contract:
-            for key in _SEARCH_CONTRACT_ARG_KEYS:
+            for key in _SEARCH_CONTRACT_ARG_KEYS + _TERMINATION_CONTRACT_ARG_KEYS:
                 value = _optional_arg(configured_args, key, _MISSING)
                 if value is _MISSING:
                     raise ValueError(f'Missing required configured search-contract field: {key}')

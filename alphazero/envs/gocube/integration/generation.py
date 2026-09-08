@@ -6,6 +6,7 @@ import numpy as np
 
 from alphazero.envs.gocube.core import BLACK, EMPTY, PLAYING, WHITE
 from alphazero.envs.gocube.evaluation import prepare_evaluation_args
+from alphazero.envs.gocube.katago_v3 import RESULT_PROVENANCE_RUNTIME
 
 from .catalog import CheckpointDescriptor
 from .contract import ContractError, resolve_contract_for_descriptor, resolve_game_class_from_contract
@@ -46,6 +47,9 @@ def serialize_terminal(
         "unresolvedCount": getattr(terminal, "unresolved_count", 0),
         "cleanupMoveCount": cleanup_move_count,
         "noResult": terminal.no_result,
+        "terminationReason": getattr(terminal, "termination_reason", getattr(terminal, "reason", None)),
+        "resultProvenance": getattr(terminal, "result_provenance", None),
+        "runtimeForced": getattr(terminal, "result_provenance", None) == RESULT_PROVENANCE_RUNTIME,
         "score": None,
     }
     score = terminal.score

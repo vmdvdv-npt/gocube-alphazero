@@ -18,6 +18,7 @@ from alphazero.Coach import Coach, TrainState, _set_state, get_args
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube.game import game_class
+from alphazero.envs.gocube.katago_v3 import EPISODE_MOVE_LIMIT
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
 from alphazero.envs.gocube.records import (
     build_game_record,
@@ -35,6 +36,8 @@ from alphazero.envs.gocube.contract_versions import (
     REPLAY_FORMAT_VERSION,
     SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
     TRAINING_CONTRACT_VERSION,
     VALUE_TARGET_SEMANTICS,
 )
@@ -50,6 +53,7 @@ _TELEMETRY_COUNTER_KEYS = (
     "samples/score_masked_rows",
     "samples/score_active_rows",
     "samples/ownership_fully_masked_rows",
+    "termination/episode_move_limit",
 )
 
 
@@ -174,6 +178,7 @@ class GoCubeCoach(Coach):
             "endgame_weight": int(self.args.gocube_endgame_sample_weight),
             "endgame_extra_samples": 0,
             "saved_total": 0,
+            "termination/episode_move_limit": 0,
         }
         return telemetry
 
@@ -416,6 +421,14 @@ class GoCubeCoach(Coach):
             "samples/score_masked_rows": 0,
             "samples/score_active_rows": 0,
             "samples/ownership_fully_masked_rows": 0,
+            "termination/formal_pass": 0,
+            "termination/pass_alive": 0,
+            "termination/cycle": 0,
+            "termination/episode_move_limit": 0,
+            "termination/runtime_forced": 0,
+            "termination/episode_move_limit_ordinary": 0,
+            "termination/episode_move_limit_synthetic_cleanup": 0,
+            "termination/episode_move_limit_fork": 0,
         }
         record_entries = []
         context = getattr(self, "_iteration_record_context", self._build_iteration_record_context(iteration))
@@ -445,7 +458,14 @@ class GoCubeCoach(Coach):
                     wins[player] += int(bool(winstate[player]))
             if hasattr(state, "diagnostic_counters"):
                 for key, value in state.diagnostic_counters().items():
-                    counters[key] += value
+                    if key in counters:
+                        counters[key] += value
+            termination_reason = getattr(state, "termination_reason", None)
+            if termination_reason == EPISODE_MOVE_LIMIT:
+                episode_type = getattr(state, "episode_type", "ordinary")
+                category_key = f"termination/episode_move_limit_{episode_type}"
+                if category_key in counters:
+                    counters[category_key] += 1
             if record_payload is not None:
                 game_id = record_payload["game_id"]
                 target_path = os.path.join(record_dir, f"{game_id}.json")
@@ -493,12 +513,22 @@ class GoCubeCoach(Coach):
             self.writer.add_scalar(key, value, iteration)
         if record_entries:
             record_entries.sort(key=lambda entry: int(entry["game_number_inside_iteration"]))
+            episode_limit_count = int(counters["termination/episode_move_limit"])
             aggregate_metrics = {
                 "games": int(num_games),
                 "black_wins": int(wins[0]) if wins else 0,
                 "white_wins": int(wins[1]) if len(wins) > 1 else 0,
                 "draws": int(draws),
                 "average_game_length": length_sum / denominator,
+                "episode_move_limit_count": episode_limit_count,
+                "episode_move_limit_fraction": episode_limit_count / denominator,
+                "episode_move_limit_by_episode_type": {
+                    "ordinary": int(counters["termination/episode_move_limit_ordinary"]),
+                    "synthetic_cleanup": int(
+                        counters["termination/episode_move_limit_synthetic_cleanup"]
+                    ),
+                    "fork": int(counters["termination/episode_move_limit_fork"]),
+                },
                 **counters,
             }
             aggregate_metrics["terminal/training_valid_fraction"] = (
@@ -765,6 +795,11 @@ def build_training_args(cli):
         gocube_score_target_semantics=SCORE_TARGET_SEMANTICS,
         gocube_ownership_target_semantics=OWNERSHIP_TARGET_SEMANTICS,
         gocube_score_initialization_contract=SCORE_INITIALIZATION_CONTRACT,
+        gocube_target_provenance_semantics=TARGET_PROVENANCE_SEMANTICS,
+        gocube_termination_contract=TERMINATION_CONTRACT,
+        # ``None`` selects the production formula. Tests may inject a small
+        # positive override into the runner without changing that formula.
+        gocube_episode_move_limit=None,
         ownership_loss_weight=0.5,
         score_loss_weight=0.5,
         gocube_endgame_sample_weight=cli.endgame_sample_weight,

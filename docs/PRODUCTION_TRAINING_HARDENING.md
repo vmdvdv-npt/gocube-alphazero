@@ -14,6 +14,17 @@ The hardened path intentionally does **not** change the network architecture, lo
 
 The KataGo reference remains commit `f6bc4b19a1686caa2d088b56251e8c11c8be6d51`.
 
+## 0. Formal rules versus episode runtime
+
+The production episode budget is `256 + 24 * point_count` (2560 for Cube 4).
+It is owned by the self-play runner and counted separately from formal/history
+turns, so fork and synthetic cleanup episodes do not inherit a stale budget.
+`apply_v3_action` and MCTS clones never turn this budget into a terminal. When
+the real runner reaches it, the current position is force-scored and records
+carry `termination_reason=episode_move_limit`, `result_provenance=runtime`,
+and `runtime_forced=true`. Formal pass, pass-alive, and cycle results remain
+separate.
+
 ## 1. Pinned chosen-move temperature
 
 The played self-play move follows the pinned self-play configuration exactly:
