@@ -25,7 +25,7 @@ The optimizer clock is `sample-clock-v2`: scheduler state advances by the
 number of examples consumed, not by wall-clock time or nominal iteration
 number. Checkpoints and resume state must carry this contract identifier.
 
-Replay format v2 is one atomic logical commit of seven tensors, in this exact
+Replay format v3 is one atomic logical commit of seven tensors, in this exact
 order:
 
 1. observations;
@@ -36,13 +36,18 @@ order:
 6. formal Rules V3 ownership targets;
 7. ownership point masks.
 
-The completion marker is published last. A marker or tensor set from replay
-v1 is rejected because it cannot reconstruct retained `NO_RESULT` policy/value
-rows.
+The completion marker is published last. Replay v1 and v2 are rejected: their
+score/ownership labels do not carry the corrected S1 semantics.
+
+Score initialization is the explicit contract
+`katago-boardhistory-clear-v1`. Setup, ordinary replay, and synthetic cleanup
+starts all initialize the equivalent of KataGo
+`BoardHistory::clear(..., encorePhase)`, including setup stones and capture
+counters. `main_moves` is telemetry and never selects a scoring algorithm.
 
 ## Target semantics
 
-The value target contract is `win-loss-noresult-v1`. A scored win/loss is a
+The value target contract is `win-loss-noresult-s1-v2`. A scored win/loss is a
 one-hot win/loss target relative to the player to move. A scored draw is
 `[0.5, 0.5, 0]`. A genuine `NO_RESULT` is `[0, 0, 1]`; its score target is
 `NaN` with score mask `0`, and its ownership target is zero with ownership
@@ -50,8 +55,8 @@ mask `0`. Losses select active rows or points before arithmetic, so masked
 `NaN` values can never contaminate gradients.
 
 The score contract is
-`normalized-score-with-applicability-mask-v1`; the ownership contract is
-`formal-v3-with-point-mask-v1`.
+`normalized-score-with-applicability-mask-s1-v2`; the ownership contract is
+`formal-v3-s1-with-point-mask-v2`.
 
 ## Immutable run identity
 

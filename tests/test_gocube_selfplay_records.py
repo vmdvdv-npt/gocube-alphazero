@@ -109,6 +109,10 @@ def test_record_contains_replay_moves_final_position_and_terminal_metadata(tmp_p
     assert record["final_score"] is not None
     assert record["final_score_margin"] == record["final_score"]["margin"]
     assert record["effective_parameters"] == {"sims": 1, "workers": 2}
+    assert record["schema_version"] == 2
+    assert record["rules"]["replay_format_version"] == 3
+    assert record["rules"]["score_initialization_contract"] == "katago-boardhistory-clear-v1"
+    assert "white_bonus_score" in record["final_position"]
 
 
 def test_effective_parameter_snapshot_includes_dotdict_contents():

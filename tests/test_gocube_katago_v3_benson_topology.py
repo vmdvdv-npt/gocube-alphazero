@@ -149,6 +149,29 @@ def test_cube_interior_benson_shape_is_pass_alive():
     )
 
 
+def test_cube_intruder_inside_pass_alive_area_is_formal_black_ownership():
+    t = cube_topology(5)
+    first_eye, intruder, second_eye = idxs(
+        t, ("front:2:2", "front:2:1", "back:2:2")
+    )
+    board = fill_except(t, (first_eye, second_eye), white=(intruder,))
+    analysis = pass_alive_analysis(board, t)
+    assert intruder in analysis.pass_alive_black_territory
+    assert not analysis.pass_alive_white_groups
+
+    state = v3_state_from_board(
+        t,
+        black=np.flatnonzero(board == BLACK),
+        white=np.flatnonzero(board == WHITE),
+        phase=CLEANUP_2,
+        second_cleanup_start_colors=bytes(board.tolist()),
+    )
+    score, ownership, ownership_mask = final_v3_score(state, t, 0.5)
+    assert score.territory.black == 2
+    assert np.array_equal(ownership[intruder], np.asarray([1.0, 0.0, 0.0]))
+    assert ownership_mask[intruder] == 1.0
+
+
 def test_cube_seam_benson_shape_matches_interior_semantics():
     t = cube_topology(5)
     assert_black_pass_alive_with_two_regions(
@@ -213,8 +236,8 @@ def test_graph_isomorphic_relabel_preserves_pass_alive_independent_life_score_an
     life = independent_life_analysis(state.board, t)
     rlife = independent_life_analysis(rs.board, rt)
     assert len(life.black_territory) == len(rlife.black_territory)
-    score, _, _ = final_v3_score(state, t, 7.5)
-    rscore, _, _ = final_v3_score(rs, rt, 7.5)
+    score, _, _ = final_v3_score(state, t, 0.5)
+    rscore, _, _ = final_v3_score(rs, rt, 0.5)
     assert score.black == rscore.black
     assert score.white == rscore.white
     assert score.winner == rscore.winner

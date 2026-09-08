@@ -10,6 +10,7 @@ from .katago_v3 import (
     CLEANUP_2,
     MAIN,
     V3State,
+    _boardhistory_clear_white_bonus,
     _board_key,
     _state_key,
 )
@@ -78,7 +79,10 @@ def rebase_cleanup_training_state(state: V3State, target_phase: str) -> V3State:
     BoardHistory into encore phase 1 or 2. GoCube mirrors that by preserving the
     board and player to move while clearing history-dependent state. Captures are
     retained because KataGo stores them on Board, while GoCube stores their
-    equivalent count on V3State.
+    equivalent count on V3State. ``BoardHistory::clear`` also reconstructs
+    ``whiteBonusScore`` from the setup board and those captures; that
+    score-relevant offset must be rebuilt here rather than inferred from the
+    rebased move counters.
     """
 
     if target_phase not in (CLEANUP_1, CLEANUP_2):
@@ -93,6 +97,7 @@ def rebase_cleanup_training_state(state: V3State, target_phase: str) -> V3State:
         turns=0,
         consecutive_passes=0,
         captures=state.captures,
+        white_bonus_score=_boardhistory_clear_white_bonus(state.board, state.captures),
         previous_board=None,
         phase=target_phase,
         ko_recap_blocked=(),

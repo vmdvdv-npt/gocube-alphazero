@@ -25,6 +25,7 @@ from alphazero.envs.gocube.katago_v3 import (
     _pseudolegal_candidate,
     apply_v3_action,
     all_points_pass_alive,
+    independent_life_analysis,
     initial_v3_state,
     terminal_from_state,
     v3_state_from_board,
@@ -122,11 +123,26 @@ def _local_state_from_setup(topology: Topology, setup: dict[str, Any]):
             raise ValueError(f"point outside test board: {item}")
         return y * topology.size + x
 
+    capture_state = setup.get("captures", {})
+    # Native KataGo reports captures by captured colour; V3 stores them by
+    # capturing player.
+    captures = (
+        int(capture_state.get("white", 0)),
+        int(capture_state.get("black", 0)),
+    )
+    encore_phase = int(setup.get("encore_phase", 0))
+    phase = {0: MAIN, 1: CLEANUP_1, 2: CLEANUP_2}[encore_phase]
+    start_colors = setup.get("second_cleanup_start_colors")
+    if start_colors is not None:
+        start_colors = bytes(int(value) for value in start_colors)
     return v3_state_from_board(
         topology,
         black=(point(item) for item in setup.get("black", [])),
         white=(point(item) for item in setup.get("white", [])),
         current_player=0 if setup.get("next_player", "B") in ("B", "black") else 1,
+        captures=captures,
+        phase=phase,
+        second_cleanup_start_colors=start_colors,
     )
 
 
@@ -169,6 +185,24 @@ def local_snapshot(state, topology: Topology) -> dict[str, Any]:
         winner = terminal.winner
         if terminal.score is not None:
             score = float(terminal.score.white - terminal.score.black)
+    life = independent_life_analysis(state.board, topology)
+    formal_area = [0] * topology.point_count
+    for point in life.black_area:
+        formal_area[point] = 1
+    for point in life.white_area:
+        formal_area[point] = 2
+    start_colors = state.second_cleanup_start_colors
+    encore2 = start_colors is not None
+    if start_colors is None:
+        start_colors = bytes([0] * topology.point_count)
+    for point, value in enumerate(np.asarray(state.board).reshape(-1)):
+        # KataGo fills only still-empty entries after independent-life area is
+        # computed. A dead stone can therefore remain labelled for the
+        # opponent's area instead of overwriting that area with its own color.
+        if int(value) == 1 and formal_area[point] == 0 and (not encore2 or start_colors[point] == 1):
+            formal_area[point] = 1
+        elif int(value) == 2 and formal_area[point] == 0 and (not encore2 or start_colors[point] == 2):
+            formal_area[point] = 2
     return {
         "board": [int(value) for value in np.asarray(state.board).reshape(-1)],
         "next_player": "B" if state.current_player == 0 else "W",
@@ -188,6 +222,13 @@ def local_snapshot(state, topology: Topology) -> dict[str, Any]:
         "captures": {"black": int(state.captures[1]), "white": int(state.captures[0])},
         "all_points_pass_alive": all_points_pass_alive(state.board, topology),
         "encore_phase": {MAIN: 0, CLEANUP_1: 1, CLEANUP_2: 2, SCORED: 2, NO_RESULT: 0}[state.phase],
+        "formal_area": formal_area,
+        "white_bonus_score": float(state.white_bonus_score),
+        "second_cleanup_start_colors": (
+            list(state.second_cleanup_start_colors)
+            if state.second_cleanup_start_colors is not None
+            else [0] * topology.point_count
+        ),
     }
 
 
@@ -204,6 +245,9 @@ SNAPSHOT_FIELDS = (
     "final_score",
     "captures",
     "all_points_pass_alive",
+    "formal_area",
+    "white_bonus_score",
+    "second_cleanup_start_colors",
 )
 
 

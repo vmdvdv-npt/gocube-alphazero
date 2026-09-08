@@ -11,7 +11,8 @@ from .endgame import (
 )
 from .katago_v3 import (
     CLEANUP_1, CLEANUP_2, KATAGO_JAPANESE_ADJUDICATOR_V3,
-    KATAGO_REFERENCE_COMMIT, KATAGO_REFERENCE_VERSION, KATAGO_RULES_VERSION,
+    KATAGO_REFERENCE_COMMIT, KATAGO_REFERENCE_VERSION, KATAGO_RULES_IMPLEMENTATION_VERSION,
+    KATAGO_RULES_VERSION,
     MAIN, NO_RESULT, OBSERVATION_SCHEMA_V3, SCORED, IndependentLifeAnalysis,
     PassAliveAnalysis, V3IllegalMove, V3State, V3Terminal, V3TrainingTargets,
     VALUE_LOSS, VALUE_NO_RESULT, VALUE_TARGET_SEMANTICS, VALUE_TARGET_SIZE,
@@ -21,6 +22,7 @@ from .katago_v3 import (
     pass_alive_analysis, rules_fingerprint,
     terminal_from_state, v3_state_from_board, v3_valid_moves,
 )
+from .contract_versions import SCORE_INITIALIZATION_CONTRACT
 from .game import (
     Cube2ChineseGame, Cube2JapaneseGame, Cube2JapaneseV2Game,
     Cube3ChineseGame, Cube3JapaneseGame, Cube3JapaneseV2Game,

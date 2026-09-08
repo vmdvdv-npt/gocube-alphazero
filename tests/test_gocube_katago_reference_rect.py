@@ -26,8 +26,9 @@ def test_static_fixture_inventory_is_pinned_and_complete():
         "ko-recap-block", "pass-for-ko-form-1", "pass-for-ko-form-2",
         "repeated-ko-prevention", "pass-alive-terminal", "territory-scoring", "seki-tax",
         "prisoner-capture-contribution", "cleanup-2-compensation", "no-result-cycle-repetition",
+        "s1-setup-main-counterexample", "s1-setup-cleanup1-captures", "s1-setup-cleanup2-captures",
     }
-    assert len(fixtures) == 25
+    assert len(fixtures) == 28
     assert {fixture["id"] for fixture in fixtures} >= required
     for fixture in fixtures:
         assert fixture["katago_commit"] == "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"

@@ -23,6 +23,7 @@ from .contract_versions import SAMPLE_CLOCK_CONTRACT, SAMPLE_CLOCK_STATE_VERSION
 from .contract_versions import (
     OWNERSHIP_TARGET_SEMANTICS,
     REPLAY_FORMAT_VERSION,
+    SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
     TRAINING_CONTRACT_VERSION,
     VALUE_TARGET_SEMANTICS,
@@ -205,6 +206,7 @@ class SampleClockNNetWrapper(NNetWrapper):
             "gocube_value_target_semantics",
             "gocube_score_target_semantics",
             "gocube_ownership_target_semantics",
+            "gocube_score_initialization_contract",
         ):
             value = _optional_arg(self.args, key, None)
             if value is not None:
@@ -248,6 +250,7 @@ class SampleClockNNetWrapper(NNetWrapper):
             "value_target_semantics": VALUE_TARGET_SEMANTICS,
             "score_target_semantics": SCORE_TARGET_SEMANTICS,
             "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
+            "score_initialization_contract": SCORE_INITIALIZATION_CONTRACT,
             "effective_config_sha256": _optional_arg(
                 self.args, "effective_config_sha256", None
             ),
@@ -283,6 +286,7 @@ class SampleClockNNetWrapper(NNetWrapper):
                 "value_target_semantics": _optional_arg(self.args, "gocube_value_target_semantics", None),
                 "score_target_semantics": _optional_arg(self.args, "gocube_score_target_semantics", None),
                 "ownership_target_semantics": _optional_arg(self.args, "gocube_ownership_target_semantics", None),
+                "score_initialization_contract": _optional_arg(self.args, "gocube_score_initialization_contract", None),
             }
             for key, expected in expected_contract_fields.items():
                 if expected is not None and training_state.get(key) != expected:

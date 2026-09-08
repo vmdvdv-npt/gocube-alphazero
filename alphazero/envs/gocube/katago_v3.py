@@ -8,7 +8,6 @@ from typing import Iterable, Sequence
 import numpy as np
 
 from .core import BLACK, EMPTY, WHITE, FinalScore, StoneBreakdown, TerritoryBreakdown, TerritoryPoints, Topology
-
 MAIN = "main"
 CLEANUP_1 = "cleanup1"
 CLEANUP_2 = "cleanup2"
@@ -22,12 +21,15 @@ VALUE_WIN = 0
 VALUE_LOSS = 1
 VALUE_NO_RESULT = 2
 VALUE_TARGET_SIZE = 3
-VALUE_TARGET_SEMANTICS = "win-loss-noresult-v1"
+VALUE_TARGET_SEMANTICS = "win-loss-noresult-s1-v2"
 
 KATAGO_JAPANESE_ADJUDICATOR_V3 = "gocube-katago-japanese-v3"
 OBSERVATION_SCHEMA_V3 = "gocube-observation-v3"
 KATAGO_RULES_VERSION = 3
-KATAGO_RULES_IMPLEMENTATION_VERSION = 3
+# The scorer/setup contract changed in S1.  Keep this separate from the
+# upstream rules number: KataGo still supplies Rules V3, while this is the
+# version of our faithful state/adjudicator implementation.
+KATAGO_RULES_IMPLEMENTATION_VERSION = 4
 KATAGO_REFERENCE_COMMIT = "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
 KATAGO_REFERENCE_VERSION = "1.18.0+ Rules Version 3"
 
@@ -86,6 +88,11 @@ class V3State:
     turns: int = 0
     consecutive_passes: int = 0
     captures: tuple[int, int] = (0, 0)
+    # KataGo's BoardHistory::whiteBonusScore.  It is score-relevant state,
+    # not a value that can be inferred from whether MAIN moves happened.
+    # GoCube stores captures by capturing player: captures[0] is black's
+    # captured-white count and captures[1] is white's captured-black count.
+    white_bonus_score: float = 0.0
     previous_board: np.ndarray | None = None
     phase: str = MAIN
     ko_recap_blocked: tuple[int, ...] = ()
@@ -114,6 +121,7 @@ class V3State:
             and self.turns == other.turns
             and self.consecutive_passes == other.consecutive_passes
             and self.captures == other.captures
+            and self.white_bonus_score == other.white_bonus_score
             and self.phase == other.phase
             and self.ko_recap_blocked == other.ko_recap_blocked
             and self.phase_history == other.phase_history
@@ -262,7 +270,53 @@ class V3IllegalMove(ValueError):
 def initial_v3_state(topology: Topology) -> V3State:
     board = _readonly_board(np.zeros(topology.point_count, dtype=np.uint8), topology.point_count)
     key = _state_key(board, 0, ())
-    return V3State(board=board, phase_history=(key,), history_since_pass=(key,))
+    return V3State(
+        board=board,
+        white_bonus_score=0.0,
+        phase_history=(key,),
+        history_since_pass=(key,),
+    )
+
+
+def _validate_captures(captures: tuple[int, int]) -> tuple[int, int]:
+    try:
+        normalized = (int(captures[0]), int(captures[1]))
+    except (IndexError, TypeError, ValueError) as exc:
+        raise ValueError("captures must be a pair of non-negative integers") from exc
+    if any(isinstance(value, bool) or value < 0 for value in normalized):
+        raise ValueError("captures must be a pair of non-negative integers")
+    if tuple(captures) != normalized:
+        raise ValueError("captures must contain integer values")
+    return normalized
+
+
+def _validate_color_snapshot(colors: bytes | None, point_count: int) -> bytes | None:
+    if colors is None:
+        return None
+    normalized = bytes(colors)
+    if len(normalized) != point_count:
+        raise ValueError(
+            "second_cleanup_start_colors must contain one occupancy byte per point"
+        )
+    if any(value not in (EMPTY, BLACK, WHITE) for value in normalized):
+        raise ValueError("second_cleanup_start_colors contains invalid occupancy values")
+    return normalized
+
+
+def _boardhistory_clear_white_bonus(board: np.ndarray, captures: tuple[int, int]) -> float:
+    """Return the score offset initialized by pinned ``BoardHistory::clear``.
+
+    ``Board::numWhiteCaptures`` counts white stones captured by Black and
+    ``Board::numBlackCaptures`` counts black stones captured by White.  The
+    public V3 state stores the same information by capturing player, hence the
+    subtraction below.  This value is deliberately computed from the explicit
+    setup state and capture state, never from move counters.
+    """
+
+    black_stones = int(np.count_nonzero(np.asarray(board) == BLACK))
+    white_stones = int(np.count_nonzero(np.asarray(board) == WHITE))
+    black_captures, white_captures = captures
+    return float(black_stones - white_stones - black_captures + white_captures)
 
 
 def v3_state_from_board(
@@ -279,6 +333,15 @@ def v3_state_from_board(
     second_cleanup_start_colors: bytes | None = None,
     cleanup2_moves: tuple[int, int] = (0, 0),
 ) -> V3State:
+    # SCORED/NO_RESULT are retained for explicit test and compatibility
+    # fixtures that construct a terminal view directly. New setup/replay
+    # inputs should use one of the three encore phases.
+    if phase not in (MAIN, CLEANUP_1, CLEANUP_2, SCORED, NO_RESULT):
+        raise ValueError(f"unsupported V3 setup phase: {phase!r}")
+    if int(current_player) not in (0, 1):
+        raise ValueError("current_player must be 0 (black) or 1 (white)")
+    current_player = int(current_player)
+    captures = _validate_captures(captures)
     board = np.zeros(topology.point_count, dtype=np.uint8)
     for p in black:
         board[p] = BLACK
@@ -290,17 +353,23 @@ def v3_state_from_board(
     blocked = tuple(sorted(set(ko_recap_blocked)))
     key = _state_key(board, current_player, blocked)
     prev = None if previous_board is None else _readonly_board(previous_board, topology.point_count)
+    second_start = _validate_color_snapshot(second_cleanup_start_colors, topology.point_count)
+    if phase == CLEANUP_2:
+        second_start = _board_key(board) if second_start is None else second_start
+    elif second_start is not None:
+        raise ValueError("second_cleanup_start_colors is only valid in CLEANUP_2")
     return V3State(
         board=board,
         current_player=current_player,
         turns=turns,
         captures=captures,
+        white_bonus_score=_boardhistory_clear_white_bonus(board, captures),
         previous_board=prev,
         phase=phase,
         ko_recap_blocked=blocked,
         phase_history=(key,),
         history_since_pass=(key,),
-        second_cleanup_start_colors=second_cleanup_start_colors,
+        second_cleanup_start_colors=second_start,
         cleanup2_moves=cleanup2_moves,
         entered_cleanup1=phase in (CLEANUP_1, CLEANUP_2),
         entered_cleanup2=phase == CLEANUP_2,
@@ -569,10 +638,13 @@ def _placement(state: V3State, action: int, topology: Topology) -> V3State:
     cleanup2_moves = list(state.cleanup2_moves)
     main_moves = list(state.main_moves)
     cleanup1_moves = list(state.cleanup1_moves)
+    white_bonus_score = state.white_bonus_score
     if state.phase == MAIN:
         main_moves[state.current_player] += 1
+        white_bonus_score += 1.0 if state.current_player == 0 else -1.0
     elif state.phase == CLEANUP_1:
         cleanup1_moves[state.current_player] += 1
+        white_bonus_score += 1.0 if state.current_player == 0 else -1.0
     elif state.phase == CLEANUP_2:
         cleanup2_moves[state.current_player] += 1
     next_state = replace(
@@ -582,6 +654,7 @@ def _placement(state: V3State, action: int, topology: Topology) -> V3State:
         turns=state.turns + 1,
         consecutive_passes=0,
         captures=(captures[0], captures[1]),
+        white_bonus_score=white_bonus_score,
         previous_board=state.board,
         ko_recap_blocked=tuple(sorted(blocked)),
         ko_capture_history=ko_history,
@@ -774,7 +847,12 @@ def independent_life_analysis(board: np.ndarray, topology: Topology) -> Independ
 
 
 def _legacy_board_only_life_analysis(board: np.ndarray, topology: Topology) -> IndependentLifeAnalysis:
-    """Compatibility scoring view for states built without move history."""
+    """LEGACY/TEST ONLY: reproduce the pre-S1 board-only scoring view.
+
+    Production scoring must call :func:`independent_life_analysis` directly.
+    Keeping this helper named and isolated lets historical-audit tooling
+    quantify the old result without allowing telemetry to select it.
+    """
 
     empty_regions = _empty_regions(board, topology)
     dame_points: set[int] = set()
@@ -844,64 +922,64 @@ def _legacy_board_only_life_analysis(board: np.ndarray, topology: Topology) -> I
 
 
 def final_v3_score(state: V3State, topology: Topology, komi: float) -> tuple[FinalScore, np.ndarray, np.ndarray]:
-    start_colors = _board_key(state.board) if state.second_cleanup_start_colors is None else state.second_cleanup_start_colors
-    board, captures = state.board, state.captures
-    has_move_history = bool(any(state.main_moves))
-    life = (
-        independent_life_analysis(board, topology)
-        if has_move_history
-        else _legacy_board_only_life_analysis(board, topology)
+    """Score one formal V3 state using the single production semantics.
+
+    The pinned implementation separates board-area scoring from the
+    score-relevant ``whiteBonusScore`` initialized by ``BoardHistory::clear``.
+    Setup and replay therefore follow the same path.  In particular,
+    ``main_moves`` is retained as telemetry only and must never select a
+    scoring algorithm.
+    """
+
+    start_colors = (
+        _board_key(state.board)
+        if state.second_cleanup_start_colors is None
+        else state.second_cleanup_start_colors
     )
+    board, captures = state.board, state.captures
+    life = independent_life_analysis(board, topology)
     black_area = set(life.black_area)
     white_area = set(life.white_area)
-    if has_move_history:
-        black_score = float(len(black_area))
-        white_score = float(len(white_area))
-        # Independent-life area is scored point-for-point. Remaining stones
-        # are scored only when they existed at the start of CLEANUP_2 (or when
-        # the game never entered that phase), matching KataGo's start-color
-        # guard. The move bonus converts surviving stones into Japanese
-        # prisoners without adding captures a second time.
-        encore2 = state.second_cleanup_start_colors is not None
-        for point, value in enumerate(np.asarray(board).reshape(-1)):
-            color = int(value)
-            if (
-                color == BLACK
-                and point not in black_area
-                and point not in white_area
-                and (not encore2 or start_colors[point] == BLACK)
-            ):
-                black_score += 1.0
-            elif (
-                color == WHITE
-                and point not in white_area
-                and point not in black_area
-                and (not encore2 or start_colors[point] == WHITE)
-            ):
-                white_score += 1.0
-        white_bonus = (
-            state.main_moves[0] - state.main_moves[1]
-            + state.cleanup1_moves[0] - state.cleanup1_moves[1]
-        )
-        white_score += float(white_bonus)
-    else:
-        # Board-only fixtures cannot reconstruct KataGo's move bonus. Preserve
-        # the public score helper's historical Japanese interpretation for
-        # those synthetic states while real game histories use the exact path
-        # above.
-        penalties = [0, 0]
-        for point, value in enumerate(np.asarray(board).reshape(-1)):
-            color = int(value)
-            if color == BLACK and point not in black_area and start_colors[point] != BLACK:
-                penalties[0] += 1
-            elif color == WHITE and point not in white_area and start_colors[point] != WHITE:
-                penalties[1] += 1
-        black_score = float(
-            len(life.black_territory) + captures[0] + state.cleanup2_moves[0] - penalties[0]
-        )
-        white_score = float(
-            len(life.white_territory) + captures[1] + state.cleanup2_moves[1] - penalties[1]
-        )
+    black_score = float(len(black_area))
+    white_score = float(len(white_area))
+    # ``calculateIndependentLifeArea`` supplies the formal board area.  The
+    # remaining stones clause is the same guard used by KataGo's territory
+    # scorer: before encore 2 all remaining stones count; in encore 2 only
+    # stones that were present at its start count.
+    encore2 = state.second_cleanup_start_colors is not None
+    for point, value in enumerate(np.asarray(board).reshape(-1)):
+        color = int(value)
+        if (
+            color == BLACK
+            and point not in black_area
+            and point not in white_area
+            and (not encore2 or start_colors[point] == BLACK)
+        ):
+            black_score += 1.0
+        elif (
+            color == WHITE
+            and point not in white_area
+            and point not in black_area
+            and (not encore2 or start_colors[point] == WHITE)
+        ):
+            white_score += 1.0
+    formal_black = set(black_area)
+    formal_white = set(white_area)
+    for point, value in enumerate(np.asarray(board).reshape(-1)):
+        color = int(value)
+        if color == BLACK and point not in formal_white and (
+            point in formal_black or not encore2 or start_colors[point] == BLACK
+        ):
+            formal_black.add(point)
+        elif color == WHITE and point not in formal_black and (
+            point in formal_white or not encore2 or start_colors[point] == WHITE
+        ):
+            formal_white.add(point)
+    # Store the white-oriented offset on the state, just as KataGo stores it
+    # on BoardHistory.  The public FinalScore keeps the existing breakdown
+    # convention: the offset is represented on white so that white-black is
+    # authoritative; it is not a territory/prisoner decomposition.
+    white_score += float(state.white_bonus_score)
     white_score += float(komi)
     territory = TerritoryBreakdown(black=len(life.black_territory), white=len(life.white_territory), neutral=len(life.dame), seki=len(life.seki))
     territory_points = TerritoryPoints(black=life.black_territory, white=life.white_territory, neutral=life.dame, seki=life.seki)
@@ -913,12 +991,10 @@ def final_v3_score(state: V3State, topology: Topology, komi: float) -> tuple[Fin
         captures=captures, prisoners=captures, dead_stones=StoneBreakdown(0, 0), winner=winner, margin=abs(black_score - white_score),
     )
     labels = np.full(topology.point_count, 2, dtype=np.int64)
-    for p in life.black_area:
-        if int(board[p]) == BLACK or p in life.black_territory:
-            labels[p] = 0
-    for p in life.white_area:
-        if int(board[p]) == WHITE or p in life.white_territory:
-            labels[p] = 1
+    for p in formal_black:
+        labels[p] = 0
+    for p in formal_white:
+        labels[p] = 1
     ownership = np.zeros((topology.point_count, 3), dtype=np.float32)
     ownership[np.arange(topology.point_count), labels] = 1.0
     ownership_mask = np.ones(topology.point_count, dtype=np.float32)
