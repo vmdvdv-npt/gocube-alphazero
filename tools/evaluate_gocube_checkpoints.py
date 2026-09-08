@@ -10,6 +10,7 @@ import math
 import os
 import random
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,7 @@ from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.envs.gocube.observation import GoCubeObservationAdapter
 from alphazero.envs.gocube.production_contract import GOCUBE_KOMI
+from alphazero.envs.gocube.b_experiment_contract import B_EXPERIMENT_CONTRACT_ID
 
 from tools.gocube_checkpoint_arena_complete import (
     _authoritative_game_class,
@@ -55,6 +57,18 @@ def load_network(game_cls, checkpoint_path: Path) -> NNetWrapper:
     """Compatibility wrapper for callers of the old helper."""
 
     return _load_network(game_cls, checkpoint_path, "cpu")
+
+
+def reject_b_experiment_checkpoint(payload: object, label: str) -> None:
+    """Prevent the legacy Wilson evaluator from becoming a B evaluator."""
+
+    args = payload.get("args") if isinstance(payload, Mapping) else None
+    marker = args.get("gocube_experiment_contract_id") if isinstance(args, Mapping) else None
+    if marker == B_EXPERIMENT_CONTRACT_ID:
+        raise RuntimeError(
+            "B experiment checkpoints require tools/evaluate_gocube_b_experiment.py; "
+            "aggregate Wilson evaluation is not valid for the B experiment."
+        )
 
 
 def main() -> int:
@@ -92,6 +106,8 @@ def main() -> int:
 
     candidate_payload = _load_payload(candidate_path)
     reference_payload = _load_payload(reference_path)
+    reject_b_experiment_checkpoint(candidate_payload, "candidate")
+    reject_b_experiment_checkpoint(reference_payload, "reference")
     candidate_contract, candidate_game_cls = _resolve_checkpoint_contract(
         candidate_payload["args"], "candidate"
     )
