@@ -34,6 +34,7 @@ _RESUME_MANIFEST_FIELDS = (
     "katago_reference_commit",
     "rules_fingerprint",
     "komi",
+    "model_profile",
     "master_seed",
     "replay_format_version",
     "value_target_semantics",
@@ -93,6 +94,7 @@ def effective_config(args: Any, game_cls) -> dict[str, object]:
         "rules_implementation_version": game_cls.KATAGO_RULES_IMPLEMENTATION_VERSION,
         "score_initialization_contract": SCORE_INITIALIZATION_CONTRACT,
         "network_type": getattr(args, "nnet_type", None),
+        "model_profile": getattr(args, "gocube_model_profile", "baseline"),
         "observation_shape": list(game_cls.observation_size()),
         "action_size": int(game_cls.action_size()),
         "action_schema": contract.action_schema,
@@ -188,6 +190,7 @@ def validate_existing_reproducible_manifest(
         "katago_reference_commit": game_cls.KATAGO_REFERENCE_COMMIT,
         "rules_fingerprint": game_cls.rules_fingerprint(),
         "komi": float(game_cls.KOMI),
+        "model_profile": getattr(args, "gocube_model_profile", "baseline"),
         "master_seed": int(getattr(args, "master_seed", 0)),
         "replay_format_version": REPLAY_FORMAT_VERSION,
         "value_target_semantics": VALUE_TARGET_SEMANTICS,
@@ -325,6 +328,7 @@ def create_reproducible_manifest(
         "sample_clock_contract": getattr(args, "gocube_training_contract", "sample-clock-v2"),
         "training_contract_version": TRAINING_CONTRACT_VERSION,
         "komi": float(game_cls.KOMI),
+        "model_profile": getattr(args, "gocube_model_profile", "baseline"),
     }
     atomic_json_write(manifest, checkpoint_run / RUN_MANIFEST_FILENAME)
     return manifest

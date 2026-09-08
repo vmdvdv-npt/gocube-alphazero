@@ -6,6 +6,7 @@ import numpy as np
 
 from .katago_v3 import terminal_from_state
 from .pinned_game import (
+    BASELINE_NETWORK_ARCHITECTURE_ID,
     PinnedCube2JapaneseGame,
     PinnedCube3JapaneseGame,
     PinnedCube4JapaneseGame,
@@ -15,6 +16,7 @@ from .pinned_game import (
     PinnedTorus9JapaneseGame,
     PinnedTorus13JapaneseGame,
     PinnedTorus19JapaneseGame,
+    structural_pinned_game_class,
 )
 from .game import (
     Cube2JapaneseGame,
@@ -231,3 +233,72 @@ def diversified_pinned_game_class(base_game_cls):
         return _DIVERSIFIED_BY_BASE[base_game_cls]
     except KeyError as exc:
         raise ValueError(f"No diversified pinned KataGo wrapper for {base_game_cls!r}") from exc
+
+
+_BASELINE_DIVERSIFIED_BY_BASE = {}
+
+
+def diversified_baseline_pinned_game_class(base_game_cls):
+    """Return the explicit production baseline profile wrapper."""
+
+    try:
+        return _BASELINE_DIVERSIFIED_BY_BASE[base_game_cls]
+    except KeyError:
+        historical = diversified_pinned_game_class(base_game_cls)
+        topology = base_game_cls.logical_topology()
+        name = f"BaselineDiversifiedPinned{base_game_cls.__name__}"
+        result = type(
+            name,
+            (historical,),
+            {
+                "__module__": __name__,
+                "GOCUBE_MODEL_PROFILE": "baseline",
+                "GOCUBE_NETWORK_ARCHITECTURE_ID": BASELINE_NETWORK_ARCHITECTURE_ID,
+                "STRUCTURAL_FEATURE_SCHEMA": None,
+                "STRUCTURAL_FEATURE_CHANNELS": 0,
+                "GOCUBE_GAME_CLASS_ID": (
+                    f"gocube-baseline-diversified-pinned-{topology.kind}-{int(topology.size)}"
+                ),
+            },
+        )
+        globals()[name] = result
+        _BASELINE_DIVERSIFIED_BY_BASE[base_game_cls] = result
+        return result
+
+
+_G1_DIVERSIFIED_BY_BASE = {}
+
+
+def diversified_structural_pinned_game_class(base_game_cls):
+    """Return the production G1 wrapper with structural observation channels."""
+
+    try:
+        return _G1_DIVERSIFIED_BY_BASE[base_game_cls]
+    except KeyError:
+        pinned = structural_pinned_game_class(base_game_cls)
+        topology = base_game_cls.logical_topology()
+        name = f"G1DiversifiedPinned{base_game_cls.__name__}"
+        result = type(
+            name,
+            (_DiversifiedStartMixin, pinned),
+            {
+                "__module__": __name__,
+                "GOCUBE_MODEL_PROFILE": "g1",
+                "GOCUBE_GAME_CLASS_ID": (
+                    f"gocube-g1-diversified-pinned-{topology.kind}-{int(topology.size)}"
+                ),
+            },
+        )
+        # Keep the generated class importable for Arena/self-play workers.
+        globals()[name] = result
+        _G1_DIVERSIFIED_BY_BASE[base_game_cls] = result
+        return result
+
+
+g1_diversified_pinned_game_class = diversified_structural_pinned_game_class
+
+# See the analogous eager materialization in ``pinned_game``: these bindings
+# make generated worker payloads pickleable under multiprocessing spawn.
+for _base_game_cls in _DIVERSIFIED_BY_BASE:
+    diversified_baseline_pinned_game_class(_base_game_cls)
+    diversified_structural_pinned_game_class(_base_game_cls)

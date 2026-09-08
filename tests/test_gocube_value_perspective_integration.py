@@ -20,14 +20,14 @@ from alphazero.envs.gocube import (
 )
 from alphazero.envs.gocube.katago_train import build_katago_training_args, parse_args
 from alphazero.envs.gocube.katago_v3 import apply_v3_action
-from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
+from alphazero.envs.gocube.diversified_game import diversified_structural_pinned_game_class
 
 
-GAME = diversified_pinned_game_class(Cube4JapaneseGame)
+GAME = diversified_structural_pinned_game_class(Cube4JapaneseGame)
 
 
 def _search_args():
-    game_cls, args = build_katago_training_args(parse_args([]))
+    game_cls, args = build_katago_training_args(parse_args(["--model-profile", "g1"]))
     assert game_cls is GAME
     args._num_players = game_cls.num_players() + game_cls.has_draw()
     args.gocube_win_loss_utility_factor = 1.0

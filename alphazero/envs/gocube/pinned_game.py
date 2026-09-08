@@ -35,6 +35,16 @@ from .selfplay_semantics import (
     PINNED_OBSERVATION_SCHEMA,
     apply_pass_would_end_phase_feature,
 )
+from .structural import (
+    STRUCTURAL_FEATURE_CHANNELS,
+    STRUCTURAL_FEATURE_SCHEMA,
+    structural_feature_matrix,
+)
+
+
+G1_OBSERVATION_SCHEMA = "gocube-observation-v5-structural-features"
+G1_NETWORK_ARCHITECTURE_ID = "gocube-graph-structural-v1"
+BASELINE_NETWORK_ARCHITECTURE_ID = "gocube-graph-v1"
 
 
 # =============================================================================
@@ -354,3 +364,73 @@ def pinned_game_class(base_game_cls):
         return _PINNED_BY_BASE[base_game_cls]
     except KeyError as exc:
         raise ValueError(f"No pinned KataGo V3 wrapper for {base_game_cls!r}") from exc
+
+
+class _StructuralObservationMixin:
+    """Append topology-only structural channels after pinned V3 channels."""
+
+    STRUCTURAL_FEATURE_SCHEMA = STRUCTURAL_FEATURE_SCHEMA
+    STRUCTURAL_FEATURE_CHANNELS = STRUCTURAL_FEATURE_CHANNELS
+
+    @classmethod
+    def observation_size(cls) -> tuple[int, int, int]:
+        return (
+            int(cls._G1_BASE_OBSERVATION_FEATURES) + STRUCTURAL_FEATURE_CHANNELS,
+            cls.logical_topology().point_count,
+            1,
+        )
+
+    def observation(self):
+        result = super().observation()
+        structural = structural_feature_matrix(self.logical_topology())
+        expected_shape = (STRUCTURAL_FEATURE_CHANNELS, self.logical_topology().point_count, 1)
+        if structural.shape != expected_shape or result.shape[0] != expected_shape[0] + int(
+            self._G1_BASE_OBSERVATION_FEATURES
+        ):
+            raise RuntimeError("G1 structural observation shape mismatch")
+        result[-STRUCTURAL_FEATURE_CHANNELS:] = structural
+        return result
+
+
+_STRUCTURAL_PINNED_BY_BASE = {}
+
+
+def structural_pinned_game_class(base_game_cls):
+    """Return the stable pinned V3 class carrying the G1 channels."""
+
+    try:
+        return _STRUCTURAL_PINNED_BY_BASE[base_game_cls]
+    except KeyError:
+        pinned = pinned_game_class(base_game_cls)
+        topology = base_game_cls.logical_topology()
+        name = f"G1Pinned{base_game_cls.__name__}"
+        result = type(
+            name,
+            (_StructuralObservationMixin, pinned),
+            {
+                "__module__": __name__,
+                "_G1_BASE_OBSERVATION_FEATURES": int(pinned.OBSERVATION_FEATURES),
+                "OBSERVATION_FEATURES": int(pinned.OBSERVATION_FEATURES) + STRUCTURAL_FEATURE_CHANNELS,
+                "OBSERVATION_SCHEMA": G1_OBSERVATION_SCHEMA,
+                "GOCUBE_NETWORK_ARCHITECTURE_ID": G1_NETWORK_ARCHITECTURE_ID,
+                "GOCUBE_MODEL_PROFILE": "g1",
+                "GOCUBE_GAME_CLASS_ID": (
+                    f"gocube-g1-pinned-{topology.kind}-{int(topology.size)}"
+                ),
+            },
+        )
+        # Dynamic classes are intentionally cached, but they also need a
+        # module-level binding so multiprocessing can pickle game instances.
+        globals()[name] = result
+        _STRUCTURAL_PINNED_BY_BASE[base_game_cls] = result
+        return result
+
+
+# Explicitly named aliases make the new contract discoverable without making
+# historical pinned classes change their observation schema.
+g1_pinned_game_class = structural_pinned_game_class
+
+# Materialize the supported variants at import time so they are importable in
+# multiprocessing spawn mode as well as fork mode.
+for _base_game_cls in _PINNED_BY_BASE:
+    structural_pinned_game_class(_base_game_cls)

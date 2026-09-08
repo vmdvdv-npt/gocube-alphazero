@@ -1,9 +1,14 @@
 {
-  "baseline_commit": "cdd4aff015455299e0439abcdb3e942d46c3fe29",
+  "architecture_reference_commit": "adb8d9ca138d461cc3324c44930458561a031710",
+  "reference_scope": "architecture-search-training-hyperparameters",
+  "model_profile": "baseline",
   "architecture": {
     "network_class": "alphazero.envs.gocube.network.GraphNet",
     "observation_shape": [18, 96, 1],
     "action_size": 97,
+    "network_architecture_id": "gocube-graph-v1",
+    "structural_feature_schema": null,
+    "structural_feature_channels": 0,
     "value_output_size": 3,
     "auxiliary_heads": ["ownership", "score"],
     "num_channels": 64,
@@ -43,7 +48,6 @@
   "rules": {
     "katago_reference_commit": "f6bc4b19a1686caa2d088b56251e8c11c8be6d51",
     "rules_version": 3,
-    "rules_implementation_version": 3,
     "ko_rule": "SIMPLE",
     "scoring_rule": "TERRITORY",
     "tax_rule": "SEKI",
@@ -55,9 +59,10 @@
     "size": 4,
     "point_count": 96
   },
-  "allowed_changes": [
+  "allowed_non_architecture_changes": [
     "replay_format_version",
     "training_target_semantics",
+    "rules_implementation_version",
     "sample_clock_contract_version",
     "auxiliary_target_masks",
     "metadata_schema",

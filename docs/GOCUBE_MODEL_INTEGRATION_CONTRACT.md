@@ -22,6 +22,29 @@ PointId sequence.  `adjacency_fingerprint` is the digest of the neighbor table
 in that sequence.  They are deterministic and do not use Python's process-
 dependent `hash()`.
 
+## Production model profiles
+
+The production KataGo training path has one explicit architecture selector:
+`--model-profile baseline` or `--model-profile g1`.  The default is the
+reproducible `baseline` profile, so G1 is not an implicit production default.
+Both profiles use the same training, self-play, replay, and evaluation path;
+the selector records the architecture and structural-channel contract in the
+effective configuration and resume manifest.
+
+The baseline profile keeps the historical graph architecture, observation
+shape `(18, 96, 1)` for Cube 4, architecture ID `gocube-graph-v1`, and zero
+structural channels.  The explicit G1 profile uses shape `(20, 96, 1)`,
+architecture ID `gocube-graph-structural-v1`, and two structural channels.
+Future B0/B1 profiles should be added to this same selector rather than
+creating a second production training path.
+
+`tests/fixtures/gocube_production_profile_baseline.json` is an architecture,
+search-budget, optimizer, and training-hyperparameter reference for the
+baseline profile.  Its `architecture_reference_commit` is not a complete
+rules snapshot, and its `reference_scope` makes that boundary explicit.  The
+fixture intentionally does not freeze the local rules implementation version;
+the final B0 freeze happens only after S1, S2, S3, H1, and M1 are integrated.
+
 The compact manifest is authoritative only when it contains the complete
 contract.  The loader reads checkpoint metadata before constructing a network,
 resolves the exact compatible game class, compares it with the catalog
@@ -31,10 +54,28 @@ topology/size-only resolver is reserved for explicit historical V1/V2/V3
 manifests, where the terminal-adjudicator version is part of the legacy
 semantics.
 
-The current pinned training builder records the V4 observation contract with
-shape `(18, 96, 1)`.  This shape is metadata-derived and is not a universal
-assumption for historical models.  Historical checkpoints remain loadable only
-under their actual saved semantics; no metadata is renamed in place.
+The explicit G1 profile records the structural observation contract with shape
+`(20, 96, 1)` for Cube 4 and architecture ID
+`gocube-graph-structural-v1`.  The first 18 channels retain the pinned V3
+observation; channels 18 and 19 are, respectively, binary graph-triangle
+membership and normalized shortest-path distance to the triangle point set.
+The feature matrix is computed once per topology from canonical adjacency and
+is cached; it is independent of stones and contains no PointId embedding.
+
+For a topology with triangles, normalization is
+`distance / max(1, max_distance)`, where `max_distance` is the largest BFS
+distance in that topology.  A topology without triangles gets zeros in both
+channels.  Cube 4 has 8 triangles and 24 participating points; Cube 2--7 and
+the supported Torus topologies use the same graph algorithm without a
+Cube-4-specific special case.
+
+G1 is rotation/permutation equivariant: all point-indexed inputs and outputs
+use the same canonical permutation, while value, score, and PASS remain
+invariant.  `gocube-observation-v5-structural-features` and
+`gocube-graph-structural-v1` are new identities.  Historical V1/V2/V3/V4
+models keep their original identities and shapes.  Old checkpoints and replay
+observations are not exact-resume compatible with G1; no input-weight padding
+or silent replay migration is performed.
 
 Inference and training curriculum are separate.  Service and evaluation use
 the resolved observation/rules/action/topology/network/search contract, but do

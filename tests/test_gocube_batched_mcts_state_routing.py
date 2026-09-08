@@ -8,20 +8,20 @@ import torch
 from alphazero.MCTS import MCTS
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube import CLEANUP_1, CLEANUP_2, Cube4JapaneseGame, NO_RESULT, SCORED
-from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
+from alphazero.envs.gocube.diversified_game import diversified_structural_pinned_game_class
 from alphazero.envs.gocube.katago_train import build_katago_training_args, parse_args
 from alphazero.envs.gocube.katago_v3 import _state_key, apply_v3_action, initial_v3_state
 from alphazero.search_contract import SearchOutput
 
 
-GAME = diversified_pinned_game_class(Cube4JapaneseGame)
+GAME = diversified_structural_pinned_game_class(Cube4JapaneseGame)
 SEED = 20260907
 SIMS = 2
 ATOL = 1.0e-6
 
 
 def _search_args():
-    game_cls, args = build_katago_training_args(parse_args([]))
+    game_cls, args = build_katago_training_args(parse_args(["--model-profile", "g1"]))
     assert game_cls is GAME
     assert float(args.gocube_komi) == 0.5
     args._num_players = GAME.num_players() + GAME.has_draw()
