@@ -104,6 +104,10 @@
     ],
     "cleanup_metadata": {},
     "expected": {
+      "control_points": [
+        "front:0:1",
+        "left:0:2"
+      ],
       "group_count": 2,
       "not_adjacent": true
     },
@@ -252,6 +256,7 @@
     "cleanup_metadata": {},
     "expected": {
       "capture_count": 4,
+      "captured_anchor": "front:0:0",
       "captured_group_count": 3,
       "legal": true,
       "own_liberties_after": 4
@@ -320,6 +325,12 @@
     "expected": {
       "capture_count": 4,
       "captured_group_count": 4,
+      "captured_neighbors": [
+        "top:3:1",
+        "front:0:2",
+        "front:1:1",
+        "front:0:0"
+      ],
       "legal": true,
       "same_group_not_double_counted": true
     },
@@ -382,6 +393,7 @@
     ],
     "cleanup_metadata": {},
     "expected": {
+      "action": "front:0:1",
       "capture_count": 0,
       "legal": false,
       "reason": "suicide"
@@ -429,6 +441,10 @@
     ],
     "cleanup_metadata": {},
     "expected": {
+      "anchor_points": [
+        "front:1:2",
+        "front:2:1"
+      ],
       "status": "unknown",
       "structural": "two_empty_components"
     },
@@ -475,6 +491,7 @@
     ],
     "cleanup_metadata": {},
     "expected": {
+      "empty_anchor": "front:0:0",
       "status": "unknown",
       "structural": "mixed_border"
     },
@@ -523,6 +540,10 @@
     ],
     "cleanup_metadata": {},
     "expected": {
+      "anchor_points": [
+        "front:0:1",
+        "left:0:2"
+      ],
       "crosses_seam": true,
       "region_count": "independent_graph"
     },
@@ -567,6 +588,9 @@
     "expected": {
       "score": "unknown",
       "shared_empty_region": true,
+      "shared_liberty_points": [
+        "front:0:1"
+      ],
       "status": "structural-only"
     },
     "external_context": {},
@@ -613,6 +637,10 @@
     ],
     "cleanup_metadata": {},
     "expected": {
+      "anchor_points": [
+        "front:1:1",
+        "back:1:1"
+      ],
       "neutral_region": true,
       "score": "unknown",
       "status": "structural-only"
@@ -838,6 +866,11 @@
         "front",
         "left",
         "top"
+      ],
+      "path_points": [
+        "front:0:0",
+        "left:0:3",
+        "top:3:0"
       ]
     },
     "external_context": {},
@@ -1057,7 +1090,10 @@
     ],
     "cleanup_metadata": {},
     "expected": {
-      "intruder": "white:front:2:2",
+      "intruder": {
+        "color": "white",
+        "point": "front:2:2"
+      },
       "pass_alive_area": "pending_independent_proof",
       "score": "unknown"
     },

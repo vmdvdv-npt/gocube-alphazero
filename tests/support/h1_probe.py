@@ -119,13 +119,23 @@ def bounded_reachable_states(
 def classify_search_result(report: ObservationProbeReport, *, searched_categories: Sequence[str]) -> dict[str, Any]:
     """Produce the bounded-search wording used by the H1 findings report."""
 
+    found_categories = {
+        category
+        for collision in report.semantic_collisions
+        for category in collision.categories
+    }
+    not_found_categories = []
+    for category in searched_categories:
+        if category not in found_categories and category not in not_found_categories:
+            not_found_categories.append(category)
     return {
         "found": [collision.observation_digest for collision in report.semantic_collisions],
+        "found_categories": sorted(found_categories),
         "same_observation_non_ambiguous": [
             collision.observation_digest
             for collision in report.collisions
             if not collision.semantic_collision
         ],
-        "not_found_within_search": list(searched_categories),
+        "not_found_within_search": not_found_categories,
         "bounded": True,
     }

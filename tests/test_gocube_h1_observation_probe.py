@@ -8,6 +8,7 @@ from alphazero.envs.gocube.katago_v3 import apply_v3_action, initial_v3_state, v
 from tests.support.h1_probe import (
     ReachableSample,
     bounded_reachable_states,
+    classify_search_result,
     find_observation_collisions,
     stable_observation_bytes,
 )
@@ -28,6 +29,22 @@ def test_observation_collision_probe_uses_stable_bytes_and_detects_semantic_diff
     assert stable_observation_bytes(np.zeros((2, 3), dtype=np.float32)) == stable_observation_bytes(
         np.zeros((2, 3), dtype=np.float32)
     )
+
+
+def test_classify_search_result_reports_only_categories_without_semantic_collision():
+    samples = (
+        ReachableSample("found-a", "A", category="found"),
+        ReachableSample("found-b", "B", category="found"),
+        ReachableSample("not-found", "C", category="not_found"),
+    )
+    report = find_observation_collisions(
+        samples,
+        observation_builder=lambda state: np.zeros((1, 1), dtype=np.float32) if state in ("A", "B") else np.ones((1, 1), dtype=np.float32),
+        semantic_signature=lambda state: state,
+    )
+    result = classify_search_result(report, searched_categories=("found", "not_found"))
+    assert result["found_categories"] == ["found"]
+    assert result["not_found_within_search"] == ["not_found"]
 
 
 def test_h1_probe_can_enumerate_legal_reachable_v3_states_without_global_rng():

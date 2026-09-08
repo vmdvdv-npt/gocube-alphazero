@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from alphazero.envs.gocube.core import cube_topology
 
@@ -56,6 +59,26 @@ def test_product_boundary_export_preserves_main_and_cleanup_sections(tmp_path):
     document = json.loads(output.read_text(encoding="utf-8"))
     assert document["schema"] == PRODUCT_BOUNDARY_SCHEMA
     assert [item["fixture_id"] for item in document["fixtures"]] == [cleanup.id, early.id]
+
+
+def test_product_boundary_requires_consecutive_passes_not_any_two_passes():
+    topology = cube_topology(4)
+    early = next(item for item in cube_verification_fixtures() if item.id == "cube4_early_termination_boundary_001")
+    interrupted = replace(
+        early,
+        id="cube4_pass_move_pass_not_boundary_001",
+        actions=("PASS", "front:0:0", "PASS"),
+    )
+    with pytest.raises(ValueError, match="two MAIN PASS"):
+        export_product_boundary_fixture(interrupted, topology)
+
+    resumed = replace(
+        interrupted,
+        id="cube4_pass_move_pass_pass_boundary_001",
+        actions=("PASS", "front:0:0", "PASS", "PASS"),
+    )
+    boundary = export_product_boundary_fixture(resumed, topology)
+    assert "front:0:0" in boundary.board_after_first_pass["white"]
 
 
 def test_corpus_counts_are_reportable_without_a_statistical_rotation_multiplier():

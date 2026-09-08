@@ -57,19 +57,20 @@ def export_product_boundary_fixture(
     board = fixture.board(topology.index_by_id)
     adjacency = topology.neighbors_by_index
     player = BLACK if fixture.to_move == "black" else WHITE
-    pass_count = 0
+    consecutive_passes = 0
     first_pass_board: tuple[int, ...] | None = None
     second_pass_board: tuple[int, ...] | None = None
     captures = []
     for action_number, action in enumerate(fixture.actions):
         if action in ("PASS", "pass"):
-            pass_count += 1
-            if pass_count == 1:
+            consecutive_passes += 1
+            if consecutive_passes == 1:
                 first_pass_board = board
-            elif pass_count == 2:
+            elif consecutive_passes == 2:
                 second_pass_board = board
             player = WHITE if player == BLACK else BLACK
             continue
+        consecutive_passes = 0
         result = apply_move(board, player, topology.point_index(action), adjacency)
         if result.captured_points:
             captures.append(

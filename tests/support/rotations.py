@@ -143,11 +143,23 @@ def _rotate_payload(value: Any, rotation: CubeRotation, topology: Any, key: str 
     if isinstance(value, str) and value in point_id_set:
         return topology.point_id(rotation.apply_point(topology.point_index(value)))
     if isinstance(value, dict):
-        return {item_key: _rotate_payload(item, rotation, topology, str(item_key)) for item_key, item in value.items()}
+        rotated = {}
+        for item_key, item in value.items():
+            rotated_key = (
+                topology.point_id(rotation.apply_point(topology.point_index(item_key)))
+                if isinstance(item_key, str) and item_key in point_id_set
+                else item_key
+            )
+            rotated[rotated_key] = _rotate_payload(item, rotation, topology)
+        return rotated
     if isinstance(value, tuple):
         return tuple(_rotate_payload(item, rotation, topology, key) for item in value)
     if isinstance(value, list):
         return [_rotate_payload(item, rotation, topology, key) for item in value]
+    if isinstance(value, frozenset):
+        return frozenset(_rotate_payload(item, rotation, topology, key) for item in value)
+    if isinstance(value, set):
+        return {_rotate_payload(item, rotation, topology, key) for item in value}
     return value
 
 

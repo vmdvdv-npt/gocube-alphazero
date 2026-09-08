@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import replace
+import re
+from typing import Any
 
 import pytest
 
@@ -14,6 +17,39 @@ from tests.support.rotations import cube_rotations, rotate_board, rotate_board_s
 
 def _fixture(fixture_id):
     return next(item for item in cube_verification_fixtures() if item.id == fixture_id)
+
+
+def _point_tokens(value: Any, topology) -> tuple[str, ...]:
+    point_ids = set(topology.point_ids)
+    tokens = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in point_ids:
+                tokens.append(key)
+            tokens.extend(_point_tokens(item, topology))
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            tokens.extend(_point_tokens(item, topology))
+    elif isinstance(value, str) and value in point_ids:
+        tokens.append(value)
+    return tuple(tokens)
+
+
+def _strings(value: Any) -> tuple[str, ...]:
+    if isinstance(value, dict):
+        return tuple(
+            item
+            for key, nested in value.items()
+            for item in ((key,) if isinstance(key, str) else ()) + _strings(nested)
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(item for nested in value for item in _strings(nested))
+    return (value,) if isinstance(value, str) else ()
+
+
+ROTATION_SAFE_FIXTURE_IDS = tuple(
+    fixture.id for fixture in cube_verification_fixtures() if fixture.rotation_safe
+)
 
 
 @pytest.mark.parametrize("size", (2, 3, 4, 5, 6, 7))
@@ -90,6 +126,25 @@ def test_rotation_maps_true_and_false_ko_proofs_without_partial_state_rotation()
                 topology.neighbors_by_index,
             )
             assert proof.is_simple_ko is expected
+
+
+@pytest.mark.parametrize("fixture_id", ROTATION_SAFE_FIXTURE_IDS)
+def test_rotation_rotates_all_rotation_safe_point_bearing_expected_state(fixture_id):
+    topology = cube_topology(4)
+    fixture = _fixture(fixture_id)
+    original_tokens = _point_tokens(fixture.expected, topology)
+    assert original_tokens, f"{fixture_id} must carry point-bearing expected state"
+    assert not any(
+        re.fullmatch(r"(?:black|white):[^:]+:\d+:\d+", value)
+        for value in _strings(fixture.expected)
+    )
+    for rotation in cube_rotations(topology):
+        rotated = rotate_fixture(fixture, topology, rotation)
+        expected_tokens = tuple(
+            topology.point_id(rotation.apply_point(topology.point_index(point)))
+            for point in original_tokens
+        )
+        assert Counter(_point_tokens(rotated.expected, topology)) == Counter(expected_tokens)
 
 
 def test_state_rotation_moves_previous_board_masks_and_cleanup_start_colors():
