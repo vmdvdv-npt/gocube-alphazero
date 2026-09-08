@@ -44,15 +44,6 @@ B_STATISTICAL_METHOD_IDENTIFIER = (
 B_BOOTSTRAP_REPLICATES = 10_000
 B_BOOTSTRAP_SEED = 20260908
 B_GAMES_PER_POSITION = 2
-B_REGISTERED_EVALUATION_CLOCK = "cumulative_new_samples"
-B_REGISTERED_EVALUATION_MILESTONES = (
-    10_000_000,
-    20_000_000,
-    30_000_000,
-    40_000_000,
-)
-B_FINAL_EVALUATION_CLOCK = B_REGISTERED_EVALUATION_CLOCK
-B_FINAL_EVALUATION_MILESTONE = B_REGISTERED_EVALUATION_MILESTONES[-1]
 B_EXTENSION_CRITERION_ID = (
     "extend-to-five-seeds-only-if-mandatory-seed-bootstrap-ambiguity-or-variance-v1"
 )
@@ -75,30 +66,32 @@ B_HELDOUT_SUITE_PATH = canonical_suite_path()
 
 
 def require_registered_b_evaluation_target(
-    scientific_clock: str,
+    scientific_clock: object,
     scientific_milestone: object,
     *,
+    registered_clock: str,
+    registered_milestones: Sequence[int],
     final_only: bool = False,
 ) -> int:
-    """Reject clocks/targets outside the registered B evaluation schedule."""
+    """Reject clocks/targets outside one immutable B contract schedule."""
 
-    if scientific_clock != B_REGISTERED_EVALUATION_CLOCK:
+    if scientific_clock != registered_clock:
         raise ValueError(
-            "B evaluation requires the registered scientific clock "
-            f"{B_REGISTERED_EVALUATION_CLOCK!r}"
+            "B evaluation requires the contract scientific clock "
+            f"{registered_clock!r}"
         )
     if isinstance(scientific_milestone, bool) or not isinstance(scientific_milestone, int):
         raise ValueError("B evaluation milestone must be an integer")
     milestone = scientific_milestone
-    if milestone not in B_REGISTERED_EVALUATION_MILESTONES:
+    if milestone not in registered_milestones:
         raise ValueError(
             "B evaluation milestone must be one of "
-            + ", ".join(str(value) for value in B_REGISTERED_EVALUATION_MILESTONES)
+            + ", ".join(str(value) for value in registered_milestones)
         )
-    if final_only and milestone != B_FINAL_EVALUATION_MILESTONE:
+    if final_only and milestone != registered_milestones[-1]:
         raise ValueError(
             "B extension approval requires the final registered B milestone "
-            f"{B_FINAL_EVALUATION_MILESTONE}"
+            f"{registered_milestones[-1]}"
         )
     return milestone
 
@@ -528,12 +521,16 @@ def extension_seed_decision(
     mandatory_bootstrap: Mapping[str, object],
     *,
     experiment_contract_sha256: str,
-    scientific_clock: str = B_FINAL_EVALUATION_CLOCK,
-    scientific_milestone: int = B_FINAL_EVALUATION_MILESTONE,
+    scientific_clock: str,
+    scientific_milestone: int,
+    registered_clock: str,
+    registered_milestones: Sequence[int],
 ) -> dict[str, object]:
     milestone = require_registered_b_evaluation_target(
         scientific_clock,
         scientific_milestone,
+        registered_clock=registered_clock,
+        registered_milestones=registered_milestones,
         final_only=True,
     )
     mandatory = []
@@ -560,7 +557,7 @@ def extension_seed_decision(
         "criterion_id": B_EXTENSION_CRITERION_ID,
         "mandatory_seed_count": 3,
         "extension_seed_count": 5,
-        "scientific_clock": B_FINAL_EVALUATION_CLOCK,
+        "scientific_clock": registered_clock,
         "scientific_milestone": milestone,
         "criterion_evidence": {
             "ambiguity_detected": ambiguity,

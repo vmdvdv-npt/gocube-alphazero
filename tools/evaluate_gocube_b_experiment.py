@@ -28,9 +28,6 @@ from alphazero.envs.gocube.b_evaluation import (
     B_HELDOUT_SUITE_ID,
     B_HELDOUT_SUITE_SHA256,
     B_HELDOUT_SUITE_POSITION_COUNT,
-    B_FINAL_EVALUATION_CLOCK,
-    B_FINAL_EVALUATION_MILESTONE,
-    B_REGISTERED_EVALUATION_MILESTONES,
     B_STATISTICAL_METHOD_IDENTIFIER,
     authoritative_suite_game_class,
     replay_actions,
@@ -42,10 +39,14 @@ from alphazero.envs.gocube.b_evaluation import (
     validate_pairing_invariants,
 )
 from alphazero.envs.gocube.b_experiment_contract import (
+    BExperimentContract,
     B_EXTENSION_SEEDS,
     B_EXPERIMENT_CONTRACT_ID,
     B_EXPERIMENT_CONTRACT_VERSION,
     B_SEED_LIST,
+    b_evaluation_schedule,
+    load_b_experiment_contract,
+    resolve_b_experiment_contract,
     validate_extension_seed_decision,
 )
 from alphazero.envs.gocube.evaluation import prepare_evaluation_args
@@ -220,23 +221,32 @@ def evaluate_seed(
     suite_path: Path,
     training_seed: int,
     sample_milestone: int,
-    sample_clock: str = "cumulative_new_samples",
+    sample_clock: str | None = None,
     device: str = "cpu",
     extension_seed_decision: Path | None = None,
     move_limit: int | None = None,
+    experiment_contract: BExperimentContract | Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     if training_seed not in B_SEED_LIST:
         raise ValueError(f"training seed must be one of {B_SEED_LIST}")
+    if experiment_contract is None:
+        raise ValueError("B evaluator requires the immutable B experiment contract")
+    contract, contract_sha256 = resolve_b_experiment_contract(experiment_contract)
+    evaluation_schedule = b_evaluation_schedule(contract)
+    registered_clock = str(evaluation_schedule["scientific_clock"])
+    effective_clock = registered_clock if sample_clock is None else sample_clock
     try:
         registered_milestone = require_registered_b_evaluation_target(
-            sample_clock,
+            effective_clock,
             sample_milestone,
+            registered_clock=registered_clock,
+            registered_milestones=evaluation_schedule["milestone_targets"],
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("B evaluator received an unregistered scientific target") from exc
     if training_seed in B_EXTENSION_SEEDS and (
-        sample_clock != B_FINAL_EVALUATION_CLOCK
-        or registered_milestone != B_FINAL_EVALUATION_MILESTONE
+        effective_clock != registered_clock
+        or registered_milestone != evaluation_schedule["final_milestone"]
     ):
         raise ValueError(
             "Extension seeds can only be evaluated at the final registered B milestone"
@@ -246,8 +256,8 @@ def evaluate_seed(
         raise ValueError("B evaluator received a non-canonical suite")
     if sample_milestone < 0:
         raise ValueError("sample milestone must be non-negative")
-    b0_selected = select_checkpoint_at_or_after(b0_checkpoint, registered_milestone, clock=sample_clock)
-    b1_selected = select_checkpoint_at_or_after(b1_checkpoint, registered_milestone, clock=sample_clock)
+    b0_selected = select_checkpoint_at_or_after(b0_checkpoint, registered_milestone, clock=effective_clock)
+    b1_selected = select_checkpoint_at_or_after(b1_checkpoint, registered_milestone, clock=effective_clock)
     for label, selected in (("B0", b0_selected), ("B1", b1_selected)):
         if selected.get("cumulative_new_samples") is None or selected.get("cumulative_optimizer_examples") is None:
             raise ValueError(
@@ -261,6 +271,8 @@ def evaluate_seed(
     saved_b, contract_sha_b = _require_b_checkpoint(payload_b, "B1")
     if contract_sha_a != contract_sha_b:
         raise ValueError("B0/B1 checkpoint contract SHA mismatch")
+    if contract_sha_a != contract_sha256:
+        raise ValueError("B checkpoints do not match the immutable B experiment contract")
     if training_seed in B_EXTENSION_SEEDS:
         if extension_seed_decision is None:
             raise ValueError(
@@ -270,6 +282,7 @@ def evaluate_seed(
         validate_extension_seed_decision(
             extension_seed_decision,
             contract_sha256=contract_sha_a,
+            experiment_contract=contract,
         )
     elif extension_seed_decision is not None:
         raise ValueError("--extension-seed-decision is only valid for extension seeds 3 and 4")
@@ -366,7 +379,7 @@ def evaluate_seed(
         "size": 4,
         "komi": GOCUBE_KOMI,
         "rules_fingerprint": contract_a.rules_fingerprint,
-        "scientific_clock": sample_clock,
+        "scientific_clock": effective_clock,
         "scientific_milestone": registered_milestone,
         "training_seed": int(training_seed),
         "b0_checkpoint": {
@@ -416,18 +429,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--b0-checkpoint", required=True)
     parser.add_argument("--b1-checkpoint", required=True)
     parser.add_argument("--suite", "--heldout-suite", dest="suite", required=True)
+    parser.add_argument("--experiment-contract", required=True)
     parser.add_argument("--training-seed", required=True, type=int)
-    parser.add_argument(
-        "--sample-milestone",
-        required=True,
-        type=int,
-        choices=B_REGISTERED_EVALUATION_MILESTONES,
-    )
-    parser.add_argument(
-        "--sample-clock",
-        choices=(B_FINAL_EVALUATION_CLOCK,),
-        default=B_FINAL_EVALUATION_CLOCK,
-    )
+    parser.add_argument("--sample-milestone", required=True, type=int)
+    parser.add_argument("--sample-clock", default=None)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--extension-seed-decision", default=None)
     parser.add_argument("--output", required=True)
@@ -436,6 +441,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--training-seed must be one of {B_SEED_LIST}")
     if args.sample_milestone < 0:
         parser.error("--sample-milestone must be non-negative")
+    try:
+        contract, _contract_sha256 = load_b_experiment_contract(args.experiment_contract)
+    except Exception as exc:
+        parser.error(str(exc))
     payload = evaluate_seed(
         b0_checkpoint=Path(args.b0_checkpoint),
         b1_checkpoint=Path(args.b1_checkpoint),
@@ -445,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
         sample_clock=args.sample_clock,
         device=args.device,
         extension_seed_decision=(Path(args.extension_seed_decision) if args.extension_seed_decision else None),
+        experiment_contract=contract,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -9,6 +9,7 @@ the complete machine-readable experiment contract before training starts.
 from __future__ import annotations
 
 import argparse
+import json
 import shlex
 import subprocess
 import sys
@@ -25,8 +26,6 @@ from alphazero.envs.gocube.b_experiment_contract import (
     B1_MODEL_PROFILE,
     B1_TREATMENT,
     B_EXTENSION_SEEDS,
-    B_FINAL_EVALUATION_CLOCK,
-    B_FINAL_EVALUATION_MILESTONE,
     B_SEED_LIST,
     DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET,
     preflight_b_experiment,
@@ -51,6 +50,25 @@ def _treatment(value: str) -> str:
     if normalized not in TREATMENT_TO_PROFILE:
         raise argparse.ArgumentTypeError("treatment must be B0 or B1")
     return normalized
+
+
+def _validate_extension_decision_target(path: str, scientific_target: SampleBudgetTarget) -> None:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read extension-seed decision: {path}") from exc
+    milestone = payload.get("scientific_milestone") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("scientific_clock") != scientific_target.kind
+        or isinstance(milestone, bool)
+        or not isinstance(milestone, int)
+        or milestone != scientific_target.target
+    ):
+        raise ValueError(
+            "extension-seed decision must target the selected B contract final milestone: "
+            f"{scientific_target.kind}={scientific_target.target}"
+        )
 
 
 def parse_args(argv=None):
@@ -104,10 +122,6 @@ def parse_args(argv=None):
                 "seeds 3 and 4 require --extension-seed-decision approved by "
                 "the pre-registered ambiguity/variance criterion"
             )
-        try:
-            validate_extension_seed_decision(args.extension_seed_decision)
-        except Exception as exc:
-            parser.error(str(exc))
     elif args.extension_seed_decision is not None:
         parser.error("--extension-seed-decision is only valid for extension seeds 3 and 4")
     if args.run_name is None:
@@ -121,14 +135,14 @@ def parse_args(argv=None):
         )
     except ValueError as exc:
         parser.error(str(exc))
-    if args.seed in B_EXTENSION_SEEDS and (
-        args.scientific_target.kind != B_FINAL_EVALUATION_CLOCK
-        or args.scientific_target.target != B_FINAL_EVALUATION_MILESTONE
-    ):
-        parser.error(
-            "extension seeds require the final registered B milestone: "
-            f"{B_FINAL_EVALUATION_CLOCK}={B_FINAL_EVALUATION_MILESTONE}"
-        )
+    if args.seed in B_EXTENSION_SEEDS:
+        try:
+            _validate_extension_decision_target(
+                args.extension_seed_decision,
+                args.scientific_target,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
     return args
 
 
@@ -232,6 +246,7 @@ def main(argv=None) -> int:
             validate_extension_seed_decision(
                 args.extension_seed_decision,
                 contract_sha256=str(preflight_payload["experiment_contract_sha256"]),
+                experiment_contract=preflight_payload["experiment_contract"],
             )
     else:
         print("Dry-run only: no frozen heldout suite was supplied; no contract record was written.")

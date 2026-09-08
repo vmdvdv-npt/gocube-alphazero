@@ -37,7 +37,11 @@ analysis without silently changing the seed universe.
 For an extension seed, provide `--extension-seed-decision decision.json` with
 the contract criterion ID and machine-readable `criterion_evidence` showing
 either ambiguity or excess variance. The launcher also binds that approval to
-the generated contract SHA before training.
+the generated contract SHA before training. The decision is valid only at the
+100% milestone recorded by that same immutable contract: this is
+`cumulative_new_samples=40,000,000` for the default contract, or the final
+optimizer-example target for an explicitly selected optimizer-example
+contract.
 The B launcher never accepts `--allow-dirty-source`; B runs require a clean
 committed source tree. The contract SHA-256 is passed to the child trainer and
 stored in its run manifest and checkpoints.
@@ -88,10 +92,12 @@ Scientific comparisons are pinned to the cumulative sample clock, not to
 iteration numbers. For the default `cumulative_new_samples` target of
 40,000,000, the immutable contract records milestones at 25%, 50%, 75%, and
 100%: 10,000,000; 20,000,000; 30,000,000; and 40,000,000 accepted samples.
-The same representation scales to an explicitly selected optimizer-example
-clock. Bootstrap iteration, health-reference iteration, arena-anchor period,
-and the held-out suite size remain fixed evaluation metadata, not scientific
-clocks.
+For an explicitly selected optimizer-example target, the same immutable
+contract records the corresponding 25%, 50%, 75%, and 100% optimizer-example
+milestones. B4 evaluation and aggregation require that contract record and
+reject clocks or milestones not present in its schedule. Bootstrap iteration,
+health-reference iteration, arena-anchor period, and the held-out suite size
+remain fixed evaluation metadata, not scientific clocks.
 
 ## Canonical Cube-4 training batch
 
@@ -123,6 +129,12 @@ canonical PointId order, and no model, self-play, replay, color swap, or
 symmetry input. `tools/build_gocube_b_heldout_suite.py --check` must reproduce
 the committed bytes and replay every timeline/fingerprint.
 
+Both `tools/evaluate_gocube_b_experiment.py` and
+`tools/analyze_gocube_b_evaluation.py` require the immutable B contract record
+via `--experiment-contract`. They derive the scientific clock and allowed
+milestones from that record, so an optimizer-example contract is evaluated on
+its own 25/50/75/100% schedule.
+
 `tools/evaluate_gocube_b_experiment.py` is the only production evaluator for
 B checkpoints. It selects the first committed/resumable checkpoint whose
 cumulative scientific counter is at least the requested milestone, and records
@@ -146,15 +158,17 @@ reported 95% percentile interval is on overall delta from 0.5. Classification
 is `B1_BETTER` when its low endpoint is positive, `B0_BETTER` when its high
 endpoint is negative, and `INCONCLUSIVE` otherwise.
 
-After mandatory seeds 0, 1, and 2 have been evaluated at the final registered
-milestone `cumulative_new_samples=40,000,000`, extension to seeds 3 and 4 is
-permitted only when the pre-registered criterion
+After mandatory seeds 0, 1, and 2 have been evaluated at the 100% milestone
+of their immutable B contract (the default is
+`cumulative_new_samples=40,000,000`), extension to seeds 3 and 4 is permitted
+only when the pre-registered criterion
 `extend-to-five-seeds-only-if-mandatory-seed-bootstrap-ambiguity-or-variance-v1`
 finds bootstrap ambiguity or sample standard deviation of mandatory seed
-deltas at least 0.10. The decision JSON must carry the same
-`scientific_clock` and `scientific_milestone`; decisions cannot be created or
-used at the 10M, 20M, or 30M intermediate milestones, nor at an unregistered
-clock or target. The extension decision is written separately as JSON.
+deltas at least 0.10. The decision JSON must carry the contract's
+`scientific_clock`, its final `scientific_milestone`, and the contract SHA;
+decisions cannot be created or used at an intermediate milestone or at an
+unregistered clock or target. The extension decision is written separately as
+JSON.
 The legacy `tools/evaluate_gocube_checkpoints.py` aggregate Wilson evaluator
 rejects checkpoints marked with the B contract and cannot be used for final B
 analysis.

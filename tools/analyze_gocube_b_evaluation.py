@@ -27,8 +27,6 @@ from alphazero.envs.gocube.b_evaluation import (
     B_HELDOUT_SUITE_ID,
     B_HELDOUT_SUITE_POSITION_COUNT,
     B_HELDOUT_SUITE_SHA256,
-    B_FINAL_EVALUATION_CLOCK,
-    B_FINAL_EVALUATION_MILESTONE,
     B_STATISTICAL_METHOD_IDENTIFIER,
     classify_delta_interval,
     extension_seed_decision,
@@ -39,9 +37,13 @@ from alphazero.envs.gocube.b_evaluation import (
     validate_pairing_invariants,
 )
 from alphazero.envs.gocube.b_experiment_contract import (
+    BExperimentContract,
     B_EXPERIMENT_CONTRACT_ID,
     B_EXPERIMENT_CONTRACT_VERSION,
     B_SEED_LIST,
+    b_evaluation_schedule,
+    load_b_experiment_contract,
+    resolve_b_experiment_contract,
 )
 
 
@@ -93,9 +95,18 @@ def _validate_game_record(game: Mapping[str, object]) -> None:
         raise ValueError("B evaluation game is missing fields: " + ", ".join(missing))
 
 
-def validate_seed_evaluation(payload: Mapping[str, object]) -> dict[str, object]:
+def validate_seed_evaluation(
+    payload: Mapping[str, object],
+    *,
+    evaluation_schedule: Mapping[str, object] | None = None,
+    experiment_contract_sha256: str | None = None,
+) -> dict[str, object]:
     """Validate one evaluator artifact before it enters the aggregate."""
 
+    if evaluation_schedule is None or experiment_contract_sha256 is None:
+        raise ValueError(
+            "B seed evaluation validation requires the immutable B contract schedule and SHA"
+        )
     if int(payload.get("schema_version", -1)) != 1:
         raise ValueError("Unsupported B seed evaluation schema")
     required = (
@@ -110,6 +121,8 @@ def validate_seed_evaluation(payload: Mapping[str, object]) -> dict[str, object]
         raise ValueError("B seed evaluation is missing fields: " + ", ".join(missing))
     if payload.get("experiment_contract_id") != B_EXPERIMENT_CONTRACT_ID:
         raise ValueError("B seed evaluation has the wrong experiment contract")
+    if payload.get("experiment_contract_sha256") != experiment_contract_sha256:
+        raise ValueError("B seed evaluation does not match the immutable B experiment contract")
     if payload.get("heldout_suite_id") != B_HELDOUT_SUITE_ID:
         raise ValueError("B seed evaluation has the wrong heldout suite")
     if payload.get("heldout_suite_sha256") != B_HELDOUT_SUITE_SHA256:
@@ -124,6 +137,8 @@ def validate_seed_evaluation(payload: Mapping[str, object]) -> dict[str, object]
         registered_milestone = require_registered_b_evaluation_target(
             payload["scientific_clock"],
             payload["scientific_milestone"],
+            registered_clock=str(evaluation_schedule["scientific_clock"]),
+            registered_milestones=evaluation_schedule["milestone_targets"],
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("B seed evaluation uses an unregistered scientific target") from exc
@@ -207,12 +222,24 @@ def analyze_evaluations(
     evaluation_payloads: Sequence[Mapping[str, object]],
     *,
     extension_decision_payload: Mapping[str, object] | None = None,
+    experiment_contract: BExperimentContract | Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object], dict[str, object] | None]:
     """Return final JSON report and the separate extension decision payload."""
 
     if not evaluation_payloads:
         raise ValueError("At least one B seed evaluation is required")
-    artifacts = [validate_seed_evaluation(payload) for payload in evaluation_payloads]
+    if experiment_contract is None:
+        raise ValueError("B analysis requires the immutable B experiment contract")
+    contract, contract_sha256 = resolve_b_experiment_contract(experiment_contract)
+    evaluation_schedule = b_evaluation_schedule(contract)
+    artifacts = [
+        validate_seed_evaluation(
+            payload,
+            evaluation_schedule=evaluation_schedule,
+            experiment_contract_sha256=contract_sha256,
+        )
+        for payload in evaluation_payloads
+    ]
     seeds = sorted(int(item["training_seed"]) for item in artifacts)
     if len(set(seeds)) != len(seeds):
         raise ValueError("Duplicate B training seed evaluation")
@@ -256,10 +283,7 @@ def analyze_evaluations(
     )
     scientific_clock = str(artifacts[0]["scientific_clock"])
     scientific_milestone = int(artifacts[0]["scientific_milestone"])
-    final_milestone = (
-        scientific_clock == B_FINAL_EVALUATION_CLOCK
-        and scientific_milestone == B_FINAL_EVALUATION_MILESTONE
-    )
+    final_milestone = scientific_milestone == evaluation_schedule["final_milestone"]
     if len(artifacts) == 5 and not final_milestone:
         raise ValueError("Extension seeds are only allowed at the final registered B milestone")
     decision = None
@@ -267,9 +291,11 @@ def analyze_evaluations(
         decision = extension_seed_decision(
             {int(item["training_seed"]): float(item["seed_delta"]) for item in artifacts if int(item["training_seed"]) in (0, 1, 2)},
             mandatory_bootstrap,
-            experiment_contract_sha256=str(artifacts[0]["experiment_contract_sha256"]),
+            experiment_contract_sha256=contract_sha256,
             scientific_clock=scientific_clock,
             scientific_milestone=scientific_milestone,
+            registered_clock=str(evaluation_schedule["scientific_clock"]),
+            registered_milestones=evaluation_schedule["milestone_targets"],
         )
     if extension_decision_payload is not None:
         if decision is None:
@@ -409,6 +435,7 @@ def _read_json(path: Path) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evaluation", "--seed-evaluation", dest="evaluations", action="append", required=True)
+    parser.add_argument("--experiment-contract", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--markdown-output", default=None)
     parser.add_argument("--extension-decision-output", default=None)
@@ -416,7 +443,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     payloads = [_read_json(Path(path)) for path in args.evaluations]
     supplied_decision = _read_json(Path(args.extension_decision)) if args.extension_decision else None
-    report, decision = analyze_evaluations(payloads, extension_decision_payload=supplied_decision)
+    contract, _contract_sha256 = load_b_experiment_contract(args.experiment_contract)
+    report, decision = analyze_evaluations(
+        payloads,
+        extension_decision_payload=supplied_decision,
+        experiment_contract=contract,
+    )
     if args.extension_decision_output and decision is None:
         raise ValueError(
             "--extension-decision-output is only valid at the final registered B milestone"

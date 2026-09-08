@@ -301,6 +301,42 @@ def test_launcher_accepts_mandatory_and_approved_extension_seeds(tmp_path):
     )
     command = gocube_b_experiment.training_command(args, python="python")
     assert command[command.index("--seed") + 1] == "3"
+    optimizer_decision = tmp_path / "optimizer-extension-decision.json"
+    optimizer_payload = json.loads(decision.read_text(encoding="utf-8"))
+    optimizer_payload["scientific_clock"] = "cumulative_optimizer_examples"
+    optimizer_payload["scientific_milestone"] = 12_345_678
+    optimizer_decision.write_text(json.dumps(optimizer_payload), encoding="utf-8")
+    optimizer_args = gocube_b_experiment.parse_args(
+        [
+            "--treatment",
+            "B1",
+            "--seed",
+            "3",
+            "--cumulative-optimizer-examples-target",
+            "12345678",
+            "--extension-seed-decision",
+            str(optimizer_decision),
+            "--dry-run",
+        ]
+    )
+    assert optimizer_args.scientific_target.kind == "cumulative_optimizer_examples"
+    assert optimizer_args.scientific_target.target == 12_345_678
+    early_decision = tmp_path / "early-extension-decision.json"
+    early_payload = json.loads(decision.read_text(encoding="utf-8"))
+    early_payload["scientific_milestone"] = 10_000_000
+    early_decision.write_text(json.dumps(early_payload), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        gocube_b_experiment.parse_args(
+            [
+                "--treatment",
+                "B1",
+                "--seed",
+                "3",
+                "--extension-seed-decision",
+                str(early_decision),
+                "--dry-run",
+            ]
+        )
     with pytest.raises(SystemExit):
         gocube_b_experiment.parse_args(["--treatment", "B1", "--seed", "3", "--dry-run"])
     with pytest.raises(SystemExit):

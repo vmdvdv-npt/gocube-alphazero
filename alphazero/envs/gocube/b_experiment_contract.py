@@ -35,9 +35,6 @@ from .b_evaluation import (
     B_HELDOUT_SUITE_ID,
     B_HELDOUT_SUITE_POSITION_COUNT,
     B_HELDOUT_SUITE_SHA256,
-    B_FINAL_EVALUATION_CLOCK,
-    B_FINAL_EVALUATION_MILESTONE,
-    B_REGISTERED_EVALUATION_CLOCK,
     require_registered_b_evaluation_target,
     validate_frozen_suite,
 )
@@ -54,7 +51,7 @@ B0_TREATMENT = "B0"
 B1_TREATMENT = "B1"
 B0_MODEL_PROFILE = "baseline"
 B1_MODEL_PROFILE = "g1"
-DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET = B_FINAL_EVALUATION_MILESTONE
+DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET = 40_000_000
 EVALUATION_MILESTONE_FRACTIONS = (0.25, 0.50, 0.75, 1.0)
 B_SEED_LIST = (0, 1, 2, 3, 4)
 B_INITIAL_SEED_COUNT = 3
@@ -64,6 +61,56 @@ B_EXTENSION_SEEDS = (3, 4)
 B_EXTENSION_SEED_CRITERION_ID = (
     "extend-to-five-seeds-only-if-mandatory-seed-bootstrap-ambiguity-or-variance-v1"
 )
+
+
+def b_evaluation_schedule(contract: object) -> dict[str, object]:
+    """Return and validate the evaluation schedule recorded by one B contract."""
+
+    if isinstance(contract, Mapping) and "experiment_contract" in contract:
+        contract = contract["experiment_contract"]
+    if isinstance(contract, Mapping):
+        target_payload = contract.get("scientific_sample_target")
+        milestones_payload = contract.get("evaluation_milestones")
+    else:
+        target_payload = getattr(contract, "scientific_sample_target", None)
+        milestones_payload = getattr(contract, "evaluation_milestones", None)
+    if not isinstance(target_payload, Mapping) or not isinstance(milestones_payload, Mapping):
+        raise ExperimentContractError(
+            "B experiment contract is missing scientific target or evaluation milestones"
+        )
+    clock = milestones_payload.get("clock")
+    target_kind = target_payload.get("kind")
+    if not isinstance(clock, str) or clock != target_kind:
+        raise ExperimentContractError(
+            "B experiment evaluation milestone clock does not match its scientific target"
+        )
+    target = target_payload.get("target")
+    if isinstance(target, bool) or not isinstance(target, int) or target <= 0:
+        raise ExperimentContractError("B experiment scientific target must be a positive integer")
+    raw_milestones = milestones_payload.get("milestone_targets")
+    if not isinstance(raw_milestones, (list, tuple)) or not raw_milestones:
+        raise ExperimentContractError(
+            "B experiment evaluation milestones must be a non-empty list"
+        )
+    milestones = tuple(raw_milestones)
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in milestones
+    ):
+        raise ExperimentContractError("B experiment evaluation milestones must be integers")
+    if tuple(sorted(set(milestones))) != milestones:
+        raise ExperimentContractError(
+            "B experiment evaluation milestones must be strictly increasing"
+        )
+    if milestones[-1] != target:
+        raise ExperimentContractError(
+            "B experiment final evaluation milestone must equal its scientific target"
+        )
+    return {
+        "scientific_clock": clock,
+        "milestone_targets": milestones,
+        "final_milestone": target,
+    }
 
 
 def _evaluation_milestones(scientific_target: SampleBudgetTarget) -> dict[str, object]:
@@ -211,9 +258,33 @@ def validate_extension_seed_decision(
     path: str | os.PathLike[str],
     *,
     contract_sha256: str | None = None,
+    experiment_contract: object | None = None,
+    experiment_contract_path: str | os.PathLike[str] | None = None,
 ) -> dict[str, object]:
     """Validate the pre-registered decision that permits seeds 3 and 4."""
 
+    if (experiment_contract is None) == (experiment_contract_path is None):
+        raise ExperimentContractError(
+            "Extension-seed decision validation requires exactly one immutable B contract"
+        )
+    try:
+        if experiment_contract_path is not None:
+            contract, actual_contract_sha256 = load_b_experiment_contract(
+                experiment_contract_path
+            )
+        else:
+            contract, actual_contract_sha256 = resolve_b_experiment_contract(
+                experiment_contract
+            )
+        schedule = b_evaluation_schedule(contract)
+    except (ExperimentContractError, TypeError, ValueError) as exc:
+        raise ExperimentContractError(
+            "Cannot validate extension-seed decision without a valid B experiment contract"
+        ) from exc
+    if contract_sha256 is not None and str(contract_sha256) != actual_contract_sha256:
+        raise ExperimentContractError(
+            "Extension-seed decision validation received a different experiment contract"
+        )
     decision_path = Path(path)
     try:
         payload = json.loads(decision_path.read_text(encoding="utf-8"))
@@ -227,6 +298,8 @@ def validate_extension_seed_decision(
         require_registered_b_evaluation_target(
             payload["scientific_clock"],
             payload["scientific_milestone"],
+            registered_clock=str(schedule["scientific_clock"]),
+            registered_milestones=schedule["milestone_targets"],
             final_only=True,
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -239,8 +312,8 @@ def validate_extension_seed_decision(
         "criterion_id": B_EXTENSION_SEED_CRITERION_ID,
         "mandatory_seed_count": B_INITIAL_SEED_COUNT,
         "extension_seed_count": B_EXTENSION_SEED_COUNT,
-        "scientific_clock": B_REGISTERED_EVALUATION_CLOCK,
-        "scientific_milestone": B_FINAL_EVALUATION_MILESTONE,
+        "scientific_clock": schedule["scientific_clock"],
+        "scientific_milestone": schedule["final_milestone"],
     }
     for key, value in expected.items():
         if payload.get(key) != value:
@@ -275,7 +348,7 @@ def validate_extension_seed_decision(
             raise ExperimentContractError("Extension-seed ambiguity evidence is inconsistent with its CI")
         if bool(evidence.get("variance_exceeded")) != (std >= 0.10):
             raise ExperimentContractError("Extension-seed variance evidence is inconsistent with the 0.10 threshold")
-    if contract_sha256 is not None and payload.get("experiment_contract_sha256") != contract_sha256:
+    if payload.get("experiment_contract_sha256") != actual_contract_sha256:
         raise ExperimentContractError(
             "Extension-seed decision is for a different experiment contract"
         )
@@ -1043,6 +1116,43 @@ def validate_b_experiment_record(path: str | os.PathLike[str]) -> dict[str, obje
         b1_effective_config=configs["B1"],
     )
     return dict(payload)
+
+
+def load_b_experiment_contract(
+    path: str | os.PathLike[str],
+) -> tuple[BExperimentContract, str]:
+    """Load a fully validated immutable B contract record and its SHA."""
+
+    record = validate_b_experiment_record(path)
+    contract_payload = record.get("experiment_contract")
+    contract = BExperimentContract.from_dict(contract_payload)
+    contract_sha256 = record.get("experiment_contract_sha256")
+    if not isinstance(contract_sha256, str) or contract_sha256 != contract.sha256():
+        raise ExperimentContractError("B experiment contract record SHA-256 is invalid")
+    return contract, contract_sha256
+
+
+def resolve_b_experiment_contract(
+    value: BExperimentContract | Mapping[str, object],
+) -> tuple[BExperimentContract, str]:
+    """Validate an in-memory B contract or contract-record payload."""
+
+    declared_sha256 = None
+    contract_value: object = value
+    if isinstance(value, Mapping) and "experiment_contract" in value:
+        declared_sha256 = value.get("experiment_contract_sha256")
+        contract_value = value.get("experiment_contract")
+    if isinstance(contract_value, BExperimentContract):
+        contract = contract_value
+    elif isinstance(contract_value, Mapping):
+        contract = BExperimentContract.from_dict(contract_value)
+    else:
+        raise ExperimentContractError("B experiment contract must be an object")
+    validate_b_experiment_contract(contract)
+    contract_sha256 = contract.sha256()
+    if declared_sha256 is not None and declared_sha256 != contract_sha256:
+        raise ExperimentContractError("B experiment contract record SHA-256 is invalid")
+    return contract, contract_sha256
 
 
 def _resolve_effective_config(
