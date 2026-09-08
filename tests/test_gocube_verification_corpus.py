@@ -121,6 +121,18 @@ def test_v2_export_contains_explicit_mapping_steps_and_deterministic_boundary():
     assert first == second
 
 
+def test_v2_export_carries_nonempty_verified_score_and_group_classification():
+    exported = export_verified_product_boundary_fixtures(cube_verification_fixtures(), cube_topology(4))
+    fixture = next(item for item in exported if item.fixture_id == "cube4_nonempty_two_eye_score_001")
+
+    assert fixture.expected_endgame_classification == (
+        {"points": fixture.initial_position["black"], "status": "alive"},
+    )
+    assert fixture.expected_final_score is not None
+    assert fixture.expected_final_score["territory"] == {"black": 2, "white": 0, "neutral": 0, "seki": 0}
+    assert fixture.expected_final_score["stones_on_board"] == {"black": 94, "white": 0}
+
+
 def test_corpus_counts_are_reportable_without_a_statistical_rotation_multiplier():
     counts = fixture_counts(cube_verification_fixtures())
     assert sum(counts.values()) == len(cube_verification_fixtures())

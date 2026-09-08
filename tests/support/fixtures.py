@@ -189,6 +189,7 @@ def cube_verification_fixtures() -> tuple[VerificationFixture, ...]:
 
     q = "front:0:1"
     q_neighbors = ("top:3:1", "front:0:2", "front:1:1", "front:0:0")
+    two_eye_black = _cube4_black_except("front:0:0", "back:2:2")
     fixtures = (
         _cube4_fixture(
             "cube4_vertex_single_group_001",
@@ -440,6 +441,32 @@ def cube_verification_fixtures() -> tuple[VerificationFixture, ...]:
             rotation_policy="history-aware-only",
             notes="Future GoCube boundary fixture; no TypeScript engine is changed or consulted here.",
             cleanup_metadata={"training_internal_cleanup": {"actions": [], "phase_transitions": [], "final_training_result": None}},
+        ),
+        _cube4_fixture(
+            "cube4_nonempty_two_eye_score_001",
+            "endgame_score",
+            black=two_eye_black,
+            expected={
+                "status": "verified",
+                "independent_proof": "one connected black group has two exclusive graph-vital regions",
+                "verified_endgame_classification": ({"points": two_eye_black, "status": "alive"},),
+                "verified_final_score": {
+                    "rule_set": "japanese",
+                    "black": 2.0,
+                    "white": 0.5,
+                    "komi": 0.5,
+                    "territory": {"black": 2, "white": 0, "neutral": 0, "seki": 0},
+                    "stones_on_board": {"black": 94, "white": 0},
+                    "captures": [0, 0],
+                    "prisoners": [0, 0],
+                    "dead_stones": {"black": 0, "white": 0},
+                    "winner": "black",
+                    "margin": 1.5,
+                },
+            },
+            oracle="independent_graph",
+            evidence="independent two-vital-region graph proof plus independent Japanese score_position oracle",
+            notes="Non-empty product scoring boundary: the single logical black group is manually marked alive after two MAIN passes; both graph-proven eyes become black territory.",
         ),
     )
     return fixtures

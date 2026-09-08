@@ -9,7 +9,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from alphazero.envs.gocube.core import BLACK, EMPTY, WHITE, cube_topology, torus_topology
+from alphazero.envs.gocube.core import (
+    BLACK,
+    EMPTY,
+    WHITE,
+    GroupClassification,
+    cube_topology,
+    initial_state,
+    score_position,
+    torus_topology,
+)
 from alphazero.envs.gocube.katago_v3 import (
     CLEANUP_1,
     CLEANUP_2,
@@ -401,6 +410,54 @@ def test_v1_intruder_has_independent_pass_alive_evidence_and_matching_production
     assert score.territory.black == 2
     assert np.array_equal(ownership[intruder], np.asarray((1.0, 0.0, 0.0)))
     assert ownership_mask[intruder] == 1.0
+
+
+def test_v1_nonempty_score_fixture_matches_independent_graph_and_japanese_oracles():
+    topology = cube_topology(4)
+    fixture = _fixture("cube4_nonempty_two_eye_score_001")
+    board = fixture.board(topology.index_by_id)
+    proof = prove_two_vital_regions(board, BLACK, topology.neighbors_by_index)
+
+    assert len(proof.vital_regions) == 2
+    assert {topology.point_id(point) for region in proof.vital_regions for point in region} == {
+        "front:0:0",
+        "back:2:2",
+    }
+    assert len(proof.group) == len(fixture.black)
+
+    state = replace(initial_state(topology), board=np.asarray(board, dtype=np.uint8))
+    score = score_position(
+        state,
+        topology,
+        [GroupClassification(tuple(sorted(proof.group)), "alive")],
+        "japanese",
+        0.5,
+    )
+    actual = {
+        "rule_set": score.ruleset,
+        "black": score.black,
+        "white": score.white,
+        "komi": score.komi,
+        "territory": {
+            "black": score.territory.black,
+            "white": score.territory.white,
+            "neutral": score.territory.neutral,
+            "seki": score.territory.seki,
+        },
+        "stones_on_board": {
+            "black": score.stones_on_board.black,
+            "white": score.stones_on_board.white,
+        },
+        "captures": list(score.captures),
+        "prisoners": None if score.prisoners is None else list(score.prisoners),
+        "dead_stones": {
+            "black": score.dead_stones.black,
+            "white": score.dead_stones.white,
+        },
+        "winner": score.winner,
+        "margin": score.margin,
+    }
+    assert actual == fixture.expected["verified_final_score"]
 
 
 def test_v1_settled_seki_has_pinned_katago_rectangular_scoring_analog():
