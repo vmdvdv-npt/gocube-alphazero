@@ -3,8 +3,8 @@
 The hardened B entrypoint is:
 
 ```bash
-.venv/bin/python tools/gocube_b_experiment.py --treatment B0
-.venv/bin/python tools/gocube_b_experiment.py --treatment B1
+.venv/bin/python tools/gocube_b_experiment.py --treatment B0 --heldout-suite path/to/frozen-suite.json
+.venv/bin/python tools/gocube_b_experiment.py --treatment B1 --heldout-suite path/to/frozen-suite.json
 ```
 
 `--treatment` is the only model choice exposed to the operator. The launcher
@@ -17,8 +17,14 @@ changed explicitly to an optimizer-example target:
 
 ```bash
 .venv/bin/python tools/gocube_b_experiment.py \
-  --treatment B1 --cumulative-optimizer-examples-target 40000000
+  --treatment B1 --heldout-suite path/to/frozen-suite.json \
+  --cumulative-optimizer-examples-target 40000000
 ```
+
+`--heldout-suite` is mandatory for a real run. Its SHA-256 is computed from
+the bytes of that frozen artifact and is stored in the immutable contract. If
+the suite is not available yet, the launcher permits only `--dry-run`; it does
+not write a runnable contract record and cannot start training.
 
 `--iterations` is only a safety ceiling. `--games-per-iteration=256` remains
 the generation chunk and is not the experimental budget. The production loop
@@ -32,7 +38,7 @@ machine-readable `gocube-b-experiment-contract.json` containing:
 - the immutable `gocube-b-experiment-contract-v1` specification;
 - source SHA, rules/search/termination/target identities, both model
   contracts, budgets, optimizer/scheduler, seeds, evaluation semantics, and
-  held-out-suite hash;
+  the SHA-256 of the actual frozen held-out-suite artifact;
 - both effective configs, their diff, and the allowed semantic difference
   paths.
 
@@ -45,7 +51,11 @@ are never counted as newly accepted samples. Episode move-limit terminations,
 `NO_RESULT`, and average game length are reported separately because they can
 change samples per game.
 
-Reports for both B0 and B1 include games, positions, saved/new samples,
+The evaluation result semantics are fixed as W=1, D=0.5, NR=0.5, L=0 on
+paired starting positions. The primary endpoint is the paired position score;
+uncertainty is identified as hierarchical paired bootstrap over seeds and then
+starting-position pairs. `NO_RESULT` remains in the denominator and contributes
+0.5. Reports for both B0 and B1 include games, positions, saved/new samples,
 optimizer steps, and examples seen, so acceptance can be stated as:
 
 > B0 and B1 were trained to the same cumulative sample budget.

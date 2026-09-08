@@ -127,20 +127,16 @@ def current_source_git_sha(repo: str | os.PathLike[str] | None = None) -> str:
     return sha
 
 
-def _default_heldout_suite_hash() -> str:
-    descriptor = {
-        "schema_version": 1,
-        "suite": "gocube-b-heldout-suite-v1",
-        "positions": 16,
-        "seed": 20260907,
-        "evaluation": "paired-fixed-suite",
-    }
-    return hashlib.sha256(_canonical_json(descriptor)).hexdigest()
-
-
 def hash_heldout_suite(path: str | os.PathLike[str]) -> str:
+    artifact = Path(path)
+    if not artifact.is_file():
+        raise ExperimentContractError(
+            f"heldout suite must be a real frozen artifact file: {artifact}"
+        )
+    if artifact.stat().st_size == 0:
+        raise ExperimentContractError("heldout suite artifact must not be empty")
     digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
+    with artifact.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -163,8 +159,12 @@ class BExperimentContract:
     termination_contract: str
     b0_model_profile: str
     b0_model_contract: Mapping[str, object]
+    b0_structural_feature_schema: str | None
+    b0_structural_feature_channels: int
     b1_model_profile: str
     b1_model_contract: Mapping[str, object]
+    b1_structural_feature_schema: str | None
+    b1_structural_feature_channels: int
     b0_observation_schema: str
     b1_observation_schema: str
     self_play_simulations: int
@@ -187,6 +187,7 @@ class BExperimentContract:
     no_result_evaluation_convention: str
     primary_endpoint: str
     statistical_method_identifier: str
+    canonical_common_effective_config: Mapping[str, object]
     allowed_effective_config_differences: tuple[str, ...] = ALLOWED_EFFECTIVE_CONFIG_DIFFERENCES
 
     def __post_init__(self) -> None:
@@ -342,7 +343,9 @@ def build_b_experiment_contract(
     if source_git_sha is None:
         source_git_sha = current_source_git_sha(repo)
     if heldout_suite_hash is None:
-        heldout_suite_hash = _default_heldout_suite_hash()
+        raise ExperimentContractError(
+            "heldout_suite_hash must come from a real frozen heldout-suite artifact"
+        )
     rules_fingerprint = str(b0_model.rules_fingerprint)
     if rules_fingerprint != str(b1_model.rules_fingerprint):
         raise ExperimentContractError("B0 and B1 resolve different rules fingerprints")
@@ -372,8 +375,12 @@ def build_b_experiment_contract(
         termination_contract=TERMINATION_CONTRACT,
         b0_model_profile=B0_MODEL_PROFILE,
         b0_model_contract=b0_model.to_dict(),
+        b0_structural_feature_schema=b0_config.get("gocube_structural_feature_schema"),
+        b0_structural_feature_channels=int(b0_config.get("gocube_structural_feature_channels", 0)),
         b1_model_profile=B1_MODEL_PROFILE,
         b1_model_contract=b1_model.to_dict(),
+        b1_structural_feature_schema=b1_config.get("gocube_structural_feature_schema"),
+        b1_structural_feature_channels=int(b1_config.get("gocube_structural_feature_channels", 0)),
         b0_observation_schema=str(b0_model.observation_schema),
         b1_observation_schema=str(b1_model.observation_schema),
         self_play_simulations=CUBE4_PRODUCTION.regular_sims,
@@ -426,16 +433,22 @@ def build_b_experiment_contract(
         },
         heldout_suite_hash=str(heldout_suite_hash),
         result_semantics={
-            "win": "one point",
-            "draw": "half point",
-            "no_result": "not scored",
+            "win": 1.0,
+            "draw": 0.5,
+            "no_result": 0.5,
+            "loss": 0.0,
+            "metric": "paired-position-score",
+            "unit": "paired-starting-position",
             "reported_counts": ["wins", "losses", "draws", "no_results"],
         },
         no_result_evaluation_convention=(
-            "NO_RESULT is reported separately and excluded from the scored win-rate denominator"
+            "NO_RESULT contributes 0.5 to the paired position score and remains in the denominator"
         ),
-        primary_endpoint="heldout_paired_win_rate",
-        statistical_method_identifier="wilson-score-95ci-draw-half-no-result-excluded-v1",
+        primary_endpoint="heldout_paired_position_score",
+        statistical_method_identifier=(
+            "hierarchical-paired-bootstrap-seeds-to-starting-position-pairs-v1"
+        ),
+        canonical_common_effective_config=_strip_allowed_effective_config(b0_config),
     )
 
 
@@ -472,6 +485,50 @@ def _allowed_difference(path: str, allowed: tuple[str, ...]) -> bool:
     return False
 
 
+_OMIT = object()
+
+
+def _strip_allowed_effective_config(
+    value: Any,
+    path: str = "",
+    *,
+    allowed: tuple[str, ...] = ALLOWED_EFFECTIVE_CONFIG_DIFFERENCES,
+) -> Any:
+    """Remove treatment-specific and run-identity fields from a config.
+
+    The resulting snapshot is the canonical common surface. Comparing every
+    treatment against that snapshot catches a drift applied identically to B0
+    and B1, which a B0-vs-B1 diff alone cannot see.
+    """
+
+    if path and _allowed_difference(path, allowed):
+        return _OMIT
+    if isinstance(value, Mapping):
+        result = {}
+        for key, item in value.items():
+            child = f"{path}.{key}" if path else str(key)
+            normalized = _strip_allowed_effective_config(item, child, allowed=allowed)
+            if normalized is not _OMIT:
+                result[str(key)] = normalized
+        return result
+    if isinstance(value, (list, tuple)):
+        result = []
+        for index, item in enumerate(value):
+            child = f"{path}[{index}]"
+            normalized = _strip_allowed_effective_config(item, child, allowed=allowed)
+            if normalized is not _OMIT:
+                result.append(normalized)
+        return result
+    return value
+
+
+def _effective_config_common_differences(
+    expected: Mapping[str, object],
+    actual: Mapping[str, object],
+) -> list[str]:
+    return _walk_differences(expected, _strip_allowed_effective_config(actual))
+
+
 def diff_effective_configs(
     b0_effective_config: Mapping[str, object],
     b1_effective_config: Mapping[str, object],
@@ -495,6 +552,72 @@ def _config_value(config: Mapping[str, object], *keys: str) -> Any:
         if key in config:
             return config[key]
     return None
+
+
+def _require_config_value(
+    config: Mapping[str, object],
+    path: str,
+    expected: Any,
+    *,
+    label: str,
+) -> None:
+    """Require one effective-config field to equal its canonical value."""
+
+    value: Any = config
+    for part in path.split("."):
+        if not isinstance(value, Mapping) or part not in value:
+            raise ExperimentContractError(
+                f"{label} effective config is missing canonical field {path}"
+            )
+        value = value[part]
+    same = value == expected
+    if isinstance(expected, float) or isinstance(value, float):
+        try:
+            same = abs(float(value) - float(expected)) <= 1e-12
+        except (TypeError, ValueError):
+            same = False
+    if not same:
+        raise ExperimentContractError(
+            f"{label} effective config {path} drift: expected {expected!r}, got {value!r}"
+        )
+
+
+def _validate_treatment_specific_config(
+    config: Mapping[str, object],
+    *,
+    label: str,
+    profile: str,
+    model_contract: Mapping[str, object],
+    observation_schema: str,
+    structural_feature_schema: str | None,
+    structural_feature_channels: int,
+) -> None:
+    """Validate the values allowed to differ between B0 and B1.
+
+    Whitelisting a path only permits the B0/B1 difference. It does not permit
+    an arbitrary value: every treatment-specific value must still match the
+    model contract resolved for that treatment.
+    """
+
+    expected_model = _thaw(model_contract)
+    expected_architecture = expected_model["networkArchitectureId"]
+    expected_fingerprint = expected_model["networkArchitectureFingerprint"]
+    expected_shape = expected_model["observationShape"]
+    expected_game_class = expected_model["gameClassId"]
+    for path, expected in (
+        ("gocube_model_profile", profile),
+        ("model_profile", profile),
+        ("gocube_network_architecture", expected_architecture),
+        ("network_architecture_id", expected_architecture),
+        ("network_architecture_fingerprint", expected_fingerprint),
+        ("gocube_structural_feature_schema", structural_feature_schema),
+        ("gocube_structural_feature_channels", structural_feature_channels),
+        ("gocube_observation_schema", observation_schema),
+        ("observation_shape", expected_shape),
+        ("game_class_id", expected_game_class),
+        ("model_contract", expected_model),
+    ):
+        _require_config_value(config, path, expected, label=label)
 
 
 def validate_b0_b1_effective_configs(
@@ -559,6 +682,39 @@ def validate_b0_b1_effective_configs(
                         f"{label} effective config {key} drift: "
                         f"expected {expected_value!r}, got {actual_value!r}"
                     )
+        common_differences = _effective_config_common_differences(
+            contract.canonical_common_effective_config,
+            b0_effective_config,
+        )
+        common_differences.extend(
+            _effective_config_common_differences(
+                contract.canonical_common_effective_config,
+                b1_effective_config,
+            )
+        )
+        if common_differences:
+            raise ExperimentContractError(
+                "B effective config differs from canonical common settings: "
+                + ", ".join(sorted(set(common_differences)))
+            )
+        _validate_treatment_specific_config(
+            b0_effective_config,
+            label="B0",
+            profile=contract.b0_model_profile,
+            model_contract=contract.b0_model_contract,
+            observation_schema=contract.b0_observation_schema,
+            structural_feature_schema=contract.b0_structural_feature_schema,
+            structural_feature_channels=contract.b0_structural_feature_channels,
+        )
+        _validate_treatment_specific_config(
+            b1_effective_config,
+            label="B1",
+            profile=contract.b1_model_profile,
+            model_contract=contract.b1_model_contract,
+            observation_schema=contract.b1_observation_schema,
+            structural_feature_schema=contract.b1_structural_feature_schema,
+            structural_feature_channels=contract.b1_structural_feature_channels,
+        )
     return differences
 
 
@@ -589,6 +745,13 @@ def validate_b_experiment_contract(
         "b0_model_profile": B0_MODEL_PROFILE,
         "b1_model_profile": B1_MODEL_PROFILE,
         "termination_contract": TERMINATION_CONTRACT,
+        "primary_endpoint": "heldout_paired_position_score",
+        "statistical_method_identifier": (
+            "hierarchical-paired-bootstrap-seeds-to-starting-position-pairs-v1"
+        ),
+        "no_result_evaluation_convention": (
+            "NO_RESULT contributes 0.5 to the paired position score and remains in the denominator"
+        ),
     }
     for key, expected in required.items():
         actual = get(key, None)
@@ -644,9 +807,15 @@ def validate_b_experiment_contract(
     for key in ("b0_model_contract", "b1_model_contract", "target_semantics", "replay_window", "optimizer_settings", "scheduler_settings"):
         if not isinstance(get(key, None), Mapping):
             raise ExperimentContractError(f"B experiment contract field {key} must be an object")
-    if isinstance(contract, BExperimentContract):
-        canonical = canonical_fields
-        actual_payload = contract.to_dict()
+    for key in (
+        "canonical_common_effective_config",
+    ):
+        if not isinstance(get(key, None), Mapping):
+            raise ExperimentContractError(f"B experiment contract field {key} must be an object")
+    contract_object = contract if isinstance(contract, BExperimentContract) else BExperimentContract.from_dict(contract)
+    canonical = canonical_fields
+    actual_payload = contract_object.to_dict()
+    if isinstance(contract, BExperimentContract) or isinstance(contract, Mapping):
         canonical_payload = canonical.to_dict()
         for key in actual_payload:
             if key in {"source_git_sha", "heldout_suite_hash"}:
@@ -661,7 +830,7 @@ def validate_b_experiment_contract(
         validate_b0_b1_effective_configs(
             b0_effective_config,
             b1_effective_config,
-            contract=contract if isinstance(contract, BExperimentContract) else None,
+            contract=contract_object,
         )
     return contract
 
@@ -851,7 +1020,9 @@ def validate_effective_config_for_treatment(
     if selected not in {B0_TREATMENT, B1_TREATMENT}:
         raise ExperimentContractError(f"Unknown B experiment treatment: {treatment!r}")
     if contract is None:
-        contract = build_b_experiment_contract()
+        raise ExperimentContractError(
+            "validate_effective_config_for_treatment requires the immutable B contract"
+        )
     if selected == B0_TREATMENT:
         expected_profile = contract.b0_model_profile
         expected_model = contract.b0_model_contract
@@ -905,7 +1076,11 @@ def preflight_b_experiment(
     """Resolve, validate, and optionally persist the B experiment record."""
 
     root = Path(repo).resolve() if repo is not None else _repo_root()
-    heldout_hash = hash_heldout_suite(heldout_suite_path) if heldout_suite_path else None
+    if heldout_suite_path is None:
+        raise ExperimentContractError(
+            "--heldout-suite is required for a real B experiment; only --dry-run may omit it"
+        )
+    heldout_hash = hash_heldout_suite(heldout_suite_path)
     contract = build_b_experiment_contract(
         source_git_sha=current_source_git_sha(root),
         heldout_suite_hash=heldout_hash,

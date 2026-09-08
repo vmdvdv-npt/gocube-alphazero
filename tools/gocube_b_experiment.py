@@ -164,18 +164,26 @@ def training_command(args, *, python: str | None = None) -> list[str]:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    if args.heldout_suite is None and not args.dry_run:
+        raise SystemExit(
+            "--heldout-suite is required for a real B experiment; "
+            "without it only --dry-run is permitted"
+        )
     repo = Path.cwd().resolve()
     contract_path = (
         Path(args.contract_path).resolve()
         if args.contract_path
         else repo / "training_reports" / args.run_name / "gocube-b-experiment-contract.json"
     )
-    preflight_b_experiment(
-        repo=repo,
-        contract_path=contract_path,
-        heldout_suite_path=args.heldout_suite,
-        scientific_target=args.scientific_target,
-    )
+    if args.heldout_suite is not None:
+        preflight_b_experiment(
+            repo=repo,
+            contract_path=contract_path,
+            heldout_suite_path=args.heldout_suite,
+            scientific_target=args.scientific_target,
+        )
+    else:
+        print("Dry-run only: no frozen heldout suite was supplied; no contract record was written.")
     command = training_command(args, python=str(repo / ".venv" / "bin" / "python"))
     print(f"B experiment contract: {contract_path}")
     print("Launching: " + shlex.join(command))

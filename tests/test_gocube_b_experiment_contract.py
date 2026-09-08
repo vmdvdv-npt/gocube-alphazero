@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from dataclasses import replace
 
 import pytest
@@ -9,6 +10,8 @@ from alphazero.envs.gocube.b_experiment_contract import (
     ExperimentContractError,
     build_b_experiment_contract,
     diff_effective_configs,
+    hash_heldout_suite,
+    preflight_b_experiment,
     resolve_b_effective_configs_separate_processes,
     validate_b0_b1_effective_configs,
     validate_b_experiment_contract,
@@ -20,7 +23,7 @@ from tools import gocube_b_experiment
 
 @pytest.fixture(scope="module")
 def canonical():
-    contract = build_b_experiment_contract()
+    contract = build_b_experiment_contract(heldout_suite_hash="a" * 64)
     b0, b1 = resolve_b_effective_configs_separate_processes()
     return contract, b0, b1
 
@@ -32,6 +35,29 @@ def test_canonical_b0_and_b1_configs_validate(canonical):
     assert contract.komi == 0.5
     assert contract.training_batch_size == 1024
     assert b0["train_batch_size"] == b1["train_batch_size"] == 1024
+    assert contract.result_semantics["win"] == 1.0
+    assert contract.result_semantics["draw"] == 0.5
+    assert contract.result_semantics["no_result"] == 0.5
+    assert contract.result_semantics["loss"] == 0.0
+    assert contract.primary_endpoint == "heldout_paired_position_score"
+    assert "hierarchical-paired-bootstrap" in contract.statistical_method_identifier
+    assert "excluded from the denominator" not in contract.no_result_evaluation_convention
+
+
+def test_contract_builder_rejects_missing_heldout_hash():
+    with pytest.raises(ExperimentContractError, match="real frozen heldout-suite"):
+        build_b_experiment_contract()
+
+
+def test_heldout_hash_is_computed_from_artifact(tmp_path):
+    artifact = tmp_path / "frozen-suite.json"
+    artifact.write_bytes(b'{"schema_version":1,"positions":16}\n')
+    assert hash_heldout_suite(artifact) == hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+
+def test_real_preflight_requires_heldout_artifact():
+    with pytest.raises(ExperimentContractError, match="--heldout-suite is required"):
+        preflight_b_experiment()
 
 
 @pytest.mark.parametrize(
@@ -54,7 +80,7 @@ def test_contract_drift_fails_closed(canonical, field, value):
 
 
 def test_effective_config_whitelist_allows_only_treatment_structure(canonical):
-    _contract, b0, b1 = canonical
+    contract, b0, b1 = canonical
     allowed = copy.deepcopy(b1)
     allowed["lr"] = float(b0["lr"]) + 0.001
     # The learning-rate assignment is deliberately not a permitted change.
@@ -65,6 +91,27 @@ def test_effective_config_whitelist_allows_only_treatment_structure(canonical):
     structural["gocube_network_architecture"] = "test-architecture"
     structural["network_architecture_id"] = "test-architecture"
     assert diff_effective_configs(b0, structural) == []
+    with pytest.raises(ExperimentContractError, match="network_architecture"):
+        validate_b0_b1_effective_configs(b0, structural, contract=contract)
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [("lr", 0.02), ("workers", 8), ("gocube_lr_decay_gamma", 0.2)],
+)
+def test_same_common_drift_in_b0_and_b1_fails_against_canonical_contract(canonical, key, value):
+    contract, b0, b1 = canonical
+    broken_b0 = copy.deepcopy(b0)
+    broken_b1 = copy.deepcopy(b1)
+    broken_b0[key] = value
+    broken_b1[key] = value
+    assert diff_effective_configs(broken_b0, broken_b1) == []
+    with pytest.raises(ExperimentContractError, match=key):
+        validate_b0_b1_effective_configs(
+            broken_b0,
+            broken_b1,
+            contract=contract,
+        )
 
 
 @pytest.mark.parametrize(
@@ -102,6 +149,22 @@ def test_launcher_requires_treatment_and_resolves_profile_itself():
     args = gocube_b_experiment.parse_args(["--treatment", "B0", "--dry-run"])
     command = gocube_b_experiment.training_command(args, python="python")
     assert command[command.index("--model-profile") + 1] == "baseline"
+
+
+def test_launcher_without_suite_is_dry_run_only(tmp_path):
+    contract_path = tmp_path / "must-not-be-written.json"
+    assert gocube_b_experiment.main(
+        [
+            "--treatment",
+            "B1",
+            "--dry-run",
+            "--contract-path",
+            str(contract_path),
+        ]
+    ) == 0
+    assert not contract_path.exists()
+    with pytest.raises(SystemExit, match="--heldout-suite is required"):
+        gocube_b_experiment.main(["--treatment", "B1", "--iterations", "1"])
 
 
 def test_machine_readable_record_round_trips(canonical, tmp_path):
