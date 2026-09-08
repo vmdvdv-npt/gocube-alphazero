@@ -95,12 +95,14 @@ def _optional_arg(args: Any, key: str, default: Any = None) -> Any:
 def effective_config(args: Any, game_cls) -> dict[str, object]:
     contract = resolve_model_contract(game_cls, args)
     config = effective_parameter_snapshot(args)
-    # B05 segment switches control the bounded orchestration/resume protocol;
-    # they are not model, search, rules, or optimizer semantics.  Omitting
-    # them keeps the immutable run manifest resumable while the checkpoint
-    # still records the explicit B05 dry-run identity.
-    for key in ("gocube_b05_segment", "gocube_b05_resume_segment"):
-        config.pop(key, None)
+    # B05 segment switches and its iteration safety ceiling control only the
+    # bounded orchestration/resume protocol; they are not model, search,
+    # rules, or optimizer semantics. Omitting them keeps the immutable run
+    # manifest resumable while the checkpoint still records the explicit B05
+    # dry-run identity. The ordinary production manifest retains numIters.
+    if getattr(args, "gocube_b05_dry_run", False):
+        for key in ("gocube_b05_segment", "gocube_b05_resume_segment", "numIters"):
+            config.pop(key, None)
     config.update({
         "topology": game_cls.topology_kind(),
         "size": int(game_cls.board_size()),

@@ -10,6 +10,9 @@ from alphazero.envs.gocube.b_experiment_contract import (
     B05_DRY_RUN_TARGET,
     build_b_experiment_contract,
 )
+from alphazero.envs.gocube.hardened_train import build_hardened_training_args
+from alphazero.envs.gocube.katago_train import parse_args as katago_parse_args
+from alphazero.envs.gocube.reproducible_manifest import effective_config
 from alphazero.envs.gocube.production_training import SampleBudgetTarget
 from tools import analyze_gocube_b_evaluation, gocube_b05, gocube_b_experiment
 from tools.hardware_telemetry import HardwareTelemetry
@@ -41,6 +44,33 @@ def test_b05_launcher_resume_preserves_hardened_path_and_batch():
     assert "--b05-dry-run" in command
     assert "--b05-resume-segment" in command
     assert "--allow-existing-run" in command
+
+
+def test_b05_resume_ignores_only_iteration_safety_ceiling_in_manifest():
+    common = [
+        "--model-profile", "baseline", "--topology", "cube", "--size", "4",
+        "--workers", "2", "--sims", "50", "--arena-sims", "50",
+        "--games-per-iteration", "4", "--train-batch-size", "1024",
+        "--fast-game-prob", "0.25", "--train-samples-per-new-sample", "1",
+        "--cumulative-new-samples-target", "512", "--run-name", "manifest-b05",
+        "--no-arena", "--experiment-contract-id", "gocube-b-experiment-contract-v1",
+        "--experiment-contract-sha256", "a" * 64, "--b05-dry-run", "--b05-segment",
+    ]
+    initial_cli = katago_parse_args(["--iterations", "1", *common])
+    resume_cli = katago_parse_args(
+        ["--iterations", "2", *common, "--b05-resume-segment", "--allow-existing-run"]
+    )
+    initial_game, initial_args = build_hardened_training_args(initial_cli)
+    resume_game, resume_args = build_hardened_training_args(resume_cli)
+    assert effective_config(initial_args, initial_game) == effective_config(resume_args, resume_game)
+
+    production_cli = katago_parse_args(["--iterations", "1"])
+    production_resume_cli = katago_parse_args(["--iterations", "2"])
+    production_game, production_args = build_hardened_training_args(production_cli)
+    production_resume_game, production_resume_args = build_hardened_training_args(production_resume_cli)
+    assert effective_config(production_args, production_game)["numIters"] != effective_config(
+        production_resume_args, production_resume_game
+    )["numIters"]
 
 
 def test_scientific_analyzer_rejects_b05_marker_before_other_fields():
