@@ -38,6 +38,13 @@ architecture ID `gocube-graph-structural-v1`, and two structural channels.
 Future B0/B1 profiles should be added to this same selector rather than
 creating a second production training path.
 
+`tests/fixtures/gocube_production_profile_baseline.json` is an architecture,
+search-budget, optimizer, and training-hyperparameter reference for the
+baseline profile.  Its `architecture_reference_commit` is not a complete
+rules snapshot, and its `reference_scope` makes that boundary explicit.  The
+fixture intentionally does not freeze the local rules implementation version;
+the final B0 freeze happens only after S1, S2, S3, H1, and M1 are integrated.
+
 The compact manifest is authoritative only when it contains the complete
 contract.  The loader reads checkpoint metadata before constructing a network,
 resolves the exact compatible game class, compares it with the catalog

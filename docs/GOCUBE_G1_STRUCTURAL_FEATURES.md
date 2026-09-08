@@ -31,6 +31,12 @@ profile (`--model-profile baseline`), which retains the `(18, 96, 1)`
 observation, `gocube-graph-v1`, and zero structural channels.  G1 is selected
 explicitly and is recorded in the effective configuration and resume manifest.
 
+In G1, the `baseline` profile means preservation of the pre-G1 network
+architecture and protected training/search hyperparameters; it is not the
+final B0 rules snapshot.  Correctness contracts from S1, S3, H1, and M1 apply
+equally to `baseline` and `g1`.  The final B0 freeze happens only after S1,
+S2, S3, H1, and M1 are integrated.
+
 For Cube 4 the maximum BFS distance is 2, so its non-zero distance values are
 `0.5` and `1.0` after normalization.  Cube 2 has every point in a vertex
 triangle and therefore has maximum distance 0.
