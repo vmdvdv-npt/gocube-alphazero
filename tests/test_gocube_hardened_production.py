@@ -1,20 +1,37 @@
 from __future__ import annotations
 
+import json
 import math
 import os
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 
 from alphazero.envs.gocube.atomic_io import (
     RECOVERY_CONTRACT,
+    REPLAY_TARGET_PROVENANCE_SUFFIX,
     REPLAY_TENSOR_SUFFIXES,
     atomic_torch_save,
     find_last_valid_contiguous_checkpoint,
     load_replay_marker,
+    load_replay_target_provenance,
     replay_marker_path,
     write_replay_marker,
+)
+from alphazero.envs.gocube.contract_versions import (
+    TARGET_PROVENANCE_ENCODING,
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
+)
+from alphazero.envs.gocube.game import Cube4JapaneseGame
+from alphazero.envs.gocube.katago_v3 import _cycle_check_and_record, initial_v3_state
+from alphazero.envs.gocube.pinned_game import PinnedCube4JapaneseGame
+from alphazero.envs.gocube.replay_provenance import (
+    encode_target_provenance,
+    provenance_codes_to_semantics,
 )
 from alphazero.envs.gocube.exploration_contract import (
     KATAGO_PINNED_EXPLORATION_CONTRACT,
@@ -184,6 +201,26 @@ class _DummyGame:
     def observation_size():
         return (2,)
 
+    @staticmethod
+    def action_size():
+        return 4
+
+    @staticmethod
+    def num_players():
+        return 2
+
+    @staticmethod
+    def logical_topology():
+        return SimpleNamespace(point_count=1)
+
+
+class _RecordingWriter:
+    def __init__(self):
+        self.scalars = []
+
+    def add_scalar(self, *args):
+        self.scalars.append(args)
+
 
 def _replay_base(tmp_path, run_name, iteration):
     folder = tmp_path / run_name
@@ -203,6 +240,10 @@ def _write_complete_replay(base, rows=3):
     )
     for suffix, tensor in zip(REPLAY_TENSOR_SUFFIXES, tensors):
         torch.save(tensor, os.fspath(base) + suffix)
+    torch.save(
+        torch.tensor([1, 2, 3][:rows], dtype=torch.uint8),
+        os.fspath(base) + REPLAY_TARGET_PROVENANCE_SUFFIX,
+    )
     write_replay_marker(os.fspath(base), iteration=1, row_count=rows)
 
 
@@ -219,12 +260,16 @@ def _replay_loader_coach(tmp_path, run_name):
     return coach
 
 
-def test_replay_loader_requires_completion_marker_and_all_seven_tensors(tmp_path):
+def test_replay_loader_requires_completion_marker_seven_tensors_and_sidecar(tmp_path):
     run_name = "atomic-replay"
     base = _replay_base(tmp_path, run_name, 1)
     _write_complete_replay(base)
     marker = load_replay_marker(os.fspath(base))
     assert marker["row_count"] == 3
+    assert torch.equal(
+        load_replay_target_provenance(os.fspath(base)),
+        torch.tensor([1, 2, 3], dtype=torch.uint8),
+    )
 
     coach = _replay_loader_coach(tmp_path, run_name)
     datasets, loaded = coach._load_replay_datasets(1)
@@ -241,3 +286,186 @@ def test_replay_loader_requires_completion_marker_and_all_seven_tensors(tmp_path
     datasets, loaded = coach._load_replay_datasets(1)
     assert datasets == []
     assert loaded == {}
+
+
+def test_current_s3_provenance_encoding_fails_closed_for_missing_or_unknown_source():
+    for provenance in (None, "not-a-provenance"):
+        with pytest.raises(ValueError):
+            encode_target_provenance(provenance)
+
+
+def test_replay_loader_rejects_missing_truncated_invalid_or_mismatched_sidecar(tmp_path):
+    base = _replay_base(tmp_path, "provenance-replay", 1)
+    _write_complete_replay(base)
+
+    sidecar = os.fspath(base) + REPLAY_TARGET_PROVENANCE_SUFFIX
+    os.unlink(sidecar)
+    with pytest.raises(ValueError, match="provenance sidecar is missing"):
+        load_replay_marker(os.fspath(base))
+
+    torch.save(torch.tensor([1, 2], dtype=torch.uint8), sidecar)
+    with pytest.raises(ValueError, match="row count mismatch"):
+        load_replay_marker(os.fspath(base))
+
+    torch.save(torch.tensor([1, 2, 3, 1], dtype=torch.uint8), sidecar)
+    with pytest.raises(ValueError, match="row count mismatch"):
+        load_replay_marker(os.fspath(base))
+
+    with open(sidecar, "wb") as handle:
+        handle.write(b"truncated")
+    with pytest.raises(ValueError, match="sidecar is unreadable"):
+        load_replay_marker(os.fspath(base))
+
+    torch.save(torch.tensor([1, 4, 3], dtype=torch.uint8), sidecar)
+    with pytest.raises(ValueError, match="Unknown target provenance codes"):
+        load_replay_marker(os.fspath(base))
+
+    torch.save(torch.tensor([1, 0, 3], dtype=torch.uint8), sidecar)
+    with pytest.raises(ValueError, match="cannot contain unknown"):
+        load_replay_marker(os.fspath(base))
+
+    torch.save(torch.tensor([1, 2, 3], dtype=torch.int64), sidecar)
+    with pytest.raises(ValueError, match="must use torch.uint8"):
+        load_replay_marker(os.fspath(base))
+
+
+@pytest.mark.parametrize(
+    "marker_field, marker_value, error",
+    [
+        ("target_provenance_encoding", "wrong-encoding", "encoding mismatch"),
+        ("target_provenance_sidecar", "-wrong.pkl", "sidecar mismatch"),
+        ("termination_contract", "wrong-termination", "termination_contract"),
+        ("replay_format_version", 3, "Replay format version"),
+    ],
+)
+def test_replay_loader_rejects_old_or_semantically_incompatible_marker(
+    tmp_path, marker_field, marker_value, error
+):
+    base = _replay_base(tmp_path, "marker-boundary", 1)
+    _write_complete_replay(base)
+    marker_path = replay_marker_path(os.fspath(base))
+    payload = json.loads(open(marker_path, encoding="utf-8").read())
+    payload[marker_field] = marker_value
+    with open(marker_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+    with pytest.raises(ValueError, match=error):
+        load_replay_marker(os.fspath(base))
+
+
+def test_s3_production_persists_row_ordered_provenance_without_changing_seven_tensors(tmp_path):
+    formal_game = PinnedCube4JapaneseGame()
+    formal_game.configure_pinned_selfplay(
+        auto_end_pass_alive=False,
+        root_prune_useless_moves=False,
+        seki_fork_hack_prob=0.0,
+    )
+    for _ in range(6):
+        formal_game.play_action(formal_game.pass_action())
+
+    runtime_game = PinnedCube4JapaneseGame()
+    for action in (0, 1, 2):
+        runtime_game.play_action(action)
+    runtime_game.finalize_episode_due_to_runtime_limit(3)
+    assert runtime_game.result_provenance == "runtime"
+
+    topology = Cube4JapaneseGame.logical_topology()
+    initial = initial_v3_state(topology)
+    key = initial.history_since_pass[0]
+    cycle_state = _cycle_check_and_record(
+        replace(initial, history_since_pass=(key, key, key)),
+        after_pass=False,
+    )
+    cycle_game = PinnedCube4JapaneseGame(cycle_state)
+
+    # The final three rows model the worker's repeat=3 endgame weighting: the
+    # same source target is queued as three independent replay rows.
+    source_games = [
+        formal_game,
+        runtime_game,
+        formal_game,
+        cycle_game,
+        runtime_game,
+        runtime_game,
+        runtime_game,
+    ]
+    source_bundles = [
+        game.training_target_bundle(side_to_move=int(game.player))
+        for game in source_games
+    ]
+    expected_provenance = [
+        "formal", "runtime", "formal", "rule_no_result", "runtime", "runtime", "runtime"
+    ]
+    assert [bundle.result_provenance for bundle in source_bundles] == expected_provenance
+    codes = [encode_target_provenance(bundle.result_provenance) for bundle in source_bundles]
+    rows = len(source_games)
+    samples = []
+    for row, (game, bundle) in enumerate(zip(source_games, source_bundles)):
+        policy = np.zeros(Cube4JapaneseGame.action_size(), dtype=np.float32)
+        policy[row] = 1.0
+        samples.append(
+            (
+                game.observation(),
+                policy,
+                bundle.value_target,
+                bundle.score_target,
+                bundle.score_mask,
+                bundle.ownership_target,
+                bundle.ownership_mask,
+                encode_target_provenance(bundle.result_provenance),
+            )
+        )
+    expected_tensors = tuple(
+        np.stack([sample[field] for sample in samples])
+        for field in range(7)
+    )
+
+    coach = object.__new__(HardenedKataGoSearchCoach)
+    coach.args = SimpleNamespace(
+        data=os.fspath(tmp_path),
+        run_name="s3-e2e",
+        symmetricSamples=True,
+        gocube_endgame_sample_weight=1,
+        gocube_target_provenance_semantics=TARGET_PROVENANCE_SEMANTICS,
+        gocube_target_provenance_encoding=TARGET_PROVENANCE_ENCODING,
+        minTrainHistoryWindow=4,
+        trainHistoryIncrementIters=2,
+        maxTrainHistoryWindow=20,
+    )
+    coach.game_cls = PinnedCube4JapaneseGame
+    coach.file_queue = object()
+    coach._pending_iteration_samples = samples
+    coach._iteration_telemetry = {
+        "base_positions": rows,
+        "base_endgame_positions": 2,
+        "endgame_extra_samples": 0,
+    }
+    coach.writer = _RecordingWriter()
+
+    coach.saveIterationSamples(1)
+
+    base = tmp_path / "s3-e2e" / get_iter_file(1).replace(".pkl", "")
+    marker = load_replay_marker(os.fspath(base))
+    assert marker["replay_format_version"] == 4
+    assert marker["target_provenance_semantics"] == TARGET_PROVENANCE_SEMANTICS
+    assert marker["target_provenance_encoding"] == TARGET_PROVENANCE_ENCODING
+    assert marker["target_provenance_sidecar"] == REPLAY_TARGET_PROVENANCE_SUFFIX
+    assert marker["target_provenance_rows"] == rows
+    assert marker["termination_contract"] == TERMINATION_CONTRACT
+    provenance = load_replay_target_provenance(os.fspath(base), marker=marker)
+    assert provenance.tolist() == codes
+    assert provenance_codes_to_semantics(provenance) == tuple(expected_provenance)
+
+    for suffix, expected in zip(REPLAY_TENSOR_SUFFIXES, expected_tensors):
+        persisted = torch.load(os.fspath(base) + suffix, map_location="cpu")
+        torch.testing.assert_close(
+            persisted,
+            torch.from_numpy(expected),
+            rtol=0.0,
+            atol=0.0,
+            equal_nan=True,
+        )
+
+    datasets, loaded = coach._load_replay_datasets(1)
+    assert loaded == {1: rows}
+    assert len(datasets) == 1
+    assert len(datasets[0].tensors) == 7

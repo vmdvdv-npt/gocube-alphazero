@@ -54,6 +54,7 @@ def test_v3_contract_and_training_controls_are_forwarded():
     assert args.train_steps_per_iteration is None
     assert args.probFastSim == 0.75
     assert args.gocube_auxiliary_targets is True
+    assert args.gocube_target_provenance_encoding == "gocube-target-provenance-encoding-v1"
     assert args.gocube_endgame_sample_weight == 3
     assert args.gocube_terminal_adjudicator == "gocube-katago-japanese-v3"
     assert args.gocube_observation_schema == "gocube-observation-v3"

@@ -134,10 +134,10 @@ def test_no_result_is_framework_draw_utility_but_not_training_target():
         game.training_targets()
 
 
-def test_emergency_move_cap_is_no_result_not_forced_score():
+def test_formal_transition_does_not_apply_runner_move_cap():
     t = rect_topology(3, 3)
     cap = EMERGENCY_MOVE_CAP_BASE + EMERGENCY_MOVE_CAP_FACTOR * t.point_count
     state = replace(initial_v3_state(t), turns=cap - 1)
     state = apply_v3_action(state, t.pass_action, t)
-    assert state.terminal_kind == NO_RESULT
-    assert state.no_result_reason == "move-cap"
+    assert state.terminal_kind is None
+    assert state.no_result_reason is None

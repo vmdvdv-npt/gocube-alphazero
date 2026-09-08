@@ -61,6 +61,8 @@ def run_smoke(topology: str, size: int, games: int, seed: int) -> dict[str, obje
             "game": game_index,
             "terminal_kind": game.terminal_kind,
             "no_result_reason": state.no_result_reason,
+            "termination_reason": state.termination_reason,
+            "result_provenance": state.result_provenance,
             "training_valid": game.has_training_result(),
             "score_target_generated": score_target_generated,
             "ownership_target_generated": ownership_target_generated,
@@ -79,6 +81,13 @@ def run_smoke(topology: str, size: int, games: int, seed: int) -> dict[str, obje
     cleanup2_moves = total("terminal/cleanup2_moves")
     scored_rows = [r for r in results if r["terminal_kind"] == SCORED]
     no_result_rows = [r for r in results if r["terminal_kind"] == NO_RESULT]
+    termination_counts = {}
+    provenance_counts = {}
+    for row in results:
+        reason = row["termination_reason"] or "unknown"
+        provenance = row["result_provenance"] or "unknown"
+        termination_counts[reason] = termination_counts.get(reason, 0) + 1
+        provenance_counts[provenance] = provenance_counts.get(provenance, 0) + 1
     summary = {
         "topology": topology,
         "size": size,
@@ -97,9 +106,17 @@ def run_smoke(topology: str, size: int, games: int, seed: int) -> dict[str, obje
         "score_targets_generated": sum(bool(r["score_target_generated"]) for r in results),
         "ownership_targets_generated": sum(bool(r["ownership_target_generated"]) for r in results),
         "ownership_masks_generated": sum(bool(r["ownership_mask_generated"]) for r in results),
+        "termination_counts": termination_counts,
+        "result_provenance_counts": provenance_counts,
+        "episode_move_limit_count": termination_counts.get("episode_move_limit", 0),
+        "episode_move_limit_fraction": termination_counts.get("episode_move_limit", 0) / games,
         "exact_score_examples": [r["score"] for r in scored_rows[:5]],
         "no_result_cases": [
-            {"game": r["game"], "reason": r["no_result_reason"], "turns": r["turns"]}
+            {
+                "game": r["game"],
+                "reason": r["termination_reason"],
+                "turns": r["turns"],
+            }
             for r in no_result_rows
         ],
         "crashes_exceptions": 0,

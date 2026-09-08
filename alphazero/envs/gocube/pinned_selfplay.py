@@ -5,7 +5,11 @@ import numpy as np
 from alphazero.SelfPlayAgent import SelfPlayAgent
 
 from .exploration_contract import KATAGO_PINNED_EXPLORATION_DEFAULTS, chosen_move_temperature
-from .selfplay_semantics import KATAGO_PINNED_SELFPLAY_DEFAULTS
+from .selfplay_semantics import (
+    KATAGO_PINNED_SELFPLAY_DEFAULTS,
+    resolve_episode_move_limit,
+    should_stop_episode,
+)
 
 
 def _optional_arg(args, name, default):
@@ -25,6 +29,33 @@ def _keep_current_temperature(current_temperature, _turn_number, _max_turns):
 
 class PinnedSelfPlayAgent(SelfPlayAgent):
     """Self-play agent that adds the remaining pinned KataGo game-level semantics."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        configured = _optional_arg(self.args, "gocube_episode_move_limit", None)
+        self._episode_move_limit = resolve_episode_move_limit(
+            self.game_cls.logical_topology(), configured
+        )
+
+    def _after_game_action(self, index):
+        """Enforce the episode budget after a real action, outside MCTS clones."""
+
+        if self._is_arena or self._is_warmup:
+            return None
+        game = self.games[index]
+        if not hasattr(game, "episode_move_count") or not hasattr(
+            game, "finalize_episode_due_to_runtime_limit"
+        ):
+            return None
+        if getattr(game, "terminal_kind", None) is not None:
+            return None
+        if should_stop_episode(
+            game.episode_move_count,
+            game.logical_topology(),
+            episode_limit=self._episode_move_limit,
+        ) and game.finalize_episode_due_to_runtime_limit(self._episode_move_limit):
+            self._telemetry_add("termination/episode_move_limit")
+        return None
 
     def _configure_pinned_game(self, index: int) -> bool:
         if self._is_arena or self._is_warmup or not getattr(self, "score_aware", False):
@@ -92,6 +123,8 @@ class PinnedSelfPlayAgent(SelfPlayAgent):
                 seki_fork_hack_prob=float(config["seki_fork_hack_prob"]),
                 started_from_seki_fork=bool(config["started_from_seki_fork"]),
             )
+        if result and hasattr(self.games[index], "mark_synthetic_cleanup_episode"):
+            self.games[index].mark_synthetic_cleanup_episode()
         return result
 
     def playMoves(self):

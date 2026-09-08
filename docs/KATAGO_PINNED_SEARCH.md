@@ -139,7 +139,7 @@ No new terminal heuristic is introduced. Search uses the existing pinned V3 rule
 
 `MAIN -> CLEANUP_1 -> CLEANUP_2 -> SCORED`, plus `NO_RESULT`.
 
-For a scored terminal, search uses the exact final score and exact result. For `NO_RESULT`, result utility is zero with the pinned `noResultUtilityForWhite = 0`, and no artificial score is supplied.
+For a formal scored terminal, search uses the exact final score and exact result. For `NO_RESULT`, result utility is zero with the pinned `noResultUtilityForWhite = 0`, and no artificial score is supplied. The self-play episode limit is enforced after a real runner action, not by `apply_v3_action` and not by search clones. A limit crossing is force-scored with `termination_reason=episode_move_limit` and runtime provenance; it is not relabeled as a formal pass.
 
 ## Tree reuse
 

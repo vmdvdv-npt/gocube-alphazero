@@ -349,9 +349,10 @@ def test_technical_budget_candidate_is_diagnostic_only():
     candidate = replace(initial, turns=cap - 1)
 
     # The occupancy observation cannot see this manually injected counter,
-    # while the next accepted action has different current behavior. This is
-    # intentionally not part of _all_h1_samples: candidate is not a legal
-    # replay, so it is evidence for S3 review rather than an H1 finding.
+    # while the runner-level episode budget is intentionally kept separate
+    # from this formal transition. This is not part of _all_h1_samples:
+    # candidate is not a legal replay, so it is evidence for S3 review rather
+    # than an H1 finding.
     assert np.array_equal(
         Cube4JapaneseGame(initial).observation(),
         Cube4JapaneseGame(candidate).observation(),
@@ -359,4 +360,4 @@ def test_technical_budget_candidate_is_diagnostic_only():
     initial_after_pass = apply_v3_action(initial, topology.pass_action, topology)
     candidate_after_pass = apply_v3_action(candidate, topology.pass_action, topology)
     assert initial_after_pass.terminal_kind is None
-    assert candidate_after_pass.terminal_kind == "no_result"
+    assert candidate_after_pass.terminal_kind is None

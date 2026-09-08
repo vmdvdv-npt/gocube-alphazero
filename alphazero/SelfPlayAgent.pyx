@@ -17,6 +17,11 @@ from alphazero.envs.gocube.selfplay_semantics import (
     apply_pass_would_end_phase_feature,
     rebase_cleanup_training_state,
 )
+from alphazero.envs.gocube.contract_versions import (
+    TARGET_PROVENANCE_ENCODING,
+    TARGET_PROVENANCE_SEMANTICS,
+)
+from alphazero.envs.gocube.replay_provenance import encode_target_provenance
 from alphazero.search_contract import KATAGO_PINNED_SEARCH_UTILITY_MODE
 from alphazero.envs.gocube.reproducibility import derive_worker_seed, seed_process
 
@@ -75,6 +80,18 @@ class SelfPlayAgent(mp.Process):
         self.score_aware = (
             _optional_arg(args, 'search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
         )
+        self._requires_s3_target_provenance = (
+            _optional_arg(args, 'gocube_target_provenance_semantics', None)
+            == TARGET_PROVENANCE_SEMANTICS
+        )
+        if self._requires_s3_target_provenance and not _optional_arg(
+            args, 'gocube_auxiliary_targets', False
+        ):
+            raise ValueError('S3 GoCube replay provenance requires auxiliary targets')
+        if self._requires_s3_target_provenance and _optional_arg(
+            args, 'gocube_target_provenance_encoding', None
+        ) != TARGET_PROVENANCE_ENCODING:
+            raise ValueError('S3 GoCube replay provenance encoding is missing or invalid')
         if self.score_aware and not _is_warmup and (score_tensor is None or ownership_tensor is None):
             raise ValueError('KataGo-derived SelfPlayAgent requires score_tensor and ownership_tensor')
 
@@ -210,6 +227,10 @@ class SelfPlayAgent(mp.Process):
             counter.value += amount
         finally:
             lock.release()
+
+    def _after_game_action(self, index):
+        """Hook for game runners that own runtime-only termination policy."""
+        return None
 
     def _cleanup_training_active(self, index):
         phases = getattr(self, 'cleanup_training_phase', None)
@@ -520,6 +541,7 @@ class SelfPlayAgent(mp.Process):
             else:
                 self._mcts(i).update_root(self.games[i], action)
             self.games[i].play_action(action)
+            self._after_game_action(i)
             self._cleanup_slot_set('root_policy_cache', i, None)
 
             if in_cleanup_prelude:
@@ -585,6 +607,10 @@ class SelfPlayAgent(mp.Process):
                     terminal = getattr(final_game, "terminal_adjudication", None)
                     if terminal is not None and terminal.value_target_valid:
                         v3_targets = final_game
+                if getattr(self, '_requires_s3_target_provenance', False) and v3_targets is None:
+                    raise RuntimeError(
+                        'Current S3 replay requires an authoritative V3 target bundle'
+                    )
                 training_valid = v3_targets is not None
                 if v3_targets is None:
                     training_valid = True
@@ -609,6 +635,7 @@ class SelfPlayAgent(mp.Process):
                         for state, pi in data:
                             self._check_pause()
                             observation = state.observation()
+                            provenance_code = None
                             if getattr(self, 'score_aware', False):
                                 observation = apply_pass_would_end_phase_feature(state, observation)
                             if v3_targets is not None:
@@ -620,6 +647,10 @@ class SelfPlayAgent(mp.Process):
                                 score_mask = target_bundle.score_mask
                                 ownership_target = target_bundle.ownership_target
                                 ownership_mask = target_bundle.ownership_mask
+                                if getattr(self, '_requires_s3_target_provenance', False):
+                                    provenance_code = encode_target_provenance(
+                                        target_bundle.result_provenance
+                                    )
                                 if target_bundle.terminal_kind == "no_result":
                                     self._telemetry_add('samples/value_no_result_rows')
                                 if bool(score_mask[0]):
@@ -651,6 +682,12 @@ class SelfPlayAgent(mp.Process):
                                     ownership_target,
                                     ownership_mask,
                                 )
+                            if getattr(self, '_requires_s3_target_provenance', False):
+                                if provenance_code is None:
+                                    raise RuntimeError(
+                                        'Current S3 replay sample has no target provenance'
+                                    )
+                                sample = sample + (provenance_code,)
                             for _ in range(repeat):
                                 self._set_worker_context(i, 'enqueue_samples')
                                 self.output_queue.put(sample)

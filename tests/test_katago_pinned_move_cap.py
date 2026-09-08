@@ -1,13 +1,14 @@
 from alphazero.envs.gocube.katago_v3 import (
     EMERGENCY_MOVE_CAP_BASE,
     EMERGENCY_MOVE_CAP_FACTOR,
-    SCORED,
+    EPISODE_MOVE_LIMIT,
+    RESULT_PROVENANCE_RUNTIME,
     v3_state_from_board,
 )
 from alphazero.envs.gocube.pinned_game import PinnedCube2JapaneseGame
 
 
-def test_pinned_training_force_scores_current_board_at_move_cap():
+def test_formal_transition_ignores_episode_move_cap():
     game_cls = PinnedCube2JapaneseGame
     topology = game_cls.logical_topology()
     move_cap = EMERGENCY_MOVE_CAP_BASE + EMERGENCY_MOVE_CAP_FACTOR * topology.point_count
@@ -18,14 +19,27 @@ def test_pinned_training_force_scores_current_board_at_move_cap():
     )
     game = game_cls(state)
 
-    # The move crosses GoCube's emergency move cap. Pinned self-play mirrors
-    # KataGo GameRunner::endAndScoreGameNow(): current board is force-scored
-    # and remains valid training data rather than becoming NO_RESULT.
+    # The move crosses the runtime budget in the formal counter. That counter
+    # must not create a terminal in the rule transition or in a search clone.
     game.play_action(0)
 
     assert game.semantic_state.turns == move_cap
-    assert game.terminal_kind == SCORED
+    assert game.terminal_kind is None
     assert game.semantic_state.no_result_reason is None
+
+
+def test_runner_force_scores_at_episode_move_cap_with_provenance():
+    game_cls = PinnedCube2JapaneseGame
+    topology = game_cls.logical_topology()
+    move_cap = EMERGENCY_MOVE_CAP_BASE + EMERGENCY_MOVE_CAP_FACTOR * topology.point_count
+    game = game_cls()
+    # The runner count is deliberately independent from formal/history turns.
+    game._pinned_episode_move_count = move_cap
+
+    assert game.finalize_episode_due_to_runtime_limit() is True
+    assert game.terminal_kind == "scored"
+    assert game.termination_reason == EPISODE_MOVE_LIMIT
+    assert game.result_provenance == RESULT_PROVENANCE_RUNTIME
     assert game.has_training_result()
     assert game.terminal_adjudication is not None
     assert game.terminal_adjudication.score is not None

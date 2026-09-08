@@ -8,10 +8,12 @@ from torch.utils.data import TensorDataset
 
 from alphazero.envs.gocube.atomic_io import (
     RECOVERY_CONTRACT,
+    REPLAY_ARTIFACT_SUFFIXES,
     REPLAY_TENSOR_SUFFIXES,
     cleanup_staging_directory,
     find_last_valid_contiguous_checkpoint,
     load_replay_marker,
+    load_replay_target_provenance,
     make_staging_directory,
     promote_staged_file,
     remove_replay_marker,
@@ -125,7 +127,7 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
             super().__init__(game_cls, nnet, args)
 
     def saveIterationSamples(self, iteration):
-        """Commit all seven replay tensors as one recoverable logical unit."""
+        """Commit seven replay tensors plus provenance as one logical unit."""
 
         original_data = self.args.data
         final_folder = os.path.join(original_data, self.args.run_name)
@@ -154,7 +156,7 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
                 self.args.run_name,
                 get_iter_file(iteration).replace(".pkl", ""),
             )
-            for suffix in REPLAY_TENSOR_SUFFIXES:
+            for suffix in REPLAY_ARTIFACT_SUFFIXES:
                 staged = staged_base + suffix
                 if not os.path.exists(staged):
                     raise RuntimeError(f"Replay staging is incomplete: missing {staged}")
@@ -179,6 +181,7 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
             )
             try:
                 marker = load_replay_marker(base)
+                load_replay_target_provenance(base, marker=marker)
             except (FileNotFoundError, OSError, ValueError) as exc:
                 print(f"Warning: ignoring incomplete replay iteration {train_iter}: {exc}")
                 continue
@@ -255,7 +258,7 @@ def print_hardened_configuration(args):
     print("Crash recovery:")
     print(f"  contract = {args.gocube_recovery_contract}")
     print("  checkpoint writes = staging + fsync + atomic replace")
-    print("  replay commit = 7 tensors + completion marker")
+    print("  replay commit = 7 tensors + provenance sidecar + completion marker")
     print("  resume = last valid contiguous checkpoint")
 
 

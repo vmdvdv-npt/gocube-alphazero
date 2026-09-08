@@ -14,6 +14,17 @@ The hardened path intentionally does **not** change the network architecture, lo
 
 The KataGo reference remains commit `f6bc4b19a1686caa2d088b56251e8c11c8be6d51`.
 
+## 0. Formal rules versus episode runtime
+
+The production episode budget is `256 + 24 * point_count` (2560 for Cube 4).
+It is owned by the self-play runner and counted separately from formal/history
+turns, so fork and synthetic cleanup episodes do not inherit a stale budget.
+`apply_v3_action` and MCTS clones never turn this budget into a terminal. When
+the real runner reaches it, the current position is force-scored and records
+carry `termination_reason=episode_move_limit`, `result_provenance=runtime`,
+and `runtime_forced=true`. Formal pass, pass-alive, and cycle results remain
+separate.
+
 ## 1. Pinned chosen-move temperature
 
 The played self-play move follows the pinned self-play configuration exactly:
@@ -75,7 +86,9 @@ A process crash before the replace leaves the previous visible checkpoint unchan
 
 ## 5. Atomic replay logical commits
 
-Each iteration's seven replay tensors (replay format v3) are first written into a staging directory on the same filesystem:
+Each iteration's seven replay tensors and required target-provenance sidecar
+(replay format v4) are first written into a staging directory on the same
+filesystem:
 
 1. observation data;
 2. policy targets;
@@ -85,7 +98,13 @@ Each iteration's seven replay tensors (replay format v3) are first written into 
 6. ownership targets;
 7. ownership point masks.
 
-Only after all seven files exist are they promoted into the run directory. A completion marker `iteration-NNNN-complete.json` is written **last**.
+The eighth artifact is `-target-provenance.pkl`, a row-aligned `uint8 [N]`
+sidecar using encoding `gocube-target-provenance-encoding-v1` (`1=formal`,
+`2=rule_no_result`, `3=runtime`; `0` is reserved for unknown/legacy data and
+is rejected for new S3 rows). Only after all seven tensors and the sidecar
+exist are they promoted into the run directory. A completion marker
+`iteration-NNNN-complete.json` is written **last** and records the provenance
+semantics, encoding, suffix, row count, and termination contract.
 
 Replay loading is fail-closed: an iteration without a valid marker, with a missing tensor, or with inconsistent row counts is ignored rather than partially entering the replay window.
 
@@ -103,7 +122,7 @@ effective parameter, topology, rules fingerprint, pinned KataGo commit, komi,
 master seed, target semantic, sample-clock contract, or replay version aborts
 the run. The rich manifest is never overwritten during resume.
 
-Old checkpoints are not silently reinterpreted under the new semantics. The exploration contract is versioned as `katago-pinned-exploration-v2`, and hardened checkpoints additionally persist the recovery and move/value/LCB fields. S1 also requires replay format v3, target semantics `win-loss-noresult-s1-v2`, `normalized-score-with-applicability-mask-s1-v2`, `formal-v3-s1-with-point-mask-v2`, and score initialization `katago-boardhistory-clear-v1`; older artifacts fail closed.
+Old checkpoints are not silently reinterpreted under the new semantics. The exploration contract is versioned as `katago-pinned-exploration-v2`, and hardened checkpoints additionally persist the recovery and move/value/LCB fields. S1 requires replay format v4, while retaining training contract v3 and the target semantics `win-loss-noresult-s1-v2`, `normalized-score-with-applicability-mask-s1-v2`, `formal-v3-s1-with-point-mask-v2`, and score initialization `katago-boardhistory-clear-v1`. S3 additionally requires the provenance sidecar and encoding; older artifacts fail closed.
 
 ## 7. Initial network reproducibility
 

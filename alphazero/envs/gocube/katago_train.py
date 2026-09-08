@@ -48,8 +48,15 @@ from alphazero.envs.gocube.sample_clock import SampleClockNNetWrapper, TRAINING_
 from alphazero.envs.gocube.contract_versions import (
     DEFAULT_MASTER_SEED,
     SEED_DERIVATION_CONTRACT,
+    TARGET_PROVENANCE_ENCODING,
+    TARGET_PROVENANCE_SEMANTICS,
+    TERMINATION_CONTRACT,
 )
-from alphazero.envs.gocube.atomic_io import REPLAY_TENSOR_SUFFIXES
+from alphazero.envs.gocube.atomic_io import (
+    REPLAY_TENSOR_SUFFIXES,
+    load_replay_marker,
+    load_replay_target_provenance,
+)
 from alphazero.envs.gocube.selfplay_semantics import (
     KATAGO_CLEANUP_TRAINING_DEFAULTS,
     KATAGO_PINNED_SELFPLAY_DEFAULTS,
@@ -411,18 +418,38 @@ class KataGoSearchCoach(GoCubeCoach):
     def _load_replay_datasets(self, iteration):
         datasets = []
         loaded_samples = {}
+        current_s3_replay = (
+            getattr(self.args, "gocube_target_provenance_semantics", None)
+            == TARGET_PROVENANCE_SEMANTICS
+        )
+        if (
+            current_s3_replay
+            and getattr(self.args, "gocube_target_provenance_encoding", None)
+            != TARGET_PROVENANCE_ENCODING
+        ):
+            raise ValueError("S3 replay provenance encoding is missing or invalid")
         for train_iter in self._replay_iterations(iteration):
             filename = os.path.join(
                 self.args.data,
                 self.args.run_name,
                 get_iter_file(train_iter).replace('.pkl', ''),
             )
+            marker = None
+            if current_s3_replay:
+                try:
+                    marker = load_replay_marker(filename)
+                    load_replay_target_provenance(filename, marker=marker)
+                except (FileNotFoundError, OSError, ValueError) as exc:
+                    print(f"Warning: ignoring incomplete V3 replay iteration {train_iter}: {exc}")
+                    continue
             try:
                 tensors = [torch.load(filename + suffix) for suffix in REPLAY_TENSOR_SUFFIXES]
-            except FileNotFoundError as exc:
+            except (FileNotFoundError, OSError, RuntimeError, EOFError) as exc:
                 print('Warning: could not find complete V3 tensor data. ' + str(exc))
                 continue
             row_count = validate_v3_target_tensors(tensors)
+            if marker is not None and row_count != int(marker["row_count"]):
+                raise ValueError("Replay marker row count does not match tensor rows")
             if tensors[0].shape[1:] != self.game_cls.observation_size():
                 raise ValueError("V3 dataset observation schema/shape mismatch")
             datasets.append(TensorDataset(*tensors))
@@ -1006,6 +1033,9 @@ def build_katago_training_args(cli):
     args.gocube_structural_feature_channels = profile.structural_feature_channels
     args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
     args.gocube_katago_search_contract = KATAGO_SEARCH_CONTRACT
+    args.gocube_target_provenance_semantics = TARGET_PROVENANCE_SEMANTICS
+    args.gocube_target_provenance_encoding = TARGET_PROVENANCE_ENCODING
+    args.gocube_termination_contract = TERMINATION_CONTRACT
     args.gocube_katago_search_reference_commit = KATAGO_REFERENCE_COMMIT
     args.gocube_katago_exploration_contract = KATAGO_PINNED_EXPLORATION_CONTRACT
     args.gocube_observation_schema = game_cls.OBSERVATION_SCHEMA
