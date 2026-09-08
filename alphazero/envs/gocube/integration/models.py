@@ -13,6 +13,7 @@ from alphazero.envs.gocube.contract_versions import (
     TARGET_PROVENANCE_SEMANTICS,
     TERMINATION_CONTRACT,
 )
+from alphazero.envs.gocube.production_contract import require_gocube_komi
 from alphazero.search_contract import KATAGO_SEARCH_CONTRACT
 
 from .catalog import CheckpointCatalog, CheckpointDescriptor
