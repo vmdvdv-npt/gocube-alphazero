@@ -163,6 +163,24 @@ class SelfPlayAgent(mp.Process):
         self._current_game_slot = None if game_slot is None else int(game_slot)
         self._current_stage = str(stage)
 
+    def _publish_non_recording_result(self, final_game, winstate):
+        """Reserve an accepted game before publishing its Arena/training result."""
+        lock = self.games_played.get_lock()
+        lock.acquire()
+        try:
+            accepted = self.games_played.value < self.args.gamesPerIteration
+            if accepted:
+                self.games_played.value += 1
+        finally:
+            lock.release()
+
+        if not accepted:
+            return False
+
+        self._set_worker_context(self._current_game_slot, 'enqueue_result')
+        self.result_queue.put((final_game, winstate, self.id))
+        return True
+
     def _worker_error_payload(self, exc):
         game_slot = self._current_game_slot
         game_id = None
@@ -553,15 +571,8 @@ class SelfPlayAgent(mp.Process):
                     }
                 ))
             else:
-                self._set_worker_context(i, 'enqueue_result')
-                self.result_queue.put((final_game, winstate, self.id))
-                lock = self.games_played.get_lock()
-                lock.acquire()
-                accepted = self.games_played.value < self.args.gamesPerIteration
-                if accepted:
-                    self.games_played.value += 1
-                lock.release()
-                if not accepted:
+                self._set_worker_context(i, 'finish_game')
+                if not self._publish_non_recording_result(final_game, winstate):
                     continue
 
             if not self._is_arena:

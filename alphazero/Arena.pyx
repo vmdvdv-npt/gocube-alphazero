@@ -193,26 +193,127 @@ class Arena:
             else:
                 bucket['losses'] += 1
 
-    def __collect_batched_results(self, result_queue):
-        num_games = result_queue.qsize()
+    def __collect_batched_results(self, result_queue, expected_count=None, timeout=None):
         wins = [0] * self.game_cls.num_players()
         draws = 0
         no_results = 0
-        for _ in range(num_games):
-            state, winstate, agent_id = result_queue.get()
-            self.__record_batched_color_result(state, winstate, agent_id)
-            has_draw_slot = len(winstate) > self.game_cls.num_players()
-            if has_draw_slot and winstate[-1]:
-                if getattr(state, 'terminal_kind', None) == 'no_result':
-                    no_results += 1
+        result_count = 0
+
+        if expected_count is None:
+            while True:
+                try:
+                    result = result_queue.get_nowait()
+                except Empty:
+                    break
+                state, winstate, agent_id = result
+                self.__record_batched_color_result(state, winstate, agent_id)
+                has_draw_slot = len(winstate) > self.game_cls.num_players()
+                if has_draw_slot and winstate[-1]:
+                    if getattr(state, 'terminal_kind', None) == 'no_result':
+                        no_results += 1
+                    else:
+                        draws += 1
                 else:
-                    draws += 1
-                continue
-            for player, is_win in enumerate(winstate[:self.game_cls.num_players()]):
-                if is_win:
-                    index = self._agents[agent_id].player_to_index[player]
-                    wins[index] += 1
-        return wins, draws, no_results
+                    for player, is_win in enumerate(winstate[:self.game_cls.num_players()]):
+                        if is_win:
+                            index = self._agents[agent_id].player_to_index[player]
+                            wins[index] += 1
+                result_count += 1
+        else:
+            expected_count = int(expected_count)
+            for _ in range(expected_count):
+                try:
+                    result = result_queue.get(timeout=timeout) if timeout is not None else result_queue.get()
+                except Empty as exc:
+                    raise RuntimeError(
+                        'Batched Arena result finalization expected '
+                        f'{expected_count} remaining accepted results, but only received {result_count}'
+                    ) from exc
+                state, winstate, agent_id = result
+                self.__record_batched_color_result(state, winstate, agent_id)
+                has_draw_slot = len(winstate) > self.game_cls.num_players()
+                if has_draw_slot and winstate[-1]:
+                    if getattr(state, 'terminal_kind', None) == 'no_result':
+                        no_results += 1
+                    else:
+                        draws += 1
+                else:
+                    for player, is_win in enumerate(winstate[:self.game_cls.num_players()]):
+                        if is_win:
+                            index = self._agents[agent_id].player_to_index[player]
+                            wins[index] += 1
+                result_count += 1
+
+        return wins, draws, no_results, result_count
+
+    def __account_batched_results(self, result_queue, expected_count=None, timeout=None):
+        wins, draws, no_results, result_count = self.__collect_batched_results(
+            result_queue, expected_count, timeout
+        )
+        for i, w in enumerate(wins):
+            self.__player_stats[i].wins += w
+        self.draws += draws
+        self.no_results += no_results
+        self.__update_winrates()
+        return result_count
+
+    def __finalize_batched_results(
+            self, result_queue, games_played, results_accounted, num, cancelled=False
+    ):
+        final_games_played = int(games_played.value)
+        if final_games_played < 0:
+            raise RuntimeError(
+                f'Batched Arena accounting invariant violated: final games_played={final_games_played} < 0'
+            )
+        if final_games_played > int(num):
+            raise RuntimeError(
+                'Batched Arena accounting invariant violated: '
+                f'final games_played={final_games_played} > requested num={num}'
+            )
+        if results_accounted < 0 or results_accounted > final_games_played:
+            raise RuntimeError(
+                'Batched Arena accounting invariant violated: '
+                f'results_accounted={results_accounted}, final_games_played={final_games_played}'
+            )
+
+        remaining_results = final_games_played - results_accounted
+        results_accounted += self.__account_batched_results(
+            result_queue,
+            expected_count=remaining_results,
+            timeout=5.0,
+        )
+        if results_accounted != final_games_played:
+            raise RuntimeError(
+                'Batched Arena accounting invariant violated after finalization: '
+                f'results_accounted={results_accounted}, final_games_played={final_games_played}'
+            )
+
+        aggregate_outcomes = sum(self.wins()) + self.draws + self.no_results
+        if aggregate_outcomes != final_games_played:
+            raise RuntimeError(
+                'Batched Arena outcome accounting invariant violated: '
+                f'outcomes={aggregate_outcomes}, final_games_played={final_games_played}'
+            )
+        if not cancelled and final_games_played != int(num):
+            raise RuntimeError(
+                'Batched Arena completed without cancellation before reaching requested games: '
+                f'final_games_played={final_games_played}, requested num={num}'
+            )
+        if self.game_cls.num_players() == 2:
+            for player_index in range(2):
+                color_games = sum(
+                    self._player_color_results[player_index][color]['games']
+                    for color in ('black', 'white')
+                )
+                if color_games != final_games_played:
+                    raise RuntimeError(
+                        'Batched Arena color accounting invariant violated: '
+                        f'player={player_index}, games={color_games}, '
+                        f'final_games_played={final_games_played}'
+                    )
+
+        self.games_played = final_games_played
+        return final_games_played, results_accounted
 
     def wins(self) -> List[int]:
         return [s.wins for s in self.__player_stats]
@@ -282,7 +383,7 @@ class Arena:
             self.__check_players_valid()
 
             def empty_queue(q: mp.Queue):
-                for _ in range(q.qsize()):
+                while True:
                     try:
                         q.get_nowait()
                     except Empty:
@@ -361,7 +462,8 @@ class Arena:
             end = time.time()
 
             n = 0
-            while completed.value != self.args.workers:
+            results_accounted = 0
+            while completed.value != self.args.workers and not self.stop_event.is_set():
                 try:
                     id = ready_queue.get(timeout=1)
 
@@ -405,12 +507,7 @@ class Arena:
                     n = size
                     end = time.time()
 
-                wins, draws, no_results = self.__collect_batched_results(result_queue)
-                for i, w in enumerate(wins):
-                    self.__player_stats[i].wins += w
-                self.draws += draws
-                self.no_results += no_results
-                self.__update_winrates()
+                results_accounted += self.__account_batched_results(result_queue)
 
                 bar.suffix = '({eps}/{maxeps}) Winrates: {wr} | No-result: {nr} | Eps Time: {et:.3f}s | Total: {total:} | ETA: {eta:}' \
                     .format(
@@ -424,7 +521,32 @@ class Arena:
                 self.total_time = bar.elapsed_td
                 self.eta = bar.eta_td
 
+            cancelled = self.stop_event.is_set()
             self.stop_event.set()
+            for agent in self._agents:
+                agent.join()
+
+            final_games_played, results_accounted = self.__finalize_batched_results(
+                result_queue,
+                games_played,
+                results_accounted,
+                num,
+                cancelled=cancelled,
+            )
+            if final_games_played > n:
+                sample_time.update(
+                    (time.time() - end) / (final_games_played - n), final_games_played - n
+                )
+            self.__update_winrates()
+            bar.suffix = '({eps}/{maxeps}) Winrates: {wr} | No-result: {nr} | Eps Time: {et:.3f}s | Total: {total:} | ETA: {eta:}' \
+                .format(
+                    eps=final_games_played, maxeps=num, et=sample_time.avg, total=bar.elapsed_td,
+                    eta=bar.eta_td, wr=[round(w, 3) for w in self.winrates()], nr=self.no_results
+                )
+            bar.goto(final_games_played)
+            self.eps_time = sample_time.avg
+            self.total_time = bar.elapsed_td
+            self.eta = bar.eta_td
             bar.update()
             bar.finish()
 
@@ -433,8 +555,7 @@ class Arena:
             for q in batch_queues:
                 empty_queue(q)
 
-            for agent in self._agents:
-                agent.join()
+            for _ in self._agents:
                 del policy_tensors[0]
                 del value_tensors[0]
                 if score_aware:
