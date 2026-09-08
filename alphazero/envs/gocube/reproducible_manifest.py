@@ -52,6 +52,7 @@ _RESUME_MANIFEST_FIELDS = (
     "training_contract_version",
     "experiment_contract_id",
     "experiment_contract_version",
+    "experiment_contract_sha256",
 )
 
 
@@ -139,6 +140,7 @@ def effective_config(args: Any, game_cls) -> dict[str, object]:
         "seed_derivation_contract": SEED_DERIVATION_CONTRACT,
         "experiment_contract_id": _optional_arg(args, "gocube_experiment_contract_id"),
         "experiment_contract_version": _optional_arg(args, "gocube_experiment_contract_version"),
+        "experiment_contract_sha256": _optional_arg(args, "gocube_experiment_contract_sha256"),
     })
     if _optional_arg(args, "gocube_experiment_contract_id") == B_EXPERIMENT_CONTRACT_ID:
         # Keep the B experiment's canonical vocabulary visible next to the
@@ -234,6 +236,7 @@ def validate_existing_reproducible_manifest(
         "model_profile": getattr(args, "gocube_model_profile", "baseline"),
         "experiment_contract_id": _optional_arg(args, "gocube_experiment_contract_id"),
         "experiment_contract_version": _optional_arg(args, "gocube_experiment_contract_version"),
+        "experiment_contract_sha256": _optional_arg(args, "gocube_experiment_contract_sha256"),
         "master_seed": int(getattr(args, "master_seed", 0)),
         "replay_format_version": REPLAY_FORMAT_VERSION,
         "value_target_semantics": VALUE_TARGET_SEMANTICS,
@@ -380,6 +383,7 @@ def create_reproducible_manifest(
         "model_profile": getattr(args, "gocube_model_profile", "baseline"),
         "experiment_contract_id": _optional_arg(args, "gocube_experiment_contract_id"),
         "experiment_contract_version": _optional_arg(args, "gocube_experiment_contract_version"),
+        "experiment_contract_sha256": _optional_arg(args, "gocube_experiment_contract_sha256"),
     }
     atomic_json_write(manifest, checkpoint_run / RUN_MANIFEST_FILENAME)
     return manifest

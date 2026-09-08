@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 from dataclasses import replace
 
 import pytest
@@ -13,7 +14,9 @@ from alphazero.envs.gocube.b_experiment_contract import (
     hash_heldout_suite,
     preflight_b_experiment,
     resolve_b_effective_configs_separate_processes,
+    validate_b0_effective_config,
     validate_b0_b1_effective_configs,
+    validate_b1_effective_config,
     validate_b_experiment_contract,
     validate_b_experiment_record,
     write_b_experiment_record,
@@ -42,6 +45,11 @@ def test_canonical_b0_and_b1_configs_validate(canonical):
     assert contract.primary_endpoint == "heldout_paired_position_score"
     assert "hierarchical-paired-bootstrap" in contract.statistical_method_identifier
     assert "excluded from the denominator" not in contract.no_result_evaluation_convention
+    assert contract.seed_list == (0, 1, 2, 3, 4)
+    assert contract.initial_seed_count == 3
+    assert contract.extension_seed_count == 5
+    assert contract.mandatory_seed_list == (0, 1, 2)
+    assert contract.extension_seed_list == (3, 4)
 
 
 def test_contract_builder_rejects_missing_heldout_hash():
@@ -93,6 +101,12 @@ def test_effective_config_whitelist_allows_only_treatment_structure(canonical):
     assert diff_effective_configs(b0, structural) == []
     with pytest.raises(ExperimentContractError, match="network_architecture"):
         validate_b0_b1_effective_configs(b0, structural, contract=contract)
+
+
+def test_single_treatment_helpers_validate_canonical_b0_and_b1(canonical):
+    contract, b0, b1 = canonical
+    validate_b0_effective_config(b0, contract=contract)
+    validate_b1_effective_config(b1, contract=contract)
 
 
 @pytest.mark.parametrize(
@@ -149,6 +163,57 @@ def test_launcher_requires_treatment_and_resolves_profile_itself():
     args = gocube_b_experiment.parse_args(["--treatment", "B0", "--dry-run"])
     command = gocube_b_experiment.training_command(args, python="python")
     assert command[command.index("--model-profile") + 1] == "baseline"
+    command = gocube_b_experiment.training_command(
+        args,
+        python="python",
+        contract_sha256="a" * 64,
+    )
+    assert command[command.index("--experiment-contract-sha256") + 1] == "a" * 64
+
+
+def test_launcher_accepts_mandatory_and_approved_extension_seeds(tmp_path):
+    args = gocube_b_experiment.parse_args(["--treatment", "B0", "--seed", "2", "--dry-run"])
+    command = gocube_b_experiment.training_command(args, python="python")
+    assert command[command.index("--seed") + 1] == "2"
+
+    decision = tmp_path / "extension-decision.json"
+    decision.write_text(
+        json.dumps(
+            {
+                "approved": True,
+                "decision": "extend_to_five",
+                "criterion_id": (
+                    "extend-to-five-seeds-only-if-mandatory-seed-bootstrap-ambiguity-or-variance-v1"
+                ),
+                "mandatory_seed_count": 3,
+                "extension_seed_count": 5,
+                "criterion_evidence": {
+                    "ambiguity_detected": True,
+                    "variance_exceeded": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = gocube_b_experiment.parse_args(
+        [
+            "--treatment",
+            "B1",
+            "--seed",
+            "3",
+            "--extension-seed-decision",
+            str(decision),
+            "--dry-run",
+        ]
+    )
+    command = gocube_b_experiment.training_command(args, python="python")
+    assert command[command.index("--seed") + 1] == "3"
+    with pytest.raises(SystemExit):
+        gocube_b_experiment.parse_args(["--treatment", "B1", "--seed", "3", "--dry-run"])
+    with pytest.raises(SystemExit):
+        gocube_b_experiment.parse_args(
+            ["--treatment", "B1", "--seed", "0", "--allow-dirty-source", "--dry-run"]
+        )
 
 
 def test_launcher_without_suite_is_dry_run_only(tmp_path):

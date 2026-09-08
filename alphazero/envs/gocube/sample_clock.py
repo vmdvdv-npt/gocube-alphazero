@@ -212,6 +212,7 @@ class SampleClockNNetWrapper(NNetWrapper):
             "gocube_score_initialization_contract",
             "gocube_target_provenance_semantics",
             "gocube_termination_contract",
+            "gocube_experiment_contract_sha256",
         ):
             value = _optional_arg(self.args, key, None)
             if value is not None:
@@ -261,6 +262,9 @@ class SampleClockNNetWrapper(NNetWrapper):
             "target_provenance_semantics": TARGET_PROVENANCE_SEMANTICS,
             "target_provenance_encoding": TARGET_PROVENANCE_ENCODING,
             "termination_contract": TERMINATION_CONTRACT,
+            "experiment_contract_sha256": _optional_arg(
+                self.args, "gocube_experiment_contract_sha256", None
+            ),
             "effective_config_sha256": _optional_arg(
                 self.args, "effective_config_sha256", None
             ),

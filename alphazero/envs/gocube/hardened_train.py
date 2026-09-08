@@ -77,6 +77,15 @@ class AtomicSampleClockNNetWrapper(SampleClockNNetWrapper):
             if key not in self.args:
                 raise ValueError(f"Missing required production search-selection field: {key}")
             fields[key] = self.args[key]
+        if getattr(self.args, "gocube_experiment_contract_id", None) == B_EXPERIMENT_CONTRACT_ID:
+            digest = getattr(self.args, "gocube_experiment_contract_sha256", None)
+            if not isinstance(digest, str) or len(digest) != 64 or any(
+                character not in "0123456789abcdef" for character in digest.lower()
+            ):
+                raise ValueError(
+                    "B experiment checkpoints require experiment_contract_sha256"
+                )
+            fields["gocube_experiment_contract_sha256"] = digest.lower()
         return fields
 
     def save_checkpoint(self, folder="checkpoint", filename="checkpoint.pth.tar", make_dirs=True):

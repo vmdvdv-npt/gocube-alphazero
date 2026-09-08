@@ -24,8 +24,11 @@ from alphazero.envs.gocube.b_experiment_contract import (
     B0_TREATMENT,
     B1_MODEL_PROFILE,
     B1_TREATMENT,
+    B_EXTENSION_SEEDS,
+    B_SEED_LIST,
     DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET,
     preflight_b_experiment,
+    validate_extension_seed_decision,
 )
 from alphazero.envs.gocube.production_contract import CUBE4_PRODUCTION
 from alphazero.envs.gocube.production_training import (
@@ -78,13 +81,32 @@ def parse_args(argv=None):
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--contract-path", default=None)
     parser.add_argument("--heldout-suite", default=None)
-    parser.add_argument("--allow-dirty-source", action="store_true")
+    parser.add_argument(
+        "--extension-seed-decision",
+        default=None,
+        help="JSON approval required when running extension seed 3 or 4",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     if args.iterations < 1:
         parser.error("--iterations must be positive")
-    if args.seed not in (0,):
-        parser.error("B experiment seed must be one of the contract seed_list values: 0")
+    if args.seed not in B_SEED_LIST:
+        parser.error(
+            "B experiment seed must be one of the contract seed_list values: "
+            + ", ".join(str(seed) for seed in B_SEED_LIST)
+        )
+    if args.seed in B_EXTENSION_SEEDS:
+        if args.extension_seed_decision is None:
+            parser.error(
+                "seeds 3 and 4 require --extension-seed-decision approved by "
+                "the pre-registered ambiguity/variance criterion"
+            )
+        try:
+            validate_extension_seed_decision(args.extension_seed_decision)
+        except Exception as exc:
+            parser.error(str(exc))
+    elif args.extension_seed_decision is not None:
+        parser.error("--extension-seed-decision is only valid for extension seeds 3 and 4")
     if args.run_name is None:
         args.run_name = f"gocube-b-{args.treatment.lower()}"
     if args.cumulative_new_samples_target is None and args.cumulative_optimizer_examples_target is None:
@@ -99,7 +121,12 @@ def parse_args(argv=None):
     return args
 
 
-def training_command(args, *, python: str | None = None) -> list[str]:
+def training_command(
+    args,
+    *,
+    python: str | None = None,
+    contract_sha256: str | None = None,
+) -> list[str]:
     """Return the fully pinned child command for the selected treatment."""
 
     interpreter = python or str(Path(__file__).resolve().parents[1] / ".venv" / "bin" / "python")
@@ -157,8 +184,8 @@ def training_command(args, *, python: str | None = None) -> list[str]:
             str(scientific_target.target),
         ]
     )
-    if args.allow_dirty_source:
-        command.append("--allow-dirty-source")
+    if contract_sha256 is not None:
+        command.extend(["--experiment-contract-sha256", str(contract_sha256)])
     return command
 
 
@@ -175,16 +202,31 @@ def main(argv=None) -> int:
         if args.contract_path
         else repo / "training_reports" / args.run_name / "gocube-b-experiment-contract.json"
     )
+    preflight_payload = None
     if args.heldout_suite is not None:
-        preflight_b_experiment(
+        preflight_payload = preflight_b_experiment(
             repo=repo,
             contract_path=contract_path,
             heldout_suite_path=args.heldout_suite,
             scientific_target=args.scientific_target,
         )
+        if args.seed in B_EXTENSION_SEEDS:
+            validate_extension_seed_decision(
+                args.extension_seed_decision,
+                contract_sha256=str(preflight_payload["experiment_contract_sha256"]),
+            )
     else:
         print("Dry-run only: no frozen heldout suite was supplied; no contract record was written.")
-    command = training_command(args, python=str(repo / ".venv" / "bin" / "python"))
+    contract_sha256 = (
+        None
+        if preflight_payload is None
+        else str(preflight_payload["experiment_contract_sha256"])
+    )
+    command = training_command(
+        args,
+        python=str(repo / ".venv" / "bin" / "python"),
+        contract_sha256=contract_sha256,
+    )
     print(f"B experiment contract: {contract_path}")
     print("Launching: " + shlex.join(command))
     if args.dry_run:

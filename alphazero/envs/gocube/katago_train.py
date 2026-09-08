@@ -1226,6 +1226,11 @@ def parse_args(argv=None):
     )
     parser.add_argument("--seed", type=int, default=DEFAULT_MASTER_SEED)
     parser.add_argument("--allow-dirty-source", action="store_true")
+    parser.add_argument(
+        "--experiment-contract-sha256",
+        default=None,
+        help="SHA-256 of the immutable B experiment contract record.",
+    )
     parsed = parser.parse_args(raw_argv)
     parsed._explicit_sweep_flags = frozenset(
         flag
@@ -1248,6 +1253,10 @@ def build_katago_training_args(cli):
         raise ValueError("Production checkpoint Arena is observational; model gating is disabled")
     if int(cli.seed) < 0:
         raise ValueError("seed must be non-negative")
+    if cli.experiment_contract_sha256 is not None:
+        value = str(cli.experiment_contract_sha256).lower()
+        if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+            raise ValueError("experiment-contract-sha256 must be a 64-character hexadecimal digest")
     if cli.arena_games_per_opponent < 1:
         raise ValueError("arena-games-per-opponent must be positive")
     if cli.arena_anchor_period < 1:
@@ -1359,6 +1368,9 @@ def build_katago_training_args(cli):
     args.gocube_training_contract = TRAINING_CONTRACT
     args.master_seed = int(cli.seed)
     args.seed_derivation_contract = SEED_DERIVATION_CONTRACT
+    args.gocube_experiment_contract_sha256 = (
+        None if cli.experiment_contract_sha256 is None else str(cli.experiment_contract_sha256).lower()
+    )
     args.gocube_train_samples_per_new_sample = float(cli.train_samples_per_new_sample)
     args.gocube_cumulative_new_samples_target = (
         None

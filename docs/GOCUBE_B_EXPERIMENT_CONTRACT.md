@@ -26,6 +26,22 @@ the bytes of that frozen artifact and is stored in the immutable contract. If
 the suite is not available yet, the launcher permits only `--dry-run`; it does
 not write a runnable contract record and cannot start training.
 
+The seed protocol is immutable: `seed_list=(0,1,2,3,4)`, with seeds `0, 1,
+2` mandatory for both treatments. The initial analysis therefore uses 3 B0
+and 3 B1 runs. Seeds `3` and `4` are extension seeds, permitted only with a
+machine-readable approval from the pre-registered ambiguity/variance
+criterion. The contract records `initial_seed_count=3` and
+`extension_seed_count=5`, so the same v1 contract covers both 3+3 and 5+5
+analysis without silently changing the seed universe.
+
+For an extension seed, provide `--extension-seed-decision decision.json` with
+the contract criterion ID and machine-readable `criterion_evidence` showing
+either ambiguity or excess variance. The launcher also binds that approval to
+the generated contract SHA before training.
+The B launcher never accepts `--allow-dirty-source`; B runs require a clean
+committed source tree. The contract SHA-256 is passed to the child trainer and
+stored in its run manifest and checkpoints.
+
 `--iterations` is only a safety ceiling. `--games-per-iteration=256` remains
 the generation chunk and is not the experimental budget. The production loop
 generates a chunk, counts the actual accepted rows, trains according to the

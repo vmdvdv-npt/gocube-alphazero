@@ -44,6 +44,14 @@ B1_TREATMENT = "B1"
 B0_MODEL_PROFILE = "baseline"
 B1_MODEL_PROFILE = "g1"
 DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET = 40_000_000
+B_SEED_LIST = (0, 1, 2, 3, 4)
+B_INITIAL_SEED_COUNT = 3
+B_EXTENSION_SEED_COUNT = 5
+B_MANDATORY_SEEDS = (0, 1, 2)
+B_EXTENSION_SEEDS = (3, 4)
+B_EXTENSION_SEED_CRITERION_ID = (
+    "extend-to-five-seeds-only-if-mandatory-seed-bootstrap-ambiguity-or-variance-v1"
+)
 
 # These are semantic paths in the JSON effective-config artifact.  A whole
 # model contract is not whitelisted: rules/search/training changes inside it
@@ -142,6 +150,68 @@ def hash_heldout_suite(path: str | os.PathLike[str]) -> str:
     return digest.hexdigest()
 
 
+def require_clean_source(repo: str | os.PathLike[str] | None = None) -> None:
+    """Reject a B run whose source SHA would not describe the working tree."""
+
+    root = Path(repo).resolve() if repo is not None else _repo_root()
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        raise ExperimentContractError(
+            "B experiment requires a clean committed source tree; "
+            "uncommitted or untracked changes are present"
+        )
+
+
+def validate_extension_seed_decision(
+    path: str | os.PathLike[str],
+    *,
+    contract_sha256: str | None = None,
+) -> dict[str, object]:
+    """Validate the pre-registered decision that permits seeds 3 and 4."""
+
+    decision_path = Path(path)
+    try:
+        payload = json.loads(decision_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ExperimentContractError(
+            f"Cannot read extension-seed decision: {decision_path}"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise ExperimentContractError("Extension-seed decision must be a JSON object")
+    expected = {
+        "approved": True,
+        "decision": "extend_to_five",
+        "criterion_id": B_EXTENSION_SEED_CRITERION_ID,
+        "mandatory_seed_count": B_INITIAL_SEED_COUNT,
+        "extension_seed_count": B_EXTENSION_SEED_COUNT,
+    }
+    for key, value in expected.items():
+        if payload.get(key) != value:
+            raise ExperimentContractError(
+                f"Extension-seed decision {key} drift: expected {value!r}, "
+                f"got {payload.get(key)!r}"
+            )
+    evidence = payload.get("criterion_evidence")
+    if not isinstance(evidence, Mapping) or not (
+        bool(evidence.get("ambiguity_detected"))
+        or bool(evidence.get("variance_exceeded"))
+    ):
+        raise ExperimentContractError(
+            "Extension-seed decision must record ambiguity or variance evidence"
+        )
+    if contract_sha256 is not None and payload.get("experiment_contract_sha256") != contract_sha256:
+        raise ExperimentContractError(
+            "Extension-seed decision is for a different experiment contract"
+        )
+    return dict(payload)
+
+
 @dataclass(frozen=True)
 class BExperimentContract:
     """Deeply immutable experiment specification for B0 versus B1."""
@@ -181,6 +251,11 @@ class BExperimentContract:
     generation_chunk_size: int
     scientific_sample_target: Mapping[str, object]
     seed_list: tuple[int, ...]
+    initial_seed_count: int
+    extension_seed_count: int
+    mandatory_seed_list: tuple[int, ...]
+    extension_seed_list: tuple[int, ...]
+    extension_seed_activation_criterion: str
     evaluation_milestones: Mapping[str, object]
     heldout_suite_hash: str
     result_semantics: Mapping[str, object]
@@ -199,6 +274,10 @@ class BExperimentContract:
                 object.__setattr__(self, field.name, tuple(_freeze(item) for item in value))
         if not isinstance(self.seed_list, tuple):
             object.__setattr__(self, "seed_list", tuple(int(seed) for seed in self.seed_list))
+        for name in ("mandatory_seed_list", "extension_seed_list"):
+            value = getattr(self, name)
+            if not isinstance(value, tuple):
+                object.__setattr__(self, name, tuple(int(seed) for seed in value))
         if not isinstance(self.allowed_effective_config_differences, tuple):
             object.__setattr__(
                 self,
@@ -424,7 +503,12 @@ def build_b_experiment_contract(
             "target": int(scientific_target.target),
             "generation_chunk_games": CUBE4_PRODUCTION.games_per_iteration,
         },
-        seed_list=(0,),
+        seed_list=B_SEED_LIST,
+        initial_seed_count=B_INITIAL_SEED_COUNT,
+        extension_seed_count=B_EXTENSION_SEED_COUNT,
+        mandatory_seed_list=B_MANDATORY_SEEDS,
+        extension_seed_list=B_EXTENSION_SEEDS,
+        extension_seed_activation_criterion=B_EXTENSION_SEED_CRITERION_ID,
         evaluation_milestones={
             "bootstrap_iteration": 7,
             "health_reference_iteration": 4,
@@ -752,6 +836,11 @@ def validate_b_experiment_contract(
         "no_result_evaluation_convention": (
             "NO_RESULT contributes 0.5 to the paired position score and remains in the denominator"
         ),
+        "initial_seed_count": B_INITIAL_SEED_COUNT,
+        "extension_seed_count": B_EXTENSION_SEED_COUNT,
+        "mandatory_seed_list": list(B_MANDATORY_SEEDS),
+        "extension_seed_list": list(B_EXTENSION_SEEDS),
+        "extension_seed_activation_criterion": B_EXTENSION_SEED_CRITERION_ID,
     }
     for key, expected in required.items():
         actual = get(key, None)
@@ -760,6 +849,8 @@ def validate_b_experiment_contract(
                 same = abs(float(actual) - float(expected)) <= 1e-12
             except (TypeError, ValueError):
                 same = False
+        elif key in {"mandatory_seed_list", "extension_seed_list"}:
+            same = tuple(actual or ()) == tuple(expected)
         else:
             same = actual == expected
         if not same:
@@ -1027,10 +1118,14 @@ def validate_effective_config_for_treatment(
         expected_profile = contract.b0_model_profile
         expected_model = contract.b0_model_contract
         expected_schema = contract.b0_observation_schema
+        expected_structural_schema = contract.b0_structural_feature_schema
+        expected_structural_channels = contract.b0_structural_feature_channels
     else:
         expected_profile = contract.b1_model_profile
         expected_model = contract.b1_model_contract
         expected_schema = contract.b1_observation_schema
+        expected_structural_schema = contract.b1_structural_feature_schema
+        expected_structural_channels = contract.b1_structural_feature_channels
     profile = _config_value(config, "gocube_model_profile", "model_profile")
     if profile != expected_profile:
         raise ExperimentContractError(
@@ -1045,6 +1140,10 @@ def validate_effective_config_for_treatment(
             b1_model_profile=expected_profile,
             b0_model_contract=expected_model,
             b1_model_contract=expected_model,
+            b0_structural_feature_schema=expected_structural_schema,
+            b1_structural_feature_schema=expected_structural_schema,
+            b0_structural_feature_channels=expected_structural_channels,
+            b1_structural_feature_channels=expected_structural_channels,
             b0_observation_schema=expected_schema,
             b1_observation_schema=expected_schema,
         ),
@@ -1080,6 +1179,7 @@ def preflight_b_experiment(
         raise ExperimentContractError(
             "--heldout-suite is required for a real B experiment; only --dry-run may omit it"
         )
+    require_clean_source(root)
     heldout_hash = hash_heldout_suite(heldout_suite_path)
     contract = build_b_experiment_contract(
         source_git_sha=current_source_git_sha(root),
