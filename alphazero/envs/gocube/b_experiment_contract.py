@@ -62,6 +62,23 @@ B_EXTENSION_SEED_CRITERION_ID = (
     "extend-to-five-seeds-only-if-mandatory-seed-bootstrap-ambiguity-or-variance-v1"
 )
 
+# B05 is an integration proof, not a scientific run.  It keeps the real
+# hardened launcher and the real 1024-example optimizer batch while shrinking
+# only the generation chunk and worker fan-out so the end-to-end proof remains
+# bounded.  The marker is persisted in the immutable contract and checkpoint
+# metadata; production B4 validation rejects it.
+B05_DRY_RUN_DEFAULT_SETTINGS = {
+    "workers": 2,
+    "regular_sims": 50,
+    "fast_sims": 20,
+    "fast_probability": 0.25,
+    "arena_sims": 50,
+    "games_per_iteration": 4,
+    "train_batch_size": 1024,
+    "train_samples_per_new_sample": 1.0,
+}
+B05_DRY_RUN_TARGET = 512
+
 
 def b_evaluation_schedule(contract: object) -> dict[str, object]:
     """Return and validate the evaluation schedule recorded by one B contract."""
@@ -407,6 +424,8 @@ class BExperimentContract:
     statistical_method_identifier: str
     canonical_common_effective_config: Mapping[str, object]
     allowed_effective_config_differences: tuple[str, ...] = ALLOWED_EFFECTIVE_CONFIG_DIFFERENCES
+    non_scientific_dry_run: bool = False
+    dry_run_settings: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         for field in dataclasses.fields(self):
@@ -496,6 +515,7 @@ class BExperimentContract:
 
 def _resolved_profile_contracts(
     scientific_target: SampleBudgetTarget | None = None,
+    dry_run_settings: Mapping[str, object] | None = None,
 ) -> tuple[object, object, object, object]:
     """Resolve B0/B1 from the real hardened builders, not hand-written copies."""
 
@@ -516,6 +536,16 @@ def _resolved_profile_contracts(
             str(scientific_target.target),
         ]
     for profile in (B0_MODEL_PROFILE, B1_MODEL_PROFILE):
+        settings = B05_DRY_RUN_DEFAULT_SETTINGS if dry_run_settings is not None else {
+            "workers": CUBE4_PRODUCTION.workers,
+            "regular_sims": CUBE4_PRODUCTION.regular_sims,
+            "arena_sims": CUBE4_PRODUCTION.arena_sims,
+            "games_per_iteration": CUBE4_PRODUCTION.games_per_iteration,
+            "train_batch_size": CUBE4_PRODUCTION.train_batch_size,
+            "fast_probability": CUBE4_PRODUCTION.fast_probability,
+        }
+        if dry_run_settings is not None:
+            settings = {**B05_DRY_RUN_DEFAULT_SETTINGS, **dict(dry_run_settings)}
         cli = parse_args(
             [
                 "--model-profile",
@@ -525,20 +555,25 @@ def _resolved_profile_contracts(
                 "--size",
                 "4",
                 "--workers",
-                str(CUBE4_PRODUCTION.workers),
+                str(settings["workers"]),
                 "--sims",
-                str(CUBE4_PRODUCTION.regular_sims),
+                str(settings["regular_sims"]),
                 "--arena-sims",
-                str(CUBE4_PRODUCTION.arena_sims),
+                str(settings["arena_sims"]),
                 "--games-per-iteration",
-                str(CUBE4_PRODUCTION.games_per_iteration),
+                str(settings["games_per_iteration"]),
                 "--train-batch-size",
-                str(CUBE4_PRODUCTION.train_batch_size),
+                str(settings["train_batch_size"]),
                 "--fast-game-prob",
-                "0.25",
+                str(settings["fast_probability"]),
                 "--no-arena",
                 "--run-name",
                 f"gocube-b-preflight-{profile}",
+                *(
+                    ["--b05-dry-run", "--b05-config-resolution"]
+                    if dry_run_settings is not None
+                    else []
+                ),
                 *target_args,
             ]
         )
@@ -553,6 +588,7 @@ def build_b_experiment_contract(
     heldout_suite_hash: str | None = None,
     repo: str | os.PathLike[str] | None = None,
     scientific_target: SampleBudgetTarget | None = None,
+    dry_run_settings: Mapping[str, object] | None = None,
 ) -> BExperimentContract:
     """Build the canonical B contract from the live hardened config builders."""
 
@@ -561,7 +597,37 @@ def build_b_experiment_contract(
             SampleBudgetTarget.NEW_SAMPLES,
             DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET,
         )
-    b0_model, b0_config, b1_model, b1_config = _resolved_profile_contracts(scientific_target)
+    if dry_run_settings is not None:
+        dry_run_settings = {
+            **B05_DRY_RUN_DEFAULT_SETTINGS,
+            **dict(dry_run_settings),
+        }
+        unknown = set(dry_run_settings) - set(B05_DRY_RUN_DEFAULT_SETTINGS)
+        if unknown:
+            raise ExperimentContractError(
+                "B05 dry-run settings contain unsupported keys: " + ", ".join(sorted(unknown))
+            )
+        if int(dry_run_settings["train_batch_size"]) != CUBE4_PRODUCTION.train_batch_size:
+            raise ExperimentContractError("B05 dry-run training batch must remain 1024")
+        if int(dry_run_settings["train_batch_size"]) < 512:
+            raise ExperimentContractError("B05 training batch below 512 is forbidden")
+        if int(dry_run_settings["workers"]) < 1 or int(dry_run_settings["games_per_iteration"]) < 1:
+            raise ExperimentContractError("B05 dry-run workers and generation chunk must be positive")
+        for key, expected in B05_DRY_RUN_DEFAULT_SETTINGS.items():
+            actual = dry_run_settings[key]
+            if key in {"fast_probability", "train_samples_per_new_sample"}:
+                same = abs(float(actual) - float(expected)) <= 1e-12
+            else:
+                same = int(actual) == int(expected)
+            if not same:
+                raise ExperimentContractError(
+                    f"B05 dry-run setting {key} is not the pinned integration value: "
+                    f"expected {expected!r}, got {actual!r}"
+                )
+    b0_model, b0_config, b1_model, b1_config = _resolved_profile_contracts(
+        scientific_target,
+        dry_run_settings,
+    )
     if source_git_sha is None:
         source_git_sha = current_source_git_sha(repo)
     if heldout_suite_hash is None:
@@ -605,10 +671,10 @@ def build_b_experiment_contract(
         b1_structural_feature_channels=int(b1_config.get("gocube_structural_feature_channels", 0)),
         b0_observation_schema=str(b0_model.observation_schema),
         b1_observation_schema=str(b1_model.observation_schema),
-        self_play_simulations=CUBE4_PRODUCTION.regular_sims,
-        fast_simulations=CUBE4_PRODUCTION.fast_sims,
-        fast_probability=CUBE4_PRODUCTION.fast_probability,
-        arena_simulations=CUBE4_PRODUCTION.arena_sims,
+        self_play_simulations=int(b0_config["numMCTSSims"]),
+        fast_simulations=int(b0_config["numFastSims"]),
+        fast_probability=float(b0_config["probFastSim"]),
+        arena_simulations=int(b0_config["arenaMCTSSims"]),
         arena_temperature_noise_policy={
             "temperature": 0.0,
             "root_noise": False,
@@ -616,7 +682,7 @@ def build_b_experiment_contract(
             "batched": True,
             "chosen_move_temperature": 0.0,
         },
-        training_batch_size=CUBE4_PRODUCTION.train_batch_size,
+        training_batch_size=int(b0_config["train_batch_size"]),
         replay_window={
             "mode": "production-schedule",
             "min_iterations": 4,
@@ -637,14 +703,14 @@ def build_b_experiment_contract(
             "decay_gamma": 0.1,
             "gradient_clip_norm": 5.0,
         },
-        worker_count=CUBE4_PRODUCTION.workers,
-        generation_chunk_size=CUBE4_PRODUCTION.games_per_iteration,
+        worker_count=int(b0_config["workers"]),
+        generation_chunk_size=int(b0_config["gamesPerIteration"]),
         scientific_sample_target={
             "clock": "cumulative-training-counter",
             "kind": scientific_target.kind,
             "counter": scientific_target.counter_key,
             "target": int(scientific_target.target),
-            "generation_chunk_games": CUBE4_PRODUCTION.games_per_iteration,
+            "generation_chunk_games": int(b0_config["gamesPerIteration"]),
         },
         seed_list=B_SEED_LIST,
         initial_seed_count=B_INITIAL_SEED_COUNT,
@@ -671,6 +737,8 @@ def build_b_experiment_contract(
             "hierarchical-paired-bootstrap-seeds-to-starting-position-pairs-v1"
         ),
         canonical_common_effective_config=_strip_allowed_effective_config(b0_config),
+        non_scientific_dry_run=dry_run_settings is not None,
+        dry_run_settings=None if dry_run_settings is None else dict(dry_run_settings),
     )
 
 
@@ -949,6 +1017,36 @@ def validate_b_experiment_contract(
     """Validate the immutable B contract and optionally its resolved configs."""
 
     get = contract.get if isinstance(contract, Mapping) else lambda key, default=None: getattr(contract, key, default)
+    is_dry_run = get("non_scientific_dry_run", False)
+    if not isinstance(is_dry_run, bool):
+        raise ExperimentContractError("B experiment non_scientific_dry_run must be boolean")
+    raw_dry_settings = get("dry_run_settings", None)
+    if is_dry_run:
+        if not isinstance(raw_dry_settings, Mapping):
+            raise ExperimentContractError("B05 dry-run contract must contain dry_run_settings")
+        dry_run_settings = dict(raw_dry_settings)
+        unknown = set(dry_run_settings) - set(B05_DRY_RUN_DEFAULT_SETTINGS)
+        if unknown:
+            raise ExperimentContractError(
+                "B05 dry-run contract contains unsupported settings: " + ", ".join(sorted(unknown))
+            )
+        dry_run_settings = {**B05_DRY_RUN_DEFAULT_SETTINGS, **dry_run_settings}
+    else:
+        if raw_dry_settings not in (None, {}):
+            raise ExperimentContractError(
+                "non-dry B experiment contract must not contain dry_run_settings"
+            )
+        dry_run_settings = None
+    expected_operational = dry_run_settings or {
+        "workers": CUBE4_PRODUCTION.workers,
+        "regular_sims": CUBE4_PRODUCTION.regular_sims,
+        "fast_sims": CUBE4_PRODUCTION.fast_sims,
+        "fast_probability": CUBE4_PRODUCTION.fast_probability,
+        "arena_sims": CUBE4_PRODUCTION.arena_sims,
+        "games_per_iteration": CUBE4_PRODUCTION.games_per_iteration,
+        "train_batch_size": CUBE4_PRODUCTION.train_batch_size,
+        "train_samples_per_new_sample": CUBE4_PRODUCTION.train_samples_per_new_sample,
+    }
     required = {
         "contract_id": B_EXPERIMENT_CONTRACT_ID,
         "contract_version": B_EXPERIMENT_CONTRACT_VERSION,
@@ -956,14 +1054,14 @@ def validate_b_experiment_contract(
         "board_size": 4,
         "rules_id": "gocube-katago-japanese-v3",
         "komi": GOCUBE_KOMI,
-        "self_play_simulations": CUBE4_PRODUCTION.regular_sims,
-        "fast_simulations": CUBE4_PRODUCTION.fast_sims,
-        "fast_probability": CUBE4_PRODUCTION.fast_probability,
-        "arena_simulations": CUBE4_PRODUCTION.arena_sims,
-        "training_batch_size": CUBE4_PRODUCTION.train_batch_size,
-        "train_samples_per_new_sample": CUBE4_PRODUCTION.train_samples_per_new_sample,
-        "worker_count": CUBE4_PRODUCTION.workers,
-        "generation_chunk_size": CUBE4_PRODUCTION.games_per_iteration,
+        "self_play_simulations": int(expected_operational["regular_sims"]),
+        "fast_simulations": int(expected_operational["fast_sims"]),
+        "fast_probability": float(expected_operational["fast_probability"]),
+        "arena_simulations": int(expected_operational["arena_sims"]),
+        "training_batch_size": int(expected_operational["train_batch_size"]),
+        "train_samples_per_new_sample": float(expected_operational["train_samples_per_new_sample"]),
+        "worker_count": int(expected_operational["workers"]),
+        "generation_chunk_size": int(expected_operational["games_per_iteration"]),
         "b0_model_profile": B0_MODEL_PROFILE,
         "b1_model_profile": B1_MODEL_PROFILE,
         "termination_contract": TERMINATION_CONTRACT,
@@ -1011,7 +1109,7 @@ def validate_b_experiment_contract(
         raise ExperimentContractError(
             "B experiment scientific_sample_target counter does not match its kind"
         )
-    if int(target_payload.get("generation_chunk_games", -1)) != CUBE4_PRODUCTION.games_per_iteration:
+    if int(target_payload.get("generation_chunk_games", -1)) != int(expected_operational["games_per_iteration"]):
         raise ExperimentContractError(
             "B experiment scientific_sample_target generation chunk drift"
         )
@@ -1025,6 +1123,7 @@ def validate_b_experiment_contract(
         source_git_sha=str(source_sha),
         heldout_suite_hash=str(heldout_hash),
         scientific_target=scientific_target,
+        dry_run_settings=dry_run_settings,
     )
     for key in ("rules_fingerprint", "search_contract_id", "b0_observation_schema", "b1_observation_schema"):
         if not isinstance(get(key, None), str) or not get(key, ""):
@@ -1158,6 +1257,7 @@ def resolve_b_experiment_contract(
 def _resolve_effective_config(
     profile: str,
     scientific_target: SampleBudgetTarget | None = None,
+    dry_run_settings: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     from .hardened_train import build_hardened_training_args
     from .katago_train import parse_args
@@ -1173,6 +1273,16 @@ def _resolve_effective_config(
         if scientific_target.kind == SampleBudgetTarget.NEW_SAMPLES
         else "--cumulative-optimizer-examples-target"
     )
+    settings = B05_DRY_RUN_DEFAULT_SETTINGS if dry_run_settings is not None else {
+        "workers": CUBE4_PRODUCTION.workers,
+        "regular_sims": CUBE4_PRODUCTION.regular_sims,
+        "arena_sims": CUBE4_PRODUCTION.arena_sims,
+        "games_per_iteration": CUBE4_PRODUCTION.games_per_iteration,
+        "train_batch_size": CUBE4_PRODUCTION.train_batch_size,
+        "fast_probability": CUBE4_PRODUCTION.fast_probability,
+    }
+    if dry_run_settings is not None:
+        settings = {**B05_DRY_RUN_DEFAULT_SETTINGS, **dict(dry_run_settings)}
     cli = parse_args(
         [
             "--model-profile",
@@ -1182,20 +1292,25 @@ def _resolve_effective_config(
             "--size",
             "4",
             "--workers",
-            str(CUBE4_PRODUCTION.workers),
+            str(settings["workers"]),
             "--sims",
-            str(CUBE4_PRODUCTION.regular_sims),
+            str(settings["regular_sims"]),
             "--arena-sims",
-            str(CUBE4_PRODUCTION.arena_sims),
+            str(settings["arena_sims"]),
             "--games-per-iteration",
-            str(CUBE4_PRODUCTION.games_per_iteration),
+            str(settings["games_per_iteration"]),
             "--train-batch-size",
-            str(CUBE4_PRODUCTION.train_batch_size),
+            str(settings["train_batch_size"]),
             "--fast-game-prob",
-            "0.25",
+            str(settings["fast_probability"]),
             "--no-arena",
             "--run-name",
             f"gocube-b-preflight-{profile}",
+            *(
+                ["--b05-dry-run", "--b05-config-resolution"]
+                if dry_run_settings is not None
+                else []
+            ),
             target_flag,
             str(scientific_target.target),
         ]
@@ -1208,6 +1323,7 @@ def resolve_b_effective_configs_separate_processes(
     *,
     repo: str | os.PathLike[str] | None = None,
     scientific_target: SampleBudgetTarget | None = None,
+    dry_run_settings: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Resolve B0 and B1 in independent interpreters before diffing them."""
 
@@ -1231,6 +1347,11 @@ def resolve_b_effective_configs_separate_processes(
             "--target",
             str(scientific_target.target),
         ]
+        if dry_run_settings is not None:
+            command.extend([
+                "--b05-settings-json",
+                json.dumps(dict(dry_run_settings), sort_keys=True, separators=(",", ":")),
+            ])
         environment = os.environ.copy()
         existing_pythonpath = environment.get("PYTHONPATH")
         environment["PYTHONPATH"] = (
@@ -1265,12 +1386,14 @@ def resolve_b_effective_configs(
     *,
     repo: str | os.PathLike[str] | None = None,
     scientific_target: SampleBudgetTarget | None = None,
+    dry_run_settings: Mapping[str, object] | None = None,
 ):
     """Short public alias; resolution remains separate-process by contract."""
 
     return resolve_b_effective_configs_separate_processes(
         repo=repo,
         scientific_target=scientific_target,
+        dry_run_settings=dry_run_settings,
     )
 
 
@@ -1346,6 +1469,7 @@ def preflight_b_experiment(
     contract_path: str | os.PathLike[str] | None = None,
     heldout_suite_path: str | os.PathLike[str] | None = None,
     scientific_target: SampleBudgetTarget | None = None,
+    dry_run_settings: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Resolve, validate, and optionally persist the B experiment record."""
 
@@ -1374,10 +1498,12 @@ def preflight_b_experiment(
         heldout_suite_hash=heldout_hash,
         repo=root,
         scientific_target=scientific_target,
+        dry_run_settings=dry_run_settings,
     )
     b0, b1 = resolve_b_effective_configs_separate_processes(
         repo=root,
         scientific_target=scientific_target,
+        dry_run_settings=dry_run_settings,
     )
     validate_b_experiment_contract(contract, b0_effective_config=b0, b1_effective_config=b1)
     if contract_path is None:
@@ -1405,14 +1531,23 @@ def _main(argv: list[str] | None = None) -> int:
         default=SampleBudgetTarget.NEW_SAMPLES,
     )
     parser.add_argument("--target", type=int, default=DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET)
+    parser.add_argument("--b05-settings-json", default=None)
     args = parser.parse_args(argv)
     if args.resolve_effective_config:
         if args.profile is None:
             parser.error("--profile is required with --resolve-effective-config")
         target = SampleBudgetTarget(args.target_kind, args.target)
+        dry_run_settings = None
+        if args.b05_settings_json is not None:
+            try:
+                dry_run_settings = json.loads(args.b05_settings_json)
+            except json.JSONDecodeError as exc:
+                parser.error(f"--b05-settings-json must be valid JSON: {exc}")
+            if not isinstance(dry_run_settings, Mapping):
+                parser.error("--b05-settings-json must contain a JSON object")
         print(
             json.dumps(
-                _resolve_effective_config(args.profile, target),
+                _resolve_effective_config(args.profile, target, dry_run_settings),
                 sort_keys=True,
                 separators=(",", ":"),
             )

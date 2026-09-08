@@ -14,6 +14,7 @@ import contextlib
 import json
 import math
 import os
+import shutil
 import statistics
 import subprocess
 import threading
@@ -21,6 +22,26 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
+
+
+def nvidia_smi_command() -> list[str] | None:
+    """Return the available NVIDIA management command.
+
+    WSL exposes ``nvidia-smi`` in ``/usr/lib/wsl/lib`` without adding that
+    directory to PATH.  Keeping discovery here lets both the preflight and
+    the background sampler use the same telemetry path without treating a
+    usable CUDA device as a missing GPU merely because PATH is minimal.
+    """
+
+    candidates = []
+    resolved = shutil.which("nvidia-smi")
+    if resolved:
+        candidates.append(resolved)
+    candidates.append("/usr/lib/wsl/lib/nvidia-smi")
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return [candidate]
+    return None
 
 
 def _read_cpu_ticks() -> tuple[int, int] | None:
@@ -63,8 +84,11 @@ def _read_memory() -> dict[str, float]:
 
 
 def _read_nvidia_smi() -> list[dict[str, float | int]]:
+    executable = nvidia_smi_command()
+    if executable is None:
+        return []
     command = [
-        "nvidia-smi",
+        *executable,
         "--query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
         "--format=csv,noheader,nounits",
     ]
@@ -245,6 +269,22 @@ class HardwareTelemetry:
                     by_phase[phase]["gpu_util_percent"].append(max(util_values))
                 if memory_values:
                     by_phase[phase]["gpu_memory_used_mib"].append(sum(memory_values))
+                temperature_values = [
+                    float(item["gpu_temperature_c"])
+                    for item in gpus
+                    if isinstance(item, dict)
+                    and isinstance(item.get("gpu_temperature_c"), (int, float))
+                ]
+                power_values = [
+                    float(item["gpu_power_w"])
+                    for item in gpus
+                    if isinstance(item, dict)
+                    and isinstance(item.get("gpu_power_w"), (int, float))
+                ]
+                if temperature_values:
+                    by_phase[phase]["gpu_temperature_c"].append(max(temperature_values))
+                if power_values:
+                    by_phase[phase]["gpu_power_w"].append(sum(power_values))
 
         phases: dict[str, object] = {}
         for phase, metrics in sorted(by_phase.items()):

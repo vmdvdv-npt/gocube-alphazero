@@ -86,6 +86,8 @@ class AtomicSampleClockNNetWrapper(SampleClockNNetWrapper):
                     "B experiment checkpoints require experiment_contract_sha256"
                 )
             fields["gocube_experiment_contract_sha256"] = digest.lower()
+            if getattr(self.args, "gocube_b05_dry_run", False):
+                fields["gocube_b05_dry_run"] = True
         return fields
 
     def save_checkpoint(self, folder="checkpoint", filename="checkpoint.pth.tar", make_dirs=True):
@@ -107,6 +109,9 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
     """Production coach with atomic replay commits and contiguous resume."""
 
     def __init__(self, game_cls, nnet, args):
+        self._b05_resume_segment_pending = bool(
+            getattr(args, "gocube_b05_resume_segment", False)
+        )
         checkpoint_folder = os.path.join(args.checkpoint, args.run_name)
         existing = glob(os.path.join(checkpoint_folder, "iteration-*.pkl"))
         if args.load_model and existing:
@@ -151,6 +156,12 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
                 )
         else:
             super().__init__(game_cls, nnet, args)
+
+    def _training_budget_reached(self):
+        if self._b05_resume_segment_pending:
+            self._b05_resume_segment_pending = False
+            return False
+        return super()._training_budget_reached()
 
     def saveIterationSamples(self, iteration):
         """Commit seven replay tensors plus provenance as one logical unit."""
@@ -237,10 +248,18 @@ def build_hardened_training_args(cli):
     args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
     # 1024 is the ordinary Cube-4 production batch as well as the B batch. It
     # must never be used as an implicit experiment marker.
-    if int(args.train_batch_size) == CUBE4_PRODUCTION.train_batch_size:
+    if int(args.train_batch_size) == CUBE4_PRODUCTION.train_batch_size and not getattr(cli, "b05_dry_run", False):
         CUBE4_PRODUCTION.validate_checkpoint_args(args)
+    if getattr(cli, "b05_dry_run", False) and int(args.train_batch_size) != CUBE4_PRODUCTION.train_batch_size:
+        raise ValueError("B05 dry-run training batch must remain 1024")
     experiment_id = getattr(args, "gocube_experiment_contract_id", None)
     experiment_sha256 = getattr(args, "gocube_experiment_contract_sha256", None)
+    if (
+        getattr(cli, "b05_dry_run", False)
+        and experiment_id != B_EXPERIMENT_CONTRACT_ID
+        and not getattr(cli, "b05_config_resolution", False)
+    ):
+        raise ValueError("B05 dry-run requires the immutable B experiment contract")
     if experiment_id == B_EXPERIMENT_CONTRACT_ID:
         if not isinstance(experiment_sha256, str) or len(experiment_sha256) != 64 or any(
             character not in "0123456789abcdef" for character in experiment_sha256.lower()
@@ -339,7 +358,11 @@ def main(argv=None):
     coach.learn()
     target_builder = getattr(coach, "_sample_budget_target", None)
     target = target_builder() if callable(target_builder) else None
-    if target is not None and not coach._training_budget_reached():
+    if (
+        target is not None
+        and not coach._training_budget_reached()
+        and not getattr(cli, "b05_segment", False)
+    ):
         counters = getattr(coach, "_cumulative_training_counters", None)
         current = target.current(counters) if counters is not None else 0
         raise RuntimeError(

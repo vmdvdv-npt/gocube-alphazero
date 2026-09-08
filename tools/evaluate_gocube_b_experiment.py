@@ -226,6 +226,7 @@ def evaluate_seed(
     extension_seed_decision: Path | None = None,
     move_limit: int | None = None,
     experiment_contract: BExperimentContract | Mapping[str, object] | None = None,
+    allow_non_scientific_dry_run: bool = False,
 ) -> dict[str, object]:
     if training_seed not in B_SEED_LIST:
         raise ValueError(f"training seed must be one of {B_SEED_LIST}")
@@ -273,6 +274,16 @@ def evaluate_seed(
         raise ValueError("B0/B1 checkpoint contract SHA mismatch")
     if contract_sha_a != contract_sha256:
         raise ValueError("B checkpoints do not match the immutable B experiment contract")
+    b05_a = bool(_mapping_value(saved_a, "gocube_b05_dry_run", False))
+    b05_b = bool(_mapping_value(saved_b, "gocube_b05_dry_run", False))
+    if b05_a != b05_b:
+        raise ValueError("B0/B1 checkpoints disagree on B05 dry-run identity")
+    if b05_a != bool(contract.non_scientific_dry_run):
+        raise ValueError("B checkpoint and immutable B contract disagree on B05 dry-run identity")
+    if b05_a and not allow_non_scientific_dry_run:
+        raise ValueError(
+            "B05 non-scientific dry-run checkpoints require the dedicated B05 evaluator"
+        )
     if training_seed in B_EXTENSION_SEEDS:
         if extension_seed_decision is None:
             raise ValueError(
@@ -381,6 +392,7 @@ def evaluate_seed(
         "rules_fingerprint": contract_a.rules_fingerprint,
         "scientific_clock": effective_clock,
         "scientific_milestone": registered_milestone,
+        "non_scientific_dry_run": b05_a,
         "training_seed": int(training_seed),
         "b0_checkpoint": {
             "path": str(b0_checkpoint.resolve()),

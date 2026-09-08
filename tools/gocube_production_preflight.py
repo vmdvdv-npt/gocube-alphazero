@@ -17,6 +17,7 @@ from typing import Any
 import torch
 
 from tools.gocube_experiment_storage import MIN_FREE_RESERVE_BYTES
+from tools.hardware_telemetry import nvidia_smi_command
 from alphazero.envs.gocube.b_experiment_contract import (
     ALLOWED_EFFECTIVE_CONFIG_DIFFERENCES,
     BExperimentContract,
@@ -98,14 +99,46 @@ def _origin_matches_project(url: str) -> bool:
 
 
 def _pip_freeze() -> list[str]:
-    output = _run_text([sys.executable, "-m", "pip", "freeze", "--all"])
+    try:
+        output = _run_text([sys.executable, "-m", "pip", "freeze", "--all"])
+    except RuntimeError as pip_error:
+        # The project environment is uv-managed and may intentionally omit
+        # pip.  uv's interpreter-targeted freeze is equivalent for the
+        # reproducibility fingerprint; retain the original hard failure when
+        # neither inventory path is available.
+        uv = shutil.which("uv")
+        if uv is None:
+            output = ""
+        else:
+            try:
+                output = _run_text([uv, "pip", "freeze", "--python", sys.executable])
+            except RuntimeError:
+                output = ""
+    if not output:
+        # Some systemd user environments intentionally have a minimal PATH
+        # that hides uv as well.  The interpreter's installed distribution
+        # metadata is still an exact, deterministic package inventory for
+        # the preflight fingerprint.
+        try:
+            from importlib.metadata import distributions
+
+            return sorted(
+                f"{distribution.metadata['Name']}=={distribution.version}"
+                for distribution in distributions()
+                if distribution.metadata.get("Name") and distribution.version
+            )
+        except Exception:
+            raise pip_error
     return sorted(line.strip() for line in output.splitlines() if line.strip())
 
 
 def _nvidia_driver_version() -> str | None:
+    executable = nvidia_smi_command()
+    if executable is None:
+        return None
     try:
         output = _run_text(
-            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"]
+            [*executable, "--query-gpu=driver_version", "--format=csv,noheader"]
         )
     except RuntimeError:
         return None
@@ -380,6 +413,54 @@ def validate_new_production_preflight(report: dict[str, Any]) -> None:
         raise RuntimeError("New production sweep must verify GitHub origin/main")
     if source.get("remote_main_sha") != source.get("head_sha"):
         raise RuntimeError("Local HEAD is not the current GitHub origin/main commit")
+
+
+def validate_b05_production_preflight(
+    report: dict[str, Any],
+    *,
+    base_ref: str = REQUIRED_UPSTREAM,
+) -> None:
+    """Validate a B05 checkout using the shared production preflight.
+
+    The long-running production sweep intentionally requires ``main``.  B05
+    is a short integration proof and must run from its review branch, but only
+    when that branch is rooted at the freshly fetched remote default branch.
+    All hardware, runtime, supervision, disk, and clean-tree checks remain
+    the same as the production preflight above.
+    """
+
+    _validate_common(report)
+    source = report["source"]
+    if not bool(source.get("remote_verified")):
+        raise RuntimeError("B05 must verify the freshly fetched GitHub origin/main")
+    remote_main_sha = source.get("remote_main_sha")
+    if not isinstance(remote_main_sha, str) or len(remote_main_sha) != 40:
+        raise RuntimeError("B05 preflight has no authoritative remote main SHA")
+    try:
+        base_sha = _git(Path(str(source["repo_path"])), "rev-parse", base_ref)
+        merge_base = _git(
+            Path(str(source["repo_path"])),
+            "merge-base",
+            "HEAD",
+            base_ref,
+        )
+    except RuntimeError as exc:
+        raise RuntimeError(f"B05 cannot resolve its authoritative base {base_ref}: {exc}") from exc
+    if base_sha != remote_main_sha:
+        raise RuntimeError(
+            f"{base_ref} is stale: local {base_sha}, fetched GitHub origin/main {remote_main_sha}"
+        )
+    if merge_base != remote_main_sha:
+        raise RuntimeError(
+            "B05 source is not based on the freshly fetched origin/main commit: "
+            f"merge-base={merge_base}, origin/main={remote_main_sha}"
+        )
+    branch = str(source.get("branch", ""))
+    if branch == REQUIRED_BRANCH:
+        if source.get("head_sha") != remote_main_sha:
+            raise RuntimeError("B05 main checkout is not at the current GitHub origin/main commit")
+    elif not branch.startswith("codex/"):
+        raise RuntimeError(f"B05 must run on main or a codex review branch; got {branch!r}")
 
 
 def validate_resume_production_preflight(

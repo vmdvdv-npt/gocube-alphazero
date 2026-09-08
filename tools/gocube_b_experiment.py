@@ -27,6 +27,8 @@ from alphazero.envs.gocube.b_experiment_contract import (
     B1_TREATMENT,
     B_EXTENSION_SEEDS,
     B_SEED_LIST,
+    B05_DRY_RUN_DEFAULT_SETTINGS,
+    B05_DRY_RUN_TARGET,
     DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET,
     preflight_b_experiment,
     validate_extension_seed_decision,
@@ -107,7 +109,27 @@ def parse_args(argv=None):
         default=None,
         help="JSON approval required when running extension seed 3 or 4",
     )
+    parser.add_argument(
+        "--allow-existing-run",
+        action="store_true",
+        help="Resume an existing hardened namespace after its checkpoint is validated.",
+    )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--b05-dry-run",
+        action="store_true",
+        help="Run the explicitly non-scientific B05 integration contract.",
+    )
+    parser.add_argument(
+        "--b05-segment",
+        action="store_true",
+        help="Allow a bounded B05 segment to stop before its test target.",
+    )
+    parser.add_argument(
+        "--b05-resume-segment",
+        action="store_true",
+        help="Permit one post-resume B05 progress iteration even if its test target was reached.",
+    )
     args = parser.parse_args(argv)
     if args.iterations < 1:
         parser.error("--iterations must be positive")
@@ -124,10 +146,15 @@ def parse_args(argv=None):
             )
     elif args.extension_seed_decision is not None:
         parser.error("--extension-seed-decision is only valid for extension seeds 3 and 4")
+    if args.b05_segment or args.b05_resume_segment:
+        if not args.b05_dry_run:
+            parser.error("B05 segment controls require --b05-dry-run")
     if args.run_name is None:
         args.run_name = f"gocube-b-{args.treatment.lower()}"
     if args.cumulative_new_samples_target is None and args.cumulative_optimizer_examples_target is None:
-        args.cumulative_new_samples_target = DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET
+        args.cumulative_new_samples_target = (
+            B05_DRY_RUN_TARGET if args.b05_dry_run else DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET
+        )
     try:
         args.scientific_target = build_sample_budget_target(
             cumulative_new_samples_target=args.cumulative_new_samples_target,
@@ -155,6 +182,14 @@ def training_command(
     """Return the fully pinned child command for the selected treatment."""
 
     interpreter = python or str(Path(__file__).resolve().parents[1] / ".venv" / "bin" / "python")
+    settings = B05_DRY_RUN_DEFAULT_SETTINGS if args.b05_dry_run else {
+        "workers": CUBE4_PRODUCTION.workers,
+        "regular_sims": CUBE4_PRODUCTION.regular_sims,
+        "arena_sims": CUBE4_PRODUCTION.arena_sims,
+        "games_per_iteration": CUBE4_PRODUCTION.games_per_iteration,
+        "train_batch_size": CUBE4_PRODUCTION.train_batch_size,
+        "fast_probability": CUBE4_PRODUCTION.fast_probability,
+    }
     command = [
         interpreter,
         "-m",
@@ -166,19 +201,19 @@ def training_command(
         "--size",
         "4",
         "--workers",
-        str(CUBE4_PRODUCTION.workers),
+        str(settings["workers"]),
         "--sims",
-        str(CUBE4_PRODUCTION.regular_sims),
+        str(settings["regular_sims"]),
         "--arena-sims",
-        str(CUBE4_PRODUCTION.arena_sims),
+        str(settings["arena_sims"]),
         "--games-per-iteration",
-        str(CUBE4_PRODUCTION.games_per_iteration),
+        str(settings["games_per_iteration"]),
         "--iterations",
         str(args.iterations),
         "--train-batch-size",
-        str(CUBE4_PRODUCTION.train_batch_size),
+        str(settings["train_batch_size"]),
         "--fast-game-prob",
-        str(CUBE4_PRODUCTION.fast_probability),
+        str(settings["fast_probability"]),
         "--train-samples-per-new-sample",
         str(CUBE4_PRODUCTION.train_samples_per_new_sample),
         "--endgame-sample-weight",
@@ -218,6 +253,14 @@ def training_command(
                 str(contract_sha256),
             ]
         )
+    if args.b05_dry_run:
+        command.append("--b05-dry-run")
+    if args.b05_segment:
+        command.append("--b05-segment")
+    if args.b05_resume_segment:
+        command.append("--b05-resume-segment")
+    if args.allow_existing_run:
+        command.append("--allow-existing-run")
     return command
 
 
@@ -241,6 +284,7 @@ def main(argv=None) -> int:
             contract_path=contract_path,
             heldout_suite_path=args.heldout_suite,
             scientific_target=args.scientific_target,
+            dry_run_settings=(B05_DRY_RUN_DEFAULT_SETTINGS if args.b05_dry_run else None),
         )
         if args.seed in B_EXTENSION_SEEDS:
             validate_extension_seed_decision(

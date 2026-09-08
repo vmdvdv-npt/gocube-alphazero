@@ -1238,6 +1238,26 @@ def parse_args(argv=None):
         default=None,
         help="SHA-256 of the immutable B experiment contract record.",
     )
+    parser.add_argument(
+        "--b05-dry-run",
+        action="store_true",
+        help="Activate the explicitly non-scientific B05 integration settings.",
+    )
+    parser.add_argument(
+        "--b05-segment",
+        action="store_true",
+        help="Allow a bounded B05 segment to end before its test target.",
+    )
+    parser.add_argument(
+        "--b05-resume-segment",
+        action="store_true",
+        help="Allow one post-resume B05 iteration after the target is already reached.",
+    )
+    parser.add_argument(
+        "--b05-config-resolution",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parsed = parser.parse_args(raw_argv)
     parsed._explicit_sweep_flags = frozenset(
         flag
@@ -1275,6 +1295,10 @@ def build_katago_training_args(cli):
         value = str(experiment_contract_sha256).lower()
         if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
             raise ValueError("experiment-contract-sha256 must be a 64-character hexadecimal digest")
+    if (cli.b05_segment or cli.b05_resume_segment) and not cli.b05_dry_run:
+        raise ValueError("B05 segment controls require --b05-dry-run")
+    if cli.b05_config_resolution and not cli.b05_dry_run:
+        raise ValueError("B05 config resolution requires --b05-dry-run")
     if cli.arena_games_per_opponent < 1:
         raise ValueError("arena-games-per-opponent must be positive")
     if cli.arena_anchor_period < 1:
@@ -1395,6 +1419,9 @@ def build_katago_training_args(cli):
     args.gocube_experiment_contract_sha256 = (
         None if experiment_contract_sha256 is None else str(experiment_contract_sha256).lower()
     )
+    args.gocube_b05_dry_run = bool(cli.b05_dry_run)
+    args.gocube_b05_segment = bool(cli.b05_segment)
+    args.gocube_b05_resume_segment = bool(cli.b05_resume_segment)
     args.gocube_train_samples_per_new_sample = float(cli.train_samples_per_new_sample)
     args.gocube_cumulative_new_samples_target = (
         None

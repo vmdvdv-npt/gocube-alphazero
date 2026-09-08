@@ -109,6 +109,10 @@ def validate_seed_evaluation(
         )
     if int(payload.get("schema_version", -1)) != 1:
         raise ValueError("Unsupported B seed evaluation schema")
+    if bool(payload.get("non_scientific_dry_run", False)):
+        raise ValueError(
+            "B05 non-scientific dry-run artifacts are not valid B scientific results"
+        )
     required = (
         "experiment_contract_id", "experiment_contract_sha256", "heldout_suite_id",
         "heldout_suite_sha256", "scientific_clock", "scientific_milestone",
@@ -231,6 +235,10 @@ def analyze_evaluations(
     if experiment_contract is None:
         raise ValueError("B analysis requires the immutable B experiment contract")
     contract, contract_sha256 = resolve_b_experiment_contract(experiment_contract)
+    if bool(contract.non_scientific_dry_run):
+        raise ValueError(
+            "B05 non-scientific dry-run contracts cannot be analyzed as B scientific results"
+        )
     evaluation_schedule = b_evaluation_schedule(contract)
     artifacts = [
         validate_seed_evaluation(
