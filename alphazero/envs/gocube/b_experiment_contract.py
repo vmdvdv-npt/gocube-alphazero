@@ -11,6 +11,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -29,6 +30,12 @@ from .contract_versions import (
     TERMINATION_CONTRACT,
     TRAINING_CONTRACT_VERSION,
     VALUE_TARGET_SEMANTICS,
+)
+from .b_evaluation import (
+    B_HELDOUT_SUITE_ID,
+    B_HELDOUT_SUITE_POSITION_COUNT,
+    B_HELDOUT_SUITE_SHA256,
+    validate_frozen_suite,
 )
 from .production_contract import CUBE4_PRODUCTION, GOCUBE_KOMI
 from .production_training import (
@@ -233,6 +240,25 @@ def validate_extension_seed_decision(
         raise ExperimentContractError(
             "Extension-seed decision must record ambiguity or variance evidence"
         )
+    # B3 approval artifacts only carried the boolean evidence.  Preserve that
+    # legacy validator surface; B4-generated artifacts add the numeric values
+    # and are checked mechanically when present.
+    numeric_keys = {"mandatory_ci95_low", "mandatory_ci95_high", "mandatory_seed_delta_std"}
+    if any(key in evidence for key in numeric_keys):
+        try:
+            low = float(evidence["mandatory_ci95_low"])
+            high = float(evidence["mandatory_ci95_high"])
+            std = float(evidence["mandatory_seed_delta_std"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ExperimentContractError(
+                "Extension-seed decision must record numeric criterion evidence"
+            ) from exc
+        if not all(math.isfinite(value) for value in (low, high, std)) or low > high or std < 0.0:
+            raise ExperimentContractError("Extension-seed numeric criterion evidence is invalid")
+        if bool(evidence.get("ambiguity_detected")) != (low <= 0.0 <= high):
+            raise ExperimentContractError("Extension-seed ambiguity evidence is inconsistent with its CI")
+        if bool(evidence.get("variance_exceeded")) != (std >= 0.10):
+            raise ExperimentContractError("Extension-seed variance evidence is inconsistent with the 0.10 threshold")
     if contract_sha256 is not None and payload.get("experiment_contract_sha256") != contract_sha256:
         raise ExperimentContractError(
             "Extension-seed decision is for a different experiment contract"
@@ -1203,7 +1229,20 @@ def preflight_b_experiment(
             "--heldout-suite is required for a real B experiment; only --dry-run may omit it"
         )
     require_clean_source(root)
+    try:
+        suite_payload, _suite_positions = validate_frozen_suite(
+            heldout_suite_path,
+            expected_sha256=B_HELDOUT_SUITE_SHA256,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise ExperimentContractError(
+            f"B experiment requires the canonical frozen suite {B_HELDOUT_SUITE_ID}: {exc}"
+        ) from exc
     heldout_hash = hash_heldout_suite(heldout_suite_path)
+    if suite_payload.get("suite_id") != B_HELDOUT_SUITE_ID:
+        raise ExperimentContractError("B experiment heldout suite has the wrong suite_id")
+    if int(suite_payload.get("position_count", -1)) != B_HELDOUT_SUITE_POSITION_COUNT:
+        raise ExperimentContractError("B experiment heldout suite must contain exactly 16 positions")
     contract = build_b_experiment_contract(
         source_git_sha=current_source_git_sha(root),
         heldout_suite_hash=heldout_hash,
