@@ -156,3 +156,81 @@ def test_komi_audit_has_no_applicable_production_7_5_literal():
     audit = gocube_b05._komi_audit(Path(__file__).resolve().parents[1])
     assert audit["canonical_komi"] == 0.5
     assert audit["applicable_production_matches"] == []
+
+
+def test_throughput_summary_uses_median_and_preserves_canonical_workers():
+    def repeat(workers, repeat, positions_per_second):
+        return {
+            "workers": workers,
+            "repeat": repeat,
+            "games": gocube_b05.THROUGHPUT_GAMES,
+            "positions_per_second": positions_per_second,
+        }
+
+    summary = gocube_b05._summarize_throughput(
+        [repeat(8, 1, 40.0), repeat(8, 2, 50.0), repeat(8, 3, 60.0)],
+        [repeat(16, 1, 30.0), repeat(16, 2, 35.0), repeat(16, 3, 40.0)],
+    )
+    assert summary["benchmark"]["games_per_repeat"] == 64
+    assert summary["workers_8"]["positions_per_second"]["median"] == 50.0
+    assert summary["workers_16"]["positions_per_second"]["median"] == 35.0
+    assert summary["comparison"]["relative_delta_percent_16_vs_8"] == pytest.approx(-30.0)
+    assert summary["comparison"]["stable_workers_16_regression"] is True
+    assert summary["comparison"]["canonical_workers"] == 16
+    assert summary["comparison"]["canonical_workers_changed"] is False
+
+
+def test_storage_extrapolation_scales_full_target_and_reports_logs(tmp_path):
+    run_name = "storage-b0"
+    checkpoint = tmp_path / "checkpoint" / run_name
+    data = tmp_path / "data" / run_name
+    runs = tmp_path / "runs" / run_name
+    report_root = tmp_path / "report"
+    (data / "records" / "iteration-0001").mkdir(parents=True)
+    checkpoint.mkdir(parents=True)
+    runs.mkdir(parents=True)
+    (report_root / "logs").mkdir(parents=True)
+    for filename, size in (
+        ("iteration-0000.pkl", 10),
+        ("iteration-0001.pkl", 20),
+        ("iteration-0002.pkl", 20),
+        ("run-manifest.json", 5),
+    ):
+        (checkpoint / filename).write_bytes(b"x" * size)
+    for filename, size in (
+        ("iteration-0001-data.pkl", 100),
+        ("iteration-0001-policy.pkl", 10),
+        ("iteration-0001-complete.json", 5),
+        ("training-progress.json", 5),
+    ):
+        (data / filename).write_bytes(b"x" * size)
+    for index in (1, 2, 3, 4):
+        (data / "records" / "iteration-0001" / f"C4-{index:06d}.json").write_bytes(b"x" * 25)
+    (data / "records" / "iteration-0001" / "iteration-manifest.json").write_bytes(b"x" * 5)
+    (runs / "events.out.tfevents.test").write_bytes(b"x" * 6)
+    log = report_root / "logs" / "b0.log"
+    log.write_bytes(b"x" * 8)
+
+    details = {
+        "run_name": run_name,
+        "latest_iteration": 2,
+        "counters": {
+            "new_samples_accepted": 200,
+            "selfplay_games_completed": 8,
+        },
+        "log_paths": [str(log)],
+    }
+    result = gocube_b05._storage_extrapolation(
+        tmp_path,
+        report_root,
+        {gocube_b05.B0_TREATMENT: details, gocube_b05.B1_TREATMENT: details},
+    )
+    estimate = result["estimates"]["3+3"]
+    assert result["scientific_target_new_samples_per_treatment"] == 40_000_000
+    assert result["retention_policy"]["replay_window_max_iterations"] == 20
+    assert result["measured_b05"][gocube_b05.B0_TREATMENT]["measured_command_log_bytes"] == 8
+    assert estimate["estimated_new_bytes"] > estimate["measured_tiny_pair_artifact_bytes"] * 3
+    assert estimate["estimated_unpruned_current_launcher_bytes"] >= estimate["estimated_new_bytes"]
+    assert result["full_run_per_treatment"][gocube_b05.B0_TREATMENT]["retained_policy_bytes"]["logs"] > 0
+    assert result["reserve_policy"]["used_for_full_run_estimate"] is False
+    assert result["estimates"]["5+5"]["reserve_bytes"] == 1 * 1024**3

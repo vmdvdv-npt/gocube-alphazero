@@ -45,6 +45,7 @@ from alphazero.envs.gocube.b_experiment_contract import (
     B0_TREATMENT,
     B1_MODEL_PROFILE,
     B1_TREATMENT,
+    DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET,
     diff_effective_configs,
     load_b_experiment_contract,
     preflight_b_experiment,
@@ -55,6 +56,7 @@ from alphazero.envs.gocube.hardened_train import (
     AtomicSampleClockNNetWrapper,
     build_hardened_training_args,
 )
+from alphazero.envs.gocube.atomic_io import REPLAY_ARTIFACT_SUFFIXES
 from alphazero.envs.gocube.integration.catalog import CheckpointCatalog
 from alphazero.envs.gocube.integration.models import CheckpointModelLoader
 from alphazero.envs.gocube.katago_train import parse_args as parse_training_args
@@ -82,10 +84,16 @@ from tools.hardware_telemetry import HardwareTelemetry, _read_nvidia_smi
 
 REPORT_SCHEMA_VERSION = 1
 DEFAULT_REPORT_DIR = "training_reports/gocube-b05-legion-preflight-dryrun"
-THROUGHPUT_GAMES = 8
+THROUGHPUT_GAMES = 64
+THROUGHPUT_REPEATS = 3
+THROUGHPUT_TARGET_GRACE_SECONDS = 120.0
 INFERENCE_BATCH_ROWS = 32
 INFERENCE_REPEATS = 12
 EVALUATION_MILESTONE = 128
+REPLAY_WINDOW_MAX_ITERATIONS = 20
+CHECKPOINT_CADENCE_ITERATIONS = 1
+STORAGE_OPERATIONAL_HEADROOM_BYTES = 1 * 1024**3
+STORAGE_TRANSIENT_SAFETY_FACTOR = 2.0
 
 
 def _atomic_json(path: Path, payload: object) -> None:
@@ -210,6 +218,7 @@ def _run_command(
     log_path: Path,
     phase: str,
     telemetry: HardwareTelemetry,
+    benchmark_target_games: int | None = None,
 ) -> dict[str, object]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
@@ -220,6 +229,10 @@ def _run_command(
     started = time.perf_counter()
     sample_time = None
     inference_batch = None
+    target_games_elapsed = None
+    last_target_games_elapsed = None
+    replay_save_started_elapsed = None
+    iteration_summary_elapsed = None
     with log_path.open("a", encoding="utf-8", errors="replace") as log:
         log.write("\n=== COMMAND ===\n" + " ".join(command) + "\n")
         log.flush()
@@ -235,10 +248,21 @@ def _run_command(
         )
         assert process.stdout is not None
         for line in process.stdout:
+            observed_elapsed = time.perf_counter() - started
             sys.stdout.write(line)
             sys.stdout.flush()
             log.write(line)
             log.flush()
+            if benchmark_target_games is not None:
+                target_marker = rf"\({int(benchmark_target_games)}/{int(benchmark_target_games)}\)"
+                if re.search(target_marker, line):
+                    if target_games_elapsed is None:
+                        target_games_elapsed = observed_elapsed
+                    last_target_games_elapsed = observed_elapsed
+                if line.startswith("Saving ") and replay_save_started_elapsed is None:
+                    replay_save_started_elapsed = observed_elapsed
+                if line.startswith("=== V3 iteration ") and iteration_summary_elapsed is None:
+                    iteration_summary_elapsed = observed_elapsed
             match = re.search(r"Sample Time:\s*([0-9.]+)s", line)
             if match:
                 sample_time = float(match.group(1))
@@ -256,6 +280,39 @@ def _run_command(
         "sample_time_seconds": sample_time,
         "mean_inference_batch_rows": inference_batch,
     }
+    if benchmark_target_games is not None:
+        if target_games_elapsed is None:
+            raise RuntimeError(
+                f"Benchmark command never reported target game count {benchmark_target_games}: "
+                f"{' '.join(command)}"
+            )
+        result.update(
+            {
+                "benchmark_elapsed_seconds": float(target_games_elapsed),
+                "target_games_elapsed_seconds": float(target_games_elapsed),
+                "last_target_games_elapsed_seconds": (
+                    float(last_target_games_elapsed)
+                    if last_target_games_elapsed is not None
+                    else float(target_games_elapsed)
+                ),
+                "legacy_worker_pool_drain_seconds": max(
+                    0.0,
+                    float(last_target_games_elapsed or target_games_elapsed) - float(target_games_elapsed),
+                ),
+                "replay_save_started_elapsed_seconds": (
+                    float(replay_save_started_elapsed)
+                    if replay_save_started_elapsed is not None
+                    else None
+                ),
+                "iteration_summary_elapsed_seconds": (
+                    float(iteration_summary_elapsed)
+                    if iteration_summary_elapsed is not None
+                    else None
+                ),
+                "runner_overhead_seconds": max(0.0, wall - float(target_games_elapsed)),
+                "legacy_runner_grace_seconds": THROUGHPUT_TARGET_GRACE_SECONDS,
+            }
+        )
     if return_code != 0:
         raise RuntimeError(f"Command failed with exit code {return_code}: {' '.join(command)}")
     return result
@@ -429,8 +486,14 @@ def _run_training(repo: Path, root: Path, suite: Path, contract: Path, treatment
     return metrics, logs
 
 
-def _throughput_benchmark(repo: Path, root: Path, workers: int, telemetry: HardwareTelemetry) -> dict[str, object]:
-    run_name = f"gocube-b05-throughput-w{workers}"
+def _throughput_benchmark(
+    repo: Path,
+    root: Path,
+    workers: int,
+    repeat: int,
+    telemetry: HardwareTelemetry,
+) -> dict[str, object]:
+    run_name = f"gocube-b05-throughput-w{workers}-r{repeat}"
     if (repo / "checkpoint" / run_name).exists() or (repo / "data" / run_name).exists():
         raise RuntimeError(f"Refusing to overwrite throughput namespace: {run_name}")
     command = [
@@ -443,7 +506,14 @@ def _throughput_benchmark(repo: Path, root: Path, workers: int, telemetry: Hardw
         "--fast-game-prob", "0.25", "--no-arena", "--run-name", run_name,
     ]
     log = root / "logs" / f"throughput-w{workers}.log"
-    command_metrics = _run_command(command, repo=repo, log_path=log, phase=f"THROUGHPUT_W{workers}", telemetry=telemetry)
+    command_metrics = _run_command(
+        command,
+        repo=repo,
+        log_path=log,
+        phase=f"THROUGHPUT_W{workers}",
+        telemetry=telemetry,
+        benchmark_target_games=THROUGHPUT_GAMES,
+    )
     records = sorted((repo / "data" / run_name / "records").glob("iteration-*/iteration-manifest.json"))
     if not records:
         raise RuntimeError(f"Throughput benchmark produced no iteration manifest: {run_name}")
@@ -455,18 +525,97 @@ def _throughput_benchmark(repo: Path, root: Path, workers: int, telemetry: Hardw
     if games <= 0 or positions <= 0:
         raise RuntimeError(f"Throughput benchmark has no positive game/position counters: {run_name}")
     wall = float(command_metrics["wall_time_seconds"])
+    benchmark_elapsed = float(command_metrics["benchmark_elapsed_seconds"])
     return {
         "workers": workers,
+        "repeat": repeat,
         "run_name": run_name,
         "command": command,
         "log": str(log),
         "games": games,
         "positions": positions,
         "wall_time_seconds": wall,
-        "games_per_second": games / wall if wall else 0.0,
-        "positions_per_second": positions / wall if wall else 0.0,
+        "games_per_second": games / benchmark_elapsed if benchmark_elapsed else 0.0,
+        "positions_per_second": positions / benchmark_elapsed if benchmark_elapsed else 0.0,
         "sample_time_seconds": command_metrics["sample_time_seconds"],
         "mean_inference_batch_rows": command_metrics["mean_inference_batch_rows"],
+        "benchmark_elapsed_seconds": benchmark_elapsed,
+        "target_games_elapsed_seconds": command_metrics["target_games_elapsed_seconds"],
+        "last_target_games_elapsed_seconds": command_metrics["last_target_games_elapsed_seconds"],
+        "legacy_worker_pool_drain_seconds": command_metrics["legacy_worker_pool_drain_seconds"],
+        "replay_save_started_elapsed_seconds": command_metrics["replay_save_started_elapsed_seconds"],
+        "iteration_summary_elapsed_seconds": command_metrics["iteration_summary_elapsed_seconds"],
+        "runner_overhead_seconds": command_metrics["runner_overhead_seconds"],
+        "legacy_runner_grace_seconds": command_metrics["legacy_runner_grace_seconds"],
+    }
+
+
+def _summarize_throughput(
+    workers_8: list[Mapping[str, object]],
+    workers_16: list[Mapping[str, object]],
+) -> dict[str, object]:
+    """Summarize paired worker runs without changing the production default."""
+
+    if len(workers_8) != len(workers_16) or not workers_8:
+        raise ValueError("throughput comparison requires equally sized non-empty repeat sets")
+    if len(workers_8) < 2:
+        raise ValueError("throughput comparison requires at least two repeats")
+
+    def summarize(items: list[Mapping[str, object]], workers: int) -> dict[str, object]:
+        rates = [float(item["positions_per_second"]) for item in items]
+        games = [int(item["games"]) for item in items]
+        if any(int(item["workers"]) != workers for item in items):
+            raise ValueError(f"throughput repeat has the wrong worker count for w{workers}")
+        if any(game_count < THROUGHPUT_GAMES for game_count in games):
+            raise ValueError(
+                f"throughput repeat did not complete the requested {THROUGHPUT_GAMES} games"
+            )
+        return {
+            "workers": workers,
+            "repeat_count": len(items),
+            "games_per_repeat": THROUGHPUT_GAMES,
+            "repeats": items,
+            "positions_per_second": {
+                "median": float(np.median(rates)),
+                "mean": float(np.mean(rates)),
+                "min": float(min(rates)),
+                "max": float(max(rates)),
+            },
+        }
+
+    summary_8 = summarize(workers_8, 8)
+    summary_16 = summarize(workers_16, 16)
+    rates_8 = [float(item["positions_per_second"]) for item in workers_8]
+    rates_16 = [float(item["positions_per_second"]) for item in workers_16]
+    paired_deltas = [
+        100.0 * (right / left - 1.0) if left else 0.0
+        for left, right in zip(rates_8, rates_16)
+    ]
+    median_8 = float(summary_8["positions_per_second"]["median"])
+    median_16 = float(summary_16["positions_per_second"]["median"])
+    slower_repeats = sum(delta < 0.0 for delta in paired_deltas)
+    stable_regression = median_16 < median_8 and slower_repeats >= math.ceil(len(paired_deltas) / 2)
+    return {
+        "benchmark": {
+            "games_per_repeat": THROUGHPUT_GAMES,
+            "repeats": len(workers_8),
+            "metric": "median positions/sec",
+            "paired_repeat_indices": list(range(1, len(workers_8) + 1)),
+        },
+        "workers_8": summary_8,
+        "workers_16": summary_16,
+        "comparison": {
+            "median_positions_per_second_workers_8": median_8,
+            "median_positions_per_second_workers_16": median_16,
+            "relative_delta_percent_16_vs_8": 100.0 * (median_16 / median_8 - 1.0)
+            if median_8
+            else 0.0,
+            "paired_repeat_deltas_percent_16_vs_8": paired_deltas,
+            "slower_repeat_count": slower_repeats,
+            "stable_workers_16_regression": stable_regression,
+            "canonical_workers": CUBE4_PRODUCTION.workers,
+            "canonical_workers_changed": False,
+        },
     }
 
 
@@ -528,43 +677,291 @@ def _inference_microbenchmark(repo: Path, root: Path, device: str) -> dict[str, 
     return results
 
 
-def _storage_extrapolation(repo: Path, root: Path, runs: Mapping[str, Mapping[str, object]]) -> dict[str, object]:
-    def tree_bytes(path: Path) -> int:
+def _storage_extrapolation(
+    repo: Path,
+    root: Path,
+    runs: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    """Estimate the full B-run footprint from measured B05 artifacts.
+
+    B05 is too small to extrapolate by multiplying its total directory size.
+    The scientific run is sample-clocked, writes one checkpoint per iteration,
+    and trains from a maximum 20-iteration replay window.  The report keeps
+    both the contract-retained estimate and a conservative view of the current
+    launcher, which does not delete old replay/record artifacts on disk.
+    """
+
+    def tree_bytes(path: Path, *, include=None) -> int:
         if not path.exists():
             return 0
-        return sum(item.stat().st_size for item in path.rglob("*") if item.is_file() and not item.is_symlink())
-    per_treatment = {}
-    for treatment, details in runs.items():
+        total = 0
+        for item in path.rglob("*"):
+            if not item.is_file() or item.is_symlink():
+                continue
+            if include is None or include(item):
+                total += item.stat().st_size
+        return total
+
+    def files_bytes(paths) -> int:
+        return sum(path.stat().st_size for path in paths if path.is_file())
+
+    def artifact_measurement(treatment: str, details: Mapping[str, object]) -> dict[str, object]:
         name = str(details["run_name"])
-        paths = {
-            "checkpoint": repo / "checkpoint" / name,
-            "replay": repo / "data" / name,
-            "logs": root / "logs",
+        checkpoint_root = repo / "checkpoint" / name
+        data_root = repo / "data" / name
+        runs_root = repo / "runs" / name
+        checkpoint_files = sorted(checkpoint_root.glob("iteration-*.pkl"))
+        data_files = [path for path in data_root.rglob("*") if path.is_file()]
+        replay_files = [
+            path for path in data_files
+            if path.name.endswith(tuple(REPLAY_ARTIFACT_SUFFIXES))
+            or path.name.endswith("-complete.json")
+        ]
+        game_record_files = [
+            path for path in data_files
+            if "records" in path.parts and path.name.startswith("C4-") and path.suffix == ".json"
+        ]
+        iteration_manifest_files = [
+            path for path in data_files if path.name == "iteration-manifest.json"
+        ]
+        progress_files = [path for path in data_files if path.name == "training-progress.json"]
+        checkpoint_metadata_files = [
+            path for path in checkpoint_root.iterdir()
+            if path.is_file() and not re.fullmatch(r"iteration-\d+\.pkl", path.name)
+        ] if checkpoint_root.exists() else []
+        log_paths = [Path(path) for path in details.get("log_paths", [])]
+        command_log_bytes = files_bytes(log_paths)
+        tensorboard_log_bytes = tree_bytes(runs_root)
+        report_bytes = tree_bytes(
+            root,
+            include=lambda path: "logs" not in path.relative_to(root).parts,
+        )
+
+        counters = details.get("counters")
+        if not isinstance(counters, Mapping):
+            raise RuntimeError(f"Missing B05 counters for storage measurement: {treatment}")
+        measured_samples = int(counters.get("new_samples_accepted", 0))
+        measured_games = int(counters.get("selfplay_games_completed", 0))
+        measured_iterations = int(details.get("latest_iteration", 0))
+        if measured_samples <= 0 or measured_games <= 0 or measured_iterations <= 0:
+            raise RuntimeError(f"Invalid B05 counters for storage measurement: {treatment}")
+
+        replay_bytes = files_bytes(replay_files)
+        game_record_bytes = files_bytes(game_record_files)
+        iteration_manifest_bytes = files_bytes(iteration_manifest_files)
+        progress_bytes = files_bytes(progress_files)
+        initial_checkpoint_bytes = next(
+            (path.stat().st_size for path in checkpoint_files if path.name == "iteration-0000.pkl"),
+            0,
+        )
+        steady_checkpoints = [
+            path.stat().st_size for path in checkpoint_files if path.name != "iteration-0000.pkl"
+        ]
+        if not steady_checkpoints:
+            raise RuntimeError(f"Missing post-bootstrap checkpoints for storage measurement: {treatment}")
+        measured_checkpoint_bytes = float(np.mean(steady_checkpoints))
+        measured_record_games = max(1, len(game_record_files))
+        measured_iteration_manifest_count = max(1, len(iteration_manifest_files))
+        measured_command_log_bytes = command_log_bytes
+        measured_report_share_bytes = report_bytes // 2
+        return {
+            "run_name": name,
+            "measured_samples": measured_samples,
+            "measured_games": measured_games,
+            "measured_iterations": measured_iterations,
+            "measured_replay_bytes": replay_bytes,
+            "measured_game_record_bytes": game_record_bytes,
+            "measured_checkpoint_bytes": int(sum(path.stat().st_size for path in checkpoint_files)),
+            "measured_initial_checkpoint_bytes": int(initial_checkpoint_bytes),
+            "measured_checkpoint_metadata_bytes": files_bytes(checkpoint_metadata_files),
+            "measured_iteration_manifest_bytes": iteration_manifest_bytes,
+            "measured_progress_bytes": progress_bytes,
+            "measured_command_log_bytes": measured_command_log_bytes,
+            "measured_tensorboard_log_bytes": tensorboard_log_bytes,
+            "measured_report_share_bytes": measured_report_share_bytes,
+            "measured_tiny_total_bytes": int(
+                replay_bytes
+                + game_record_bytes
+                + sum(path.stat().st_size for path in checkpoint_files)
+                + files_bytes(checkpoint_metadata_files)
+                + iteration_manifest_bytes
+                + progress_bytes
+                + command_log_bytes
+                + tensorboard_log_bytes
+                + measured_report_share_bytes
+            ),
+            "replay_bytes_per_sample": replay_bytes / measured_samples,
+            "game_record_bytes_per_game": game_record_bytes / measured_record_games,
+            "samples_per_iteration": measured_samples / measured_iterations,
+            "samples_per_game": measured_samples / measured_games,
+            "checkpoint_bytes_per_iteration": measured_checkpoint_bytes,
+            "iteration_manifest_bytes_per_iteration": iteration_manifest_bytes / measured_iteration_manifest_count,
+            "command_log_bytes_per_iteration": command_log_bytes / measured_iterations,
+            "tensorboard_log_bytes_per_iteration": tensorboard_log_bytes / measured_iterations,
+            "transient_iteration_bytes": int(
+                math.ceil(
+                    replay_bytes / measured_iterations
+                    + game_record_bytes / measured_iterations
+                    + measured_checkpoint_bytes
+                    + iteration_manifest_bytes / measured_iteration_manifest_count
+                    + command_log_bytes / measured_iterations
+                    + tensorboard_log_bytes / measured_iterations
+                )
+            ),
         }
-        per_treatment[treatment] = {
-            key: tree_bytes(path) if key != "logs" else 0
-            for key, path in paths.items()
+
+    measured = {
+        treatment: artifact_measurement(treatment, details)
+        for treatment, details in runs.items()
+    }
+    target = int(DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET)
+    full_run = {}
+    for treatment, item in measured.items():
+        # B05 uses only eight games per iteration.  Scale the measured
+        # samples/game to the production 256-game iteration before deriving
+        # the number of iterations; using the tiny iteration total directly
+        # would inflate checkpoints, manifests, and logs by 32x.
+        production_samples_per_iteration = float(item["samples_per_game"]) * int(
+            CUBE4_PRODUCTION.games_per_iteration
+        )
+        full_iterations = int(math.ceil(target / production_samples_per_iteration))
+        window_iterations = min(REPLAY_WINDOW_MAX_ITERATIONS, full_iterations)
+        window_samples = production_samples_per_iteration * window_iterations
+        window_games = int(CUBE4_PRODUCTION.games_per_iteration) * window_iterations
+        # The bootstrap checkpoint is explicitly separated from steady-state
+        # checkpoints so cadence is visible in the report and formula.
+        checkpoint_bytes = int(
+            int(item["measured_initial_checkpoint_bytes"])
+            + round(float(item["checkpoint_bytes_per_iteration"]) * full_iterations)
+        )
+        manifests_bytes = int(
+            item["measured_checkpoint_metadata_bytes"]
+            + item["measured_progress_bytes"]
+            + round(float(item["iteration_manifest_bytes_per_iteration"]) * full_iterations)
+        )
+        logs_bytes = int(
+            round(
+                (
+                    float(item["command_log_bytes_per_iteration"])
+                    + float(item["tensorboard_log_bytes_per_iteration"])
+                )
+                * full_iterations
+            )
+        )
+        retained = {
+            "replay": round(float(item["replay_bytes_per_sample"]) * window_samples),
+            "game_records": round(float(item["game_record_bytes_per_game"]) * window_games),
+            "checkpoint": checkpoint_bytes,
+            "manifests": manifests_bytes,
+            "logs": logs_bytes,
+            "reports": int(item["measured_report_share_bytes"]),
         }
-        per_treatment[treatment]["total"] = sum(per_treatment[treatment].values())
-    pair_bytes = per_treatment[B0_TREATMENT]["total"] + per_treatment[B1_TREATMENT]["total"]
+        unpruned = dict(retained)
+        unpruned["replay"] = round(float(item["replay_bytes_per_sample"]) * target)
+        unpruned["game_records"] = round(
+            float(item["game_record_bytes_per_game"])
+            * (int(CUBE4_PRODUCTION.games_per_iteration) * full_iterations)
+        )
+        full_run[treatment] = {
+            "scientific_target_new_samples": target,
+            "games_per_iteration": int(CUBE4_PRODUCTION.games_per_iteration),
+            "measured_samples_per_game": float(item["samples_per_game"]),
+            "production_samples_per_iteration": production_samples_per_iteration,
+            "checkpoint_cadence_iterations": CHECKPOINT_CADENCE_ITERATIONS,
+            "estimated_iterations": full_iterations,
+            "replay_window_iterations": window_iterations,
+            "replay_window_samples": round(window_samples),
+            "replay_window_games": window_games,
+            "retained_policy_bytes": retained,
+            "retained_policy_total_bytes": int(sum(retained.values())),
+            "unpruned_current_launcher_bytes": unpruned,
+            "unpruned_current_launcher_total_bytes": int(sum(unpruned.values())),
+        }
+
+    pair_retained = sum(int(item["retained_policy_total_bytes"]) for item in full_run.values())
+    pair_unpruned = sum(int(item["unpruned_current_launcher_total_bytes"]) for item in full_run.values())
+    measured_pair = sum(int(item["measured_tiny_total_bytes"]) for item in measured.values())
+    pair_transient_iteration_bytes = sum(
+        int(item["transient_iteration_bytes"]) for item in measured.values()
+    )
     usage = shutil.disk_usage(repo)
-    reserve = 5 * 1024**3
     estimates = {}
     for replicate_count in (3, 5):
-        estimate = pair_bytes * replicate_count
+        retained_estimate = pair_retained * replicate_count
+        unpruned_estimate = pair_unpruned * replicate_count
+        # The old 5 GiB value came from the generic storage preflight and had
+        # no B-specific peak or filesystem-behavior derivation.  For this
+        # full-run estimate, reserve only the measured one-iteration write
+        # set, doubled for transient files and scaled by parallel pairs, with
+        # a 1 GiB operational floor.
+        reserve = max(
+            STORAGE_OPERATIONAL_HEADROOM_BYTES,
+            int(
+                math.ceil(
+                    pair_transient_iteration_bytes
+                    * replicate_count
+                    * STORAGE_TRANSIENT_SAFETY_FACTOR
+                )
+            ),
+        )
         estimates[f"{replicate_count}+{replicate_count}"] = {
             "replicate_count_per_treatment": replicate_count,
-            "real_pair_artifact_bytes": pair_bytes,
-            "estimated_new_bytes": estimate,
+            "measured_tiny_pair_artifact_bytes": measured_pair,
+            "estimated_new_bytes": retained_estimate,
+            "estimated_retained_policy_bytes": retained_estimate,
+            "estimated_unpruned_current_launcher_bytes": unpruned_estimate,
             "reserve_bytes": reserve,
-            "required_free_bytes": estimate + reserve,
+            "reserve_basis": "measured_transient_iteration_bytes_x_replicates_x_2_with_1GiB_floor",
+            "required_free_bytes": retained_estimate + reserve,
+            "unpruned_required_free_bytes": unpruned_estimate + reserve,
             "filesystem_free_bytes": int(usage.free),
-            "safety_margin_bytes": int(usage.free) - estimate - reserve,
-            "ok": int(usage.free) >= estimate + reserve,
+            "safety_margin_bytes": int(usage.free) - retained_estimate - reserve,
+            "unpruned_safety_margin_bytes": int(usage.free) - unpruned_estimate - reserve,
+            "ok": int(usage.free) >= retained_estimate + reserve,
+            "unpruned_current_launcher_ok": int(usage.free) >= unpruned_estimate + reserve,
         }
     if not all(bool(item["ok"]) for item in estimates.values()):
         raise RuntimeError("Storage extrapolation falls below the mandatory free-disk reserve")
-    return {"per_treatment": per_treatment, "estimates": estimates}
+    return {
+        "scientific_target_new_samples_per_treatment": target,
+        "retention_policy": {
+            "source": "gocube-b-experiment-contract-v1",
+            "replay_window_max_iterations": REPLAY_WINDOW_MAX_ITERATIONS,
+            "estimate_uses": "replay and game-record artifacts retained in the training-visible window",
+            "current_launcher_note": (
+                "The current launcher does not delete older replay/record files; "
+                "unpruned_current_launcher_* is reported separately as a conservative warning."
+            ),
+        },
+        "formula": {
+            "estimated_iterations": "ceil(40,000,000 / (measured_samples_per_game * production_games_per_iteration))",
+            "retained_replay": "measured_replay_bytes_per_sample * samples_per_iteration * min(20, estimated_iterations)",
+            "retained_game_records": "measured_game_record_bytes_per_game * 256 * min(20, estimated_iterations)",
+            "checkpoints": "bootstrap_checkpoint + steady_checkpoint_bytes_per_iteration * estimated_iterations",
+            "manifests": "measured_static_manifests + measured_iteration_manifest_bytes_per_iteration * estimated_iterations",
+            "logs": "measured command/tensorboard log bytes per iteration * estimated_iterations",
+            "replicates": "pair_bytes * replicate_count_per_treatment",
+            "reserve": "max(1 GiB, measured_transient_iteration_bytes_pair * replicate_count_per_treatment * 2)",
+        },
+        "reserve_policy": {
+            "legacy_generic_preflight_reserve_bytes": 5 * 1024**3,
+            "legacy_generic_preflight_source": "tools.gocube_experiment_storage.MIN_FREE_RESERVE_BYTES",
+            "legacy_generic_preflight_justification": "generic production free-space floor; no B-specific peak derivation found",
+            "used_for_full_run_estimate": False,
+            "measured_transient_iteration_bytes_pair": pair_transient_iteration_bytes,
+            "transient_safety_factor": STORAGE_TRANSIENT_SAFETY_FACTOR,
+            "minimum_operational_headroom_bytes": STORAGE_OPERATIONAL_HEADROOM_BYTES,
+            "basis": "measured replay/record/checkpoint/manifest/log write set, with 2x transient margin",
+        },
+        "measured_b05": measured,
+        "full_run_per_treatment": full_run,
+        "pair_totals": {
+            "measured_tiny_pair_artifact_bytes": measured_pair,
+            "retained_policy_bytes": pair_retained,
+            "unpruned_current_launcher_bytes": pair_unpruned,
+        },
+        "estimates": estimates,
+    }
 
 
 def _manifest_diff(record: Mapping[str, object]) -> dict[str, object]:
@@ -734,12 +1131,79 @@ def _run_pipeline(repo: Path, args: argparse.Namespace) -> int:
             raise RuntimeError("B05 workload requires CUDA after preflight; CPU is diagnostic-only")
         b0, b0_logs = _run_training(repo, root, suite, contract_path, B0_TREATMENT, telemetry)
         b1, b1_logs = _run_training(repo, root, suite, contract_path, B1_TREATMENT, telemetry)
+        b0["log_paths"] = [str(path) for path in b0_logs]
+        b1["log_paths"] = [str(path) for path in b1_logs]
         report["training_runs"] = {B0_TREATMENT: b0, B1_TREATMENT: b1}
         report["gates"]["b0_b1_training_resume_checkpoint"] = "PASS"
-        report["throughput"] = {
-            "workers_8": _throughput_benchmark(repo, root, 8, telemetry),
-            "workers_16": _throughput_benchmark(repo, root, 16, telemetry),
-        }
+        throughput_8 = [
+            _throughput_benchmark(repo, root, 8, repeat, telemetry)
+            for repeat in range(1, THROUGHPUT_REPEATS + 1)
+        ]
+        throughput_16 = [
+            _throughput_benchmark(repo, root, 16, repeat, telemetry)
+            for repeat in range(1, THROUGHPUT_REPEATS + 1)
+        ]
+        report["throughput"] = _summarize_throughput(throughput_8, throughput_16)
+        comparison = report["throughput"]["comparison"]
+        all_throughput_runs = throughput_8 + throughput_16
+        legacy_drain_runs = [
+            item for item in all_throughput_runs
+            if float(item.get("legacy_worker_pool_drain_seconds", 0.0))
+            >= THROUGHPUT_TARGET_GRACE_SECONDS
+        ]
+        if legacy_drain_runs:
+            report.setdefault("findings", []).append(
+                {
+                    "id": "legacy-runner-worker-pool-drain-after-target",
+                    "severity": "finding",
+                    "status": "OPEN",
+                    "summary": (
+                        "Legacy self-play runner keeps the worker pool alive well after "
+                        "the target game count; B05 records the excess as runner overhead."
+                    ),
+                    "evidence": {
+                        "grace_seconds": THROUGHPUT_TARGET_GRACE_SECONDS,
+                        "affected_runs": [
+                            {
+                                "run_name": item["run_name"],
+                                "benchmark_elapsed_seconds": item["benchmark_elapsed_seconds"],
+                                "legacy_worker_pool_drain_seconds": item[
+                                    "legacy_worker_pool_drain_seconds"
+                                ],
+                                "runner_overhead_seconds": item["runner_overhead_seconds"],
+                            }
+                            for item in legacy_drain_runs
+                        ],
+                    },
+                    "action": "Fix or bound legacy runner shutdown separately; do not expand B4 scope.",
+                }
+            )
+        if comparison["stable_workers_16_regression"]:
+            report.setdefault("findings", []).append(
+                {
+                    "id": "throughput-workers-16-regression-before-pilot",
+                    "severity": "finding",
+                    "status": "OPEN",
+                    "summary": (
+                        "Canonical workers=16 is stably slower than workers=8 on the "
+                        "64-game repeated benchmark; production workers remain unchanged."
+                    ),
+                    "evidence": {
+                        "median_positions_per_second_workers_8": comparison[
+                            "median_positions_per_second_workers_8"
+                        ],
+                        "median_positions_per_second_workers_16": comparison[
+                            "median_positions_per_second_workers_16"
+                        ],
+                        "relative_delta_percent_16_vs_8": comparison[
+                            "relative_delta_percent_16_vs_8"
+                        ],
+                        "slower_repeat_count": comparison["slower_repeat_count"],
+                        "repeat_count": THROUGHPUT_REPEATS,
+                    },
+                    "action": "Review workers/batching before pilot; do not change canonical workers automatically.",
+                }
+            )
         report["gates"]["throughput_8_vs_16"] = "PASS"
         report["inference_microbenchmark"] = _inference_microbenchmark(repo, root, args.device)
         report["gates"]["b0_b1_inference_microbenchmark"] = "PASS"
