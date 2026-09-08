@@ -3,6 +3,7 @@ from __future__ import annotations
 from threading import Lock
 
 from .catalog import CheckpointCatalog, CheckpointDescriptor
+from .contract import ContractError, resolve_contract_for_descriptor
 from .errors import (
     CheckpointIncompatible,
     CheckpointNotFound,
@@ -19,13 +20,20 @@ PROTOCOL_VERSION = 1
 
 
 def _compatible(a: CheckpointDescriptor, b: CheckpointDescriptor) -> bool:
-    return (
+    if not (
         a.topology == b.topology
         and a.size == b.size
         and a.rule_set == b.rule_set
         and a.komi == b.komi
         and a.terminal_adjudicator == b.terminal_adjudicator
-    )
+    ):
+        return False
+    try:
+        return not resolve_contract_for_descriptor(a).differences(
+            resolve_contract_for_descriptor(b)
+        )
+    except ContractError:
+        return False
 
 
 class GoCubeAlphaZeroService:

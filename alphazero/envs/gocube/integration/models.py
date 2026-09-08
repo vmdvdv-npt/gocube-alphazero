@@ -2,13 +2,21 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from threading import Lock
+from typing import Any, Mapping
 
 import torch
 
 from alphazero.NNetWrapper import NNetWrapper
-from alphazero.envs.gocube.game import game_class
+from alphazero.envs.gocube.game import legacy_game_class
 
 from .catalog import CheckpointCatalog, CheckpointDescriptor
+from .contract import (
+    ContractError,
+    ResolvedGoCubeContract,
+    resolve_game_class_from_contract,
+    resolve_model_contract_from_metadata,
+    resolve_model_contract,
+)
 from .errors import CheckpointLoadFailed, CheckpointMetadataInvalid, CheckpointNotFound
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda")
@@ -24,7 +32,35 @@ def resolve_device(device: str) -> str:
     return device
 
 
-def _validate_saved_gocube_metadata(model, descriptor: CheckpointDescriptor) -> None:
+def _metadata_value(metadata: Any, key: str, default=None):
+    if metadata is None:
+        return default
+    if isinstance(metadata, Mapping):
+        return metadata.get(key, default)
+    return getattr(metadata, key, default)
+
+
+def _contract_error_field(field: str) -> str:
+    return {
+        "observation_schema": "gocube_observation_schema",
+        "observation_shape": "gocube_observation_shape",
+        "action_schema": "gocube_action_schema",
+        "action_size": "gocube_action_size",
+        "topology_kind": "gocube_topology",
+        "topology_size": "gocube_size",
+        "point_count": "gocube_point_count",
+        "network_architecture_id": "gocube_network_architecture",
+        "search_contract_id": "gocube_search_contract",
+        "terminal_adjudicator_id": "gocube_terminal_adjudicator",
+        "rules_fingerprint": "gocube_rules_fingerprint",
+    }.get(field, field)
+
+
+def _validate_saved_gocube_metadata(
+    model,
+    descriptor: CheckpointDescriptor,
+    expected_contract: ResolvedGoCubeContract | None = None,
+) -> None:
     args = getattr(model, "args", None)
     if args is None:
         return
@@ -36,10 +72,100 @@ def _validate_saved_gocube_metadata(model, descriptor: CheckpointDescriptor) -> 
         "gocube_terminal_adjudicator": descriptor.terminal_adjudicator,
     }
     for field, value in expected.items():
-        if field in args and args[field] != value:
+        actual = _metadata_value(args, field, None)
+        if actual is not None and actual != value:
             raise CheckpointMetadataInvalid(
-                f"Checkpoint {descriptor.checkpoint_id} saved metadata {field}={args[field]!r} "
+                f"Checkpoint {descriptor.checkpoint_id} saved metadata {field}={actual!r} "
                 f"does not match run manifest value {value!r}"
+            )
+    if expected_contract is None:
+        return
+    for key, expected_value in expected_contract.to_checkpoint_fields().items():
+        if key == "gocube_model_contract":
+            continue
+        actual = _metadata_value(args, key, None)
+        if actual is None:
+            # Checkpoints written before S2 have the original compact fields,
+            # but not the newly added topology/network fingerprints.
+            continue
+        if isinstance(expected_value, tuple) and isinstance(actual, list):
+            actual = tuple(actual)
+        if actual != expected_value:
+            raise CheckpointMetadataInvalid(
+                f"Checkpoint GoCube contract mismatch for {key}: "
+                f"saved={actual!r}, expected={expected_value!r}"
+            )
+
+
+def _read_checkpoint_args(path: str):
+    try:
+        payload = torch.load(path, map_location="cpu")
+    except FileNotFoundError:
+        # Keep the historical test-double/API path usable.  A real loader
+        # still fails closed when NNetWrapper opens the missing weights file.
+        return {}, None
+    except Exception as exc:
+        raise CheckpointLoadFailed(f"Cannot read checkpoint metadata {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise CheckpointMetadataInvalid("Checkpoint payload must be an object")
+    return payload, payload.get("args")
+
+
+def _descriptor_contract(descriptor: CheckpointDescriptor) -> ResolvedGoCubeContract | None:
+    if descriptor.model_contract is None:
+        return None
+    try:
+        return ResolvedGoCubeContract.from_dict(descriptor.model_contract)
+    except ContractError as exc:
+        raise CheckpointMetadataInvalid(f"Invalid descriptor model contract: {exc}") from exc
+
+
+def _legacy_descriptor_contract(descriptor: CheckpointDescriptor) -> ResolvedGoCubeContract:
+    try:
+        cls = legacy_game_class(
+            descriptor.topology,
+            descriptor.size,
+            descriptor.terminal_adjudicator,
+        )
+        return resolve_model_contract(cls)
+    except (ValueError, ContractError) as exc:
+        raise CheckpointMetadataInvalid(
+            f"Cannot resolve legacy descriptor contract for {descriptor.checkpoint_id}: {exc}"
+        ) from exc
+
+
+def _validate_descriptor_against_contract(
+    descriptor: CheckpointDescriptor,
+    contract: ResolvedGoCubeContract,
+) -> None:
+    expected = {
+        "topology": descriptor.topology,
+        "size": descriptor.size,
+        "rule_set": descriptor.rule_set,
+        "komi": descriptor.komi,
+        "terminal_adjudicator": descriptor.terminal_adjudicator,
+    }
+    actual = {
+        "topology": contract.topology_kind,
+        "size": contract.topology_size,
+        "rule_set": {
+            "gocube-katago-japanese-v3": "japanese",
+            "gocube-japanese-cleanup-v2": "japanese",
+            "gocube-conservative-area-v1": "chinese",
+        }.get(contract.terminal_adjudicator_id),
+        "komi": contract.komi,
+        "terminal_adjudicator": contract.terminal_adjudicator_id,
+    }
+    for field, expected_value in expected.items():
+        value = actual[field]
+        if field == "komi":
+            matches = float(value) == float(expected_value)
+        else:
+            matches = value == expected_value
+        if not matches:
+            raise CheckpointMetadataInvalid(
+                f"Checkpoint GoCube contract mismatch for {field}: "
+                f"saved={value!r}, expected={expected_value!r}"
             )
 
 
@@ -107,7 +233,40 @@ class CheckpointModelLoader:
 
         def load_uncached():
             try:
-                cls = game_class(descriptor.topology, descriptor.size, descriptor.rule_set)
+                if descriptor.metadata_error:
+                    raise CheckpointMetadataInvalid(descriptor.metadata_error)
+                payload, saved_args = _read_checkpoint_args(descriptor.path)
+                requested_contract = _descriptor_contract(descriptor)
+                fallback = requested_contract or _legacy_descriptor_contract(descriptor)
+                saved_contract = None
+                if saved_args is not None:
+                    try:
+                        saved_contract = resolve_model_contract_from_metadata(
+                            saved_args,
+                            fallback=fallback,
+                        )
+                    except ContractError as exc:
+                        raise CheckpointMetadataInvalid(
+                            f"Checkpoint {descriptor.checkpoint_id} has invalid model contract: {exc}"
+                        ) from exc
+                contract = saved_contract or fallback
+                if saved_args is not None:
+                    _validate_descriptor_against_contract(descriptor, contract)
+                if requested_contract is not None and contract.differences(requested_contract):
+                    field, (saved, expected) = next(iter(contract.differences(requested_contract).items()))
+                    raise CheckpointMetadataInvalid(
+                        f"Checkpoint GoCube contract mismatch for {_contract_error_field(field)}: "
+                        f"saved={saved!r}, expected={expected!r}"
+                    )
+                cls = resolve_game_class_from_contract(contract)
+                if saved_args is not None:
+                    computed = resolve_model_contract(cls, saved_args)
+                    if contract.differences(computed):
+                        field, (saved, expected) = next(iter(contract.differences(computed).items()))
+                        raise CheckpointMetadataInvalid(
+                            f"Checkpoint GoCube contract mismatch for {_contract_error_field(field)}: "
+                            f"saved={saved!r}, expected={expected!r}"
+                        )
                 model = NNetWrapper.from_checkpoint(
                     cls,
                     folder="",
@@ -115,10 +274,14 @@ class CheckpointModelLoader:
                     device=self.device,
                     load_training_state=False,
                 )
-                _validate_saved_gocube_metadata(model, descriptor)
+                _validate_saved_gocube_metadata(model, descriptor, contract)
                 return model
-            except CheckpointMetadataInvalid:
+            except (CheckpointMetadataInvalid, CheckpointLoadFailed):
                 raise
+            except ContractError as exc:
+                raise CheckpointMetadataInvalid(
+                    f"Checkpoint {descriptor.checkpoint_id} has incompatible model contract: {exc}"
+                ) from exc
             except Exception as exc:
                 raise CheckpointLoadFailed(
                     f"Failed to load checkpoint {descriptor.checkpoint_id}: {exc}"

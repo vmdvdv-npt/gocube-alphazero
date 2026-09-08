@@ -4,6 +4,7 @@ import json
 import math
 import os
 from dataclasses import dataclass
+from typing import Mapping
 
 from alphazero.envs.gocube.game import legacy_game_class
 from alphazero.envs.gocube.katago_v3 import (
@@ -17,9 +18,16 @@ from alphazero.envs.gocube.terminal import (
     JAPANESE_CLEANUP_ADJUDICATOR_V2,
 )
 
+from .contract import (
+    ContractError,
+    ResolvedGoCubeContract,
+    resolve_game_class_from_contract,
+    resolve_model_contract,
+)
+
 MANIFEST_FILENAME = "gocube-run.json"
-RUN_MANIFEST_VERSION = 3
-SUPPORTED_MANIFEST_VERSIONS = (1, 2, 3)
+RUN_MANIFEST_VERSION = 4
+SUPPORTED_MANIFEST_VERSIONS = (1, 2, 3, 4)
 
 
 class ManifestError(ValueError):
@@ -43,6 +51,7 @@ class RunManifest:
     rules_fingerprint: str | None = None
     katago_rules_version: int | None = None
     katago_reference_commit: str | None = None
+    model_contract: dict[str, object] | None = None
 
     @classmethod
     def create(
@@ -54,7 +63,36 @@ class RunManifest:
         rule_set: str = "japanese",
         komi: float | None = None,
         terminal_adjudicator: str | None = None,
+        contract: ResolvedGoCubeContract | Mapping[str, object] | None = None,
+        model_contract: ResolvedGoCubeContract | Mapping[str, object] | None = None,
     ) -> "RunManifest":
+        if contract is not None and model_contract is not None:
+            raise ManifestError("Run manifest received both contract and model_contract")
+        contract = contract if contract is not None else model_contract
+        if contract is not None:
+            if isinstance(contract, ResolvedGoCubeContract):
+                resolved_contract = contract
+            elif isinstance(contract, Mapping):
+                try:
+                    resolved_contract = ResolvedGoCubeContract.from_dict(contract)
+                except ContractError as exc:
+                    raise ManifestError(str(exc)) from exc
+            else:
+                raise ManifestError("Run manifest contract must be an object")
+            return cls(
+                version=RUN_MANIFEST_VERSION,
+                run_name=run_name,
+                topology=resolved_contract.topology_kind,
+                size=resolved_contract.topology_size,
+                rule_set=rule_set,
+                komi=float(resolved_contract.komi),
+                terminal_adjudicator=resolved_contract.terminal_adjudicator_id,
+                observation_schema=resolved_contract.observation_schema,
+                rules_fingerprint=resolved_contract.rules_fingerprint,
+                katago_rules_version=KATAGO_RULES_VERSION,
+                katago_reference_commit=KATAGO_REFERENCE_COMMIT,
+                model_contract=resolved_contract.to_dict(),
+            ).validated()
         if terminal_adjudicator is None:
             terminal_adjudicator = (
                 CONSERVATIVE_AREA_ADJUDICATOR_V1
@@ -121,6 +159,11 @@ class RunManifest:
             required |= {
                 "observationSchema", "rulesFingerprint", "katagoRulesVersion", "katagoReferenceCommit",
             }
+        if data.get("version") == 4:
+            required |= {
+                "modelContract", "observationSchema", "rulesFingerprint",
+                "katagoRulesVersion", "katagoReferenceCommit",
+            }
         missing = sorted(required - set(data))
         if missing:
             raise ManifestError(f"Run manifest is missing fields: {', '.join(missing)}")
@@ -137,6 +180,7 @@ class RunManifest:
             rules_fingerprint=data.get("rulesFingerprint"),
             katago_rules_version=data.get("katagoRulesVersion"),
             katago_reference_commit=data.get("katagoReferenceCommit"),
+            model_contract=data.get("modelContract"),
         ).validated()
 
         if directory_name is not None and manifest.run_name != directory_name:
@@ -169,19 +213,20 @@ class RunManifest:
         if not isinstance(self.terminal_adjudicator, str):
             raise ManifestError("Run manifest terminalAdjudicator must be a string")
 
-        expected = {
-            1: CONSERVATIVE_AREA_ADJUDICATOR_V1,
-            2: JAPANESE_CLEANUP_ADJUDICATOR_V2,
-            3: KATAGO_JAPANESE_ADJUDICATOR_V3,
-        }[self.version]
-        if self.terminal_adjudicator != expected:
-            raise ManifestError(
-                f"Manifest version {self.version} requires terminalAdjudicator {expected!r}"
-            )
-        if self.version == 1 and self.rule_set != "chinese":
-            raise ManifestError("Manifest version 1 is reserved for legacy Chinese V1 runs")
-        if self.version in (2, 3) and self.rule_set != "japanese":
-            raise ManifestError(f"Manifest version {self.version} is reserved for Japanese runs")
+        if self.version != 4:
+            expected = {
+                1: CONSERVATIVE_AREA_ADJUDICATOR_V1,
+                2: JAPANESE_CLEANUP_ADJUDICATOR_V2,
+                3: KATAGO_JAPANESE_ADJUDICATOR_V3,
+            }[self.version]
+            if self.terminal_adjudicator != expected:
+                raise ManifestError(
+                    f"Manifest version {self.version} requires terminalAdjudicator {expected!r}"
+                )
+            if self.version == 1 and self.rule_set != "chinese":
+                raise ManifestError("Manifest version 1 is reserved for legacy Chinese V1 runs")
+            if self.version in (2, 3) and self.rule_set != "japanese":
+                raise ManifestError(f"Manifest version {self.version} is reserved for Japanese runs")
 
         try:
             game_cls = legacy_game_class(self.topology, self.size, self.terminal_adjudicator)
@@ -203,6 +248,26 @@ class RunManifest:
                 raise ManifestError("Manifest KataGo rules version does not match V3")
             if self.katago_reference_commit != KATAGO_REFERENCE_COMMIT:
                 raise ManifestError("Manifest KataGo reference commit does not match V3")
+        if self.version == 4:
+            if not isinstance(self.model_contract, dict):
+                raise ManifestError("Manifest version 4 requires modelContract")
+            try:
+                contract = ResolvedGoCubeContract.from_dict(self.model_contract)
+                game_cls = resolve_game_class_from_contract(contract)
+            except ContractError as exc:
+                raise ManifestError(str(exc)) from exc
+            if contract.topology_kind != self.topology or contract.topology_size != self.size:
+                raise ManifestError("Manifest model contract topology does not match manifest")
+            if contract.terminal_adjudicator_id != self.terminal_adjudicator:
+                raise ManifestError("Manifest model contract adjudicator does not match manifest")
+            if float(contract.komi) != float(self.komi):
+                raise ManifestError("Manifest model contract komi does not match manifest")
+            if contract.observation_schema != self.observation_schema:
+                raise ManifestError("Manifest model contract observation schema does not match manifest")
+            if contract.rules_fingerprint != self.rules_fingerprint:
+                raise ManifestError("Manifest model contract rules fingerprint does not match manifest")
+            if game_cls.RULESET != self.rule_set:
+                raise ManifestError("Manifest ruleSet does not match model contract game class")
         return self
 
     def to_dict(self) -> dict[str, object]:
@@ -215,13 +280,15 @@ class RunManifest:
             "komi": float(self.komi),
             "terminalAdjudicator": self.terminal_adjudicator,
         }
-        if self.version == 3:
+        if self.version in (3, 4):
             data.update({
                 "observationSchema": self.observation_schema,
                 "rulesFingerprint": self.rules_fingerprint,
                 "katagoRulesVersion": self.katago_rules_version,
                 "katagoReferenceCommit": self.katago_reference_commit,
             })
+        if self.version == 4:
+            data["modelContract"] = self.model_contract
         return data
 
 
@@ -269,7 +336,63 @@ def write_run_manifest(run_dir: str, manifest: RunManifest, *, force: bool = Fal
     return path
 
 
-def ensure_training_manifest(checkpoint_dir: str, run_name: str, game_cls) -> RunManifest:
+def ensure_training_manifest(checkpoint_dir: str, run_name: str, game_cls, args=None) -> RunManifest:
+    # The public helper historically accepted only ``game_cls``.  When a
+    # checkpoint is already present (including the documented audit flow), use
+    # its saved effective args to preserve the exact network/search contract;
+    # production builders pass args explicitly and do not rely on discovery.
+    if args is None:
+        import torch
+
+        candidates = [
+            os.path.join(checkpoint_dir, run_name),
+            checkpoint_dir,
+        ]
+        for folder in candidates:
+            try:
+                filenames = sorted(
+                    name for name in os.listdir(folder)
+                    if name.startswith("iteration-") and name.endswith(".pkl")
+                )
+            except FileNotFoundError:
+                continue
+            for filename in reversed(filenames):
+                try:
+                    payload = torch.load(os.path.join(folder, filename), map_location="cpu")
+                except Exception:
+                    continue
+                if isinstance(payload, dict) and payload.get("args") is not None:
+                    args = payload["args"]
+                    break
+            if args is not None:
+                break
+    try:
+        contract = resolve_model_contract(game_cls, args)
+    except ContractError as exc:
+        raise ManifestError(str(exc)) from exc
+    run_dir = os.path.join(checkpoint_dir, run_name)
+    for filename, key in (("run-manifest.json", "model_contract"), ("effective-config.json", "model_contract")):
+        path = os.path.join(run_dir, filename)
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                artifact = json.load(handle)
+            saved = artifact.get(key) if isinstance(artifact, dict) else None
+            if saved is None and filename == "run-manifest.json" and isinstance(artifact, dict):
+                saved = artifact.get("modelContract")
+            if saved is None:
+                continue
+            saved_contract = ResolvedGoCubeContract.from_dict(saved)
+        except (OSError, json.JSONDecodeError, ContractError) as exc:
+            raise ManifestError(f"Invalid {filename} model contract: {exc}") from exc
+        differences = saved_contract.differences(contract)
+        if differences:
+            field, (saved_value, expected_value) = next(iter(differences.items()))
+            raise ManifestError(
+                f"Conflicting model contract metadata in {filename}: {field} "
+                f"saved={saved_value!r}, expected={expected_value!r}"
+            )
     manifest = RunManifest.create(
         run_name=run_name,
         topology=game_cls.topology_kind(),
@@ -277,7 +400,7 @@ def ensure_training_manifest(checkpoint_dir: str, run_name: str, game_cls) -> Ru
         rule_set=game_cls.RULESET,
         komi=game_cls.KOMI,
         terminal_adjudicator=game_cls.TERMINAL_ADJUDICATOR_ID,
+        contract=contract,
     )
-    run_dir = os.path.join(checkpoint_dir, run_name)
     write_run_manifest(run_dir, manifest, force=False)
     return manifest

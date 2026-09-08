@@ -8,7 +8,11 @@ pyximport.install()
 from alphazero.Arena import Arena
 from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.envs.gocube.evaluation import load_evaluation_checkpoint, prepare_evaluation_args
-from alphazero.envs.gocube.game import game_class, legacy_game_class
+from alphazero.envs.gocube.integration.contract import (
+    ContractError,
+    resolve_contract_for_descriptor,
+    resolve_game_class_from_contract,
+)
 from alphazero.envs.gocube.integration.manifest import load_run_manifest
 
 
@@ -46,11 +50,15 @@ def resolve_game_class(checkpoint_dir, run_name, topology, size):
     folder = os.path.join(checkpoint_dir, run_name)
     try:
         manifest = load_run_manifest(folder)
-    except Exception:
-        return game_class(topology, size)
+    except Exception as exc:
+        raise ValueError(f"Cannot resolve evaluation contract: missing/invalid run manifest: {exc}") from exc
     if manifest.topology != topology or manifest.size != size:
         raise ValueError("CLI topology/size does not match run manifest")
-    return legacy_game_class(manifest.topology, manifest.size, manifest.terminal_adjudicator)
+    try:
+        contract = resolve_contract_for_descriptor(manifest)
+        return resolve_game_class_from_contract(contract)
+    except ContractError as exc:
+        raise ValueError(f"Cannot resolve evaluation model contract: {exc}") from exc
 
 
 def main():
