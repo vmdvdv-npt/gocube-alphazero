@@ -83,8 +83,6 @@ def v3_immediate_semantic_signature(state: Any, topology: Any) -> tuple[Any, ...
     """Capture the immediate semantics relevant to H1 collision grouping."""
 
     from alphazero.envs.gocube.katago_v3 import (
-        EMERGENCY_MOVE_CAP_BASE,
-        EMERGENCY_MOVE_CAP_FACTOR,
         apply_v3_action,
         is_simple_ko_state,
         v3_valid_moves,
@@ -107,20 +105,14 @@ def v3_immediate_semantic_signature(state: Any, topology: Any) -> tuple[Any, ...
         state.phase,
         "side",
         state.current_player,
+        "terminal",
+        (state.terminal_kind, state.no_result_reason),
         "pass_after",
         pass_after,
         "score_offset",
         (state.white_bonus_score, state.captures, state.second_cleanup_start_colors),
         "simple_ko",
         bool(is_simple_ko_state(state, topology)),
-        "technical",
-        (
-            state.terminal_kind,
-            state.no_result_reason,
-            state.terminal_kind is None
-            and state.turns + 1
-            >= EMERGENCY_MOVE_CAP_BASE + EMERGENCY_MOVE_CAP_FACTOR * topology.point_count,
-        ),
     )
 
 

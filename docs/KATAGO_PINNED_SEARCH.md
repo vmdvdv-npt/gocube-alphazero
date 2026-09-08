@@ -8,12 +8,19 @@ The rules and terminal state machine remain the existing GoCube Japanese V3 impl
 
 `f6bc4b19a1686caa2d088b56251e8c11c8be6d51`
 
-The search contract version is `katago-pinned-search-v3`. M1 changed only the
-root ending ko signal: the search layer now consumes an exact rule-derived
-simple-ko check, so an ordinary one-stone capture is not treated as ko merely
-because two board points changed. The ID is versioned because this changes
-root move preferences and therefore search semantics, while leaving network
-shapes and training targets unchanged.
+The integrated search contract version is `katago-pinned-search-v4`. It is the
+post-S1/S2/S3/H1/M1 semantic identity: exact rule-derived simple-ko handling,
+runner-owned episode limits, and the pinned utility/exploration semantics below.
+The ID is versioned because these boundaries determine search behavior, while
+network architecture, observation shapes, and training targets remain separate
+contracts.
+
+The v4 contract freezes the pinned KataGo reference commit, exact M1 simple-ko
+detection, root ending bonus semantics, player-relative NN value conversion to
+absolute Black/White utility, score utility, ownership interpretation, and the
+separation between search clones and runner episode limits. The production
+budgets (ordinary 50, fast 20, Arena 50 simulations) are external protected
+parameters, not part of the semantic ID.
 
 The new search layer ports the relevant behavior from that same pinned source. Cube and Torus topology differences remain isolated behind `Topology.neighbor_indices(...)` and the existing graph Benson/pass-alive implementation.
 
