@@ -22,6 +22,8 @@ _RESUME_OPTION_TO_ATTR = {
     "--benchmark-games": "benchmark_games",
     "--skip-performance-benchmark": "skip_performance_benchmark",
     "--seed": "seed",
+    "--candidate-new-samples-budget": "candidate_new_samples_budget",
+    "--candidate-optimizer-examples-budget": "candidate_optimizer_examples_budget",
 }
 
 
@@ -42,6 +44,14 @@ def _restore_saved_resume_arguments(cli, raw: list[str]):
             continue
         if attribute in saved:
             setattr(cli, attribute, saved[attribute])
+    if (
+        cli.candidate_optimizer_examples_budget is not None
+        and not any(
+            _option_present(raw, option)
+            for option in ("--candidate-new-samples-budget", "--candidate-sample-budget")
+        )
+    ):
+        cli.candidate_new_samples_budget = None
     return cli
 
 

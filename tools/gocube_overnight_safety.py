@@ -11,8 +11,7 @@ import numpy as np
 import torch
 
 from alphazero.GenericPlayers import MCTSPlayer
-from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
-from alphazero.envs.gocube.game import game_class
+from alphazero.envs.gocube.observation import GoCubeObservationAdapter
 from alphazero.utils import const_temp_scaling
 from tools import gocube_checkpoint_arena_complete as arena_impl
 
@@ -94,16 +93,18 @@ def _generate_rollout_positions(*, run_name: str, iteration: int, positions: int
     if not math.isclose(komi, arena_impl.EXPECTED_KOMI, rel_tol=0.0, abs_tol=1e-12):
         raise ValueError(f"Held-out source checkpoint violates komi 0.5 contract: {komi}")
 
-    topology = str(saved_args["gocube_topology"])
-    size = int(saved_args["gocube_size"])
-    game_cls = diversified_pinned_game_class(game_class(topology, size, "japanese"))
-    if game_cls.rules_fingerprint() != saved_args.get("gocube_rules_fingerprint"):
-        raise ValueError("Held-out generator rules fingerprint does not match source checkpoint")
+    contract, model_game_cls = arena_impl._resolve_checkpoint_contract(saved_args, "held-out source")
+    game_cls = arena_impl._authoritative_game_class(contract)
 
     resolved_device = arena_impl._resolve_device(device)
-    network = arena_impl._load_network(game_cls, checkpoint_path, resolved_device)
+    network = arena_impl._load_network(model_game_cls, checkpoint_path, resolved_device)
     eval_args = _rollout_args(saved_args, game_cls, resolved_device)
-    player = MCTSPlayer(network, game_cls=game_cls, args=eval_args)
+    player = MCTSPlayer(
+        network,
+        game_cls=game_cls,
+        args=eval_args,
+        observation_adapter=GoCubeObservationAdapter(model_game_cls),
+    )
 
     selected: list[dict[str, object]] = []
     seen_prefixes: set[tuple[int, ...]] = set()

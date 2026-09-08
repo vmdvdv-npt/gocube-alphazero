@@ -65,6 +65,14 @@ def launch_config(cli) -> dict[str, object]:
         "benchmark_games": int(cli.benchmark_games),
         "skip_performance_benchmark": bool(cli.skip_performance_benchmark),
         "seed": int(cli.seed),
+        "candidate_new_samples_budget": (
+            None if cli.candidate_new_samples_budget is None
+            else int(cli.candidate_new_samples_budget)
+        ),
+        "candidate_optimizer_examples_budget": (
+            None if cli.candidate_optimizer_examples_budget is None
+            else int(cli.candidate_optimizer_examples_budget)
+        ),
     }
 
 

@@ -99,9 +99,13 @@ class NNPlayer(BasePlayer):
 
 class MCTSPlayer(BasePlayer):
     def __init__(self, nn: NNetWrapper, *args, print_policy=False,
-                 average_value=False, draw_mcts=False, draw_depth=2, **kwargs):
+                 average_value=False, draw_mcts=False, draw_depth=2,
+                 observation_adapter=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.nn = nn
+        # The game passed to MCTS remains the authoritative semantic game.
+        # This adapter is the only profile-specific input boundary for the NN.
+        self.observation_adapter = observation_adapter
         self.temp = self.args.startTemp
         self.print_policy = print_policy
         self.average_value = average_value
@@ -110,7 +114,9 @@ class MCTSPlayer(BasePlayer):
         self.reset()
         if self.verbose:
             self.mcts.search(
-                self.game_cls(), self.nn, self.args.numMCTSSims, self.args.add_root_noise, self.args.add_root_temp
+                self.game_cls(), self.nn, self.args.numMCTSSims,
+                self.args.add_root_noise, self.args.add_root_temp,
+                self.observation_adapter,
             )
             value = self.mcts.value(self.average_value)
             self.__rel_val_split = value if value > 0.5 else 1 - value
@@ -131,7 +137,11 @@ class MCTSPlayer(BasePlayer):
         self.mcts = MCTS(self.args)
 
     def play(self, state) -> int:
-        self.mcts.search(state, self.nn, self.args.numMCTSSims, self.args.add_root_noise, self.args.add_root_temp)
+        self.mcts.search(
+            state, self.nn, self.args.numMCTSSims,
+            self.args.add_root_noise, self.args.add_root_temp,
+            self.observation_adapter,
+        )
         self.temp = self.args.temp_scaling_fn(self.temp, state.turns, state.max_turns())
         policy = self.mcts.probs(state, self.temp)
 
@@ -139,7 +149,12 @@ class MCTSPlayer(BasePlayer):
             print(f'policy: {policy}')
 
         if self.verbose:
-            _, value = self.nn.predict(state.observation())
+            observation = (
+                self.observation_adapter(state)
+                if self.observation_adapter is not None
+                else state.observation()
+            )
+            _, value = self.nn.predict(observation)
             print('max tree depth:', self.mcts.max_depth)
             print(f'raw network value: {value}')
 

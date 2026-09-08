@@ -298,8 +298,12 @@ cdef class MCTS:
         self._root_context_ready = False
         self._root_noise_enabled = False
 
-    cpdef object search_observation(self, object gs):
-        cdef object observation = gs.observation()
+    cpdef object search_observation(self, object gs, object observation_adapter=None):
+        cdef object observation = (
+            observation_adapter(gs)
+            if observation_adapter is not None
+            else gs.observation()
+        )
         if (
             self._katago_search and not self._force_legacy_search
             and self.conservative_pass and self.depth == 0
@@ -307,7 +311,10 @@ cdef class MCTS:
             return conservative_root_observation(gs, observation)
         return observation
 
-    cpdef void search(self, object gs, object nn, int sims, bint add_root_noise, bint add_root_temp):
+    cpdef void search(
+            self, object gs, object nn, int sims, bint add_root_noise, bint add_root_temp,
+            object observation_adapter=None,
+    ):
         cdef float[:] v
         cdef float[:] p
         cdef object out
@@ -317,7 +324,7 @@ cdef class MCTS:
             if self._katago_search:
                 if not hasattr(nn, 'predict_for_search'):
                     raise RuntimeError('KataGo-derived search requires predict_for_search()')
-                out = nn.predict_for_search(self.search_observation(leaf))
+                out = nn.predict_for_search(self.search_observation(leaf, observation_adapter))
                 if not isinstance(out, SearchOutput):
                     raise RuntimeError('predict_for_search() must return SearchOutput')
                 if out.score is None or out.ownership is None:
@@ -327,7 +334,9 @@ cdef class MCTS:
                     add_root_noise, add_root_temp,
                 )
             else:
-                p, v = nn(leaf.observation())
+                p, v = nn(
+                    self.search_observation(leaf, observation_adapter)
+                )
                 self.process_results(leaf, v, p, add_root_noise, add_root_temp)
 
     cpdef void raw_search(self, object gs, int sims, bint add_root_noise, bint add_root_temp):

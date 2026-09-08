@@ -1,8 +1,490 @@
 from __future__ import annotations
 
+import json
 import math
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
+
+
+# These names are the public accounting vocabulary shared by the trainer,
+# replay manifests, checkpoints, and experiment orchestration.  Per-iteration
+# deltas use the same names; cumulative values are emitted under both the
+# ``cumulative`` object and the explicit ``cumulative_<name>`` keys.
+TRAINING_COUNTER_KEYS = (
+    "selfplay_games_completed",
+    "positions_generated",
+    "saved_replay_samples",
+    "new_samples_accepted",
+    "optimizer_steps",
+    "optimizer_examples_seen",
+)
+CUMULATIVE_TRAINING_COUNTER_KEYS = tuple(
+    f"cumulative_{key}" for key in TRAINING_COUNTER_KEYS
+)
+TRAINING_PROGRESS_SCHEMA_VERSION = 1
+TRAINING_PROGRESS_FILENAME = "training-progress.json"
+
+
+def _non_negative_counter(value: int, name: str) -> int:
+    value = int(value)
+    if value < 0:
+        raise ValueError(f"{name} cannot be negative")
+    return value
+
+
+@dataclass
+class CumulativeTrainingCounters:
+    """Canonical cumulative accounting for one training namespace.
+
+    ``optimizer_steps`` and ``optimizer_examples_seen`` are normally sourced
+    from the sample-clock scheduler after a train call.  The other fields are
+    accumulated from completed self-play/replay iteration manifests.  Keeping
+    the two sources separate is important on resume: a replay window is a
+    sampling source and must never be mistaken for newly accepted data.
+    """
+
+    selfplay_games_completed: int = 0
+    positions_generated: int = 0
+    saved_replay_samples: int = 0
+    new_samples_accepted: int = 0
+    optimizer_steps: int = 0
+    optimizer_examples_seen: int = 0
+
+    def __post_init__(self) -> None:
+        for key in TRAINING_COUNTER_KEYS:
+            setattr(self, key, _non_negative_counter(getattr(self, key), key))
+
+    def copy(self) -> "CumulativeTrainingCounters":
+        return CumulativeTrainingCounters(**self.as_dict())
+
+    def add_generation(
+        self,
+        *,
+        selfplay_games_completed: int = 0,
+        positions_generated: int = 0,
+        saved_replay_samples: int = 0,
+        new_samples_accepted: int = 0,
+    ) -> None:
+        for key, amount in (
+            ("selfplay_games_completed", selfplay_games_completed),
+            ("positions_generated", positions_generated),
+            ("saved_replay_samples", saved_replay_samples),
+            ("new_samples_accepted", new_samples_accepted),
+        ):
+            amount = _non_negative_counter(amount, key)
+            setattr(self, key, getattr(self, key) + amount)
+
+    def set_optimizer_totals(self, *, steps: int, examples_seen: int) -> None:
+        steps = _non_negative_counter(steps, "optimizer_steps")
+        examples_seen = _non_negative_counter(examples_seen, "optimizer_examples_seen")
+        # A resumed optimizer is allowed to report its restored total, but a
+        # later checkpoint must never move the cumulative clock backwards.
+        self.optimizer_steps = max(self.optimizer_steps, steps)
+        self.optimizer_examples_seen = max(self.optimizer_examples_seen, examples_seen)
+
+    def set_authoritative_optimizer_totals(self, *, steps: int, examples_seen: int) -> None:
+        """Replace optimizer totals with values read from the resumed checkpoint."""
+
+        self.optimizer_steps = _non_negative_counter(steps, "optimizer_steps")
+        self.optimizer_examples_seen = _non_negative_counter(
+            examples_seen, "optimizer_examples_seen"
+        )
+
+    def as_dict(self) -> dict[str, int]:
+        return {key: int(getattr(self, key)) for key in TRAINING_COUNTER_KEYS}
+
+    def as_cumulative_dict(self) -> dict[str, int]:
+        return {
+            f"cumulative_{key}": int(getattr(self, key))
+            for key in TRAINING_COUNTER_KEYS
+        }
+
+    def payload(self, *, deltas: dict[str, int] | None = None) -> dict[str, object]:
+        """Return a JSON-safe payload with both delta and cumulative views."""
+
+        normalized_deltas = {
+            key: _non_negative_counter((deltas or {}).get(key, 0), key)
+            for key in TRAINING_COUNTER_KEYS
+        }
+        cumulative = self.as_dict()
+        return {
+            "iteration": normalized_deltas,
+            "cumulative": cumulative,
+            "cumulative_counters": cumulative,
+            **self.as_cumulative_dict(),
+        }
+
+    @classmethod
+    def from_mapping(cls, mapping: object) -> "CumulativeTrainingCounters":
+        if not isinstance(mapping, Mapping):
+            return cls()
+        source = mapping.get("cumulative_counters")
+        if not isinstance(source, Mapping):
+            source = mapping.get("cumulative")
+        if not isinstance(source, Mapping):
+            source = mapping.get("counters")
+        if not isinstance(source, Mapping):
+            source = mapping
+        values = {}
+        for key in TRAINING_COUNTER_KEYS:
+            explicit = f"cumulative_{key}"
+            value = source.get(key, mapping.get(explicit, 0))
+            values[key] = _non_negative_counter(value, key)
+        return cls(**values)
+
+
+def canonical_training_counters(
+    counters: CumulativeTrainingCounters | dict[str, object],
+    *,
+    deltas: dict[str, int] | None = None,
+) -> dict[str, object]:
+    """Normalize counters for reports and machine-readable orchestration."""
+
+    if not isinstance(counters, CumulativeTrainingCounters):
+        counters = CumulativeTrainingCounters.from_mapping(counters)
+    return counters.payload(deltas=deltas)
+
+
+@dataclass(frozen=True)
+class SampleBudgetTarget:
+    """A scientific stopping target expressed on a cumulative sample clock."""
+
+    kind: str
+    target: int
+
+    NEW_SAMPLES = "cumulative_new_samples"
+    OPTIMIZER_EXAMPLES = "cumulative_optimizer_examples"
+
+    def __post_init__(self) -> None:
+        if self.kind not in (self.NEW_SAMPLES, self.OPTIMIZER_EXAMPLES):
+            raise ValueError(
+                f"unsupported sample budget target {self.kind!r}; "
+                f"expected {self.NEW_SAMPLES!r} or {self.OPTIMIZER_EXAMPLES!r}"
+            )
+        if int(self.target) <= 0:
+            raise ValueError("sample budget target must be positive")
+        object.__setattr__(self, "target", int(self.target))
+
+    @property
+    def counter_key(self) -> str:
+        return (
+            "new_samples_accepted"
+            if self.kind == self.NEW_SAMPLES
+            else "optimizer_examples_seen"
+        )
+
+    def current(self, counters: CumulativeTrainingCounters | dict[str, object]) -> int:
+        if not isinstance(counters, CumulativeTrainingCounters):
+            counters = CumulativeTrainingCounters.from_mapping(counters)
+        return int(getattr(counters, self.counter_key))
+
+    def status(
+        self,
+        counters: CumulativeTrainingCounters | dict[str, object],
+        *,
+        before: int | None = None,
+        generation_chunk_games: int = 0,
+    ) -> dict[str, object]:
+        after = self.current(counters)
+        before_value = after if before is None else int(before)
+        overshoot = max(0, after - self.target)
+        return {
+            "kind": self.kind,
+            "target": int(self.target),
+            "counter": self.counter_key,
+            "before": before_value,
+            "after": after,
+            "remaining": max(0, self.target - after),
+            "reached": after >= self.target,
+            "overshot": overshoot > 0,
+            "overshoot": overshoot,
+            "generation_chunk_games": int(generation_chunk_games),
+        }
+
+
+# Friendly alias for callers that describe this as a training budget rather
+# than a sample-clock target.
+TrainingBudgetTarget = SampleBudgetTarget
+
+
+def build_sample_budget_target(
+    *,
+    cumulative_new_samples_target: int | None = None,
+    cumulative_optimizer_examples_target: int | None = None,
+) -> SampleBudgetTarget | None:
+    """Build the one allowed scientific stopping target from CLI/config values."""
+
+    if cumulative_new_samples_target is not None and cumulative_optimizer_examples_target is not None:
+        raise ValueError("choose either cumulative new samples or optimizer examples as the target")
+    if cumulative_new_samples_target is not None:
+        return SampleBudgetTarget(SampleBudgetTarget.NEW_SAMPLES, int(cumulative_new_samples_target))
+    if cumulative_optimizer_examples_target is not None:
+        return SampleBudgetTarget(
+            SampleBudgetTarget.OPTIMIZER_EXAMPLES,
+            int(cumulative_optimizer_examples_target),
+        )
+    return None
+
+
+def sample_budget_reached(
+    counters: CumulativeTrainingCounters | dict[str, object],
+    target: SampleBudgetTarget | None,
+) -> bool:
+    return target is not None and target.current(counters) >= target.target
+
+
+def training_progress_path(data_root: str | os.PathLike[str], run_name: str) -> Path:
+    return Path(data_root) / str(run_name) / TRAINING_PROGRESS_FILENAME
+
+
+def write_training_progress(
+    data_root: str | os.PathLike[str],
+    run_name: str,
+    *,
+    counters: CumulativeTrainingCounters | dict[str, object],
+    latest_iteration: int,
+    target_status: dict[str, object] | None = None,
+    latest_iteration_metrics: dict[str, object] | None = None,
+) -> Path:
+    """Atomically publish cumulative training accounting for orchestration."""
+
+    path = training_progress_path(data_root, run_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not isinstance(counters, CumulativeTrainingCounters):
+        counters = CumulativeTrainingCounters.from_mapping(counters)
+    payload: dict[str, object] = {
+        "schema_version": TRAINING_PROGRESS_SCHEMA_VERSION,
+        "run_name": str(run_name),
+        "latest_iteration": int(latest_iteration),
+        "counters": counters.as_dict(),
+        "cumulative": counters.as_dict(),
+        "cumulative_counters": counters.as_dict(),
+        **counters.as_cumulative_dict(),
+    }
+    if target_status is not None:
+        payload["budget"] = dict(target_status)
+    if latest_iteration_metrics is not None:
+        payload["latest_iteration_metrics"] = dict(latest_iteration_metrics)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+    return path
+
+
+def load_training_progress(
+    data_root: str | os.PathLike[str],
+    run_name: str,
+) -> dict[str, object] | None:
+    path = training_progress_path(data_root, run_name)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"invalid training progress artifact: {path}") from exc
+    if not isinstance(payload, dict) or int(payload.get("schema_version", -1)) != TRAINING_PROGRESS_SCHEMA_VERSION:
+        raise ValueError(f"unsupported training progress schema: {path}")
+    counters = CumulativeTrainingCounters.from_mapping(payload)
+    payload["counters"] = counters.as_dict()
+    payload["cumulative"] = counters.as_dict()
+    payload["cumulative_counters"] = counters.as_dict()
+    payload.update(counters.as_cumulative_dict())
+    return payload
+
+
+def _manifest_counter_delta(aggregate: object) -> dict[str, int]:
+    """Read one iteration's generation delta without treating replay history as new."""
+
+    if not isinstance(aggregate, dict):
+        return {key: 0 for key in TRAINING_COUNTER_KEYS}
+    sample = aggregate.get("sample_accounting")
+    if not isinstance(sample, dict):
+        sample = aggregate
+    training = aggregate.get("training")
+    if not isinstance(training, dict):
+        training = {}
+    values = {
+        "selfplay_games_completed": int(sample.get("selfplay_games_completed", sample.get("games", 0))),
+        "positions_generated": int(sample.get("positions_generated", sample.get("base_positions", 0))),
+        "saved_replay_samples": int(
+            sample.get("saved_replay_samples", sample.get("saved_total", training.get("new_selfplay_samples", 0)))
+        ),
+        # Only the current iteration's accepted rows count here.  The replay
+        # window's sum is deliberately absent from this expression.
+        "new_samples_accepted": int(
+            sample.get("new_samples_accepted", training.get("new_selfplay_samples", 0))
+        ),
+        "optimizer_steps": int(training.get("actual_optimizer_steps", training.get("optimizer_steps", 0))),
+        "optimizer_examples_seen": int(
+            training.get("actual_training_samples", training.get("examples_seen", 0))
+        ),
+    }
+    return {
+        key: _non_negative_counter(value, key)
+        for key, value in values.items()
+    }
+
+
+def _read_committed_iteration_manifest(
+    manifest_root: Path,
+    iteration: int,
+) -> dict[str, int]:
+    """Read one committed manifest or fail closed for scientific recovery."""
+
+    path = manifest_root / f"iteration-{int(iteration):04d}" / "iteration-manifest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"is missing or unreadable: {path}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"is not an object: {path}"
+        )
+    try:
+        manifest_iteration = int(payload.get("iteration", -1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has an invalid iteration field: {path}"
+        ) from exc
+    if manifest_iteration != int(iteration):
+        raise ValueError(
+            f"Cannot recover scientific accounting: manifest {path} claims "
+            f"iteration {manifest_iteration}, expected {iteration}"
+        )
+    aggregate = payload.get("aggregate_metrics")
+    if not isinstance(aggregate, dict):
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has invalid aggregate metrics: {path}"
+        )
+    if "sample_accounting" in aggregate and not isinstance(aggregate["sample_accounting"], dict):
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has invalid sample accounting: {path}"
+        )
+    if "training" in aggregate and not isinstance(aggregate["training"], dict):
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has invalid training metrics: {path}"
+        )
+    try:
+        return _manifest_counter_delta(aggregate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has invalid aggregate metrics: {path}"
+        ) from exc
+
+
+def recover_cumulative_training_counters(
+    data_root: str | os.PathLike[str],
+    run_name: str,
+    *,
+    optimizer_steps: int = 0,
+    optimizer_examples_seen: int = 0,
+    checkpoint_iteration: int | None = None,
+) -> CumulativeTrainingCounters:
+    """Recover counters without crossing the selected checkpoint boundary.
+
+    On a production resume, ``checkpoint_iteration`` must be the already
+    loaded last-valid checkpoint.  Progress is trusted only when its
+    ``latest_iteration`` is at or before that checkpoint: a lagging artifact is
+    completed from committed manifests, while an artifact ahead of the
+    checkpoint fails closed.  Optimizer totals always come from the checkpoint
+    in this mode; generation totals come from progress plus the missing
+    iteration manifests.
+    """
+
+    if checkpoint_iteration is not None:
+        checkpoint_iteration = _non_negative_counter(
+            checkpoint_iteration, "checkpoint_iteration"
+        )
+
+    progress = load_training_progress(data_root, run_name)
+    manifest_root = Path(data_root) / str(run_name) / "records"
+    if progress is not None:
+        try:
+            latest_iteration = int(progress.get("latest_iteration", -1))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Cannot recover scientific accounting: training progress has "
+                "an invalid latest_iteration"
+            ) from exc
+        if latest_iteration < 0:
+            raise ValueError(
+                "Cannot recover scientific accounting: training progress has "
+                "a negative latest_iteration"
+            )
+        if checkpoint_iteration is not None and latest_iteration > checkpoint_iteration:
+            raise ValueError(
+                "Cannot recover scientific accounting: training progress is ahead "
+                f"of the selected checkpoint ({latest_iteration} > {checkpoint_iteration})"
+            )
+        counters = CumulativeTrainingCounters.from_mapping(progress)
+        if checkpoint_iteration is not None:
+            for iteration in range(latest_iteration + 1, checkpoint_iteration + 1):
+                delta = _read_committed_iteration_manifest(manifest_root, iteration)
+                counters.add_generation(
+                    selfplay_games_completed=delta["selfplay_games_completed"],
+                    positions_generated=delta["positions_generated"],
+                    saved_replay_samples=delta["saved_replay_samples"],
+                    new_samples_accepted=delta["new_samples_accepted"],
+                )
+            counters.set_authoritative_optimizer_totals(
+                steps=optimizer_steps,
+                examples_seen=optimizer_examples_seen,
+            )
+        else:
+            counters.set_optimizer_totals(steps=optimizer_steps, examples_seen=optimizer_examples_seen)
+        return counters
+
+    counters = CumulativeTrainingCounters()
+    if checkpoint_iteration is not None:
+        for iteration in range(1, checkpoint_iteration + 1):
+            delta = _read_committed_iteration_manifest(manifest_root, iteration)
+            counters.add_generation(
+                selfplay_games_completed=delta["selfplay_games_completed"],
+                positions_generated=delta["positions_generated"],
+                saved_replay_samples=delta["saved_replay_samples"],
+                new_samples_accepted=delta["new_samples_accepted"],
+            )
+        counters.set_authoritative_optimizer_totals(
+            steps=optimizer_steps,
+            examples_seen=optimizer_examples_seen,
+        )
+        return counters
+
+    paths = sorted(manifest_root.glob("iteration-*/iteration-manifest.json"))
+    for path in paths:
+        try:
+            iteration = int(path.parent.name.removeprefix("iteration-"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Cannot recover scientific accounting: invalid iteration manifest path: {path}"
+            ) from exc
+        delta = _read_committed_iteration_manifest(manifest_root, iteration)
+        counters.add_generation(
+            selfplay_games_completed=delta["selfplay_games_completed"],
+            positions_generated=delta["positions_generated"],
+            saved_replay_samples=delta["saved_replay_samples"],
+            new_samples_accepted=delta["new_samples_accepted"],
+        )
+        # Older runs may not have a progress artifact yet.  Their manifests
+        # still contain per-iteration optimizer deltas, so recover those too;
+        # a checkpoint-provided absolute scheduler total below remains
+        # authoritative when it is available.
+        counters.optimizer_steps += delta["optimizer_steps"]
+        counters.optimizer_examples_seen += delta["optimizer_examples_seen"]
+    counters.set_optimizer_totals(steps=optimizer_steps, examples_seen=optimizer_examples_seen)
+    return counters
 
 
 @dataclass(frozen=True)
@@ -13,6 +495,29 @@ class ReplayTrainingPlan:
     planned_training_samples: int
     planned_optimizer_steps: int
     planned_passes_over_replay_window: float
+
+    @property
+    def sample_clock_increment(self) -> int:
+        """Optimizer examples planned for this new-data delta."""
+
+        return int(self.planned_training_samples)
+
+    @property
+    def new_samples(self) -> int:
+        """Short orchestration-facing alias for the accepted data delta."""
+
+        return int(self.new_selfplay_samples)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "new_selfplay_samples": int(self.new_selfplay_samples),
+            "replay_window_samples": int(self.replay_window_samples),
+            "train_samples_per_new_sample": float(self.train_samples_per_new_sample),
+            "planned_training_samples": int(self.planned_training_samples),
+            "planned_optimizer_steps": int(self.planned_optimizer_steps),
+            "planned_passes_over_replay_window": float(self.planned_passes_over_replay_window),
+            "sample_clock_increment": int(self.sample_clock_increment),
+        }
 
 
 def build_replay_training_plan(

@@ -5,11 +5,22 @@ import operator
 import numpy as np
 
 from alphazero.envs.gocube.core import BLACK, EMPTY, PLAYING, WHITE
+from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
 from alphazero.envs.gocube.evaluation import prepare_evaluation_args
+from alphazero.envs.gocube.game import game_class
 from alphazero.envs.gocube.katago_v3 import RESULT_PROVENANCE_RUNTIME
+from alphazero.envs.gocube.observation import GoCubeObservationAdapter
+from alphazero.envs.gocube.production_contract import require_gocube_komi
 
 from .catalog import CheckpointDescriptor
-from .contract import ContractError, resolve_contract_for_descriptor, resolve_game_class_from_contract
+from .contract import (
+    ContractError,
+    evaluation_argument_differences,
+    evaluation_contract_differences,
+    resolve_contract_for_descriptor,
+    resolve_game_class_from_contract,
+    resolve_model_contract,
+)
 from .errors import GenerationFailed
 
 
@@ -89,7 +100,19 @@ def _default_player_factory(model, game_cls, args):
     pyximport.install()
     from alphazero.GenericPlayers import MCTSPlayer
 
-    return MCTSPlayer(model, game_cls, args)
+    model_game_cls = getattr(model, "game_cls", None)
+    adapter = (
+        GoCubeObservationAdapter(model_game_cls)
+        if model_game_cls is not None
+        and hasattr(model_game_cls, "observation_from_semantic_state")
+        else None
+    )
+    return MCTSPlayer(
+        model,
+        game_cls,
+        args,
+        observation_adapter=adapter,
+    )
 
 
 class GameGenerator:
@@ -109,28 +132,111 @@ class GameGenerator:
         try:
             black_contract = resolve_contract_for_descriptor(black)
             white_contract = resolve_contract_for_descriptor(white)
-            differences = black_contract.differences(white_contract)
+            differences = evaluation_contract_differences(black_contract, white_contract)
             if differences:
                 field, (black_value, white_value) = next(iter(differences.items()))
                 raise GenerationFailed(
                     f"Game model contracts differ for {field}: "
                     f"black={black_value!r}, white={white_value!r}"
                 )
-            game_cls = (
-                self.game_cls_resolver(black.topology, black.size, black.rule_set)
-                if self.game_cls_resolver is not None
-                else resolve_game_class_from_contract(black_contract)
-            )
+            if black_contract.terminal_adjudicator_id == "gocube-katago-japanese-v3":
+                # The loaded model classes may be B0/B1 profile classes.  The
+                # generated game is their one profile-neutral semantic game.
+                game_cls = diversified_pinned_game_class(
+                    game_class(black_contract.topology_kind, black_contract.topology_size, "japanese")
+                )
+            elif self.game_cls_resolver is not None:
+                game_cls = self.game_cls_resolver(
+                    black.topology, black.size, black.rule_set
+                )
+            else:
+                game_cls = resolve_game_class_from_contract(black_contract)
         except GenerationFailed:
             raise
         except ContractError as exc:
             raise GenerationFailed(f"Cannot resolve generation model contract: {exc}") from exc
+        try:
+            semantic_contract = resolve_model_contract(game_cls, None)
+        except (ContractError, TypeError, ValueError) as exc:
+            raise GenerationFailed(
+                f"Cannot resolve authoritative semantic game contract: {exc}"
+            ) from exc
+        if black.rule_set != white.rule_set:
+            raise GenerationFailed("Checkpoint descriptors have different rule sets")
+        for label, model in (("black", black_model), ("white", white_model)):
+            model_args = getattr(model, "args", None)
+            if model_args is None:
+                continue
+            saved_komi = (
+                model_args.get("gocube_komi")
+                if hasattr(model_args, "get")
+                else getattr(model_args, "gocube_komi", None)
+            )
+            if saved_komi is not None:
+                try:
+                    require_gocube_komi(saved_komi, context=f"Saved {label} GoCube args")
+                except (TypeError, ValueError) as exc:
+                    raise GenerationFailed(str(exc)) from exc
+        search_differences = evaluation_argument_differences(
+            getattr(black_model, "args", None),
+            getattr(white_model, "args", None),
+        )
+        if search_differences:
+            field, (black_value, white_value) = next(iter(search_differences.items()))
+            raise GenerationFailed(
+                f"Evaluation search settings differ for {field}: "
+                f"black={black_value!r}, white={white_value!r}"
+            )
+        if getattr(game_cls, "RULESET", None) not in (black.rule_set, white.rule_set):
+            raise GenerationFailed(
+                "Authoritative semantic game ruleset does not match checkpoint descriptors"
+            )
+        for field in (
+            "rules_implementation",
+            "action_schema",
+            "action_size",
+            "topology_kind",
+            "topology_size",
+            "point_count",
+            "point_order_fingerprint",
+            "adjacency_fingerprint",
+            "topology_fingerprint",
+            "terminal_adjudicator_id",
+            "rules_fingerprint",
+            "komi",
+        ):
+            if getattr(semantic_contract, field) != getattr(black_contract, field):
+                raise GenerationFailed(
+                    f"Authoritative semantic game does not match checkpoint {field}: "
+                    f"game={getattr(semantic_contract, field)!r}, "
+                    f"checkpoint={getattr(black_contract, field)!r}"
+                )
+        black_komi = require_gocube_komi(
+            black.komi, context=f"Checkpoint {black.checkpoint_id}"
+        )
+        white_komi = require_gocube_komi(
+            white.komi, context=f"Checkpoint {white.checkpoint_id}"
+        )
+        if black_komi != white_komi:
+            raise GenerationFailed("Checkpoint GoCube komi values are not identical")
         black_args = prepare_evaluation_args(black_model.args, game_cls, mcts_sims)
         white_args = prepare_evaluation_args(white_model.args, game_cls, mcts_sims)
+        model_game_classes = [
+            getattr(black_model, "game_cls", None),
+            getattr(white_model, "game_cls", None),
+        ]
         players = [
             self.player_factory(black_model, game_cls, black_args),
             self.player_factory(white_model, game_cls, white_args),
         ]
+        for player, model_game_cls in zip(players, model_game_classes):
+            if model_game_cls is not None and hasattr(
+                model_game_cls, "observation_from_semantic_state"
+            ):
+                # Set after factory construction so existing custom factories
+                # keep their three-argument API while MCTSPlayer receives the
+                # same pure adapter as the checkpoint Arena.
+                player.observation_adapter = GoCubeObservationAdapter(model_game_cls)
         for player in players:
             player.reset()
 
@@ -198,7 +304,7 @@ class GameGenerator:
             "topology": black.topology,
             "size": black.size,
             "ruleSet": black.rule_set,
-            "komi": black.komi,
+            "komi": black_komi,
             "terminalAdjudicator": black.terminal_adjudicator,
             "mctsSims": mcts_sims,
             "black": {"checkpointId": black.checkpoint_id},

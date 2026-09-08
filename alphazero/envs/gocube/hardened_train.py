@@ -21,6 +21,11 @@ from alphazero.envs.gocube.atomic_io import (
     write_replay_marker,
 )
 from alphazero.envs.gocube.exploration_contract import KATAGO_PINNED_EXPLORATION_DEFAULTS
+from alphazero.envs.gocube.contract_versions import (
+    B_EXPERIMENT_CONTRACT_ID,
+    B_EXPERIMENT_CONTRACT_VERSION,
+)
+from alphazero.envs.gocube.production_contract import CUBE4_PRODUCTION
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
 from alphazero.envs.gocube.katago_train import (
     KataGoSearchCoach,
@@ -72,6 +77,15 @@ class AtomicSampleClockNNetWrapper(SampleClockNNetWrapper):
             if key not in self.args:
                 raise ValueError(f"Missing required production search-selection field: {key}")
             fields[key] = self.args[key]
+        if getattr(self.args, "gocube_experiment_contract_id", None) == B_EXPERIMENT_CONTRACT_ID:
+            digest = getattr(self.args, "gocube_experiment_contract_sha256", None)
+            if not isinstance(digest, str) or len(digest) != 64 or any(
+                character not in "0123456789abcdef" for character in digest.lower()
+            ):
+                raise ValueError(
+                    "B experiment checkpoints require experiment_contract_sha256"
+                )
+            fields["gocube_experiment_contract_sha256"] = digest.lower()
         return fields
 
     def save_checkpoint(self, folder="checkpoint", filename="checkpoint.pth.tar", make_dirs=True):
@@ -106,9 +120,21 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
             init_args = args.copy()
             init_args.load_model = False
             init_args.startIter = int(last_valid) + 1
-            super().__init__(game_cls, nnet, init_args)
+            super().__init__(
+                game_cls,
+                nnet,
+                init_args,
+                initialize_training_accounting=False,
+            )
             self.args.load_model = True
             self._load_model(self.train_net, int(last_valid))
+            # The checkpoint must establish the optimizer/sample clock before
+            # generation accounting is recovered.  In particular, a crash
+            # after saving checkpoint N but before publishing progress N must
+            # still resume with all generation deltas through N.
+            self._initialize_training_accounting(
+                resumed_checkpoint_iteration=int(last_valid)
+            )
             # A normal resume may reinitialize the wrapper from saved args;
             # explicit parameter-sweep overrides intentionally load weights and
             # training state without replacing current CLI args. Reconnecting
@@ -209,6 +235,25 @@ def build_hardened_training_args(cli):
     # wraps it with the diversified pinned class. The checkpoint contract must
     # fingerprint the class that is actually used for training and resume.
     args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
+    # 1024 is the ordinary Cube-4 production batch as well as the B batch. It
+    # must never be used as an implicit experiment marker.
+    if int(args.train_batch_size) == CUBE4_PRODUCTION.train_batch_size:
+        CUBE4_PRODUCTION.validate_checkpoint_args(args)
+    experiment_id = getattr(args, "gocube_experiment_contract_id", None)
+    experiment_sha256 = getattr(args, "gocube_experiment_contract_sha256", None)
+    if experiment_id == B_EXPERIMENT_CONTRACT_ID:
+        if not isinstance(experiment_sha256, str) or len(experiment_sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in experiment_sha256.lower()
+        ):
+            raise ValueError(
+                "B experiment activation requires a 64-character hexadecimal "
+                "experiment_contract_sha256"
+            )
+        args.gocube_experiment_contract_version = B_EXPERIMENT_CONTRACT_VERSION
+    elif experiment_id is not None or experiment_sha256 is not None:
+        raise ValueError(
+            "experiment contract metadata must be absent unless the explicit B contract marker is used"
+        )
     args.gocube_recovery_contract = RECOVERY_CONTRACT
     args.gocube_chosen_move_temperature_early = defaults["chosen_move_temperature_early"]
     args.gocube_chosen_move_temperature = defaults["chosen_move_temperature"]
@@ -292,6 +337,15 @@ def main(argv=None):
     network._gocube_checkpoint_arg_overrides = checkpoint_arg_overrides(cli, args)
     coach = HardenedKataGoSearchCoach(game_cls, network, args)
     coach.learn()
+    target_builder = getattr(coach, "_sample_budget_target", None)
+    target = target_builder() if callable(target_builder) else None
+    if target is not None and not coach._training_budget_reached():
+        counters = getattr(coach, "_cumulative_training_counters", None)
+        current = target.current(counters) if counters is not None else 0
+        raise RuntimeError(
+            "Scientific sample target was not reached before the iteration safety ceiling: "
+            f"{target.kind}={target.target}, current={current}"
+        )
 
 
 if __name__ == "__main__":

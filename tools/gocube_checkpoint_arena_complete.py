@@ -20,17 +20,46 @@ from torch import multiprocessing as mp
 from alphazero.Arena import Arena
 from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.NNetWrapper import NNetWrapper
-from alphazero.SelfPlayAgent import SelfPlayAgent
+from tools.gocube_balanced_arena import BalancedArenaSelfPlayAgent
 from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
 from alphazero.envs.gocube.game import game_class
+from alphazero.envs.gocube.integration.contract import (
+    ContractError,
+    EVALUATION_SHARED_ARG_KEYS,
+    EVALUATION_SHARED_CONTRACT_FIELDS,
+    evaluation_argument_differences,
+    ResolvedGoCubeContract,
+    resolve_game_class_from_contract,
+    resolve_model_contract,
+    resolve_model_contract_from_metadata,
+)
+from alphazero.envs.gocube.observation import GoCubeObservationAdapter
+from alphazero.envs.gocube.production_contract import GOCUBE_KOMI, require_gocube_komi
 from alphazero.inference_batching import collect_ready_worker_ids
 from alphazero.search_contract import SearchOutput
 from alphazero.utils import const_temp_scaling, get_iter_file
 
+SelfPlayAgent = BalancedArenaSelfPlayAgent
+
 ARENA_SIMS = 50
-EXPECTED_KOMI = 0.5
+EXPECTED_KOMI = GOCUBE_KOMI
 DEFAULT_SEED = 20260906
 HELDOUT_SCHEMA_VERSION = 1
+
+
+# These are the parts of a checkpoint contract that describe the game and the
+# evaluation search.  Model representation and architecture are intentionally
+# absent: B0 and B1 are allowed to differ there, while all legal moves and
+# search semantics remain fail-closed equal.
+_SHARED_CONTRACT_FIELDS = EVALUATION_SHARED_CONTRACT_FIELDS
+
+_SHARED_EVALUATION_ARG_KEYS = EVALUATION_SHARED_ARG_KEYS
+
+
+def _mapping_value(metadata, key, default=None):
+    if hasattr(metadata, "get"):
+        return metadata.get(key, default)
+    return getattr(metadata, key, default)
 
 
 def _checkpoint_path(run_name: str, iteration: int) -> Path:
@@ -49,24 +78,119 @@ def _load_payload(path: Path) -> dict:
     return payload
 
 
-def _require_same_contract(args_a, args_b) -> None:
-    for label, args in (("A", args_a), ("B", args_b)):
-        komi = float(args.get("gocube_komi", float("nan")))
-        if not math.isclose(komi, EXPECTED_KOMI, rel_tol=0.0, abs_tol=1e-12):
-            raise ValueError(f"Checkpoint {label} violates GoCube komi 0.5 contract: {komi}")
-    for key in (
-        "gocube_topology",
-        "gocube_size",
-        "gocube_rule_set",
-        "gocube_rules_fingerprint",
-        "gocube_observation_schema",
-        "gocube_katago_search_contract",
+def _resolve_checkpoint_contract(saved_args, label: str):
+    """Resolve and recompute one checkpoint's saved model contract."""
+
+    try:
+        contract = resolve_model_contract_from_metadata(saved_args)
+        model_game_cls = resolve_game_class_from_contract(contract)
+        computed = resolve_model_contract(model_game_cls, saved_args)
+    except (ContractError, TypeError, ValueError) as exc:
+        raise ValueError(f"Checkpoint {label} has invalid saved model contract: {exc}") from exc
+    differences = contract.differences(computed)
+    if differences:
+        field, (saved, expected) = next(iter(differences.items()))
+        raise ValueError(
+            f"Checkpoint {label} saved model contract mismatch for {field}: "
+            f"saved={saved!r}, expected={expected!r}"
+        )
+    return contract, model_game_cls
+
+
+def _require_compatible_contracts(
+    contract_a: ResolvedGoCubeContract,
+    contract_b: ResolvedGoCubeContract,
+    args_a=None,
+    args_b=None,
+) -> None:
+    for label, contract, saved_args in (
+        ("A", contract_a, args_a),
+        ("B", contract_b, args_b),
     ):
-        if args_a.get(key) != args_b.get(key):
+        try:
+            require_gocube_komi(contract.komi, context=f"Checkpoint {label}")
+            if saved_args is not None:
+                require_gocube_komi(
+                    _mapping_value(saved_args, "gocube_komi", float("nan")),
+                    context=f"Checkpoint {label}",
+                )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+
+    if args_a is not None and args_b is not None:
+        for key in (
+            "gocube_topology",
+            "gocube_size",
+            "gocube_rule_set",
+            "gocube_terminal_adjudicator",
+            "gocube_rules_fingerprint",
+        ):
+            value_a = _mapping_value(args_a, key, None)
+            value_b = _mapping_value(args_b, key, None)
+            if value_a is None or value_b is None or value_a != value_b:
+                raise ValueError(
+                    f"Checkpoint Arena requires matching {key}: "
+                    f"A={value_a!r}, B={value_b!r}"
+                )
+        if _mapping_value(args_a, "gocube_rule_set") != "japanese":
+            raise ValueError("Checkpoint Arena supports only the Japanese GoCube game semantics")
+
+        for key, (value_a, value_b) in evaluation_argument_differences(args_a, args_b).items():
             raise ValueError(
-                f"Checkpoint Arena requires matching {key}: "
-                f"A={args_a.get(key)!r}, B={args_b.get(key)!r}"
+                f"Checkpoint Arena requires matching evaluation setting {key}: "
+                f"A={value_a!r}, B={value_b!r}"
             )
+
+    for field in _SHARED_CONTRACT_FIELDS:
+        value_a = getattr(contract_a, field)
+        value_b = getattr(contract_b, field)
+        if value_a != value_b:
+            raise ValueError(
+                f"Checkpoint Arena requires matching {field}: "
+                f"A={value_a!r}, B={value_b!r}"
+            )
+
+
+def _require_same_contract(args_a, args_b) -> None:
+    """Backward-compatible raw-args entrypoint with profile-aware equality."""
+
+    contract_a, _ = _resolve_checkpoint_contract(args_a, "A")
+    contract_b, _ = _resolve_checkpoint_contract(args_b, "B")
+    _require_compatible_contracts(contract_a, contract_b, args_a, args_b)
+
+
+def _authoritative_game_class(contract: ResolvedGoCubeContract):
+    """Return the single profile-neutral semantic game used by Arena."""
+
+    if contract.terminal_adjudicator_id != "gocube-katago-japanese-v3":
+        raise ValueError(
+            "Checkpoint Arena cross-profile path requires KataGo Japanese V3 semantics"
+        )
+    topology = game_class(contract.topology_kind, contract.topology_size, "japanese")
+    semantic_game_cls = diversified_pinned_game_class(topology)
+    semantic_contract = resolve_model_contract(semantic_game_cls, None)
+    for field in (
+        "rules_implementation",
+        "action_schema",
+        "action_size",
+        "topology_kind",
+        "topology_size",
+        "point_count",
+        "point_order_fingerprint",
+        "adjacency_fingerprint",
+        "topology_fingerprint",
+        "terminal_adjudicator_id",
+        "rules_fingerprint",
+        "komi",
+    ):
+        if getattr(semantic_contract, field) != getattr(contract, field):
+            raise ValueError(
+                f"Current semantic game does not match checkpoint {field}: "
+                f"game={getattr(semantic_contract, field)!r}, "
+                f"checkpoint={getattr(contract, field)!r}"
+            )
+    require_gocube_komi(semantic_game_cls.KOMI, context="Checkpoint Arena semantic game")
+    return semantic_game_cls
 
 
 def _resolve_device(requested: str) -> str:
@@ -279,6 +403,11 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
     batch_ready = [mp.Event() for _ in range(workers)]
     batch_queues = [mp.Queue() for _ in range(workers)]
     policy_tensors, value_tensors, score_tensors, ownership_tensors, agents = [], [], [], [], []
+    observation_adapters = [
+        getattr(player, "observation_adapter", None) for player in players
+    ]
+    if not any(adapter is not None for adapter in observation_adapters):
+        observation_adapters = None
     for worker_id in range(workers):
         policy = torch.zeros([1, game_cls.action_size()])
         value = torch.zeros([1, game_cls.num_players() + 1])
@@ -310,6 +439,7 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
             _is_arena=True,
             score_tensor=score,
             ownership_tensor=ownership,
+            observation_adapters=observation_adapters,
         )
         agent.daemon = True
         agents.append(agent)
@@ -488,13 +618,17 @@ def main(argv=None) -> int:
     path_b = _checkpoint_path(args.run_b, args.iteration_b)
     payload_a, payload_b = _load_payload(path_a), _load_payload(path_b)
     saved_a, saved_b = payload_a["args"], payload_b["args"]
-    _require_same_contract(saved_a, saved_b)
-    topology, size = str(saved_a["gocube_topology"]), int(saved_a["gocube_size"])
-    game_cls = diversified_pinned_game_class(game_class(topology, size, "japanese"))
-    if game_cls.rules_fingerprint() != saved_a.get("gocube_rules_fingerprint"):
-        raise ValueError("Current game implementation does not match checkpoint rules fingerprint")
+    contract_a, model_game_cls_a = _resolve_checkpoint_contract(saved_a, "A")
+    contract_b, model_game_cls_b = _resolve_checkpoint_contract(saved_b, "B")
+    _require_compatible_contracts(contract_a, contract_b, saved_a, saved_b)
+    game_cls = _authoritative_game_class(contract_a)
     device = _resolve_device(args.device)
-    network_a, network_b = _load_network(game_cls, path_a, device), _load_network(game_cls, path_b, device)
+    network_a = _load_network(model_game_cls_a, path_a, device)
+    network_b = _load_network(model_game_cls_b, path_b, device)
+    observation_adapters = [
+        GoCubeObservationAdapter(model_game_cls_a),
+        GoCubeObservationAdapter(model_game_cls_b),
+    ]
     eval_args = saved_a.copy()
     eval_args.cuda = device == "cuda"
     eval_args.workers = int(args.workers)
@@ -511,7 +645,20 @@ def main(argv=None) -> int:
     eval_args.temp_scaling_fn = const_temp_scaling
     eval_args.use_draws_for_winrate = True
     eval_args.arena_inference_batch_wait_ms = float(args.arena_inference_batch_wait_ms)
-    players = [MCTSPlayer(network_a, game_cls=game_cls, args=eval_args), MCTSPlayer(network_b, game_cls=game_cls, args=eval_args)]
+    players = [
+        MCTSPlayer(
+            network_a,
+            game_cls=game_cls,
+            args=eval_args,
+            observation_adapter=observation_adapters[0],
+        ),
+        MCTSPlayer(
+            network_b,
+            game_cls=game_cls,
+            args=eval_args,
+            observation_adapter=observation_adapters[1],
+        ),
+    ]
     if device == "cuda":
         torch.cuda.reset_peak_memory_stats()
     started = time.perf_counter()
@@ -575,7 +722,18 @@ def main(argv=None) -> int:
             "move_temperature": 0.0,
             "same_search_settings": True,
             "komi": EXPECTED_KOMI,
-            "rules_fingerprint": saved_a["gocube_rules_fingerprint"],
+            "rules_fingerprint": contract_a.rules_fingerprint,
+            "semantic_game_class": (
+                f"{game_cls.__module__}.{game_cls.__qualname__}"
+            ),
+            "model_observation_shapes": [
+                list(contract_a.observation_shape),
+                list(contract_b.observation_shape),
+            ],
+            "model_observation_schemas": [
+                contract_a.observation_schema,
+                contract_b.observation_schema,
+            ],
         },
     }
     output_dir = Path("arena-results")

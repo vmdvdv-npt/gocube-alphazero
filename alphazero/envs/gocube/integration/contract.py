@@ -12,6 +12,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from ..production_contract import require_gocube_komi
+
 MODEL_CONTRACT_VERSION = 1
 MODEL_CONTRACT_ID = "gocube-model-contract-v1"
 ACTION_SCHEMA = "gocube-action-point-id-pass-v1"
@@ -371,10 +373,123 @@ class ResolvedGoCubeContract:
         }
 
 
+# Model-specific observation and architecture identity are intentionally not
+# part of this compatibility view.  The Arena/evaluation caller still has to
+# load each model against its complete own contract; this helper only answers
+# whether both models can share one semantic GoCube game timeline.
+EVALUATION_SHARED_CONTRACT_FIELDS = (
+    "contract_id",
+    "contract_version",
+    "rules_implementation",
+    "action_schema",
+    "action_size",
+    "topology_kind",
+    "topology_size",
+    "point_count",
+    "point_order_fingerprint",
+    "adjacency_fingerprint",
+    "topology_fingerprint",
+    "search_contract_id",
+    "terminal_adjudicator_id",
+    "rules_fingerprint",
+    "komi",
+    "targets_schema",
+    "output_heads",
+)
+
+# Search settings are intentionally kept outside ResolvedGoCubeContract's
+# compact serialized shape for backward compatibility, but loaded evaluation
+# models must still agree on their effective values.  Missing on both sides
+# means the same runtime default is used; asymmetric presence is rejected.
+EVALUATION_SHARED_ARG_KEYS = (
+    "gocube_katago_search_contract",
+    "gocube_search_contract",
+    "gocube_katago_search_reference_commit",
+    "search_utility_mode",
+    "gocube_win_loss_utility_factor",
+    "gocube_static_score_utility_factor",
+    "gocube_dynamic_score_utility_factor",
+    "gocube_dynamic_score_center_zero_weight",
+    "gocube_dynamic_score_center_scale",
+    "gocube_cpuct_exploration",
+    "gocube_cpuct_exploration_log",
+    "gocube_cpuct_exploration_base",
+    "gocube_root_fpu_reduction",
+    "gocube_fpu_parent_weight_by_visited_policy",
+    "gocube_fpu_parent_weight_by_visited_policy_pow",
+    "gocube_root_ending_bonus_points",
+    "gocube_fill_dame_before_pass",
+    "gocube_conservative_pass",
+    "gocube_root_dirichlet_noise_total_concentration",
+    "gocube_root_policy_temperature_early",
+    "gocube_root_policy_temperature",
+    "gocube_root_policy_temperature_halflife",
+    "gocube_root_desired_per_child_visits_coeff",
+    "gocube_value_weight_exponent",
+    "gocube_use_lcb_for_selection",
+    "gocube_lcb_stdevs",
+    "gocube_min_visit_prop_for_lcb",
+    "gocube_chosen_move_subtract",
+    "gocube_chosen_move_prune",
+    "cpuct",
+    "fpu_reduction",
+    "min_discount",
+    "root_noise_frac",
+    "root_policy_temp",
+    "gocube_target_provenance_semantics",
+    "gocube_target_provenance_encoding",
+    "gocube_termination_contract",
+    "gocube_katago_exploration_contract",
+)
+
+
+def evaluation_argument_differences(first: Any, second: Any) -> dict[str, tuple[object, object]]:
+    """Compare effective evaluation/search args without profile fields."""
+
+    missing = object()
+
+    def value(metadata, key):
+        if metadata is None:
+            return missing
+        if isinstance(metadata, Mapping):
+            return metadata[key] if key in metadata else missing
+        return getattr(metadata, key, missing)
+
+    differences = {}
+    for key in EVALUATION_SHARED_ARG_KEYS:
+        first_value = value(first, key)
+        second_value = value(second, key)
+        if first_value is missing and second_value is missing:
+            continue
+        if first_value is missing or second_value is missing or first_value != second_value:
+            differences[key] = (
+                None if first_value is missing else first_value,
+                None if second_value is missing else second_value,
+            )
+    return differences
+
+
+def evaluation_contract_differences(
+    first: ResolvedGoCubeContract,
+    second: ResolvedGoCubeContract,
+) -> dict[str, tuple[object, object]]:
+    """Return only differences that prevent one semantic evaluation game."""
+
+    return {
+        field: (getattr(first, field), getattr(second, field))
+        for field in EVALUATION_SHARED_CONTRACT_FIELDS
+        if getattr(first, field) != getattr(second, field)
+    }
+
+
 def resolve_model_contract(game_cls, args: Any = None) -> ResolvedGoCubeContract:
     """Resolve the exact contract from the concrete training class and args."""
 
     try:
+        require_gocube_komi(
+            getattr(game_cls, "KOMI"),
+            context="GoCube model contract",
+        )
         topology = game_cls.logical_topology()
         observation_shape = tuple(int(x) for x in game_cls.observation_size())
         action_size = int(game_cls.action_size())
@@ -491,6 +606,29 @@ def _class_matches_metadata(game_cls, metadata: Any) -> bool:
     for key, expected in checks:
         actual = _get(metadata, key, None)
         if actual is not None and actual != expected:
+            return False
+    # Current production checkpoints carry explicit profile metadata.  Use it
+    # when resolving a class from flat/legacy args as well; otherwise a B1
+    # label combined with B0 geometry could silently resolve to a generic
+    # pinned class and weaken the model-contract boundary.
+    profile = _provided(metadata, "gocube_model_profile")
+    if profile is not _MISSING and str(getattr(game_cls, "GOCUBE_MODEL_PROFILE", "")) != str(profile):
+        return False
+    architecture = _provided(metadata, "gocube_network_architecture")
+    if architecture is not _MISSING and hasattr(game_cls, "GOCUBE_NETWORK_ARCHITECTURE_ID"):
+        if str(architecture) != str(game_cls.GOCUBE_NETWORK_ARCHITECTURE_ID):
+            return False
+    structural_schema = _provided(metadata, "gocube_structural_feature_schema")
+    if structural_schema is not _MISSING and hasattr(game_cls, "STRUCTURAL_FEATURE_SCHEMA"):
+        if structural_schema != getattr(game_cls, "STRUCTURAL_FEATURE_SCHEMA"):
+            return False
+    structural_channels = _provided(metadata, "gocube_structural_feature_channels")
+    if structural_channels is not _MISSING and hasattr(game_cls, "STRUCTURAL_FEATURE_CHANNELS"):
+        try:
+            structural_channels = int(structural_channels)
+        except (TypeError, ValueError):
+            return False
+        if structural_channels != int(getattr(game_cls, "STRUCTURAL_FEATURE_CHANNELS")):
             return False
     return True
 
@@ -613,6 +751,13 @@ def contract_from_dict(data: Mapping[str, object]) -> ResolvedGoCubeContract:
 def resolve_contract_for_descriptor(descriptor) -> ResolvedGoCubeContract:
     """Resolve a catalog descriptor, retaining explicit legacy semantics."""
 
+    try:
+        require_gocube_komi(
+            _get(descriptor, "komi"),
+            context=f"Checkpoint {_get(descriptor, 'checkpoint_id', 'descriptor')}",
+        )
+    except (TypeError, ValueError) as exc:
+        raise ContractError(str(exc)) from exc
     nested = _get(descriptor, "model_contract", None)
     if nested is not None:
         if isinstance(nested, ResolvedGoCubeContract):

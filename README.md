@@ -32,7 +32,7 @@ python -m alphazero.envs.gocube.integration.register_run \
   --topology cube \
   --size 4 \
   --rule-set chinese \
-  --komi 7.5
+  --komi 0.5
 ```
 
 Start the service on loopback:

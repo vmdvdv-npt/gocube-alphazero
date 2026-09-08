@@ -1,5 +1,6 @@
 import argparse
 import os
+from pathlib import Path
 
 import pyximport
 
@@ -7,13 +8,27 @@ pyximport.install()
 
 from alphazero.Arena import Arena
 from alphazero.GenericPlayers import MCTSPlayer
-from alphazero.envs.gocube.evaluation import load_evaluation_checkpoint, prepare_evaluation_args
+from alphazero.envs.gocube.evaluation import (
+    load_evaluation_checkpoint,
+    prepare_evaluation_args,
+)
 from alphazero.envs.gocube.integration.contract import (
     ContractError,
     resolve_contract_for_descriptor,
     resolve_game_class_from_contract,
 )
+from alphazero.envs.gocube.observation import GoCubeObservationAdapter
 from alphazero.envs.gocube.integration.manifest import load_run_manifest
+from alphazero.utils import get_iter_file
+
+from tools.gocube_checkpoint_arena_complete import (
+    ARENA_SIMS,
+    _authoritative_game_class,
+    _load_network,
+    _load_payload,
+    _require_compatible_contracts,
+    _resolve_checkpoint_contract,
+)
 
 
 def parse_args():
@@ -24,7 +39,7 @@ def parse_args():
     parser.add_argument("--candidate", type=int, default=5)
     parser.add_argument("--baseline", type=int, default=0)
     parser.add_argument("--games", type=int, default=32)
-    parser.add_argument("--sims", type=int, default=100)
+    parser.add_argument("--sims", type=int, default=ARENA_SIMS)
     parser.add_argument("--checkpoint-dir", default="checkpoint")
     return parser.parse_args()
 
@@ -64,12 +79,51 @@ def resolve_game_class(checkpoint_dir, run_name, topology, size):
 def main():
     cli = parse_args()
     validate_cli(cli)
-    game_cls = resolve_game_class(cli.checkpoint_dir, cli.run_name, cli.topology, cli.size)
+    if cli.sims != ARENA_SIMS:
+        raise ValueError(f"GoCube Arena requires exactly {ARENA_SIMS} simulations")
     folder = os.path.join(cli.checkpoint_dir, cli.run_name)
-    candidate = load_checkpoint(game_cls, folder, cli.candidate)
-    baseline = load_checkpoint(game_cls, folder, cli.baseline)
+    manifest = load_run_manifest(folder)
+    if manifest.topology != cli.topology or manifest.size != cli.size:
+        raise ValueError("CLI topology/size does not match run manifest")
+    candidate_path = Path(folder) / get_iter_file(cli.candidate)
+    baseline_path = Path(folder) / get_iter_file(cli.baseline)
+    candidate_payload = _load_payload(candidate_path)
+    baseline_payload = _load_payload(baseline_path)
+    candidate_contract, candidate_game_cls = _resolve_checkpoint_contract(
+        candidate_payload["args"], "candidate"
+    )
+    baseline_contract, baseline_game_cls = _resolve_checkpoint_contract(
+        baseline_payload["args"], "baseline"
+    )
+    _require_compatible_contracts(
+        candidate_contract,
+        baseline_contract,
+        candidate_payload["args"],
+        baseline_payload["args"],
+    )
+    game_cls = _authoritative_game_class(candidate_contract)
+    candidate = _load_network(candidate_game_cls, candidate_path, "cpu")
+    baseline = _load_network(baseline_game_cls, baseline_path, "cpu")
     args = prepare_arena_args(candidate.args, game_cls, cli.sims)
-    players = [MCTSPlayer(candidate, game_cls, args), MCTSPlayer(baseline, game_cls, args)]
+    args.probFastSim = 0.0
+    args.add_root_noise = False
+    args.add_root_temp = False
+    args.startTemp = 0.0
+    args.arenaTemp = 0.0
+    players = [
+        MCTSPlayer(
+            candidate,
+            game_cls,
+            args,
+            observation_adapter=GoCubeObservationAdapter(candidate_game_cls),
+        ),
+        MCTSPlayer(
+            baseline,
+            game_cls,
+            args,
+            observation_adapter=GoCubeObservationAdapter(baseline_game_cls),
+        ),
+    ]
     arena = Arena(players, game_cls, use_batched_mcts=False, args=args)
     wins, draws, winrates = arena.play_games(cli.games, shuffle_players=True)
     print()

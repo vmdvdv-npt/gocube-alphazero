@@ -20,22 +20,29 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import torch
 
+from alphazero.envs.gocube.production_contract import CUBE4_PRODUCTION
+from alphazero.envs.gocube.production_training import (
+    CumulativeTrainingCounters,
+    SampleBudgetTarget,
+    build_sample_budget_target,
+    load_training_progress,
+)
 from tools.hardware_telemetry import HardwareTelemetry
 
-WORKERS = 16
-REGULAR_SIMS = 50
-FAST_SIMS = 20
-GAMES_PER_ITERATION = 256
-TRAIN_BATCH_SIZE = 1024
+WORKERS = CUBE4_PRODUCTION.workers
+REGULAR_SIMS = CUBE4_PRODUCTION.regular_sims
+FAST_SIMS = CUBE4_PRODUCTION.fast_sims
+GAMES_PER_ITERATION = CUBE4_PRODUCTION.games_per_iteration
+TRAIN_BATCH_SIZE = CUBE4_PRODUCTION.train_batch_size
 SELFPLAY_BATCH_WAIT_MS = 1.0
-ARENA_SIMS = 50
-EXPECTED_KOMI = 0.5
+ARENA_SIMS = CUBE4_PRODUCTION.arena_sims
+EXPECTED_KOMI = CUBE4_PRODUCTION.komi
 BOOTSTRAP_ITERATION = 7
 HEALTH_REFERENCE_ITERATION = 4
 CANDIDATE_ITERATIONS = 2
@@ -47,6 +54,10 @@ SELFPLAY_BENCHMARK_WAITS_MS = (0.5, 1.0, 2.0)
 ARENA_BENCHMARK_WAITS_MS = (0.5, 1.0, 2.0)
 ARENA_BENCHMARK_WORKERS = (4, 8, 16)
 DEFAULT_BENCHMARK_GAMES = 64
+# A generation chunk remains 256 games, but candidate stages are now defined
+# by a sample milestone.  The default retains the old two-chunk scale only as
+# a convenient numeric milestone; it is never used to discard games or rows.
+DEFAULT_CANDIDATE_NEW_SAMPLE_BUDGET = 512
 
 PARAMETER_SPECS = (
     {
@@ -129,6 +140,13 @@ def validate_production_checkpoint(run_name: str, iteration: int) -> dict[str, o
         "komi": float(args.get("gocube_komi", float("nan"))),
         "regular_sims": int(args.get("numMCTSSims", -1)),
         "fast_sims": int(args.get("numFastSims", -1)),
+        "fast_probability": float(args.get("probFastSim", float("nan"))),
+        "arena_sims": int(args.get("arenaMCTSSims", -1)),
+        "train_batch_size": int(args.get("train_batch_size", -1)),
+        "train_samples_per_new_sample": float(
+            args.get("gocube_train_samples_per_new_sample", float("nan"))
+        ),
+        "workers": int(args.get("workers", -1)),
         "topology": args.get("gocube_topology"),
         "size": int(args.get("gocube_size", -1)),
         "rules_fingerprint": args.get("gocube_rules_fingerprint"),
@@ -139,6 +157,34 @@ def validate_production_checkpoint(run_name: str, iteration: int) -> dict[str, o
         raise RuntimeError(f"GoCube contract requires {REGULAR_SIMS} regular sims")
     if checks["fast_sims"] != FAST_SIMS:
         raise RuntimeError(f"GoCube contract requires {FAST_SIMS} fast sims")
+    if not math.isclose(
+        checks["fast_probability"], CUBE4_PRODUCTION.fast_probability,
+        rel_tol=0.0, abs_tol=1e-12,
+    ):
+        raise RuntimeError(
+            "GoCube contract requires fast probability "
+            f"{CUBE4_PRODUCTION.fast_probability}, got {checks['fast_probability']}"
+        )
+    if checks["arena_sims"] != ARENA_SIMS:
+        raise RuntimeError(f"GoCube contract requires {ARENA_SIMS} Arena sims")
+    if checks["train_batch_size"] != TRAIN_BATCH_SIZE:
+        raise RuntimeError(
+            f"GoCube contract requires training batch size {TRAIN_BATCH_SIZE}, "
+            f"got {checks['train_batch_size']}"
+        )
+    if checks["workers"] != WORKERS:
+        raise RuntimeError(f"GoCube contract requires {WORKERS} workers")
+    if not math.isclose(
+        checks["train_samples_per_new_sample"],
+        CUBE4_PRODUCTION.train_samples_per_new_sample,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise RuntimeError(
+            "GoCube contract requires train_samples_per_new_sample "
+            f"{CUBE4_PRODUCTION.train_samples_per_new_sample}, "
+            f"got {checks['train_samples_per_new_sample']}"
+        )
     if checks["topology"] != "cube" or checks["size"] != 4:
         raise RuntimeError(f"Expected Cube 4x4 checkpoint, got {checks['topology']} {checks['size']}")
     return checks
@@ -344,6 +390,34 @@ def render_markdown_report(state: dict[str, object]) -> str:
                 f"screen {float(screen.get('win_rate', 0.0)):.3f} "
                 f"CI95 {screen.get('win_rate_ci95')}"
             )
+            budget = candidate.get("training_budget") or {}
+            counters = budget.get("counters") or budget.get("cumulative_counters") or {}
+            if counters:
+                lines.append(
+                    "  training budget: "
+                    f"games={counters.get('selfplay_games_completed', 0)}, "
+                    f"positions={counters.get('positions_generated', 0)}, "
+                    f"samples={counters.get('new_samples_accepted', 0)}, "
+                    f"optimizer_steps={counters.get('optimizer_steps', 0)}, "
+                    f"examples_seen={counters.get('optimizer_examples_seen', 0)}"
+                )
+            scientific = budget.get("budget")
+            if isinstance(scientific, dict):
+                lines.append(
+                    "  scientific stop: "
+                    f"{scientific.get('kind')} target={scientific.get('target')} "
+                    f"after={scientific.get('after')} "
+                    f"overshoot={scientific.get('overshoot', 0)} "
+                    f"overshot={scientific.get('overshot', False)}"
+                )
+            metrics = budget.get("latest_iteration_metrics")
+            if isinstance(metrics, dict):
+                lines.append(
+                    "  episode metrics: "
+                    f"average_length={metrics.get('average_game_length', 0.0)}, "
+                    f"no_results={metrics.get('no_result_games', 0)}, "
+                    f"move_limit={metrics.get('episode_move_limit_games', 0)}"
+                )
         if stage.get("justification"):
             lines.append(f"- Rationale: {stage['justification']}")
         lines.append("")
@@ -367,6 +441,26 @@ def render_markdown_report(state: dict[str, object]) -> str:
     for key in ("training_games", "benchmark_selfplay_games", "arena_games", "wall_time_seconds"):
         if key in totals:
             lines.append(f"- {key}: {totals[key]}")
+    counters = state.get("cumulative_counters") or state.get("training_counters")
+    if isinstance(counters, dict):
+        lines.extend(["", "## Scientific training accounting", ""])
+        for key in (
+            "selfplay_games_completed",
+            "positions_generated",
+            "saved_replay_samples",
+            "new_samples_accepted",
+            "optimizer_steps",
+            "optimizer_examples_seen",
+        ):
+            value = counters.get(key, counters.get(f"cumulative_{key}", 0))
+            lines.append(f"- cumulative {key}: {value}")
+    budget = state.get("scientific_budget")
+    if isinstance(budget, dict):
+        lines.extend(["", "Scientific stopping target:", ""])
+        lines.append(
+            f"- {budget.get('kind')}: target {budget.get('target')} "
+            f"(per candidate increment {budget.get('increment')})"
+        )
     lines.append("")
     if state.get("bottlenecks"):
         lines.extend(["## Resource bottlenecks", ""])
@@ -388,6 +482,7 @@ class Candidate:
     iteration: int
     screen: dict[str, object]
     heldout: dict[str, object]
+    training_budget: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -457,6 +552,85 @@ class Experiment:
         elif self.telemetry.phase_name == "IDLE":
             self.telemetry.set_phase(default_phase)
 
+    def training_progress(self, run_name: str) -> dict[str, object] | None:
+        """Read the trainer-published cumulative sample clock for a run."""
+
+        return load_training_progress("data", run_name)
+
+    @staticmethod
+    def _progress_counters(progress: dict[str, object] | None) -> CumulativeTrainingCounters:
+        return CumulativeTrainingCounters.from_mapping(progress or {})
+
+    def _training_progress_delta(
+        self,
+        before: dict[str, object] | None,
+        after: dict[str, object] | None,
+    ) -> dict[str, int]:
+        if after is None:
+            raise RuntimeError("Training command completed without training-progress.json")
+        old = self._progress_counters(before)
+        new = self._progress_counters(after)
+        delta = {
+            key: int(getattr(new, key)) - int(getattr(old, key))
+            for key in (
+                "selfplay_games_completed",
+                "positions_generated",
+                "saved_replay_samples",
+                "new_samples_accepted",
+                "optimizer_steps",
+                "optimizer_examples_seen",
+            )
+        }
+        if any(value < 0 for value in delta.values()):
+            raise RuntimeError(f"Training progress moved backwards on resume: {delta}")
+        return delta
+
+    def _account_training_progress(
+        self,
+        *,
+        run_name: str,
+        before: dict[str, object] | None,
+        action_key: str,
+        kind: str,
+        details: dict[str, object],
+    ) -> dict[str, object]:
+        after = self.training_progress(run_name)
+        delta = self._training_progress_delta(before, after)
+        metadata = {
+            "training_progress": after,
+            "training_counter_delta": delta,
+        }
+        self.state.setdefault("training_runs", {})[run_name] = after
+        self._complete_action(
+            key=action_key,
+            kind=kind,
+            details=details,
+            counter="training_games",
+            amount=delta["selfplay_games_completed"],
+            metadata=metadata,
+        )
+        self.state["cumulative_counters"] = self._progress_counters(after).as_dict()
+        return after
+
+    def _candidate_budget_target(self, parent_run: str) -> SampleBudgetTarget:
+        parent = self.training_progress(parent_run)
+        counters = self._progress_counters(parent)
+        optimizer_increment = getattr(self.cli, "candidate_optimizer_examples_budget", None)
+        new_increment = getattr(
+            self.cli,
+            "candidate_new_samples_budget",
+            DEFAULT_CANDIDATE_NEW_SAMPLE_BUDGET,
+        )
+        if optimizer_increment is not None:
+            return SampleBudgetTarget(
+                SampleBudgetTarget.OPTIMIZER_EXAMPLES,
+                counters.optimizer_examples_seen + int(optimizer_increment),
+            )
+        return SampleBudgetTarget(
+            SampleBudgetTarget.NEW_SAMPLES,
+            counters.new_samples_accepted + int(new_increment),
+        )
+
     def stream_command(self, command: list[str], log_path: Path, phase: str) -> CommandMetrics:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(self.repo)
@@ -494,7 +668,8 @@ class Experiment:
 
     def training_command(self, *, run_name: str, target_iteration: int,
                          sweep_overrides: dict[str, float | int] | None = None,
-                         resume: bool, inference_wait_ms: float | None = None) -> list[str]:
+                         resume: bool, inference_wait_ms: float | None = None,
+                         scientific_target: SampleBudgetTarget | None = None) -> list[str]:
         wait_ms = self.selfplay_wait_ms if inference_wait_ms is None else float(inference_wait_ms)
         command = [
             str(self.python), "-m", "alphazero.envs.gocube.hardened_train",
@@ -504,6 +679,14 @@ class Experiment:
             "--train-batch-size", str(TRAIN_BATCH_SIZE), "--inference-batch-wait-ms", str(wait_ms),
             "--endgame-sample-weight", "1", "--no-arena", "--run-name", run_name,
         ]
+        if scientific_target is not None:
+            if scientific_target.kind == SampleBudgetTarget.NEW_SAMPLES:
+                command.extend(["--cumulative-new-samples-target", str(scientific_target.target)])
+            else:
+                command.extend([
+                    "--cumulative-optimizer-examples-target",
+                    str(scientific_target.target),
+                ])
         for flag, value in (sweep_overrides or {}).items():
             command.extend([str(flag), str(value)])
         if resume:
@@ -768,7 +951,8 @@ class Experiment:
             "parent": {"run": parent_run, "iteration": parent_iteration},
             "candidates": [
                 {"label": c.label, "value": c.value, "run": c.run_name, "iteration": c.iteration,
-                 "screen": c.screen, "heldout": c.heldout} for c in candidates
+                 "screen": c.screen, "heldout": c.heldout,
+                 "training_budget": c.training_budget} for c in candidates
             ],
             "head_to_head": h2h,
             "edge_extension": extension_record,
@@ -892,8 +1076,32 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--health-gate-min-win-rate", type=float, default=0.45)
     parser.add_argument("--benchmark-games", type=int, default=DEFAULT_BENCHMARK_GAMES)
     parser.add_argument("--skip-performance-benchmark", action="store_true")
+    budget_targets = parser.add_mutually_exclusive_group()
+    budget_targets.add_argument(
+        "--candidate-new-samples-budget",
+        "--candidate-sample-budget",
+        dest="candidate_new_samples_budget",
+        type=int,
+        default=None,
+        help="New accepted samples added per candidate stage.",
+    )
+    budget_targets.add_argument(
+        "--candidate-optimizer-examples-budget",
+        "--candidate-examples-budget",
+        dest="candidate_optimizer_examples_budget",
+        type=int,
+        default=None,
+        help="Optimizer examples added per candidate stage (alternative target clock).",
+    )
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     cli = parser.parse_args(argv)
+    if cli.candidate_optimizer_examples_budget is not None:
+        # argparse defaults are not considered a seen member of a mutually
+        # exclusive group. Clear the new-sample default when the alternate
+        # optimizer-example clock was explicitly selected.
+        cli.candidate_new_samples_budget = None
+    elif cli.candidate_new_samples_budget is None:
+        cli.candidate_new_samples_budget = DEFAULT_CANDIDATE_NEW_SAMPLE_BUDGET
     if cli.arena_batch_wait_ms < 0:
         parser.error("--arena-batch-wait-ms must be non-negative")
     if cli.telemetry_interval <= 0:
@@ -902,6 +1110,10 @@ def parse_args(argv=None) -> argparse.Namespace:
         parser.error("--heldout-positions must be positive")
     if cli.benchmark_games < 1:
         parser.error("--benchmark-games must be positive")
+    if cli.candidate_new_samples_budget is not None and cli.candidate_new_samples_budget < 1:
+        parser.error("--candidate-new-samples-budget must be positive")
+    if cli.candidate_optimizer_examples_budget is not None and cli.candidate_optimizer_examples_budget < 1:
+        parser.error("--candidate-optimizer-examples-budget must be positive")
     if not 0.0 <= cli.health_gate_min_win_rate <= 1.0:
         parser.error("--health-gate-min-win-rate must be within [0,1]")
     return cli

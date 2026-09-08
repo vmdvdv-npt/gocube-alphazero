@@ -3,7 +3,11 @@ from __future__ import annotations
 from threading import Lock
 
 from .catalog import CheckpointCatalog, CheckpointDescriptor
-from .contract import ContractError, resolve_contract_for_descriptor
+from .contract import (
+    ContractError,
+    evaluation_contract_differences,
+    resolve_contract_for_descriptor,
+)
 from .errors import (
     CheckpointIncompatible,
     CheckpointNotFound,
@@ -15,6 +19,7 @@ from .errors import (
 )
 from .generation import GameGenerator
 from .models import CheckpointModelLoader
+from ..production_contract import require_gocube_komi
 
 PROTOCOL_VERSION = 1
 
@@ -24,15 +29,17 @@ def _compatible(a: CheckpointDescriptor, b: CheckpointDescriptor) -> bool:
         a.topology == b.topology
         and a.size == b.size
         and a.rule_set == b.rule_set
-        and a.komi == b.komi
         and a.terminal_adjudicator == b.terminal_adjudicator
     ):
         return False
     try:
-        return not resolve_contract_for_descriptor(a).differences(
-            resolve_contract_for_descriptor(b)
+        require_gocube_komi(a.komi, context=f"Checkpoint {a.checkpoint_id}")
+        require_gocube_komi(b.komi, context=f"Checkpoint {b.checkpoint_id}")
+        return not evaluation_contract_differences(
+            resolve_contract_for_descriptor(a),
+            resolve_contract_for_descriptor(b),
         )
-    except ContractError:
+    except (ContractError, TypeError, ValueError):
         return False
 
 

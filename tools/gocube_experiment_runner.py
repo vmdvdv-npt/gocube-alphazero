@@ -24,6 +24,11 @@ import time
 from pathlib import Path
 
 from alphazero.envs.gocube.production_contract import CUBE4_PRODUCTION
+from alphazero.envs.gocube.production_training import (
+    CumulativeTrainingCounters,
+    SampleBudgetTarget,
+    load_training_progress,
+)
 from tools._c4_overnight_runtime import *  # noqa: F401,F403
 from tools import _c4_overnight_runtime as _impl
 from tools.gocube_experiment_resume import (
@@ -55,6 +60,7 @@ GAMES_PER_ITERATION = _impl.GAMES_PER_ITERATION = CUBE4_PRODUCTION.games_per_ite
 TRAIN_BATCH_SIZE = _impl.TRAIN_BATCH_SIZE = CUBE4_PRODUCTION.train_batch_size
 ARENA_SIMS = _impl.ARENA_SIMS = CUBE4_PRODUCTION.arena_sims
 EXPECTED_KOMI = _impl.EXPECTED_KOMI = CUBE4_PRODUCTION.komi
+DEFAULT_CANDIDATE_NEW_SAMPLE_BUDGET = _impl.DEFAULT_CANDIDATE_NEW_SAMPLE_BUDGET
 
 build_frozen_heldout_suite = build_fresh_heldout_suite
 
@@ -136,6 +142,17 @@ class Experiment(_impl.Experiment):
         self.arena_workers = WORKERS
         self._already_terminal = False
 
+        if cli.candidate_optimizer_examples_budget is not None:
+            scientific_budget = {
+                "kind": "cumulative_optimizer_examples",
+                "increment": int(cli.candidate_optimizer_examples_budget),
+            }
+        else:
+            scientific_budget = {
+                "kind": "cumulative_new_samples",
+                "increment": int(cli.candidate_new_samples_budget),
+            }
+
         fixed_contract = {
             "workers": WORKERS,
             "regular_sims": REGULAR_SIMS,
@@ -145,6 +162,7 @@ class Experiment(_impl.Experiment):
             "initial_selfplay_inference_batch_wait_ms": SELFPLAY_BATCH_WAIT_MS,
             "arena_sims": ARENA_SIMS,
             "komi": EXPECTED_KOMI,
+            "scientific_budget": scientific_budget,
         }
         expected_launch = launch_config(cli)
         now = time.time()
@@ -200,6 +218,16 @@ class Experiment(_impl.Experiment):
                     "benchmark_selfplay_games": 0,
                     "arena_games": 0,
                 },
+                "training_runs": {},
+                "cumulative_counters": {
+                    "selfplay_games_completed": 0,
+                    "positions_generated": 0,
+                    "saved_replay_samples": 0,
+                    "new_samples_accepted": 0,
+                    "optimizer_steps": 0,
+                    "optimizer_examples_seen": 0,
+                },
+                "scientific_budget": scientific_budget,
             }
         self._restore_benchmark_selection()
         self._save_state()
@@ -568,17 +596,19 @@ class Experiment(_impl.Experiment):
             for iteration in range(1, BOOTSTRAP_ITERATION + 1):
                 if not self._checkpoint(run_name, iteration).is_file():
                     raise RuntimeError(f"Bootstrap checkpoint missing: iteration {iteration}")
-            self._complete_action(
-                key=key,
-                kind="training",
-                details=details,
-                counter="training_games",
-                amount=BOOTSTRAP_ITERATION * GAMES_PER_ITERATION,
-            )
+            if self._completed_action(key) is None:
+                self._account_training_progress(
+                    run_name=run_name,
+                    before=None,
+                    action_key=key,
+                    kind="training",
+                    details=details,
+                )
             return run_name, BOOTSTRAP_ITERATION
         if self._completed_action(key) is not None:
             raise RuntimeError("Bootstrap action is complete but iteration-0007 is missing")
         resume = checkpoint_dir.exists() and data_dir.exists()
+        before_progress = self.training_progress(run_name)
         self._begin_action(key, "training", details)
         self.stream_command(
             self.training_command(
@@ -593,12 +623,12 @@ class Experiment(_impl.Experiment):
         for iteration in range(1, BOOTSTRAP_ITERATION + 1):
             if not self._checkpoint(run_name, iteration).is_file():
                 raise RuntimeError(f"Bootstrap checkpoint missing: iteration {iteration}")
-        self._complete_action(
-            key=key,
+        self._account_training_progress(
+            run_name=run_name,
+            before=before_progress,
+            action_key=key,
             kind="training",
             details=details,
-            counter="training_games",
-            amount=BOOTSTRAP_ITERATION * GAMES_PER_ITERATION,
         )
         return run_name, BOOTSTRAP_ITERATION
 
@@ -619,6 +649,7 @@ class Experiment(_impl.Experiment):
 
     def _benchmark_training(self, bootstrap_run: str, wait_ms: float):
         run_name = f"{self.cli.experiment_id}-bench-selfplay-{_impl._safe(wait_ms)}ms"
+        parent_progress = self.training_progress(bootstrap_run)
         self._ensure_clone(
             parent_run=bootstrap_run,
             parent_iteration=BOOTSTRAP_ITERATION,
@@ -650,13 +681,19 @@ class Experiment(_impl.Experiment):
                 self.logs / f"benchmark-selfplay-{_impl._safe(wait_ms)}ms.log"
             )
             if metrics.sample_time_seconds is not None and metrics.sample_time_seconds > 0:
+                after = self.training_progress(run_name)
+                delta = self._training_progress_delta(parent_progress, after)
                 self._complete_action(
                     key=key,
                     kind="benchmark-training",
                     details=details,
                     counter="benchmark_selfplay_games",
-                    amount=GAMES_PER_ITERATION,
-                    metadata={"metrics": self._metrics_payload(metrics)},
+                    amount=delta["selfplay_games_completed"],
+                    metadata={
+                        "metrics": self._metrics_payload(metrics),
+                        "training_progress": after,
+                        "training_counter_delta": delta,
+                    },
                 )
                 return metrics
             self._quarantine_namespace(
@@ -669,6 +706,7 @@ class Experiment(_impl.Experiment):
                 target_run=run_name,
                 kind="selfplay-benchmark",
             )
+        before_progress = self.training_progress(run_name)
         self._begin_action(key, "benchmark-training", details)
         metrics = self.stream_command(
             self.training_command(
@@ -681,13 +719,19 @@ class Experiment(_impl.Experiment):
             "BENCHMARK",
         )
         self._validate_checkpoint(run_name, target_iteration)
+        after = self.training_progress(run_name)
+        delta = self._training_progress_delta(before_progress, after)
         self._complete_action(
             key=key,
             kind="benchmark-training",
             details=details,
             counter="benchmark_selfplay_games",
-            amount=GAMES_PER_ITERATION,
-            metadata={"metrics": self._metrics_payload(metrics)},
+            amount=delta["selfplay_games_completed"],
+            metadata={
+                "metrics": self._metrics_payload(metrics),
+                "training_progress": after,
+                "training_counter_delta": delta,
+            },
         )
         return metrics
 
@@ -806,27 +850,42 @@ class Experiment(_impl.Experiment):
             target_run=run_name,
             kind=f"parameter:{spec['id']}",
         )
-        target_iteration = int(parent_iteration) + CANDIDATE_ITERATIONS
+        requested_target_iteration = int(parent_iteration) + CANDIDATE_ITERATIONS
+        # This remains only a safety ceiling for a target-driven run.  The
+        # scientific stop is the cumulative sample milestone below; the
+        # number of games/iterations is not used as the budget.
+        max_iteration = int(parent_iteration) + max(CANDIDATE_ITERATIONS, 1024)
+        scientific_target = self._candidate_budget_target(parent_run)
+        parent_progress = self.training_progress(parent_run)
         sweep_overrides = dict(active_overrides)
         sweep_overrides[str(spec["flag"])] = value
-        key = f"training:{run_name}:{target_iteration}"
+        key = f"training:{run_name}:{requested_target_iteration}"
         details = {
             "run": run_name,
             "parent_run": parent_run,
             "parent_iteration": int(parent_iteration),
-            "target_iteration": target_iteration,
+            "target_iteration": requested_target_iteration,
+            "max_iteration_safety_ceiling": max_iteration,
+            "scientific_target": {
+                "kind": scientific_target.kind,
+                "target": int(scientific_target.target),
+            },
             "sweep_overrides": sweep_overrides,
         }
-        target = self._checkpoint(run_name, target_iteration)
+        target = self._checkpoint(run_name, requested_target_iteration)
         if target.is_file():
-            self._validate_checkpoint(run_name, target_iteration, sweep_overrides)
-            self._complete_action(
-                key=key,
-                kind="training",
-                details=details,
-                counter="training_games",
-                amount=CANDIDATE_ITERATIONS * GAMES_PER_ITERATION,
-            )
+            progress = self.training_progress(run_name)
+            actual_iteration = int((progress or {}).get("latest_iteration", requested_target_iteration))
+            self._validate_checkpoint(run_name, actual_iteration, sweep_overrides)
+            if self._completed_action(key) is None:
+                self._account_training_progress(
+                    run_name=run_name,
+                    before=parent_progress,
+                    action_key=key,
+                    kind="training",
+                    details=details,
+                )
+            progress = self.training_progress(run_name)
         else:
             if self._completed_action(key) is not None:
                 raise RuntimeError(f"Completed candidate training lost checkpoint: {run_name}")
@@ -834,41 +893,67 @@ class Experiment(_impl.Experiment):
             self.stream_command(
                 self.training_command(
                     run_name=run_name,
-                    target_iteration=target_iteration,
+                    target_iteration=max_iteration,
                     sweep_overrides=sweep_overrides,
                     resume=True,
+                    scientific_target=scientific_target,
                 ),
                 self.logs / f"{spec['id']}-{label}-train.log",
                 "SELFPLAY",
             )
-            self._validate_checkpoint(run_name, target_iteration, sweep_overrides)
-            self._complete_action(
-                key=key,
+            progress = self.training_progress(run_name)
+            actual_iteration = int((progress or {}).get("latest_iteration", 0))
+            if actual_iteration <= int(parent_iteration):
+                raise RuntimeError(
+                    f"Target-driven training produced no new checkpoint for {run_name}"
+                )
+            self._validate_checkpoint(run_name, actual_iteration, sweep_overrides)
+            self._account_training_progress(
+                run_name=run_name,
+                before=parent_progress,
+                action_key=key,
                 kind="training",
                 details=details,
-                counter="training_games",
-                amount=CANDIDATE_ITERATIONS * GAMES_PER_ITERATION,
             )
+        if progress is None:
+            raise RuntimeError(f"Training progress disappeared for {run_name}")
+        budget = progress.get("budget") or {}
+        if budget and not bool(budget.get("reached", False)):
+            raise RuntimeError(
+                f"Scientific target was not reached for {run_name}: {budget}"
+            )
+        actual_iteration = int(progress.get("latest_iteration", actual_iteration))
+        target = self._checkpoint(run_name, actual_iteration)
+        if not target.is_file():
+            raise RuntimeError(f"Training progress points to missing checkpoint: {target}")
         screen = self.arena(
             run_a=run_name,
-            iteration_a=target_iteration,
+            iteration_a=actual_iteration,
             run_b=parent_run,
             iteration_b=parent_iteration,
             games=SCREEN_GAMES,
             name=f"{spec['id']}-{label}-screen",
-            seed=self.cli.seed + target_iteration * 100 + sum(ord(c) for c in label),
+            seed=self.cli.seed + requested_target_iteration * 100 + sum(ord(c) for c in label),
         )
         heldout = self.arena(
             run_a=run_name,
-            iteration_a=target_iteration,
+            iteration_a=actual_iteration,
             run_b=parent_run,
             iteration_b=parent_iteration,
             games=SCREEN_GAMES,
             name=f"{spec['id']}-{label}-heldout",
             heldout=True,
-            seed=self.cli.seed + target_iteration * 1000 + sum(ord(c) for c in label),
+            seed=self.cli.seed + requested_target_iteration * 1000 + sum(ord(c) for c in label),
         )
-        return _impl.Candidate(label, value, run_name, target_iteration, screen, heldout)
+        return _impl.Candidate(
+            label,
+            value,
+            run_name,
+            actual_iteration,
+            screen,
+            heldout,
+            training_budget=progress,
+        )
 
     def _restore_completed_stages(self, bootstrap_run: str):
         champion_run = bootstrap_run

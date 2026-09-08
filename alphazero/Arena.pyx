@@ -443,6 +443,19 @@ class Arena:
 
             self.args.gamesPerIteration = num
             self._agents = []
+            observation_adapters = [
+                getattr(player, 'observation_adapter', None) for player in self.players
+            ]
+            # Keep the legacy worker path byte-for-byte compatible when no
+            # player has a model-specific adapter.  Cross-profile GoCube
+            # Arena supplies one immutable adapter per network.
+            if any(adapter is None for adapter in observation_adapters):
+                if any(adapter is not None for adapter in observation_adapters):
+                    raise ValueError(
+                        'Arena requires an observation adapter for every model '
+                        'when cross-profile observation routing is enabled'
+                    )
+                observation_adapters = None
             policy_tensors = []
             value_tensors = []
             score_tensors = []
@@ -492,6 +505,7 @@ class Arena:
                         _is_arena=True,
                         score_tensor=score_tensors[i] if score_aware else None,
                         ownership_tensor=ownership_tensors[i] if score_aware else None,
+                        observation_adapters=observation_adapters,
                     )
                 )
                 self._agents[i].daemon = True

@@ -40,7 +40,7 @@ class SelfPlayAgent(mp.Process):
                  value_tensor, output_queue, result_queue, complete_count, games_played,
                  stop_event: mp.Event, pause_event: mp.Event(), args, _is_arena=False, _is_warmup=False,
                  telemetry=None, score_tensor=None, ownership_tensor=None,
-                 worker_error_queue=None, iteration=0):
+                 worker_error_queue=None, iteration=0, observation_adapters=None):
         super().__init__()
         self.id = id
         self.game_cls = game_cls
@@ -77,6 +77,17 @@ class SelfPlayAgent(mp.Process):
         self._is_arena = _is_arena
         self._is_warmup = _is_warmup
         self.telemetry = telemetry
+        self.observation_adapters = tuple(observation_adapters or ())
+        if self.observation_adapters and len(self.observation_adapters) != game_cls.num_players():
+            raise ValueError(
+                'Arena observation adapter count must match the number of game players'
+            )
+        if self.observation_adapters and any(
+            adapter is None for adapter in self.observation_adapters
+        ):
+            raise ValueError(
+                'Arena observation adapters must be provided for every model'
+            )
         self.score_aware = (
             _optional_arg(args, 'search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
         )
@@ -171,6 +182,20 @@ class SelfPlayAgent(mp.Process):
         if self._is_arena:
             return mcts[self.games[index].player]
         return mcts
+
+    def _observation_for_search(self, index: int, state):
+        """Build the search input without changing the semantic game state."""
+
+        adapter = None
+        if self._is_arena and self.observation_adapters:
+            model_index = self.player_to_index[self.games[index].player]
+            adapter = self.observation_adapters[model_index]
+        if adapter is not None:
+            return self._mcts(index).search_observation(state, adapter)
+        if getattr(self, 'score_aware', False):
+            observation = self._mcts(index).search_observation(state)
+            return apply_pass_would_end_phase_feature(state, observation)
+        return state.observation()
 
     def _check_pause(self):
         while self.pause_event.is_set() and not self.stop_event.is_set():
@@ -410,13 +435,16 @@ class SelfPlayAgent(mp.Process):
                 if self.ownership_tensor is not None:
                     self.ownership_tensor[i].copy_(self._WARMUP_OWNERSHIP)
                 continue
-            observation = self._mcts(i).search_observation(state) if getattr(self, 'score_aware', False) else state.observation()
-            if getattr(self, 'score_aware', False):
-                observation = apply_pass_would_end_phase_feature(state, observation)
+            observation = self._observation_for_search(i, state)
             data = torch.from_numpy(observation)
             if self._is_arena:
-                data = data.view(-1, *state.observation_size())
                 player = self.player_to_index[self.games[i].player]
+                adapter = self.observation_adapters[player] if self.observation_adapters else None
+                if adapter is not None:
+                    observation_shape = adapter.observation_size()
+                else:
+                    observation_shape = state.observation_size()
+                data = data.view(-1, *observation_shape)
                 batch_tensor[player].append(data)
                 arena_slots_by_player[player].append(i)
             else:
