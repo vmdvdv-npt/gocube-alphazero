@@ -6,8 +6,10 @@ import math
 import os
 import random
 import sys
+from dataclasses import dataclass
 from glob import glob
 from time import time
+from typing import Callable
 
 import numpy as np
 import torch
@@ -18,9 +20,11 @@ from alphazero.Arena import Arena
 from alphazero.Coach import TrainState, _set_state
 from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.envs.gocube.diversified_game import (
+    diversified_baseline_pinned_game_class,
     diversified_structural_pinned_game_class,
 )
 from alphazero.envs.gocube.pinned_game import (
+    BASELINE_NETWORK_ARCHITECTURE_ID,
     G1_NETWORK_ARCHITECTURE_ID,
 )
 from alphazero.envs.gocube.structural import STRUCTURAL_FEATURE_SCHEMA
@@ -79,6 +83,49 @@ DEFAULT_ARENA_GAMES_PER_OPPONENT = 64
 DEFAULT_ARENA_ANCHOR_PERIOD = 10
 DEFAULT_ARENA_REGRESSION_WIN_RATE = 0.45
 DEFAULT_ARENA_SEED = 20260906
+
+DEFAULT_PRODUCTION_MODEL_PROFILE = "baseline"
+PRODUCTION_MODEL_PROFILE_CHOICES = ("baseline", "g1")
+
+
+@dataclass(frozen=True)
+class ProductionModelProfile:
+    """Reproducible architecture selector for the common training path."""
+
+    name: str
+    game_factory: Callable[[type], type]
+    network_architecture_id: str
+    structural_feature_schema: str | None
+    structural_feature_channels: int
+
+
+PRODUCTION_MODEL_PROFILES = {
+    "baseline": ProductionModelProfile(
+        name="baseline",
+        game_factory=diversified_baseline_pinned_game_class,
+        network_architecture_id=BASELINE_NETWORK_ARCHITECTURE_ID,
+        structural_feature_schema=None,
+        structural_feature_channels=0,
+    ),
+    "g1": ProductionModelProfile(
+        name="g1",
+        game_factory=diversified_structural_pinned_game_class,
+        network_architecture_id=G1_NETWORK_ARCHITECTURE_ID,
+        structural_feature_schema=STRUCTURAL_FEATURE_SCHEMA,
+        structural_feature_channels=2,
+    ),
+}
+
+
+def production_model_profile(name: str | None) -> ProductionModelProfile:
+    selected = DEFAULT_PRODUCTION_MODEL_PROFILE if name is None else str(name).lower()
+    try:
+        return PRODUCTION_MODEL_PROFILES[selected]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown GoCube production model profile {name!r}; "
+            f"expected one of {PRODUCTION_MODEL_PROFILE_CHOICES}"
+        ) from exc
 
 _SWEEP_FLAG_TO_ARG_KEYS = {
     "--chosen-move-temperature-halflife": ("gocube_chosen_move_temperature_halflife",),
@@ -877,6 +924,14 @@ def parse_args(argv=None):
     )
     parser.add_argument("--arena-seed", type=int, default=DEFAULT_ARENA_SEED)
     parser.add_argument("--arena-batched", action="store_true")
+    parser.add_argument(
+        "--gocube-model-profile",
+        "--model-profile",
+        dest="gocube_model_profile",
+        choices=PRODUCTION_MODEL_PROFILE_CHOICES,
+        default=DEFAULT_PRODUCTION_MODEL_PROFILE,
+        help="Select the reproducible production architecture profile.",
+    )
     parser.add_argument("--no-arena", action="store_true")
     parser.add_argument("--model-gating", action="store_true")
     parser.add_argument("--smoke", action="store_true")
@@ -929,9 +984,12 @@ def build_katago_training_args(cli):
         batch_size=cli.train_batch_size,
     )
 
+    profile = production_model_profile(
+        getattr(cli, "gocube_model_profile", DEFAULT_PRODUCTION_MODEL_PROFILE)
+    )
     base_game_cls, args = build_training_args(cli)
     args = args.copy()
-    game_cls = diversified_structural_pinned_game_class(base_game_cls)
+    game_cls = profile.game_factory(base_game_cls)
     defaults = KATAGO_SEARCH_DEFAULTS
     cleanup_defaults = KATAGO_CLEANUP_TRAINING_DEFAULTS
     selfplay_defaults = KATAGO_PINNED_SELFPLAY_DEFAULTS
@@ -942,9 +1000,10 @@ def build_katago_training_args(cli):
         raise ValueError(f"Production GoCube contract requires komi 0.5, got {args.gocube_komi}")
 
     args.search_utility_mode = KATAGO_PINNED_SEARCH_UTILITY_MODE
-    args.gocube_network_architecture = G1_NETWORK_ARCHITECTURE_ID
-    args.gocube_structural_feature_schema = STRUCTURAL_FEATURE_SCHEMA
-    args.gocube_structural_feature_channels = 2
+    args.gocube_model_profile = profile.name
+    args.gocube_network_architecture = profile.network_architecture_id
+    args.gocube_structural_feature_schema = profile.structural_feature_schema
+    args.gocube_structural_feature_channels = profile.structural_feature_channels
     args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
     args.gocube_katago_search_contract = KATAGO_SEARCH_CONTRACT
     args.gocube_katago_search_reference_commit = KATAGO_REFERENCE_COMMIT
@@ -1065,6 +1124,7 @@ def assert_fresh_run(args):
 def print_katago_search_configuration(args):
     print_training_configuration(args)
     print("Pinned KataGo search:")
+    print(f"  model profile = {args.gocube_model_profile}")
     print(f"  reference commit = {args.gocube_katago_search_reference_commit}")
     print(f"  utility mode = {args.search_utility_mode}")
     print(f"  observation schema = {args.gocube_observation_schema}")

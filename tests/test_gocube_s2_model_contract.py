@@ -33,7 +33,7 @@ class _Catalog:
 @pytest.fixture(scope="module")
 def real_checkpoint(tmp_path_factory):
     root = tmp_path_factory.mktemp("gocube-s2")
-    game_cls, args = build_hardened_training_args(parse_args([]))
+    game_cls, args = build_hardened_training_args(parse_args(["--model-profile", "g1"]))
     args = args.copy()
     args.cuda = False
     args.checkpoint = str(root)

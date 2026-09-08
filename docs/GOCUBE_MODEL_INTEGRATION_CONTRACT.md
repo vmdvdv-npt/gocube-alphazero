@@ -22,6 +22,22 @@ PointId sequence.  `adjacency_fingerprint` is the digest of the neighbor table
 in that sequence.  They are deterministic and do not use Python's process-
 dependent `hash()`.
 
+## Production model profiles
+
+The production KataGo training path has one explicit architecture selector:
+`--model-profile baseline` or `--model-profile g1`.  The default is the
+reproducible `baseline` profile, so G1 is not an implicit production default.
+Both profiles use the same training, self-play, replay, and evaluation path;
+the selector records the architecture and structural-channel contract in the
+effective configuration and resume manifest.
+
+The baseline profile keeps the historical graph architecture, observation
+shape `(18, 96, 1)` for Cube 4, architecture ID `gocube-graph-v1`, and zero
+structural channels.  The explicit G1 profile uses shape `(20, 96, 1)`,
+architecture ID `gocube-graph-structural-v1`, and two structural channels.
+Future B0/B1 profiles should be added to this same selector rather than
+creating a second production training path.
+
 The compact manifest is authoritative only when it contains the complete
 contract.  The loader reads checkpoint metadata before constructing a network,
 resolves the exact compatible game class, compares it with the catalog
@@ -31,8 +47,8 @@ topology/size-only resolver is reserved for explicit historical V1/V2/V3
 manifests, where the terminal-adjudicator version is part of the legacy
 semantics.
 
-The current pinned training builder records the G1 structural observation
-contract with shape `(20, 96, 1)` for Cube 4 and architecture ID
+The explicit G1 profile records the structural observation contract with shape
+`(20, 96, 1)` for Cube 4 and architecture ID
 `gocube-graph-structural-v1`.  The first 18 channels retain the pinned V3
 observation; channels 18 and 19 are, respectively, binary graph-triangle
 membership and normalized shortest-path distance to the triangle point set.

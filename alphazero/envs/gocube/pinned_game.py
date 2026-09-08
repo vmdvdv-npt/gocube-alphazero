@@ -44,6 +44,7 @@ from .structural import (
 
 G1_OBSERVATION_SCHEMA = "gocube-observation-v5-structural-features"
 G1_NETWORK_ARCHITECTURE_ID = "gocube-graph-structural-v1"
+BASELINE_NETWORK_ARCHITECTURE_ID = "gocube-graph-v1"
 
 
 # =============================================================================
@@ -412,6 +413,7 @@ def structural_pinned_game_class(base_game_cls):
                 "OBSERVATION_FEATURES": int(pinned.OBSERVATION_FEATURES) + STRUCTURAL_FEATURE_CHANNELS,
                 "OBSERVATION_SCHEMA": G1_OBSERVATION_SCHEMA,
                 "GOCUBE_NETWORK_ARCHITECTURE_ID": G1_NETWORK_ARCHITECTURE_ID,
+                "GOCUBE_MODEL_PROFILE": "g1",
                 "GOCUBE_GAME_CLASS_ID": (
                     f"gocube-g1-pinned-{topology.kind}-{int(topology.size)}"
                 ),

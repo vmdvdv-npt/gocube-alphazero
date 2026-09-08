@@ -21,7 +21,7 @@ ATOL = 1.0e-6
 
 
 def _search_args():
-    game_cls, args = build_katago_training_args(parse_args([]))
+    game_cls, args = build_katago_training_args(parse_args(["--model-profile", "g1"]))
     assert game_cls is GAME
     assert float(args.gocube_komi) == 0.5
     args._num_players = GAME.num_players() + GAME.has_draw()

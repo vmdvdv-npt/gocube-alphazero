@@ -12,6 +12,7 @@ import torch
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.envs.gocube.core import Topology, cube_topology, torus_topology
 from alphazero.envs.gocube.diversified_game import (
+    diversified_pinned_game_class,
     diversified_structural_pinned_game_class,
 )
 from alphazero.envs.gocube.game import (
@@ -112,7 +113,9 @@ def _small_graph_args(*, auxiliary=False, depth=2):
 
 
 def _g1_args(tmp_path):
-    game_cls, args = build_hardened_training_args(parse_args(["--smoke"]))
+    game_cls, args = build_hardened_training_args(
+        parse_args(["--model-profile", "g1", "--smoke"])
+    )
     args = args.copy()
     args.cuda = False
     args.checkpoint = str(tmp_path)
@@ -185,6 +188,10 @@ def test_point_order_fingerprint_changes_for_reindexed_topology():
 
     original = cube_topology(4)
     reordered = _reindexed_topology(original, (1, 0, *range(2, original.point_count)))
+    assert reordered.kind == original.kind
+    assert reordered.size == original.size
+    assert reordered.point_count == original.point_count
+    assert set(reordered.point_ids) == set(original.point_ids)
     for original_point in range(original.point_count):
         original_id = original.point_id(original_point)
         reordered_point = reordered.point_index(original_id)
@@ -301,7 +308,9 @@ def test_triangle_classification_reaches_100_percent_with_g1_network():
 def test_g1_production_contract_has_new_identity_and_observation():
     from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
 
-    game_cls, args = build_hardened_training_args(parse_args(["--smoke"]))
+    game_cls, args = build_hardened_training_args(
+        parse_args(["--model-profile", "g1", "--smoke"])
+    )
     contract = resolve_model_contract(game_cls, args)
     old_cls = diversified_pinned_game_class(Cube4JapaneseGame)
     old_args = args.copy()
@@ -316,6 +325,93 @@ def test_g1_production_contract_has_new_identity_and_observation():
     assert contract.network_architecture_fingerprint
     assert contract.network_architecture_id != "gocube-graph-v1"
     assert contract.network_architecture_fingerprint != old_contract.network_architecture_fingerprint
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("gocube_network_architecture", "gocube-graph-v1"),
+        ("gocube_structural_feature_schema", "gocube-structural-features-other-v1"),
+        ("gocube_structural_feature_channels", 0),
+    ),
+)
+def test_resolve_model_contract_rejects_game_class_argument_conflicts(
+    tmp_path, field, value
+):
+    game_cls, args = _g1_args(tmp_path)
+    broken = args.copy()
+    broken[field] = value
+    with pytest.raises(ContractError, match=field):
+        resolve_model_contract(game_cls, broken)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("gocube_network_architecture", "gocube-graph-v1"),
+        ("gocube_structural_feature_schema", "gocube-structural-features-other-v1"),
+        ("gocube_structural_feature_channels", 0),
+    ),
+)
+def test_real_loader_rejects_game_class_argument_conflicts(
+    tmp_path, field, value
+):
+    game_cls, args = _g1_args(tmp_path)
+    model = NNetWrapper(game_cls, args)
+    checkpoint_dir = tmp_path / "g1-loader"
+    checkpoint_dir.mkdir()
+    checkpoint_path = checkpoint_dir / "iteration-0000.pkl"
+    model.save_checkpoint(str(checkpoint_dir), checkpoint_path.name)
+
+    payload = torch.load(checkpoint_path, map_location="cpu")
+    saved_args = payload["args"].copy()
+    saved_args.pop("gocube_model_contract", None)
+    saved_args[field] = value
+    payload["args"] = saved_args
+    torch.save(payload, checkpoint_path)
+
+    contract = resolve_model_contract(game_cls, args)
+    descriptor = _descriptor_for(checkpoint_path, contract, game_cls)
+    with pytest.raises(CheckpointMetadataInvalid, match=field):
+        CheckpointModelLoader(_Catalog(descriptor), device="cpu").load(
+            descriptor.checkpoint_id
+        )
+
+
+def test_historical_v4_checkpoint_round_trips_through_loader(tmp_path):
+    historical_cls = diversified_pinned_game_class(Cube4JapaneseGame)
+    _production_cls, production_args = build_hardened_training_args(
+        parse_args(["--model-profile", "baseline", "--smoke"])
+    )
+    args = production_args.copy()
+    args.gocube_observation_schema = historical_cls.OBSERVATION_SCHEMA
+    for key in (
+        "gocube_model_profile",
+        "gocube_structural_feature_schema",
+        "gocube_structural_feature_channels",
+    ):
+        args.pop(key, None)
+
+    model = NNetWrapper(historical_cls, args)
+    checkpoint_path = tmp_path / "historical-v4.pkl"
+    model.save_checkpoint(str(tmp_path), checkpoint_path.name)
+    contract = resolve_model_contract(historical_cls, args)
+    descriptor = _descriptor_for(checkpoint_path, contract, historical_cls)
+
+    game = historical_cls()
+    observation = game.observation()
+    _, loaded = CheckpointModelLoader(
+        _Catalog(descriptor), device="cpu"
+    ).load(descriptor.checkpoint_id)
+    assert loaded.game_cls is historical_cls
+    assert historical_cls.OBSERVATION_SCHEMA == "gocube-observation-v4-pass-would-end-phase"
+    assert observation.shape == (18, 96, 1)
+    direct = model.predict_for_search(observation)
+    reloaded = loaded.predict_for_search(observation)
+    for field in ("policy", "value", "ownership", "score"):
+        np.testing.assert_allclose(
+            getattr(direct, field), getattr(reloaded, field), rtol=1e-6, atol=1e-7
+        )
 
 
 def test_24_cube_rotations_preserve_adjacency_and_structural_features():

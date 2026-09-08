@@ -15,6 +15,7 @@ from typing import Any, Mapping
 MODEL_CONTRACT_VERSION = 1
 MODEL_CONTRACT_ID = "gocube-model-contract-v1"
 ACTION_SCHEMA = "gocube-action-point-id-pass-v1"
+_MISSING = object()
 
 
 class ContractError(ValueError):
@@ -27,6 +28,16 @@ def _get(metadata: Any, key: str, default: Any = None) -> Any:
     if isinstance(metadata, Mapping):
         return metadata.get(key, default)
     return getattr(metadata, key, default)
+
+
+def _provided(metadata: Any, key: str) -> Any:
+    """Return a value while preserving the distinction between absent/None."""
+
+    if metadata is None:
+        return _MISSING
+    if isinstance(metadata, Mapping):
+        return metadata[key] if key in metadata else _MISSING
+    return getattr(metadata, key, _MISSING)
 
 
 def _canonical_json(value: object) -> bytes:
@@ -107,6 +118,7 @@ def _architecture_config(args: Any, game_cls=None) -> dict[str, object]:
         "nnet_type", "num_channels", "depth", "value_head_channels",
         "policy_head_channels", "input_fc_layers", "value_dense_layers",
         "policy_dense_layers", "score_dense_layers", "gocube_auxiliary_targets",
+        "gocube_model_profile",
         "gocube_network_architecture", "gocube_structural_feature_schema",
         "gocube_structural_feature_channels",
     )
@@ -115,16 +127,51 @@ def _architecture_config(args: Any, game_cls=None) -> dict[str, object]:
         if nnet_type is not None
         else {}
     )
-    if game_cls is not None and getattr(game_cls, "STRUCTURAL_FEATURE_SCHEMA", None):
+    if game_cls is not None and hasattr(game_cls, "GOCUBE_MODEL_PROFILE"):
+        result.setdefault("gocube_model_profile", str(game_cls.GOCUBE_MODEL_PROFILE))
+    if game_cls is not None and hasattr(game_cls, "GOCUBE_NETWORK_ARCHITECTURE_ID"):
+        result.setdefault(
+            "gocube_network_architecture",
+            str(game_cls.GOCUBE_NETWORK_ARCHITECTURE_ID),
+        )
+    if game_cls is not None and hasattr(game_cls, "STRUCTURAL_FEATURE_SCHEMA"):
         result.setdefault(
             "gocube_structural_feature_schema",
-            str(game_cls.STRUCTURAL_FEATURE_SCHEMA),
+            getattr(game_cls, "STRUCTURAL_FEATURE_SCHEMA"),
         )
+    if game_cls is not None and hasattr(game_cls, "STRUCTURAL_FEATURE_CHANNELS"):
         result.setdefault(
             "gocube_structural_feature_channels",
             int(getattr(game_cls, "STRUCTURAL_FEATURE_CHANNELS", 2)),
         )
     return result
+
+
+def _validate_game_class_args_compatibility(game_cls, args: Any) -> None:
+    """Reject contradictory class-vs-args architecture metadata early."""
+
+    checks = (
+        ("GOCUBE_MODEL_PROFILE", "gocube_model_profile", str),
+        ("GOCUBE_NETWORK_ARCHITECTURE_ID", "gocube_network_architecture", str),
+        ("STRUCTURAL_FEATURE_SCHEMA", "gocube_structural_feature_schema", None),
+        ("STRUCTURAL_FEATURE_CHANNELS", "gocube_structural_feature_channels", int),
+    )
+    for class_key, args_key, converter in checks:
+        if not hasattr(game_cls, class_key):
+            continue
+        expected = getattr(game_cls, class_key)
+        actual = _provided(args, args_key)
+        if actual is _MISSING:
+            continue
+        try:
+            compared = converter(actual) if converter is not None else actual
+        except (TypeError, ValueError):
+            compared = actual
+        if compared != expected:
+            raise ContractError(
+                f"GoCube game class/args conflict for {args_key}: "
+                f"game_cls={expected!r}, args={actual!r}"
+            )
 
 
 def _architecture_id(args: Any, game_cls=None) -> str:
@@ -335,6 +382,7 @@ def resolve_model_contract(game_cls, args: Any = None) -> ResolvedGoCubeContract
         raise ContractError(f"Cannot resolve GoCube contract from game class: {exc}") from exc
     if len(observation_shape) != 3:
         raise ContractError("GoCube observations must have three dimensions")
+    _validate_game_class_args_compatibility(game_cls, args)
     architecture = _architecture_config(args, game_cls)
     target_schema = _target_schema(args)
     output_heads = 4 if bool(_get(args, "gocube_auxiliary_targets", False)) else 2
@@ -372,6 +420,7 @@ def resolve_model_contract(game_cls, args: Any = None) -> ResolvedGoCubeContract
 def _candidate_game_classes() -> tuple[type, ...]:
     # Imports stay local: this module is used by manifest code during startup.
     from alphazero.envs.gocube.diversified_game import (
+        diversified_baseline_pinned_game_class,
         diversified_pinned_game_class,
         diversified_structural_pinned_game_class,
     )
@@ -397,6 +446,12 @@ def _candidate_game_classes() -> tuple[type, ...]:
                 if candidate is not None and candidate not in result:
                     result.append(candidate)
             if mapping is SUPPORTED_JAPANESE_GAMES:
+                try:
+                    baseline = diversified_baseline_pinned_game_class(base)
+                except ValueError:
+                    baseline = None
+                if baseline is not None and baseline not in result:
+                    result.append(baseline)
                 try:
                     diversified = diversified_pinned_game_class(base)
                 except ValueError:

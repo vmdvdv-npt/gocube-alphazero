@@ -1,9 +1,13 @@
 {
-  "baseline_commit": "cdd4aff015455299e0439abcdb3e942d46c3fe29",
+  "baseline_commit": "adb8d9ca138d461cc3324c44930458561a031710",
+  "model_profile": "baseline",
   "architecture": {
     "network_class": "alphazero.envs.gocube.network.GraphNet",
-    "observation_shape": [20, 96, 1],
+    "observation_shape": [18, 96, 1],
     "action_size": 97,
+    "network_architecture_id": "gocube-graph-v1",
+    "structural_feature_schema": null,
+    "structural_feature_channels": 0,
     "value_output_size": 3,
     "auxiliary_heads": ["ownership", "score"],
     "num_channels": 64,

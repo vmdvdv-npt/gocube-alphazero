@@ -45,7 +45,11 @@ from .rotations import (
     rotate_board,
     rotate_point_set,
 )
-from .pinned_game import G1_NETWORK_ARCHITECTURE_ID, G1_OBSERVATION_SCHEMA
+from .pinned_game import (
+    BASELINE_NETWORK_ARCHITECTURE_ID,
+    G1_NETWORK_ARCHITECTURE_ID,
+    G1_OBSERVATION_SCHEMA,
+)
 from .structural import (
     DISTANCE_TO_TRIANGLE_CHANNEL,
     STRUCTURAL_FEATURE_CHANNELS,
