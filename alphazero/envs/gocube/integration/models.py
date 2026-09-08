@@ -253,6 +253,11 @@ class CheckpointModelLoader:
 
     def load(self, checkpoint_id: str):
         descriptor = self.descriptor(checkpoint_id)
+        if descriptor.terminal_adjudicator == "gocube-katago-japanese-v3":
+            require_gocube_komi(
+                descriptor.komi,
+                context=f"Checkpoint {descriptor.checkpoint_id}",
+            )
         cache_key = (descriptor.checkpoint_id, self.device)
 
         def load_uncached():

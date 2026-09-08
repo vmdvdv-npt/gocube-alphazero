@@ -21,7 +21,16 @@ pyximport.install()
 from alphazero.Arena import Arena
 from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.NNetWrapper import NNetWrapper
-from alphazero.envs.gocube.game import game_class
+from alphazero.envs.gocube.observation import GoCubeObservationAdapter
+from alphazero.envs.gocube.production_contract import GOCUBE_KOMI
+
+from tools.gocube_checkpoint_arena_complete import (
+    _authoritative_game_class,
+    _load_payload,
+    _load_network,
+    _require_compatible_contracts,
+    _resolve_checkpoint_contract,
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -43,13 +52,9 @@ def score_interval(score: float, n: int, z: float = 1.959963984540054) -> tuple[
 
 
 def load_network(game_cls, checkpoint_path: Path) -> NNetWrapper:
-    return NNetWrapper.from_checkpoint(
-        game_cls,
-        folder=str(checkpoint_path.parent),
-        filename=checkpoint_path.name,
-        device="cpu",
-        load_training_state=False,
-    )
+    """Compatibility wrapper for callers of the old helper."""
+
+    return _load_network(game_cls, checkpoint_path, "cpu")
 
 
 def main() -> int:
@@ -62,7 +67,7 @@ def main() -> int:
     parser.add_argument("--topology", default="cube", choices=("cube", "torus"))
     parser.add_argument("--size", type=int, default=4)
     parser.add_argument("--games", type=int, default=32)
-    parser.add_argument("--sims", type=int, default=100)
+    parser.add_argument("--sims", type=int, default=50)
     parser.add_argument("--seed", type=int, default=20260906)
     args = parser.parse_args()
 
@@ -70,6 +75,8 @@ def main() -> int:
         parser.error("--games must be an even integer >= 2 so colors are balanced")
     if args.sims < 1:
         parser.error("--sims must be >= 1")
+    if args.sims != 50:
+        parser.error("GoCube Arena requires exactly 50 simulations")
 
     candidate_path = Path(args.candidate).resolve()
     reference_path = Path(args.reference).resolve()
@@ -83,9 +90,26 @@ def main() -> int:
     torch.manual_seed(args.seed)
     torch.set_num_threads(max(1, min(16, os.cpu_count() or 1)))
 
-    game_cls = game_class(args.topology, args.size, "japanese")
-    candidate = load_network(game_cls, candidate_path)
-    reference = load_network(game_cls, reference_path)
+    candidate_payload = _load_payload(candidate_path)
+    reference_payload = _load_payload(reference_path)
+    candidate_contract, candidate_game_cls = _resolve_checkpoint_contract(
+        candidate_payload["args"], "candidate"
+    )
+    reference_contract, reference_game_cls = _resolve_checkpoint_contract(
+        reference_payload["args"], "reference"
+    )
+    _require_compatible_contracts(
+        candidate_contract, reference_contract,
+        candidate_payload["args"], reference_payload["args"],
+    )
+    if (
+        candidate_contract.topology_kind != args.topology
+        or candidate_contract.topology_size != int(args.size)
+    ):
+        raise ValueError("CLI topology/size does not match checkpoint contracts")
+    game_cls = _authoritative_game_class(candidate_contract)
+    candidate = _load_network(candidate_game_cls, candidate_path, "cpu")
+    reference = _load_network(reference_game_cls, reference_path, "cpu")
 
     eval_args = candidate.args.copy()
     eval_args.cuda = False
@@ -100,8 +124,18 @@ def main() -> int:
     eval_args.use_draws_for_winrate = True
 
     players = [
-        MCTSPlayer(candidate, game_cls=game_cls, args=eval_args),
-        MCTSPlayer(reference, game_cls=game_cls, args=eval_args),
+        MCTSPlayer(
+            candidate,
+            game_cls=game_cls,
+            args=eval_args,
+            observation_adapter=GoCubeObservationAdapter(candidate_game_cls),
+        ),
+        MCTSPlayer(
+            reference,
+            game_cls=game_cls,
+            args=eval_args,
+            observation_adapter=GoCubeObservationAdapter(reference_game_cls),
+        ),
     ]
     arena = Arena(players, game_cls, use_batched_mcts=False, args=eval_args)
 
@@ -131,6 +165,7 @@ def main() -> int:
         "topology": args.topology,
         "size": args.size,
         "ruleset": "japanese",
+        "komi": GOCUBE_KOMI,
         "games_requested": args.games,
         "games_effective": effective_games,
         "candidate_wins": int(wins[0]),

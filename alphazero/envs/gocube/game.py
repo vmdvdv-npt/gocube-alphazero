@@ -68,6 +68,41 @@ V3_DEFAULT_KOMI = 0.5
 MAX_CLEANUP_STAGES = 2
 
 
+def _v3_observation_from_state(state: V3State, topology: Topology) -> np.ndarray:
+    """Build the common 17-plane V3 view from semantic state only.
+
+    This is deliberately a pure function.  Profile-specific observation
+    adapters use it through ``observation_from_semantic_state`` so a network
+    can receive its saved representation without creating a second mutable
+    game timeline.
+    """
+
+    point_count = topology.point_count
+    observation = np.zeros((OBSERVATION_FEATURES, point_count, 1), dtype=np.float32)
+    observation[0, :, 0] = state.board == BLACK
+    observation[1, :, 0] = state.board == WHITE
+    if state.previous_board is not None:
+        observation[2, :, 0] = state.previous_board == BLACK
+        observation[3, :, 0] = state.previous_board == WHITE
+    observation[4, :, 0] = 1.0 if state.current_player == 0 else -1.0
+    observation[5, :, 0] = 1.0 if state.consecutive_passes == 1 else 0.0
+    observation[6, :, 0] = state.captures[0] / point_count
+    observation[7, :, 0] = state.captures[1] / point_count
+    observation[8, :, 0] = 1.0 if state.phase == CLEANUP_1 else 0.0
+    observation[9, :, 0] = 1.0 if state.phase == CLEANUP_2 else 0.0
+    if state.ko_recap_blocked:
+        observation[10, list(state.ko_recap_blocked), 0] = 1.0
+    if state.second_cleanup_start_colors is not None:
+        start = np.frombuffer(state.second_cleanup_start_colors, dtype=np.uint8)
+        observation[11, :, 0] = start == BLACK
+        observation[12, :, 0] = start == WHITE
+    observation[13, :, 0] = state.cleanup2_moves[0] / point_count
+    observation[14, :, 0] = state.cleanup2_moves[1] / point_count
+    observation[15, :, 0] = repetition_pressure(state)
+    observation[16, :, 0] = ko_repeat_forbidden_mask(state, topology)
+    return observation
+
+
 class _TopologyAdapter(GameState):
     TOPOLOGY: ClassVar[Topology]
     RULESET: ClassVar[str] = "japanese"
@@ -233,32 +268,15 @@ class GoGame(_TopologyAdapter):
         )
 
     def observation(self) -> np.ndarray:
-        state = self._state
-        topology = self.logical_topology()
-        point_count = topology.point_count
-        observation = np.zeros(self.observation_size(), dtype=np.float32)
-        observation[0, :, 0] = state.board == BLACK
-        observation[1, :, 0] = state.board == WHITE
-        if state.previous_board is not None:
-            observation[2, :, 0] = state.previous_board == BLACK
-            observation[3, :, 0] = state.previous_board == WHITE
-        observation[4, :, 0] = 1.0 if state.current_player == 0 else -1.0
-        observation[5, :, 0] = 1.0 if state.consecutive_passes == 1 else 0.0
-        observation[6, :, 0] = state.captures[0] / point_count
-        observation[7, :, 0] = state.captures[1] / point_count
-        observation[8, :, 0] = 1.0 if state.phase == CLEANUP_1 else 0.0
-        observation[9, :, 0] = 1.0 if state.phase == CLEANUP_2 else 0.0
-        if state.ko_recap_blocked:
-            observation[10, list(state.ko_recap_blocked), 0] = 1.0
-        if state.second_cleanup_start_colors is not None:
-            start = np.frombuffer(state.second_cleanup_start_colors, dtype=np.uint8)
-            observation[11, :, 0] = start == BLACK
-            observation[12, :, 0] = start == WHITE
-        observation[13, :, 0] = state.cleanup2_moves[0] / point_count
-        observation[14, :, 0] = state.cleanup2_moves[1] / point_count
-        observation[15, :, 0] = repetition_pressure(state)
-        observation[16, :, 0] = ko_repeat_forbidden_mask(state, topology)
-        return observation
+        return type(self).observation_from_semantic_state(self._state)
+
+    @classmethod
+    def observation_from_semantic_state(cls, state: V3State) -> np.ndarray:
+        """Build this class's base observation without mutating a game object."""
+
+        if not isinstance(state, V3State):
+            raise TypeError("GoCube V3 observations require a V3 semantic state")
+        return _v3_observation_from_state(state, cls.logical_topology())
 
     def diagnostic_counters(self) -> dict[str, int | float]:
         state = self._state

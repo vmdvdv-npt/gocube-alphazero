@@ -17,6 +17,7 @@ from .game import (
     Torus9JapaneseGame,
     Torus13JapaneseGame,
     Torus19JapaneseGame,
+    _v3_observation_from_state,
 )
 from .katago_v3 import (
     CLEANUP_2,
@@ -32,8 +33,8 @@ from .selfplay_semantics import (
     KATAGO_PINNED_SELFPLAY_DEFAULTS,
     PASS_WOULD_END_PHASE_CHANNEL,
     PINNED_OBSERVATION_SCHEMA,
-    apply_pass_would_end_phase_feature,
     finalize_episode_due_to_runtime_limit,
+    pass_would_end_phase,
     resolve_episode_move_limit,
 )
 from .structural import (
@@ -62,6 +63,7 @@ BASELINE_NETWORK_ARCHITECTURE_ID = "gocube-graph-v1"
 
 class _PinnedPassWouldEndPhaseMixin:
     OBSERVATION_FEATURES = PASS_WOULD_END_PHASE_CHANNEL + 1
+    PINNED_OBSERVATION_FEATURES = PASS_WOULD_END_PHASE_CHANNEL + 1
     OBSERVATION_SCHEMA = PINNED_OBSERVATION_SCHEMA
     _SEKI_FORK_POOL = []
 
@@ -83,10 +85,23 @@ class _PinnedPassWouldEndPhaseMixin:
         self._pinned_episode_limit_override = None
 
     def observation(self):
-        # Base GoGame.observation() allocates using self.observation_size(), so
-        # the subclass feature count makes the existing 17 V3 planes land in an
-        # 18-plane tensor and leaves the final plane for passWouldEndPhase.
-        return apply_pass_would_end_phase_feature(self, super().observation())
+        return type(self).observation_from_semantic_state(self._state)
+
+    @classmethod
+    def observation_from_semantic_state(cls, state):
+        """Build the pinned 18-plane view from semantic state only."""
+
+        result = np.zeros(
+            (cls.PINNED_OBSERVATION_FEATURES, cls.logical_topology().point_count, 1),
+            dtype=np.float32,
+        )
+        result[:PASS_WOULD_END_PHASE_CHANNEL] = _v3_observation_from_state(
+            state, cls.logical_topology()
+        )
+        result[PASS_WOULD_END_PHASE_CHANNEL] = (
+            1.0 if pass_would_end_phase(state) else 0.0
+        )
+        return result
 
     @classmethod
     def rules_fingerprint(cls) -> str:
@@ -431,15 +446,18 @@ class _StructuralObservationMixin:
         )
 
     def observation(self):
-        result = super().observation()
-        structural = structural_feature_matrix(self.logical_topology())
-        expected_shape = (STRUCTURAL_FEATURE_CHANNELS, self.logical_topology().point_count, 1)
-        if structural.shape != expected_shape or result.shape[0] != expected_shape[0] + int(
-            self._G1_BASE_OBSERVATION_FEATURES
+        return type(self).observation_from_semantic_state(self._state)
+
+    @classmethod
+    def observation_from_semantic_state(cls, state):
+        result = super().observation_from_semantic_state(state)
+        structural = structural_feature_matrix(cls.logical_topology())
+        expected_shape = (STRUCTURAL_FEATURE_CHANNELS, cls.logical_topology().point_count, 1)
+        if structural.shape != expected_shape or result.shape[0] != int(
+            cls._G1_BASE_OBSERVATION_FEATURES
         ):
             raise RuntimeError("G1 structural observation shape mismatch")
-        result[-STRUCTURAL_FEATURE_CHANNELS:] = structural
-        return result
+        return np.concatenate((result, structural), axis=0)
 
 
 _STRUCTURAL_PINNED_BY_BASE = {}

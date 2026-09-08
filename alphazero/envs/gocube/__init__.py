@@ -70,6 +70,7 @@ from .structural import (
     structural_feature_metadata,
     triangle_membership,
 )
+from .observation import GoCubeObservationAdapter, ModelObservationAdapter, model_observation_adapter
 from .terminal import (
     CONSERVATIVE_AREA_ADJUDICATOR_V1, JAPANESE_CLEANUP_ADJUDICATOR_V2,
     TerminalAdjudication, TerminalGroupResolution, UnsupportedSelfPlayRuleset,
