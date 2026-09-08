@@ -315,6 +315,45 @@ class Arena:
         self.games_played = final_games_played
         return final_games_played, results_accounted
 
+    def __drain_batched_results_while_workers_exit(
+            self, agents, result_queue, games_played, results_accounted
+    ):
+        """Drain result IPC while workers finish their Queue feeder threads."""
+        initial_games_played = int(games_played.value)
+        deadline = time.monotonic() + 30.0
+
+        while True:
+            results_accounted += self.__account_batched_results(result_queue)
+            for agent in agents:
+                if agent.is_alive():
+                    agent.join(timeout=0.05)
+                    results_accounted += self.__account_batched_results(result_queue)
+
+            if not any(agent.is_alive() for agent in agents):
+                break
+            if time.monotonic() >= deadline:
+                active_workers = [int(agent.id) for agent in agents if agent.is_alive()]
+                raise RuntimeError(
+                    'Batched Arena workers did not exit while result_queue was being drained: '
+                    f'active_workers={active_workers}, results_accounted={results_accounted}, '
+                    f'games_played={int(games_played.value)}'
+                )
+
+        # Every worker is known to have exited, so this join is non-blocking;
+        # all potentially blocking joins above were bounded and interleaved
+        # with result consumption.
+        for agent in agents:
+            agent.join()
+
+        final_games_played = int(games_played.value)
+        if final_games_played < initial_games_played:
+            raise RuntimeError(
+                'Batched Arena accounting invariant violated during worker shutdown: '
+                f'initial games_played={initial_games_played}, '
+                f'final games_played={final_games_played}'
+            )
+        return final_games_played, results_accounted
+
     def wins(self) -> List[int]:
         return [s.wins for s in self.__player_stats]
 
@@ -523,8 +562,12 @@ class Arena:
 
             cancelled = self.stop_event.is_set()
             self.stop_event.set()
-            for agent in self._agents:
-                agent.join()
+            _, results_accounted = self.__drain_batched_results_while_workers_exit(
+                self._agents,
+                result_queue,
+                games_played,
+                results_accounted,
+            )
 
             final_games_played, results_accounted = self.__finalize_batched_results(
                 result_queue,
