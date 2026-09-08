@@ -401,6 +401,23 @@ def render_markdown_report(state: dict[str, object]) -> str:
                     f"optimizer_steps={counters.get('optimizer_steps', 0)}, "
                     f"examples_seen={counters.get('optimizer_examples_seen', 0)}"
                 )
+            scientific = budget.get("budget")
+            if isinstance(scientific, dict):
+                lines.append(
+                    "  scientific stop: "
+                    f"{scientific.get('kind')} target={scientific.get('target')} "
+                    f"after={scientific.get('after')} "
+                    f"overshoot={scientific.get('overshoot', 0)} "
+                    f"overshot={scientific.get('overshot', False)}"
+                )
+            metrics = budget.get("latest_iteration_metrics")
+            if isinstance(metrics, dict):
+                lines.append(
+                    "  episode metrics: "
+                    f"average_length={metrics.get('average_game_length', 0.0)}, "
+                    f"no_results={metrics.get('no_result_games', 0)}, "
+                    f"move_limit={metrics.get('episode_move_limit_games', 0)}"
+                )
         if stage.get("justification"):
             lines.append(f"- Rationale: {stage['justification']}")
         lines.append("")

@@ -304,6 +304,14 @@ def main(argv=None):
     network._gocube_checkpoint_arg_overrides = checkpoint_arg_overrides(cli, args)
     coach = HardenedKataGoSearchCoach(game_cls, network, args)
     coach.learn()
+    target = coach._sample_budget_target()
+    if target is not None and not coach._training_budget_reached():
+        counters = getattr(coach, "_cumulative_training_counters", None)
+        current = target.current(counters) if counters is not None else 0
+        raise RuntimeError(
+            "Scientific sample target was not reached before the iteration safety ceiling: "
+            f"{target.kind}={target.target}, current={current}"
+        )
 
 
 if __name__ == "__main__":

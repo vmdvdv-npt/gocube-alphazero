@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -110,14 +111,14 @@ class CumulativeTrainingCounters:
 
     @classmethod
     def from_mapping(cls, mapping: object) -> "CumulativeTrainingCounters":
-        if not isinstance(mapping, dict):
+        if not isinstance(mapping, Mapping):
             return cls()
         source = mapping.get("cumulative_counters")
-        if not isinstance(source, dict):
+        if not isinstance(source, Mapping):
             source = mapping.get("cumulative")
-        if not isinstance(source, dict):
+        if not isinstance(source, Mapping):
             source = mapping.get("counters")
-        if not isinstance(source, dict):
+        if not isinstance(source, Mapping):
             source = mapping
         values = {}
         for key in TRAINING_COUNTER_KEYS:
@@ -278,8 +279,11 @@ def load_training_progress(
         raise ValueError(f"invalid training progress artifact: {path}") from exc
     if not isinstance(payload, dict) or int(payload.get("schema_version", -1)) != TRAINING_PROGRESS_SCHEMA_VERSION:
         raise ValueError(f"unsupported training progress schema: {path}")
-    payload["counters"] = CumulativeTrainingCounters.from_mapping(payload).as_dict()
-    payload["cumulative_counters"] = dict(payload["counters"])
+    counters = CumulativeTrainingCounters.from_mapping(payload)
+    payload["counters"] = counters.as_dict()
+    payload["cumulative"] = counters.as_dict()
+    payload["cumulative_counters"] = counters.as_dict()
+    payload.update(counters.as_cumulative_dict())
     return payload
 
 
