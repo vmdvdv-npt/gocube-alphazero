@@ -283,7 +283,7 @@ def main(argv=None):
         )
     args.effective_config_sha256 = manifest["effective_config_sha256"]
     print_hardened_configuration(args)
-    ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
+    ensure_training_manifest(args.checkpoint, args.run_name, game_cls, args)
     seed_process(int(args.master_seed))
     network = AtomicSampleClockNNetWrapper(game_cls, args)
     network._gocube_checkpoint_arg_overrides = checkpoint_arg_overrides(cli, args)

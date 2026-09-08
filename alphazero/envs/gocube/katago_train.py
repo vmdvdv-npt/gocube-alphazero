@@ -1110,7 +1110,7 @@ def main(argv=None):
     if not cli.allow_existing_run:
         assert_fresh_run(args)
     print_katago_search_configuration(args)
-    ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
+    ensure_training_manifest(args.checkpoint, args.run_name, game_cls, args)
     network = SampleClockNNetWrapper(game_cls, args)
     network._gocube_checkpoint_arg_overrides = checkpoint_arg_overrides(cli, args)
     coach = KataGoSearchCoach(game_cls, network, args)

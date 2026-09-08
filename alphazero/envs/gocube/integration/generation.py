@@ -6,9 +6,9 @@ import numpy as np
 
 from alphazero.envs.gocube.core import BLACK, EMPTY, PLAYING, WHITE
 from alphazero.envs.gocube.evaluation import prepare_evaluation_args
-from alphazero.envs.gocube.game import game_class
 
 from .catalog import CheckpointDescriptor
+from .contract import ContractError, resolve_contract_for_descriptor, resolve_game_class_from_contract
 from .errors import GenerationFailed
 
 
@@ -33,12 +33,17 @@ def captured_point_ids(
     ]
 
 
-def serialize_terminal(terminal, *, cleanup_move_count: int = 0) -> dict[str, object]:
+def serialize_terminal(
+    terminal,
+    *,
+    cleanup_move_count: int = 0,
+    adjudicator_id: str | None = None,
+) -> dict[str, object]:
     payload = {
         "winner": terminal.winner,
-        "adjudicatorId": terminal.adjudicator_id,
-        "fallbackCount": terminal.fallback_count,
-        "unresolvedCount": terminal.unresolved_count,
+        "adjudicatorId": adjudicator_id or getattr(terminal, "adjudicator_id", None),
+        "fallbackCount": getattr(terminal, "fallback_count", 0),
+        "unresolvedCount": getattr(terminal, "unresolved_count", 0),
         "cleanupMoveCount": cleanup_move_count,
         "noResult": terminal.no_result,
         "score": None,
@@ -84,7 +89,7 @@ def _default_player_factory(model, game_cls, args):
 
 
 class GameGenerator:
-    def __init__(self, *, player_factory=None, game_cls_resolver=game_class):
+    def __init__(self, *, player_factory=None, game_cls_resolver=None):
         self.player_factory = player_factory or _default_player_factory
         self.game_cls_resolver = game_cls_resolver
 
@@ -97,7 +102,25 @@ class GameGenerator:
         white_model,
         mcts_sims: int,
     ) -> dict[str, object]:
-        game_cls = self.game_cls_resolver(black.topology, black.size, black.rule_set)
+        try:
+            black_contract = resolve_contract_for_descriptor(black)
+            white_contract = resolve_contract_for_descriptor(white)
+            differences = black_contract.differences(white_contract)
+            if differences:
+                field, (black_value, white_value) = next(iter(differences.items()))
+                raise GenerationFailed(
+                    f"Game model contracts differ for {field}: "
+                    f"black={black_value!r}, white={white_value!r}"
+                )
+            game_cls = (
+                self.game_cls_resolver(black.topology, black.size, black.rule_set)
+                if self.game_cls_resolver is not None
+                else resolve_game_class_from_contract(black_contract)
+            )
+        except GenerationFailed:
+            raise
+        except ContractError as exc:
+            raise GenerationFailed(f"Cannot resolve generation model contract: {exc}") from exc
         black_args = prepare_evaluation_args(black_model.args, game_cls, mcts_sims)
         white_args = prepare_evaluation_args(white_model.args, game_cls, mcts_sims)
         players = [
@@ -142,7 +165,9 @@ class GameGenerator:
             # Cleanup is an internal proof phase for Japanese territory scoring,
             # not part of the player-facing game record. Keep the two main-phase
             # passes in replay, then suppress service cleanup placements/passes.
-            if pre_state.phase != PLAYING:
+            # Historical GoState calls the main phase ``playing``; the
+            # KataGo V3 state calls it ``main``.  Both are player-facing.
+            if pre_state.phase not in (PLAYING, "main"):
                 cleanup_move_count += 1
                 continue
 
@@ -175,5 +200,9 @@ class GameGenerator:
             "black": {"checkpointId": black.checkpoint_id},
             "white": {"checkpointId": white.checkpoint_id},
             "moves": moves,
-            "result": serialize_terminal(terminal, cleanup_move_count=cleanup_move_count),
+            "result": serialize_terminal(
+                terminal,
+                cleanup_move_count=cleanup_move_count,
+                adjudicator_id=black.terminal_adjudicator,
+            ),
         }

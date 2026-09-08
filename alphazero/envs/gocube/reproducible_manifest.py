@@ -23,6 +23,7 @@ from .contract_versions import (
 )
 from .parameter_origins import classify_parameters
 from .records import effective_parameter_snapshot
+from .integration.contract import resolve_model_contract
 
 RUN_MANIFEST_SCHEMA_VERSION = 1
 RUN_MANIFEST_FILENAME = "run-manifest.json"
@@ -73,6 +74,7 @@ def _sha256_json_artifact(payload: object) -> str:
 
 
 def effective_config(args: Any, game_cls) -> dict[str, object]:
+    contract = resolve_model_contract(game_cls, args)
     config = effective_parameter_snapshot(args)
     config.update({
         "topology": game_cls.topology_kind(),
@@ -90,6 +92,20 @@ def effective_config(args: Any, game_cls) -> dict[str, object]:
         "network_type": getattr(args, "nnet_type", None),
         "observation_shape": list(game_cls.observation_size()),
         "action_size": int(game_cls.action_size()),
+        "action_schema": contract.action_schema,
+        "model_contract": contract.to_dict(),
+        "model_contract_id": contract.contract_id,
+        "model_contract_version": contract.contract_version,
+        "game_class_id": contract.game_class_id,
+        "rules_implementation": contract.rules_implementation,
+        "point_order_fingerprint": contract.point_order_fingerprint,
+        "adjacency_fingerprint": contract.adjacency_fingerprint,
+        "topology_fingerprint": contract.topology_fingerprint,
+        "network_architecture_id": contract.network_architecture_id,
+        "network_architecture_fingerprint": contract.network_architecture_fingerprint,
+        "search_contract_id": contract.search_contract_id,
+        "terminal_adjudicator_id": contract.terminal_adjudicator_id,
+        "output_heads": contract.output_heads,
         "value_output_size": 3,
         "replay_format_version": REPLAY_FORMAT_VERSION,
         "value_target_semantics": VALUE_TARGET_SEMANTICS,
@@ -182,6 +198,8 @@ def validate_existing_reproducible_manifest(
             mismatches.append(
                 f"{key}: saved={manifest.get(key)!r}, current={expected_manifest_values[key]!r}"
             )
+    if manifest.get("model_contract") is not None and manifest.get("model_contract") != current_config.get("model_contract"):
+        mismatches.append("model_contract: run-manifest conflicts with effective-config")
     if mismatches:
         raise RuntimeError(
             "Refusing resume: immutable run metadata conflicts: "
@@ -236,6 +254,7 @@ def create_reproducible_manifest(
             "Use --allow-dirty-source only for an explicitly experimental run."
         )
 
+    contract = resolve_model_contract(game_cls, args)
     config = effective_config(args, game_cls)
     config_path = checkpoint_run / EFFECTIVE_CONFIG_FILENAME
     atomic_json_write(config, config_path)
@@ -265,6 +284,17 @@ def create_reproducible_manifest(
         "source_patch_sha256": source_patch_hash,
         "katago_reference_commit": game_cls.KATAGO_REFERENCE_COMMIT,
         "rules_fingerprint": game_cls.rules_fingerprint(),
+        "model_contract": contract.to_dict(),
+        "topology": contract.topology_kind,
+        "size": contract.topology_size,
+        "point_count": contract.point_count,
+        "observation_schema": contract.observation_schema,
+        "observation_shape": list(contract.observation_shape),
+        "action_schema": contract.action_schema,
+        "action_size": contract.action_size,
+        "network_architecture_id": contract.network_architecture_id,
+        "search_contract_id": contract.search_contract_id,
+        "terminal_adjudicator": contract.terminal_adjudicator_id,
         "python_executable": os.path.abspath(sys.executable),
         "python_version": platform.python_version(),
         "platform": platform.platform(),

@@ -257,7 +257,7 @@ class SampleClockNNetWrapper(NNetWrapper):
             'opt_state': self.optimizer.state_dict(),
             'sch_state': self.scheduler.state_dict(),
             'training_state': training_state,
-            'args': self.args,
+            'args': self._checkpoint_args_payload(),
         }, filepath, pickle_protocol=pickle.HIGHEST_PROTOCOL)
 
     def load_checkpoint(

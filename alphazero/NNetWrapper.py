@@ -3,9 +3,11 @@ from alphazero.pytorch_classification.utils import Bar, AverageMeter
 from alphazero.Game import GameState
 from alphazero.search_contract import SearchOutput
 from alphazero.utils import dotdict
+from alphazero.envs.gocube.integration.contract import ContractError, resolve_model_contract
 from threading import Event
 from abc import ABC, abstractmethod
 from typing import Tuple, Optional
+import copy
 
 import torch.optim as optim
 import numpy as np
@@ -45,6 +47,21 @@ _SEARCH_CONTRACT_ARG_KEYS = (
     'cpuct',
     'fpu_reduction',
 )
+
+# These fields were added by S2.  A checkpoint from before S2 can still be
+# loaded when its older explicit schema/adjudicator metadata proves the same
+# historical inference semantics; missing S2 fingerprints are not silently
+# treated as mismatches.
+_S2_MODEL_CONTRACT_KEYS = frozenset({
+    'gocube_model_contract_id', 'gocube_model_contract_version',
+    'gocube_game_class_id', 'gocube_rules_implementation',
+    'gocube_observation_shape', 'gocube_action_schema', 'gocube_action_size',
+    'gocube_point_count', 'gocube_point_order_fingerprint',
+    'gocube_adjacency_fingerprint', 'gocube_topology_fingerprint',
+    'gocube_network_architecture', 'gocube_network_architecture_fingerprint',
+    'gocube_search_contract', 'gocube_targets_schema', 'gocube_output_heads',
+    'gocube_model_contract',
+})
 
 
 def _optional_arg(args, name, default=None):
@@ -330,15 +347,19 @@ class NNetWrapper(BaseWrapper):
 
     def _checkpoint_contract(self):
         fields = {}
-        if hasattr(self.game_cls, 'TERMINAL_ADJUDICATOR_ID'):
-            fields['gocube_terminal_adjudicator'] = self.game_cls.TERMINAL_ADJUDICATOR_ID
-        if hasattr(self.game_cls, 'OBSERVATION_SCHEMA'):
-            fields['gocube_observation_schema'] = self.game_cls.OBSERVATION_SCHEMA
-        if hasattr(self.game_cls, 'topology_kind'):
-            fields['gocube_topology'] = self.game_cls.topology_kind()
-            fields['gocube_size'] = self.game_cls.board_size()
-        if hasattr(self.game_cls, 'rules_fingerprint'):
-            fields['gocube_rules_fingerprint'] = self.game_cls.rules_fingerprint()
+        try:
+            fields.update(resolve_model_contract(self.game_cls, self.args).to_checkpoint_fields())
+        except (ContractError, AttributeError):
+            # Non-GoCube environments retain the generic wrapper contract.
+            if hasattr(self.game_cls, 'TERMINAL_ADJUDICATOR_ID'):
+                fields['gocube_terminal_adjudicator'] = self.game_cls.TERMINAL_ADJUDICATOR_ID
+            if hasattr(self.game_cls, 'OBSERVATION_SCHEMA'):
+                fields['gocube_observation_schema'] = self.game_cls.OBSERVATION_SCHEMA
+            if hasattr(self.game_cls, 'topology_kind'):
+                fields['gocube_topology'] = self.game_cls.topology_kind()
+                fields['gocube_size'] = self.game_cls.board_size()
+            if hasattr(self.game_cls, 'rules_fingerprint'):
+                fields['gocube_rules_fingerprint'] = self.game_cls.rules_fingerprint()
 
         configured_args = getattr(self, 'args', None)
         configured_contract = _optional_arg(
@@ -356,17 +377,40 @@ class NNetWrapper(BaseWrapper):
         expected = self._checkpoint_contract()
         strict_v3 = expected.get('gocube_terminal_adjudicator') == 'gocube-katago-japanese-v3'
         for key, value in expected.items():
-            if key not in saved_args:
+            saved_value = _optional_arg(saved_args, key, _MISSING)
+            if saved_value is _MISSING:
                 if key in _SEARCH_CONTRACT_ARG_KEYS and allow_legacy_search_contract:
+                    continue
+                if key in _S2_MODEL_CONTRACT_KEYS:
                     continue
                 if strict_v3:
                     raise ValueError(f'Checkpoint missing required GoCube V3 metadata: {key}')
                 continue
-            if saved_args[key] != value:
+            if saved_value != value:
                 raise ValueError(
                     f'Checkpoint GoCube contract mismatch for {key}: '
-                    f'saved={saved_args[key]!r}, expected={value!r}'
+                    f'saved={saved_value!r}, expected={value!r}'
                 )
+
+    def _checkpoint_args_payload(self):
+        """Return args plus the exact resolved contract saved with weights."""
+
+        if hasattr(self.args, "copy"):
+            saved_args = self.args.copy()
+        elif isinstance(self.args, dict):
+            saved_args = dict(self.args)
+        else:
+            saved_args = copy.copy(self.args)
+        try:
+            contract = resolve_model_contract(self.game_cls, self.args)
+        except (ContractError, AttributeError):
+            return saved_args
+        if hasattr(saved_args, "update"):
+            saved_args.update(contract.to_checkpoint_fields())
+        else:
+            for key, value in contract.to_checkpoint_fields().items():
+                setattr(saved_args, key, value)
+        return saved_args
 
     def save_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar', make_dirs=True):
         ensure_finite_parameters(self.nnet)
@@ -378,7 +422,7 @@ class NNetWrapper(BaseWrapper):
             'state_dict': self.nnet.state_dict(),
             'opt_state': self.optimizer.state_dict(),
             'sch_state': self.scheduler.state_dict(),
-            'args': self.args
+            'args': self._checkpoint_args_payload()
         }, filepath, pickle_protocol=pickle.HIGHEST_PROTOCOL)
 
     def load_checkpoint(
