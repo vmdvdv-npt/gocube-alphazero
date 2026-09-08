@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 
 from alphazero.envs.gocube.b_experiment_contract import (
     B05_DRY_RUN_DEFAULT_SETTINGS,
@@ -71,6 +72,26 @@ def test_b05_resume_ignores_only_iteration_safety_ceiling_in_manifest():
     assert effective_config(production_args, production_game)["numIters"] != effective_config(
         production_resume_args, production_resume_game
     )["numIters"]
+
+
+def test_b05_checkpoint_metadata_is_json_safe(tmp_path):
+    run_name = "json-safe"
+    checkpoint_dir = tmp_path / "checkpoint" / run_name
+    checkpoint_dir.mkdir(parents=True)
+    args = {
+        "gocube_b05_dry_run": True,
+        "gocube_komi": 0.5,
+        "gocube_topology": "cube",
+        "gocube_size": 4,
+        "train_batch_size": 1024,
+        "gocube_experiment_contract_id": "gocube-b-experiment-contract-v1",
+        "gocube_model_profile": "baseline",
+        "nnet_type": type,
+    }
+    torch.save({"args": args, "state_dict": {"weight": torch.tensor([1.0])}}, checkpoint_dir / "iteration-0001.pkl")
+    metadata = gocube_b05._checkpoint_metadata(tmp_path, run_name)
+    json.dumps(metadata)
+    assert metadata["args"]["nnet_type"] == "builtins.type"
 
 
 def test_scientific_analyzer_rejects_b05_marker_before_other_fields():

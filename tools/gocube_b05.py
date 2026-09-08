@@ -64,6 +64,7 @@ from alphazero.envs.gocube.production_training import (
     SampleBudgetTarget,
     load_training_progress,
 )
+from alphazero.envs.gocube.records import effective_parameter_snapshot
 from tools import analyze_gocube_b_evaluation
 from tools.evaluate_gocube_b05_dryrun import main as evaluate_b05_main
 from tools.gocube_production_preflight import (
@@ -311,7 +312,7 @@ def _checkpoint_metadata(repo: Path, run_name: str) -> dict[str, object]:
         "sha256": _sha256_file(checkpoint),
         "iteration": int(re.search(r"iteration-(\d+)", checkpoint.name).group(1)),
         "profile": args.get("gocube_model_profile"),
-        "args": dict(args),
+        "args": effective_parameter_snapshot(args),
         "state_dict_tensor_count": len(state_dict),
         "state_dict_finite": True,
     }
@@ -749,7 +750,7 @@ def _run_pipeline(repo: Path, args: argparse.Namespace) -> int:
 
         evaluation_path = root / "artifacts" / "b05-seed0-m128.json"
         evaluation_path.parent.mkdir(parents=True, exist_ok=True)
-        evaluation_b05_main([
+        evaluate_b05_main([
             "--b0-checkpoint", str(b0["checkpoint_metadata"]["path"]),
             "--b1-checkpoint", str(b1["checkpoint_metadata"]["path"]),
             "--suite", str(suite), "--experiment-contract", str(contract_path),
