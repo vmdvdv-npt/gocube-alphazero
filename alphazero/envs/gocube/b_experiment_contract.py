@@ -44,6 +44,7 @@ B1_TREATMENT = "B1"
 B0_MODEL_PROFILE = "baseline"
 B1_MODEL_PROFILE = "g1"
 DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET = 40_000_000
+EVALUATION_MILESTONE_FRACTIONS = (0.25, 0.50, 0.75, 1.0)
 B_SEED_LIST = (0, 1, 2, 3, 4)
 B_INITIAL_SEED_COUNT = 3
 B_EXTENSION_SEED_COUNT = 5
@@ -52,6 +53,33 @@ B_EXTENSION_SEEDS = (3, 4)
 B_EXTENSION_SEED_CRITERION_ID = (
     "extend-to-five-seeds-only-if-mandatory-seed-bootstrap-ambiguity-or-variance-v1"
 )
+
+
+def _evaluation_milestones(scientific_target: SampleBudgetTarget) -> dict[str, object]:
+    """Describe scientific checkpoints on the cumulative sample clock.
+
+    Iteration numbers remain useful for operations and recovery, but they are
+    deliberately not scientific comparison milestones because realized rows
+    per generation chunk can differ between treatments.
+    """
+
+    target = int(scientific_target.target)
+    return {
+        "clock": scientific_target.kind,
+        "counter": scientific_target.counter_key,
+        "target": target,
+        "milestone_fractions": list(EVALUATION_MILESTONE_FRACTIONS),
+        "milestone_targets": [
+            int(round(target * fraction)) for fraction in EVALUATION_MILESTONE_FRACTIONS
+        ],
+        "comparison_rule": "paired-at-equal-cumulative-sample-budget-v1",
+        "operational_metadata": {
+            "bootstrap_iteration": 7,
+            "health_reference_iteration": 4,
+            "arena_anchor_period_iterations": 10,
+            "heldout_positions": 16,
+        },
+    }
 
 # These are semantic paths in the JSON effective-config artifact.  A whole
 # model contract is not whitelisted: rules/search/training changes inside it
@@ -509,12 +537,7 @@ def build_b_experiment_contract(
         mandatory_seed_list=B_MANDATORY_SEEDS,
         extension_seed_list=B_EXTENSION_SEEDS,
         extension_seed_activation_criterion=B_EXTENSION_SEED_CRITERION_ID,
-        evaluation_milestones={
-            "bootstrap_iteration": 7,
-            "health_reference_iteration": 4,
-            "arena_anchor_period": 10,
-            "heldout_positions": 16,
-        },
+        evaluation_milestones=_evaluation_milestones(scientific_target),
         heldout_suite_hash=str(heldout_suite_hash),
         result_semantics={
             "win": 1.0,

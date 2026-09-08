@@ -21,6 +21,12 @@ from alphazero.envs.gocube.b_experiment_contract import (
     validate_b_experiment_record,
     write_b_experiment_record,
 )
+from alphazero.envs.gocube.contract_versions import (
+    B_EXPERIMENT_CONTRACT_ID,
+    B_EXPERIMENT_CONTRACT_VERSION,
+)
+from alphazero.envs.gocube.hardened_train import build_hardened_training_args
+from alphazero.envs.gocube.katago_train import parse_args
 from tools import gocube_b_experiment
 
 
@@ -50,6 +56,15 @@ def test_canonical_b0_and_b1_configs_validate(canonical):
     assert contract.extension_seed_count == 5
     assert contract.mandatory_seed_list == (0, 1, 2)
     assert contract.extension_seed_list == (3, 4)
+    milestones = contract.evaluation_milestones
+    assert milestones["clock"] == "cumulative_new_samples"
+    assert milestones["counter"] == "new_samples_accepted"
+    assert milestones["target"] == 40_000_000
+    assert milestones["milestone_fractions"] == (0.25, 0.5, 0.75, 1.0)
+    assert milestones["milestone_targets"] == (10_000_000, 20_000_000, 30_000_000, 40_000_000)
+    assert milestones["comparison_rule"] == "paired-at-equal-cumulative-sample-budget-v1"
+    assert "bootstrap_iteration" not in milestones
+    assert milestones["operational_metadata"]["bootstrap_iteration"] == 7
 
 
 def test_contract_builder_rejects_missing_heldout_hash():
@@ -84,6 +99,21 @@ def test_contract_drift_fails_closed(canonical, field, value):
     contract, _b0, _b1 = canonical
     broken = replace(contract, **{field: value})
     with pytest.raises(ExperimentContractError):
+        validate_b_experiment_contract(broken)
+
+
+def test_iteration_based_evaluation_milestones_are_rejected(canonical):
+    contract, _b0, _b1 = canonical
+    broken = replace(
+        contract,
+        evaluation_milestones={
+            "bootstrap_iteration": 7,
+            "health_reference_iteration": 4,
+            "arena_anchor_period": 10,
+            "heldout_positions": 16,
+        },
+    )
+    with pytest.raises(ExperimentContractError, match="evaluation_milestones"):
         validate_b_experiment_contract(broken)
 
 
@@ -169,6 +199,67 @@ def test_launcher_requires_treatment_and_resolves_profile_itself():
         contract_sha256="a" * 64,
     )
     assert command[command.index("--experiment-contract-sha256") + 1] == "a" * 64
+    assert command[command.index("--experiment-contract-id") + 1] == B_EXPERIMENT_CONTRACT_ID
+
+
+def _canonical_cube4_args(*extra):
+    return parse_args(
+        [
+            "--topology",
+            "cube",
+            "--size",
+            "4",
+            "--workers",
+            "16",
+            "--sims",
+            "50",
+            "--arena-sims",
+            "50",
+            "--games-per-iteration",
+            "256",
+            "--train-batch-size",
+            "1024",
+            "--fast-game-prob",
+            "0.25",
+            "--train-samples-per-new-sample",
+            "1",
+            "--no-arena",
+            *extra,
+        ]
+    )
+
+
+def test_ordinary_cube4_production_batch_does_not_activate_b_contract():
+    _game_cls, args = build_hardened_training_args(_canonical_cube4_args())
+    assert args.train_batch_size == 1024
+    assert args.gocube_experiment_contract_id is None
+    assert args.gocube_experiment_contract_version is None
+    assert args.gocube_experiment_contract_sha256 is None
+
+
+def test_explicit_b_marker_sets_contract_identity_and_version():
+    _game_cls, args = build_hardened_training_args(
+        _canonical_cube4_args(
+            "--experiment-contract-id",
+            B_EXPERIMENT_CONTRACT_ID,
+            "--experiment-contract-sha256",
+            "a" * 64,
+        )
+    )
+    assert args.gocube_experiment_contract_id == B_EXPERIMENT_CONTRACT_ID
+    assert args.gocube_experiment_contract_version == B_EXPERIMENT_CONTRACT_VERSION
+    assert args.gocube_experiment_contract_sha256 == "a" * 64
+
+
+def test_b_marker_without_sha_fails_closed():
+    with pytest.raises(ValueError, match="both --experiment-contract-id"):
+        build_hardened_training_args(
+            _canonical_cube4_args("--experiment-contract-id", B_EXPERIMENT_CONTRACT_ID)
+        )
+    with pytest.raises(ValueError, match="both --experiment-contract-id"):
+        build_hardened_training_args(
+            _canonical_cube4_args("--experiment-contract-sha256", "a" * 64)
+        )
 
 
 def test_launcher_accepts_mandatory_and_approved_extension_seeds(tmp_path):

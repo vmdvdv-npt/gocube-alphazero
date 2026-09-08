@@ -235,13 +235,25 @@ def build_hardened_training_args(cli):
     # wraps it with the diversified pinned class. The checkpoint contract must
     # fingerprint the class that is actually used for training and resume.
     args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
-    # The generic pilot builder intentionally retains its historical 256 batch
-    # default.  Once the hardened production launcher selects the canonical
-    # 1024 batch, all other B production settings become fail-closed too.
+    # 1024 is the ordinary Cube-4 production batch as well as the B batch. It
+    # must never be used as an implicit experiment marker.
     if int(args.train_batch_size) == CUBE4_PRODUCTION.train_batch_size:
         CUBE4_PRODUCTION.validate_checkpoint_args(args)
-        args.gocube_experiment_contract_id = B_EXPERIMENT_CONTRACT_ID
+    experiment_id = getattr(args, "gocube_experiment_contract_id", None)
+    experiment_sha256 = getattr(args, "gocube_experiment_contract_sha256", None)
+    if experiment_id == B_EXPERIMENT_CONTRACT_ID:
+        if not isinstance(experiment_sha256, str) or len(experiment_sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in experiment_sha256.lower()
+        ):
+            raise ValueError(
+                "B experiment activation requires a 64-character hexadecimal "
+                "experiment_contract_sha256"
+            )
         args.gocube_experiment_contract_version = B_EXPERIMENT_CONTRACT_VERSION
+    elif experiment_id is not None or experiment_sha256 is not None:
+        raise ValueError(
+            "experiment contract metadata must be absent unless the explicit B contract marker is used"
+        )
     args.gocube_recovery_contract = RECOVERY_CONTRACT
     args.gocube_chosen_move_temperature_early = defaults["chosen_move_temperature_early"]
     args.gocube_chosen_move_temperature = defaults["chosen_move_temperature"]

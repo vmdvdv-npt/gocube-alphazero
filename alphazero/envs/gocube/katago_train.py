@@ -52,6 +52,8 @@ from alphazero.envs.gocube.production_training import (
 from alphazero.envs.gocube.records import ITERATION_MANIFEST_FILENAME
 from alphazero.envs.gocube.sample_clock import SampleClockNNetWrapper, TRAINING_CONTRACT
 from alphazero.envs.gocube.contract_versions import (
+    B_EXPERIMENT_CONTRACT_ID,
+    B_EXPERIMENT_CONTRACT_VERSION,
     DEFAULT_MASTER_SEED,
     SEED_DERIVATION_CONTRACT,
     TARGET_PROVENANCE_ENCODING,
@@ -1227,6 +1229,11 @@ def parse_args(argv=None):
     parser.add_argument("--seed", type=int, default=DEFAULT_MASTER_SEED)
     parser.add_argument("--allow-dirty-source", action="store_true")
     parser.add_argument(
+        "--experiment-contract-id",
+        default=None,
+        help="Explicit experiment contract marker; required with its SHA for a B run.",
+    )
+    parser.add_argument(
         "--experiment-contract-sha256",
         default=None,
         help="SHA-256 of the immutable B experiment contract record.",
@@ -1253,8 +1260,19 @@ def build_katago_training_args(cli):
         raise ValueError("Production checkpoint Arena is observational; model gating is disabled")
     if int(cli.seed) < 0:
         raise ValueError("seed must be non-negative")
-    if cli.experiment_contract_sha256 is not None:
-        value = str(cli.experiment_contract_sha256).lower()
+    experiment_contract_id = getattr(cli, "experiment_contract_id", None)
+    experiment_contract_sha256 = getattr(cli, "experiment_contract_sha256", None)
+    if experiment_contract_id is not None and str(experiment_contract_id) != B_EXPERIMENT_CONTRACT_ID:
+        raise ValueError(
+            "unsupported experiment-contract-id; only the immutable B contract is supported"
+        )
+    if (experiment_contract_id is None) != (experiment_contract_sha256 is None):
+        raise ValueError(
+            "B experiment activation requires both --experiment-contract-id and "
+            "--experiment-contract-sha256"
+        )
+    if experiment_contract_sha256 is not None:
+        value = str(experiment_contract_sha256).lower()
         if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
             raise ValueError("experiment-contract-sha256 must be a 64-character hexadecimal digest")
     if cli.arena_games_per_opponent < 1:
@@ -1368,8 +1386,14 @@ def build_katago_training_args(cli):
     args.gocube_training_contract = TRAINING_CONTRACT
     args.master_seed = int(cli.seed)
     args.seed_derivation_contract = SEED_DERIVATION_CONTRACT
+    args.gocube_experiment_contract_id = (
+        None if experiment_contract_id is None else str(experiment_contract_id)
+    )
+    args.gocube_experiment_contract_version = (
+        None if experiment_contract_id is None else B_EXPERIMENT_CONTRACT_VERSION
+    )
     args.gocube_experiment_contract_sha256 = (
-        None if cli.experiment_contract_sha256 is None else str(cli.experiment_contract_sha256).lower()
+        None if experiment_contract_sha256 is None else str(experiment_contract_sha256).lower()
     )
     args.gocube_train_samples_per_new_sample = float(cli.train_samples_per_new_sample)
     args.gocube_cumulative_new_samples_target = (

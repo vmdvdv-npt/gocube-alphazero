@@ -30,6 +30,7 @@ from alphazero.envs.gocube.b_experiment_contract import (
     preflight_b_experiment,
     validate_extension_seed_decision,
 )
+from alphazero.envs.gocube.contract_versions import B_EXPERIMENT_CONTRACT_ID
 from alphazero.envs.gocube.production_contract import CUBE4_PRODUCTION
 from alphazero.envs.gocube.production_training import (
     SampleBudgetTarget,
@@ -185,7 +186,14 @@ def training_command(
         ]
     )
     if contract_sha256 is not None:
-        command.extend(["--experiment-contract-sha256", str(contract_sha256)])
+        command.extend(
+            [
+                "--experiment-contract-id",
+                B_EXPERIMENT_CONTRACT_ID,
+                "--experiment-contract-sha256",
+                str(contract_sha256),
+            ]
+        )
     return command
 
 

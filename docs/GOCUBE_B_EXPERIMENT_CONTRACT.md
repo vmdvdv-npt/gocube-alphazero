@@ -42,6 +42,12 @@ The B launcher never accepts `--allow-dirty-source`; B runs require a clean
 committed source tree. The contract SHA-256 is passed to the child trainer and
 stored in its run manifest and checkpoints.
 
+The canonical training batch `1024` is not an experiment marker. Ordinary
+Cube-4 production training may use that batch without a B contract. A B run is
+activated only when the launcher passes both the explicit
+`gocube-b-experiment-contract-v1` marker and the generated contract SHA-256;
+missing or mismatched marker/SHA metadata fails closed.
+
 `--iterations` is only a safety ceiling. `--games-per-iteration=256` remains
 the generation chunk and is not the experimental budget. The production loop
 generates a chunk, counts the actual accepted rows, trains according to the
@@ -75,6 +81,17 @@ starting-position pairs. `NO_RESULT` remains in the denominator and contributes
 optimizer steps, and examples seen, so acceptance can be stated as:
 
 > B0 and B1 were trained to the same cumulative sample budget.
+
+## Evaluation milestones
+
+Scientific comparisons are pinned to the cumulative sample clock, not to
+iteration numbers. For the default `cumulative_new_samples` target of
+40,000,000, the immutable contract records milestones at 25%, 50%, 75%, and
+100%: 10,000,000; 20,000,000; 30,000,000; and 40,000,000 accepted samples.
+The same representation scales to an explicitly selected optimizer-example
+clock. Bootstrap iteration, health-reference iteration, arena-anchor period,
+and the held-out suite size remain fixed evaluation metadata, not scientific
+clocks.
 
 ## Canonical Cube-4 training batch
 
