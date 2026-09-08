@@ -14,7 +14,7 @@ merged.
 
 The authoritative exact game state is the frozen `V3State` in
 `alphazero/envs/gocube/katago_v3.py`. `GoGame` is the framework facade and
-`Pinned*JapaneseGame` adds search/self-play metadata. `V3State` has 27 fields:
+`Pinned*JapaneseGame` adds search/self-play metadata. `V3State` has 25 fields:
 
 | Field | Type | Legality | Phase | Score | Root/search | Technical stop | In observation | Exactly reconstructible | Classification |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
