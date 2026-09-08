@@ -1,0 +1,1179 @@
+[
+  {
+    "actions": [],
+    "black": [
+      "front:0:0",
+      "left:0:3"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "group": [
+        "front:0:0",
+        "left:0:3"
+      ],
+      "liberty_count": 5
+    },
+    "external_context": {},
+    "family": "vertex_groups",
+    "generator_version": null,
+    "id": "cube4_vertex_single_group_001",
+    "initial_position": {
+      "black": [
+        "front:0:0",
+        "left:0:3"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Two canonical points meet across a physical vertex triangle; liberties are unique graph points.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:0",
+      "left:0:3",
+      "top:3:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "group_count": 1,
+      "vertex_triangle": [
+        "front:0:0",
+        "left:0:3",
+        "top:3:0"
+      ]
+    },
+    "external_context": {},
+    "family": "vertex_groups",
+    "generator_version": null,
+    "id": "cube4_vertex_three_face_group_001",
+    "initial_position": {
+      "black": [
+        "front:0:0",
+        "left:0:3",
+        "top:3:0"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "A group crosses all three faces incident to one vertex.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:1",
+      "left:0:2"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "control_points": [
+        "front:0:1",
+        "left:0:2"
+      ],
+      "group_count": 2,
+      "not_adjacent": true
+    },
+    "external_context": {},
+    "family": "vertex_groups",
+    "generator_version": null,
+    "id": "cube4_vertex_near_miss_001",
+    "initial_position": {
+      "black": [
+        "front:0:1",
+        "left:0:2"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Visually close face points are deliberately not connected by the canonical graph.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:1:1",
+      "front:1:2"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "group": [
+        "front:1:1",
+        "front:1:2"
+      ],
+      "liberty_count": 6
+    },
+    "external_context": {},
+    "family": "vertex_groups",
+    "generator_version": null,
+    "id": "cube4_inner_shared_liberty_001",
+    "initial_position": {
+      "black": [
+        "front:1:1",
+        "front:1:2"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Connected interior stones share liberties; duplicate incident edges must not inflate the count.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [
+      "top:3:0"
+    ],
+    "black": [
+      "front:0:1",
+      "front:1:0",
+      "left:0:3"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "capture_count": 1,
+      "captured": [
+        "front:0:0"
+      ],
+      "legal": true
+    },
+    "external_context": {},
+    "family": "captures",
+    "generator_version": null,
+    "id": "cube4_vertex_capture_001",
+    "initial_position": {
+      "black": [
+        "front:0:1",
+        "front:1:0",
+        "left:0:3"
+      ],
+      "white": [
+        "front:0:0"
+      ]
+    },
+    "ko_state": {},
+    "notes": "Single-stone capture at a three-face vertex.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:0:0"
+    ]
+  },
+  {
+    "actions": [
+      "top:3:0"
+    ],
+    "black": [
+      "front:0:1",
+      "front:1:0",
+      "left:0:2",
+      "left:1:3",
+      "top:1:0",
+      "top:2:1",
+      "top:3:2"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "capture_count": 4,
+      "captured_anchor": "front:0:0",
+      "captured_group_count": 3,
+      "legal": true,
+      "own_liberties_after": 4
+    },
+    "external_context": {},
+    "family": "captures",
+    "generator_version": null,
+    "id": "cube4_vertex_capture_before_suicide_001",
+    "initial_position": {
+      "black": [
+        "front:0:1",
+        "front:1:0",
+        "left:0:2",
+        "left:1:3",
+        "top:1:0",
+        "top:2:1",
+        "top:3:2"
+      ],
+      "white": [
+        "front:0:0",
+        "left:0:3",
+        "top:2:0",
+        "top:3:1"
+      ]
+    },
+    "ko_state": {},
+    "notes": "The played point has no liberty before removal; it is legal only because capture precedes suicide checking.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:0:0",
+      "left:0:3",
+      "top:2:0",
+      "top:3:1"
+    ]
+  },
+  {
+    "actions": [
+      "front:0:1"
+    ],
+    "black": [
+      "front:0:3",
+      "front:1:0",
+      "front:1:2",
+      "front:2:1",
+      "left:0:3",
+      "top:2:1",
+      "top:3:0",
+      "top:3:2"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "capture_count": 4,
+      "captured_group_count": 4,
+      "captured_neighbors": [
+        "top:3:1",
+        "front:0:2",
+        "front:1:1",
+        "front:0:0"
+      ],
+      "legal": true,
+      "same_group_not_double_counted": true
+    },
+    "external_context": {},
+    "family": "captures",
+    "generator_version": null,
+    "id": "cube4_vertex_multiple_neighbor_capture_001",
+    "initial_position": {
+      "black": [
+        "front:0:3",
+        "front:1:0",
+        "front:1:2",
+        "front:2:1",
+        "left:0:3",
+        "top:2:1",
+        "top:3:0",
+        "top:3:2"
+      ],
+      "white": [
+        "top:3:1",
+        "front:0:2",
+        "front:1:1",
+        "front:0:0"
+      ]
+    },
+    "ko_state": {},
+    "notes": "Four independent opponent groups touch a vertex-adjacent move; each group is removed once.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "top:3:1",
+      "front:0:2",
+      "front:1:1",
+      "front:0:0"
+    ]
+  },
+  {
+    "actions": [
+      "front:0:1"
+    ],
+    "black": [
+      "top:3:1",
+      "front:0:2",
+      "front:1:1",
+      "front:0:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "action": "front:0:1",
+      "capture_count": 0,
+      "legal": false,
+      "reason": "suicide"
+    },
+    "external_context": {},
+    "family": "captures",
+    "generator_version": null,
+    "id": "cube4_vertex_suicide_control_001",
+    "initial_position": {
+      "black": [
+        "top:3:1",
+        "front:0:2",
+        "front:1:1",
+        "front:0:0"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Control for capture-before-suicide: same local shape with no capturable opponent group.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "white",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:1:1",
+      "front:1:3",
+      "front:3:1",
+      "front:3:3"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "anchor_points": [
+        "front:1:2",
+        "front:2:1"
+      ],
+      "status": "unknown",
+      "structural": "two_empty_components"
+    },
+    "external_context": {},
+    "family": "eyes",
+    "generator_version": null,
+    "id": "cube4_two_independent_eyes_001",
+    "initial_position": {
+      "black": [
+        "front:1:1",
+        "front:1:3",
+        "front:3:1",
+        "front:3:3"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Only empty-region connectivity and borders are asserted; no alive/dead conclusion is made.",
+    "oracle/source": "structural-only",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:1",
+      "front:1:0",
+      "front:1:2",
+      "front:2:1"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "empty_anchor": "front:0:0",
+      "status": "unknown",
+      "structural": "mixed_border"
+    },
+    "external_context": {},
+    "family": "eyes",
+    "generator_version": null,
+    "id": "cube4_false_eye_control_001",
+    "initial_position": {
+      "black": [
+        "front:0:1",
+        "front:1:0",
+        "front:1:2",
+        "front:2:1"
+      ],
+      "white": [
+        "front:1:1"
+      ]
+    },
+    "ko_state": {},
+    "notes": "A false-eye-shaped control; this fixture does not claim life-and-death status.",
+    "oracle/source": "structural-only",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:1:1"
+    ]
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:1",
+      "left:0:2"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "anchor_points": [
+        "front:0:1",
+        "left:0:2"
+      ],
+      "crosses_seam": true,
+      "region_count": "independent_graph"
+    },
+    "external_context": {},
+    "family": "eyes",
+    "generator_version": null,
+    "id": "cube4_seam_region_001",
+    "initial_position": {
+      "black": [
+        "front:0:1",
+        "left:0:2"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Empty connectivity is measured on the closed surface, not on a flat cube net.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:1:1",
+      "front:1:2"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "score": "unknown",
+      "shared_empty_region": true,
+      "shared_liberty_points": [
+        "front:0:1"
+      ],
+      "status": "structural-only"
+    },
+    "external_context": {},
+    "family": "seki_dame",
+    "generator_version": null,
+    "id": "cube4_seki_shared_liberty_001",
+    "initial_position": {
+      "black": [
+        "front:1:1",
+        "front:1:2"
+      ],
+      "white": [
+        "front:2:1",
+        "front:2:2"
+      ]
+    },
+    "ko_state": {},
+    "notes": "Shared liberties are recorded for later seki proof; no production pass-alive result is used.",
+    "oracle/source": "structural-only",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:2:1",
+      "front:2:2"
+    ]
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "anchor_points": [
+        "front:1:1",
+        "back:1:1"
+      ],
+      "neutral_region": true,
+      "score": "unknown",
+      "status": "structural-only"
+    },
+    "external_context": {},
+    "family": "seki_dame",
+    "generator_version": null,
+    "id": "cube4_dame_neutral_region_001",
+    "initial_position": {
+      "black": [
+        "front:0:0"
+      ],
+      "white": [
+        "back:0:0"
+      ]
+    },
+    "ko_state": {},
+    "notes": "Control with both colors bordering one connected empty component; neutrality is structural, not a score claim.",
+    "oracle/source": "structural-only",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "back:0:0"
+    ]
+  },
+  {
+    "actions": [
+      "front:2:1",
+      "front:1:1"
+    ],
+    "black": [
+      "front:0:1",
+      "front:1:0",
+      "front:1:2",
+      "front:2:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "capture_action": "front:2:1",
+      "captured": [
+        "front:1:1"
+      ],
+      "recapture_legal": false,
+      "recapture_reason": "suicide",
+      "simple_ko": false
+    },
+    "external_context": {},
+    "family": "ko",
+    "generator_version": null,
+    "id": "cube4_false_simple_ko_001",
+    "initial_position": {
+      "black": [
+        "front:0:1",
+        "front:1:0",
+        "front:1:2",
+        "front:2:0"
+      ],
+      "white": [
+        "front:1:1"
+      ]
+    },
+    "ko_state": {
+      "known_on_revision": "842de66323e1bd20caaac4cec3df007608190611",
+      "production_heuristic": "diagnostic-only"
+    },
+    "notes": "Reviewed M1 false positive: two board points change, but the apparent recapture is suicide and does not restore the position.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:1:1"
+    ]
+  },
+  {
+    "actions": [
+      "front:0:1",
+      "front:0:0"
+    ],
+    "black": [
+      "front:1:0",
+      "left:0:3",
+      "top:3:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "capture_action": "front:0:1",
+      "captured": [
+        "front:0:0"
+      ],
+      "recapture_legal_without_ko": true,
+      "restores_initial_board": true,
+      "simple_ko": true
+    },
+    "external_context": {},
+    "family": "ko",
+    "generator_version": null,
+    "id": "cube4_true_simple_ko_001",
+    "initial_position": {
+      "black": [
+        "front:1:0",
+        "left:0:3",
+        "top:3:0"
+      ],
+      "white": [
+        "front:0:0",
+        "front:0:2",
+        "front:1:1",
+        "top:3:1"
+      ]
+    },
+    "ko_state": {},
+    "notes": "The independent capture checker proves positional restoration; the ko prohibition itself remains a separate policy check.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:0:0",
+      "front:0:2",
+      "front:1:1",
+      "top:3:1"
+    ]
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:0",
+      "left:0:3"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "control": [
+        "front:0:1",
+        "left:0:2"
+      ],
+      "induced_edges": [
+        [
+          "front:0:0",
+          "left:0:3"
+        ]
+      ]
+    },
+    "external_context": {},
+    "family": "seam_tactics",
+    "generator_version": null,
+    "id": "cube4_seam_local_isomorphism_001",
+    "initial_position": {
+      "black": [
+        "front:0:0",
+        "left:0:3"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Positive seam edge and visually-near non-edge are paired in one fixture.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:0",
+      "left:0:3",
+      "top:3:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "group_count": 1,
+      "path_faces": [
+        "front",
+        "left",
+        "top"
+      ],
+      "path_points": [
+        "front:0:0",
+        "left:0:3",
+        "top:3:0"
+      ]
+    },
+    "external_context": {},
+    "family": "global_connectivity",
+    "generator_version": null,
+    "id": "cube4_global_path_three_faces_001",
+    "initial_position": {
+      "black": [
+        "front:0:0",
+        "left:0:3",
+        "top:3:0"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "The group is connected through a three-face vertex triangle.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:0",
+      "front:0:1",
+      "front:0:2"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "after_removing": {
+        "front:0:1": 2
+      },
+      "before_group_count": 1
+    },
+    "external_context": {},
+    "family": "global_connectivity",
+    "generator_version": null,
+    "id": "cube4_global_cut_group_001",
+    "initial_position": {
+      "black": [
+        "front:0:0",
+        "front:0:1",
+        "front:0:2"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "A graph cut is described structurally; the expected split is checked by independent flood-fill.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  },
+  {
+    "actions": [
+      "front:0:1",
+      "PASS",
+      "PASS"
+    ],
+    "black": [
+      "front:1:0",
+      "left:0:3",
+      "top:3:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {
+      "training_internal_cleanup": {
+        "actions": [],
+        "phase_transitions": []
+      }
+    },
+    "expected": {
+      "cleanup_record": "separate",
+      "ko_local_property": "true",
+      "main_until_first_pass": true
+    },
+    "external_context": {},
+    "family": "cleanup",
+    "generator_version": null,
+    "id": "cube4_cleanup1_pass_for_ko_001",
+    "initial_position": {
+      "black": [
+        "front:1:0",
+        "left:0:3",
+        "top:3:0"
+      ],
+      "white": [
+        "front:0:0",
+        "front:0:2",
+        "front:1:1",
+        "top:3:1"
+      ]
+    },
+    "ko_state": {},
+    "notes": "Product-boundary groundwork: MAIN and cleanup context are kept separate; full phase proof is future acceptance.",
+    "oracle/source": "independent_graph",
+    "phase": "cleanup1",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "history-aware-only",
+    "rotation_safe": false,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:0:0",
+      "front:0:2",
+      "front:1:1",
+      "top:3:1"
+    ]
+  },
+  {
+    "actions": [
+      "front:0:1",
+      "PASS",
+      "PASS"
+    ],
+    "black": [
+      "front:1:0",
+      "left:0:3",
+      "top:3:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {
+      "training_internal_cleanup": {
+        "actions": [],
+        "phase_transitions": []
+      }
+    },
+    "expected": {
+      "cleanup_record": "separate",
+      "cleanup_stage": 2,
+      "main_after_second_pass": true
+    },
+    "external_context": {},
+    "family": "cleanup",
+    "generator_version": null,
+    "id": "cube4_cleanup2_pass_for_ko_001",
+    "initial_position": {
+      "black": [
+        "front:1:0",
+        "left:0:3",
+        "top:3:0"
+      ],
+      "white": [
+        "front:0:0",
+        "front:0:2",
+        "front:1:1",
+        "top:3:1"
+      ]
+    },
+    "ko_state": {},
+    "notes": "Second-cleanup placeholder preserving the board/history boundary for the later product comparison.",
+    "oracle/source": "independent_graph",
+    "phase": "cleanup2",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "history-aware-only",
+    "rotation_safe": false,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:0:0",
+      "front:0:2",
+      "front:1:1",
+      "top:3:1"
+    ]
+  },
+  {
+    "actions": [],
+    "black": [
+      "front:0:0",
+      "front:0:1",
+      "front:1:0",
+      "left:0:3",
+      "top:3:0"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "expected": {
+      "intruder": {
+        "color": "white",
+        "point": "front:2:2"
+      },
+      "pass_alive_area": "pending_independent_proof",
+      "score": "unknown"
+    },
+    "external_context": {},
+    "family": "s1_intruder_support",
+    "generator_version": null,
+    "id": "cube4_pass_alive_intruder_001",
+    "initial_position": {
+      "black": [
+        "front:0:0",
+        "front:0:1",
+        "front:1:0",
+        "left:0:3",
+        "top:3:0"
+      ],
+      "white": [
+        "front:2:2"
+      ]
+    },
+    "ko_state": {},
+    "notes": "S1 support only: preserves an intruder-shaped board and independent graph facts; it is not a scorer oracle.",
+    "oracle/source": "product_fixture_pending",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "all_24",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": [
+      "front:2:2"
+    ]
+  },
+  {
+    "actions": [
+      "PASS",
+      "PASS"
+    ],
+    "black": [],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {
+      "training_internal_cleanup": {
+        "actions": [],
+        "final_training_result": null,
+        "phase_transitions": []
+      }
+    },
+    "expected": {
+      "after_second_pass": "product-boundary",
+      "training_internal_cleanup": "separate"
+    },
+    "external_context": {},
+    "family": "early_termination",
+    "generator_version": null,
+    "id": "cube4_early_termination_boundary_001",
+    "initial_position": {
+      "black": [],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Future GoCube boundary fixture; no TypeScript engine is changed or consulted here.",
+    "oracle/source": "product_fixture_pending",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "history-aware-only",
+    "rotation_safe": false,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 4,
+    "source_fixture_id": null,
+    "to_move": "black",
+    "topology_kind": "cube",
+    "white": []
+  }
+]

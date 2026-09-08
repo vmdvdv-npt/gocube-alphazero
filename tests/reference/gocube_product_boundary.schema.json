@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GoCube product boundary verification fixture",
+  "type": "object",
+  "required": ["schema", "fixtures"],
+  "properties": {
+    "schema": {"const": "gocube-product-boundary-v1"},
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "fixture_id",
+          "topology",
+          "size",
+          "komi",
+          "initial_position",
+          "MAIN_action_sequence",
+          "side_to_move",
+          "expected_captures_during_MAIN",
+          "board_after_first_PASS",
+          "board_after_second_PASS",
+          "training_internal_cleanup"
+        ],
+        "properties": {
+          "fixture_id": {"type": "string"},
+          "topology": {"type": "string"},
+          "size": {"type": "integer", "minimum": 2},
+          "komi": {"const": 0.5},
+          "initial_position": {"type": "object"},
+          "MAIN_action_sequence": {"type": "array"},
+          "side_to_move": {"enum": ["black", "white"]},
+          "expected_captures_during_MAIN": {"type": "array"},
+          "board_after_first_PASS": {"type": "object"},
+          "board_after_second_PASS": {"type": "object"},
+          "training_internal_cleanup": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}
