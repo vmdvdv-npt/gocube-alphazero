@@ -314,12 +314,33 @@ def cube_verification_fixtures() -> tuple[VerificationFixture, ...]:
         _cube4_fixture(
             "cube4_seki_shared_liberty_001",
             "seki_dame",
-            black=("front:1:1", "front:1:2"),
-            white=("front:2:1", "front:2:2"),
-            expected={"status": "verified", "seki_kind": "shared_liberty_control", "shared_empty_region": True, "shared_liberty_points": ["front:0:1"], "independent_proof": "both color groups border the same graph liberty region"},
-            oracle="independent_graph",
-            evidence="manual-reviewed graph proof of shared liberty; scoring is checked separately by pinned rectangular seki-tax fixture",
-            notes="A reviewed shared-liberty seki fixture; no production life helper supplies the expected classification.",
+            black=_cube4_black_except(
+                "front:1:1",
+                "front:2:1",
+                white=("front:1:2", "front:2:2"),
+            ),
+            white=("front:1:2", "front:2:2"),
+            expected={
+                "status": "verified",
+                "seki_kind": "settled_mutual_two_liberty",
+                "shared_empty_region": True,
+                "shared_liberty_points": ["front:1:1", "front:2:1"],
+                "independent_proof": "bounded exhaustive continuation proves neither side can force a capture",
+                "search_status": "proved_draw",
+                "search_depth": 3,
+                "explored_nodes": 6,
+                "defensive_reply": "the other shared liberty captures the first player's group",
+            },
+            oracle="exhaustive_solver",
+            evidence="independent bounded exhaustive continuation plus explicit legal first-move/defensive-reply table; scoring is checked against pinned rectangular seki-tax",
+            external_context={
+                "katago_analog": {
+                    "fixture_id": "seki-tax",
+                    "katago_commit": "f6bc4b19a1686caa2d088b56251e8c11c8be6d51",
+                    "assertion": "SCORED terminal with white-minus-black final score 0.5",
+                }
+            },
+            notes="Closed Cube4 settled seki: the only two empty points are shared by one black and one white group; playing either liberty lets the opponent fill the other and capture the mover's group.",
         ),
         _cube4_fixture(
             "cube4_dame_neutral_region_001",

@@ -41,6 +41,12 @@ from tests.support.independent_graph import (
     find_groups,
     graph_triangles,
 )
+from tests.support.independent_endgame import (
+    mixed_border_regions,
+    prove_opponent_placement_exhaustion,
+    prove_settled_seki,
+    prove_two_vital_regions,
+)
 from tests.support.independent_rules import (
     CLEANUP_1 as GRAPH_CLEANUP_1,
     CLEANUP_2 as GRAPH_CLEANUP_2,
@@ -59,6 +65,7 @@ from tests.support.katago_differential import (
 from tests.support.ko import prove_positional_restoration
 from tests.support.v1_matrix import REQUIRED_FAMILIES, assert_matrix_accepted, canonical_matrix
 from tests.support.rotations import cube_rotations, rotate_fixture
+from katago_reference_runner import run_fixture
 
 
 def _fixture(fixture_id):
@@ -132,7 +139,7 @@ def test_independent_support_does_not_import_production_rule_helpers():
     import ast
     from pathlib import Path
 
-    for name in ("independent_graph.py", "independent_rules.py"):
+    for name in ("independent_graph.py", "independent_rules.py", "independent_endgame.py"):
         tree = ast.parse((Path(__file__).parent / "support" / name).read_text(encoding="utf-8"))
         modules = {
             node.module
@@ -300,39 +307,88 @@ def test_v1_eye_proofs_are_graph_facts_and_production_follows_them():
         expected_points = set(fixture.expected.get("eye_points", ())) or {fixture.expected["eye_point"]}
         assert expected_points.issubset(point_ids)
         state = _state_for_fixture(fixture, topology)
+        # Production helpers are the actual side of this comparison; the
+        # expected two-eye fact above comes from the independent graph proof.
         analysis = pass_alive_analysis(state.board, topology)
         life = independent_life_analysis(state.board, topology)
         if fixture.expected["eye_kind"] in ("obvious_true_eye_pair", "vertex_related"):
+            vital = prove_two_vital_regions(board, BLACK, topology.neighbors_by_index)
+            expected_indices = {topology.point_index(point) for point in expected_points}
+            assert expected_indices == set().union(*vital.vital_regions)
             assert expected_points.issubset({topology.point_id(point) for point in analysis.pass_alive_black_territory})
             assert expected_points.issubset({topology.point_id(point) for point in life.black_territory})
         else:
+            expected_indices = {topology.point_index(point) for point in expected_points}
+            independent_dame = set().union(*mixed_border_regions(board, topology.neighbors_by_index))
+            assert expected_indices.issubset(independent_dame)
             assert not analysis.pass_alive_black_groups
             assert expected_points.issubset({topology.point_id(point) for point in life.dame})
 
 
-def test_v1_seki_and_dame_use_independent_region_borders_before_production_scoring():
+def test_v1_settled_seki_has_independent_bounded_continuation_proof():
     topology = cube_topology(4)
     seki = _fixture("cube4_seki_shared_liberty_001")
-    dame = _fixture("cube4_dame_neutral_region_001")
-    for fixture in (seki, dame):
-        board = fixture.board(topology.index_by_id)
-        regions = empty_regions(board, topology.neighbors_by_index)
-        assert any(region.bordering_colors == frozenset((BLACK, WHITE)) for region in regions)
-        state = _state_for_fixture(fixture, topology)
-        life = independent_life_analysis(state.board, topology)
-        if fixture is dame:
-            assert len(life.dame) > 0
-        else:
-            # The independent oracle deliberately accepts this as a shared
-            # liberty control; production must not turn it into territory.
-            assert not set(life.black_territory) & set.union(*(set(region.points) for region in regions))
-            assert not set(life.white_territory) & set.union(*(set(region.points) for region in regions))
+    board = seki.board(topology.index_by_id)
+    proof = prove_settled_seki(board, topology.neighbors_by_index)
+    shared = {topology.point_index(point) for point in seki.expected["shared_liberty_points"]}
+    assert proof.status == "proved_settled_seki"
+    assert proof.search_status == "proved_draw"
+    assert proof.max_depth == 3
+    assert proof.max_depth_reached == 3
+    assert proof.nodes == seki.expected["explored_nodes"] == 6
+    assert set(proof.shared_liberties) == shared
+    assert tuple(action for _player, actions in proof.legal_first_actions for action in actions) == tuple(sorted(shared)) * 2
+    assert len(proof.reply_lines) == 4
+    for line in proof.reply_lines:
+        assert line.defensive_action != line.first_action
+        assert line.captured_first_group
+
+    state = _state_for_fixture(seki, topology)
+    # These are actual production observations, never the source of the
+    # expected seki classification.
+    production_pass_alive = pass_alive_analysis(state.board, topology)
+    production_life = independent_life_analysis(state.board, topology)
+    assert not production_pass_alive.pass_alive_black_groups
+    assert not production_pass_alive.pass_alive_white_groups
+    assert not shared.intersection(set(production_life.black_territory))
+    assert not shared.intersection(set(production_life.white_territory))
+    assert shared.issubset(set(production_life.dame))
+    scoring_state = replace(
+        state,
+        phase=CLEANUP_2,
+        second_cleanup_start_colors=bytes(board),
+    )
+    production_score, ownership, ownership_mask = final_v3_score(scoring_state, topology, 0.5)
+    assert production_score.territory.neutral == len(shared)
+    assert production_score.territory.seki == 0
+    for point in shared:
+        assert np.array_equal(ownership[point], np.asarray((0.0, 0.0, 1.0)))
+        assert ownership_mask[point] == 1.0
+
+
+def test_v1_dame_is_independently_classified_before_production_comparison():
+    topology = cube_topology(4)
+    fixture = _fixture("cube4_dame_neutral_region_001")
+    board = fixture.board(topology.index_by_id)
+    independent_dame = set().union(*mixed_border_regions(board, topology.neighbors_by_index))
+    anchors = {topology.point_index(point) for point in fixture.expected["anchor_points"]}
+    assert anchors.issubset(independent_dame)
+
+    state = _state_for_fixture(fixture, topology)
+    # Production life/scoring is compared to the graph-derived neutral set.
+    production_life = independent_life_analysis(state.board, topology)
+    assert anchors.issubset(set(production_life.dame))
+    assert not anchors.intersection(set(production_life.black_territory))
+    assert not anchors.intersection(set(production_life.white_territory))
 
 
 def test_v1_intruder_has_independent_pass_alive_evidence_and_matching_production_ownership():
     topology = cube_topology(4)
     fixture = _fixture("cube4_pass_alive_intruder_001")
     board = fixture.board(topology.index_by_id)
+    exhaustion = prove_opponent_placement_exhaustion(board, BLACK, topology.neighbors_by_index)
+    assert exhaustion.proved
+    assert exhaustion.opponent_legal_actions == ()
     regions = empty_regions(board, topology.neighbors_by_index)
     assert any(region.bordering_colors == frozenset((BLACK,)) for region in regions)
     intruder = topology.point_index(fixture.expected["intruder"]["point"])
@@ -345,6 +401,22 @@ def test_v1_intruder_has_independent_pass_alive_evidence_and_matching_production
     assert score.territory.black == 2
     assert np.array_equal(ownership[intruder], np.asarray((1.0, 0.0, 0.0)))
     assert ownership_mask[intruder] == 1.0
+
+
+def test_v1_settled_seki_has_pinned_katago_rectangular_scoring_analog():
+    rules_path = Path(__file__).parent / "reference" / "katago" / "rules_fixtures.json"
+    analog = next(
+        fixture
+        for fixture in json.loads(rules_path.read_text(encoding="utf-8"))
+        if fixture["id"] == "seki-tax"
+    )
+    snapshots = run_fixture(analog)
+    final = snapshots[-1]
+    assert final["phase"] == "SCORED"
+    assert final["is_game_finished"] is True
+    assert final["is_no_result"] is False
+    assert final["final_score"] == 0.5
+    assert final["winner"] == "white"
 
 
 def test_v1_runtime_limit_is_not_a_formal_no_result():

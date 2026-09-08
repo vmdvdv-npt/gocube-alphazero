@@ -39,7 +39,14 @@ source fixtures and 528 metamorphic rotation variants.  Cube2–Cube7 topology
 invariants pass; Cube4 has 96 points, eight graph triangles, and 24 triangle
 points.  Mandatory Cube graph families (groups, liberties, seams, vertices,
 captures, ko, eyes, false-eye, seki/dame and intruder) have independent graph
-evidence and production comparisons.
+evidence and production comparisons.  The seki fixture is a closed Cube4
+position with one black and one white group sharing exactly two liberties.  A
+production-independent bounded exhaustive continuation search reaches
+`proved_draw` at depth 3 without exhaustion: every legal first placement is
+one shared liberty, and the defender's other-liberty reply captures the
+mover's group.  The dame and pass-alive controls likewise derive mixed-border,
+two-vital-region, or closed-board placement-exhaustion facts before calling
+production life/scoring helpers.
 
 The Torus9 source corpus contains four fixtures: wrap group, wrap capture,
 wrap ko, and no-Cube-triangle topology control.  Torus9, Torus13, and Torus19
@@ -48,10 +55,14 @@ Torus.
 
 ## Solver
 
-The bounded solver gate includes one proved tiny continuation.  The separate
-resource-exhaustion regression intentionally returns `unknown`; it is a
-fail-safe test and is not part of the mandatory V1 acceptance corpus.  No
-mandatory fixture has solver status `unknown`.
+The bounded solver gate includes a proved settled-seki continuation.  Its
+closed Cube4 root has exactly two legal placement points for each color; all
+four first-placement branches have an explicit opposite-liberty capture reply,
+and the exhaustive search reaches `proved_draw` at depth 3 with 6 explored
+nodes and no exhaustion.  The separate resource-exhaustion regression
+intentionally returns `unknown`; it is a fail-safe test and is not part of the
+mandatory V1 acceptance corpus.  No mandatory fixture has solver status
+`unknown`.
 
 ## Differences and matrix
 

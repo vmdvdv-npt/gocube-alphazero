@@ -20,7 +20,7 @@ Every mandatory row is `PASS`; there are no `PENDING`, `UNKNOWN`,
 | C2→score | 1 | pinned KataGo | yes | yes | history-aware | PASS | none | Formal pass terminal |
 | cleanup ko | 4 | pinned KataGo | yes | yes | history-aware | PASS | none | Block/release/repeat |
 | cycle | 1 | pinned KataGo | yes | yes | history-aware | PASS | none | Rule `NO_RESULT`, not runtime cap |
-| pass-alive | 2 | pinned KataGo + independent graph | yes | yes | Cube/Torus smoke | PASS | none | Positive and bounded controls |
+| pass-alive | 2 | pinned KataGo + independent vital-region/placement proof | yes | yes | Cube/Torus smoke | PASS | none | Positive two-vital-region proof plus closed-board placement exhaustion |
 | vertex groups | 4 | independent graph | no | yes | 24 per source | PASS | none | Cube4 vertex triangles |
 | vertex capture | 3 | independent graph | no | yes | 24 per source | PASS | none | Includes vertex and multi-group capture |
 | seam groups | 1 | independent graph | no | yes | 24 per source | PASS | none | Cross-face adjacency |
@@ -28,8 +28,8 @@ Every mandatory row is `PASS`; there are no `PENDING`, `UNKNOWN`,
 | global connectivity | 2 | independent graph | no | yes | 24 per source | PASS | none | Three-face path and cut |
 | eyes | 2 | independent graph + reviewed proof | no | yes | 24 per source | PASS | none | Obvious and vertex-related true eyes |
 | false eye | 1 | independent graph | no | yes | 24 per source | PASS | none | Mixed-border control |
-| seki | 1 | manual-reviewed graph proof | no | yes | 24 per source | PASS | none | Shared-liberty evidence |
-| dame | 1 | independent graph | no | yes | 24 per source | PASS | none | Neutral mixed-border region |
+| seki | 1 | independent bounded exhaustive continuation + KataGo seki-tax analog | no | yes | 24 per source | PASS | none | Settled two-shared-liberty seki; all first placements and defensive replies enumerated |
+| dame | 1 | independent mixed-border region proof | no | yes | 24 per source | PASS | none | Neutral region derived before production comparison |
 | scoring/setup | 4 | pinned KataGo | yes | yes | not multiplied | PASS | none | Includes S1 W−B = −3.5 |
 | S1 intruder | 1 | independent graph + pinned analog | no | yes | history-aware | PASS | none | Cube graph, no fake rectangle oracle |
 | ownership | 4 | pinned KataGo + graph regions | yes | yes | invariant | PASS | none | Black/White/Neutral and masks |
