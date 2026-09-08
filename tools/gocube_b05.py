@@ -57,7 +57,7 @@ from alphazero.envs.gocube.hardened_train import (
 )
 from alphazero.envs.gocube.integration.catalog import CheckpointCatalog
 from alphazero.envs.gocube.integration.models import CheckpointModelLoader
-from alphazero.envs.gocube.katago_train import parse_args
+from alphazero.envs.gocube.katago_train import parse_args as parse_training_args
 from alphazero.envs.gocube.production_contract import CUBE4_PRODUCTION, GOCUBE_KOMI
 from alphazero.envs.gocube.production_training import (
     CumulativeTrainingCounters,
@@ -472,7 +472,7 @@ def _throughput_benchmark(repo: Path, root: Path, workers: int, telemetry: Hardw
 def _inference_microbenchmark(repo: Path, root: Path, device: str) -> dict[str, object]:
     results = {}
     for profile_name in (B0_MODEL_PROFILE, B1_MODEL_PROFILE):
-        cli = parse_args([
+        cli = parse_training_args([
             "--model-profile", profile_name, "--topology", "cube", "--size", "4",
             "--workers", "2", "--sims", "50", "--arena-sims", "50",
             "--games-per-iteration", "4", "--train-batch-size", "1024",
