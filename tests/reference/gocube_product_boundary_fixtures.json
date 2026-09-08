@@ -1,0 +1,167 @@
+{
+  "fixtures": [
+    {
+      "MAIN_action_sequence": [
+        "front:0:1",
+        "PASS",
+        "PASS"
+      ],
+      "board_after_first_PASS": {
+        "black": [
+          "front:0:1",
+          "front:1:0",
+          "left:0:3",
+          "top:3:0"
+        ],
+        "white": [
+          "front:0:2",
+          "front:1:1",
+          "top:3:1"
+        ]
+      },
+      "board_after_second_PASS": {
+        "black": [
+          "front:0:1",
+          "front:1:0",
+          "left:0:3",
+          "top:3:0"
+        ],
+        "white": [
+          "front:0:2",
+          "front:1:1",
+          "top:3:1"
+        ]
+      },
+      "expected_captures_during_MAIN": [
+        {
+          "action": "front:0:1",
+          "action_index": 0,
+          "player": "black",
+          "points": [
+            "front:0:0"
+          ]
+        }
+      ],
+      "fixture_id": "cube4_cleanup1_pass_for_ko_001",
+      "initial_position": {
+        "black": [
+          "front:1:0",
+          "left:0:3",
+          "top:3:0"
+        ],
+        "white": [
+          "front:0:0",
+          "front:0:2",
+          "front:1:1",
+          "top:3:1"
+        ]
+      },
+      "komi": 0.5,
+      "schema": "gocube-product-boundary-v1",
+      "side_to_move": "black",
+      "size": 4,
+      "topology": "cube",
+      "training_internal_cleanup": {
+        "actions": [],
+        "phase_transitions": []
+      }
+    },
+    {
+      "MAIN_action_sequence": [
+        "front:0:1",
+        "PASS",
+        "PASS"
+      ],
+      "board_after_first_PASS": {
+        "black": [
+          "front:0:1",
+          "front:1:0",
+          "left:0:3",
+          "top:3:0"
+        ],
+        "white": [
+          "front:0:2",
+          "front:1:1",
+          "top:3:1"
+        ]
+      },
+      "board_after_second_PASS": {
+        "black": [
+          "front:0:1",
+          "front:1:0",
+          "left:0:3",
+          "top:3:0"
+        ],
+        "white": [
+          "front:0:2",
+          "front:1:1",
+          "top:3:1"
+        ]
+      },
+      "expected_captures_during_MAIN": [
+        {
+          "action": "front:0:1",
+          "action_index": 0,
+          "player": "black",
+          "points": [
+            "front:0:0"
+          ]
+        }
+      ],
+      "fixture_id": "cube4_cleanup2_pass_for_ko_001",
+      "initial_position": {
+        "black": [
+          "front:1:0",
+          "left:0:3",
+          "top:3:0"
+        ],
+        "white": [
+          "front:0:0",
+          "front:0:2",
+          "front:1:1",
+          "top:3:1"
+        ]
+      },
+      "komi": 0.5,
+      "schema": "gocube-product-boundary-v1",
+      "side_to_move": "black",
+      "size": 4,
+      "topology": "cube",
+      "training_internal_cleanup": {
+        "actions": [],
+        "phase_transitions": []
+      }
+    },
+    {
+      "MAIN_action_sequence": [
+        "PASS",
+        "PASS"
+      ],
+      "board_after_first_PASS": {
+        "black": [],
+        "white": []
+      },
+      "board_after_second_PASS": {
+        "black": [],
+        "white": []
+      },
+      "expected_captures_during_MAIN": [],
+      "fixture_id": "cube4_early_termination_boundary_001",
+      "initial_position": {
+        "black": [],
+        "white": []
+      },
+      "komi": 0.5,
+      "schema": "gocube-product-boundary-v1",
+      "side_to_move": "black",
+      "size": 4,
+      "topology": "cube",
+      "training_internal_cleanup": {
+        "actions": [],
+        "final_training_result": null,
+        "phase_transitions": []
+      }
+    }
+  ],
+  "schema": "gocube-product-boundary-v1"
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GoCube independent verification fixture",
+  "type": "object",
+  "required": [
+    "id",
+    "family",
+    "topology_kind",
+    "size",
+    "initial_position",
+    "to_move",
+    "actions",
+    "expected",
+    "oracle/source",
+    "rotation_policy",
+    "notes"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^cube[0-9]+_[a-z0-9_]+$"},
+    "family": {"type": "string"},
+    "topology_kind": {"enum": ["cube", "torus", "rectangular-test"]},
+    "size": {"type": "integer", "minimum": 1},
+    "initial_position": {
+      "type": "object",
+      "required": ["black", "white"],
+      "properties": {"black": {"type": "array"}, "white": {"type": "array"}},
+      "additionalProperties": false
+    },
+    "to_move": {"enum": ["black", "white"]},
+    "actions": {"type": "array"},
+    "expected": {"type": "object"},
+    "oracle/source": {"type": "string"},
+    "rotation_policy": {"type": "string"},
+    "rotation_safe": {"type": "boolean"},
+    "notes": {"type": "string"}
+  },
+  "additionalProperties": true
+}
