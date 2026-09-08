@@ -276,6 +276,7 @@ def export_verified_product_boundary_fixtures(
                 derived,
                 topology,
                 source_verification_id=source.source_id,
+                expected_endgame_classification=source.expected.get("verified_endgame_classification", ()),
                 expected_final_score=source.expected.get("verified_final_score"),
                 require_verified=True,
             )
