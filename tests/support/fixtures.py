@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping
 
-from .independent_graph import BLACK, EMPTY, WHITE, board_from_colors
+from .independent_graph import board_from_colors
 
 EXPECTED_SOURCES = frozenset(
     {
@@ -380,9 +379,12 @@ def assert_rotation_split_consistency(
 ) -> None:
     for fixture in fixtures:
         source = fixture.source_id
-        if source in split_by_fixture_id and fixture.id in split_by_fixture_id:
-            if split_by_fixture_id[source] != split_by_fixture_id[fixture.id]:
-                raise AssertionError(f"Rotations of {source} cross corpus splits")
+        if fixture.id not in split_by_fixture_id:
+            continue
+        if source not in split_by_fixture_id:
+            raise AssertionError(f"Source fixture {source} has no corpus split")
+        if split_by_fixture_id[source] != split_by_fixture_id[fixture.id]:
+            raise AssertionError(f"Rotations of {source} cross corpus splits")
 
 
 def write_fixture_json(path: str | Path, fixtures: Iterable[VerificationFixture]) -> None:

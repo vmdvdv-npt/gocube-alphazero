@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .fixtures import VerificationFixture
-from .independent_graph import BLACK, EMPTY, WHITE, IndependentIllegalMove, apply_move
+from .independent_graph import BLACK, WHITE, apply_move
 
 PRODUCT_BOUNDARY_SCHEMA = "gocube-product-boundary-v1"
 KOMI = 0.5
