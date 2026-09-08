@@ -257,9 +257,41 @@ def assert_snapshot_equal(reference: dict[str, Any], local: dict[str, Any], *, c
         actual = local.get(field)
         if field == "final_score" and expected is not None and actual is not None:
             if not np.isclose(float(expected), float(actual), rtol=0.0, atol=1e-6):
-                raise AssertionError(f"{context} field={field}: KataGo={expected!r}, GoCube={actual!r}")
+                raise AssertionError(_mismatch_message(context, field, expected, actual, reference, local))
         elif expected != actual:
-            raise AssertionError(f"{context} field={field}: KataGo={expected!r}, GoCube={actual!r}")
+            raise AssertionError(_mismatch_message(context, field, expected, actual, reference, local))
+
+
+def _mismatch_message(
+    context: str,
+    field: str,
+    expected: Any,
+    actual: Any,
+    reference: dict[str, Any],
+    local: dict[str, Any],
+) -> str:
+    """Include a replayable semantic state in every differential failure."""
+
+    details = {
+        "field": field,
+        "katago": expected,
+        "gocube": actual,
+        "board_before_or_reference": reference.get("board"),
+        "board_after_gocube": local.get("board"),
+        "legal_mask_katago": reference.get("legal_mask"),
+        "legal_mask_gocube": local.get("legal_mask"),
+        "phase_katago": reference.get("phase"),
+        "phase_gocube": local.get("phase"),
+        "next_player_katago": reference.get("next_player"),
+        "next_player_gocube": local.get("next_player"),
+        "captures_katago": reference.get("captures"),
+        "captures_gocube": local.get("captures"),
+        "simple_ko_katago": reference.get("simple_ko"),
+        "simple_ko_gocube": local.get("simple_ko"),
+        "terminal_katago": (reference.get("is_game_finished"), reference.get("is_no_result")),
+        "terminal_gocube": (local.get("is_game_finished"), local.get("is_no_result")),
+    }
+    return f"{context} differential mismatch: {json.dumps(details, sort_keys=True, default=str)}"
 
 
 def _assert_postconditions(

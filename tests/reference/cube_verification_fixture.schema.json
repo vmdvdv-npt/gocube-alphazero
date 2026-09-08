@@ -13,10 +13,12 @@
     "expected",
     "oracle/source",
     "rotation_policy",
-    "notes"
+    "notes",
+    "status",
+    "evidence"
   ],
   "properties": {
-    "id": {"type": "string", "pattern": "^cube[0-9]+_[a-z0-9_]+$"},
+    "id": {"type": "string", "pattern": "^(cube|torus)[0-9]+_[a-z0-9_]+$"},
     "family": {"type": "string"},
     "topology_kind": {"enum": ["cube", "torus", "rectangular-test"]},
     "size": {"type": "integer", "minimum": 1},
@@ -32,7 +34,9 @@
     "oracle/source": {"type": "string"},
     "rotation_policy": {"type": "string"},
     "rotation_safe": {"type": "boolean"},
-    "notes": {"type": "string"}
+    "notes": {"type": "string"},
+    "status": {"enum": ["verified", "explained_difference", "unresolved"]},
+    "evidence": {"type": "string"}
   },
   "additionalProperties": true
 }
