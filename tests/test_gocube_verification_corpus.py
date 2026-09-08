@@ -101,8 +101,12 @@ def test_v2_export_is_coupled_to_verified_v1_status():
 
 def test_v2_export_contains_explicit_mapping_steps_and_deterministic_boundary():
     topology = cube_topology(4)
-    exported = export_verified_product_boundary_fixtures(cube_verification_fixtures(), topology)
+    sources = cube_verification_fixtures()
+    exported = export_verified_product_boundary_fixtures(sources, topology)
     assert len(exported) >= 10
+    source_by_id = {fixture.source_id: fixture for fixture in sources}
+    assert all(source_by_id[fixture.source_verification_id].phase == "main" for fixture in exported)
+    assert not any("cleanup" in fixture.fixture_id for fixture in exported)
     for fixture in exported:
         document = fixture.to_dict()
         assert document["source_verification_status"] == "verified"

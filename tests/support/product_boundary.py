@@ -255,7 +255,8 @@ def export_verified_product_boundary_fixtures(
     exported = []
     for fixture in fixtures:
         if (
-            fixture.family in excluded
+            fixture.phase != "main"
+            or fixture.family in excluded
             or fixture.oracle not in VERIFIED_V1_SOURCES
             or fixture.status != "verified"
             or fixture.expected.get("legal") is False
