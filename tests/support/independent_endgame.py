@@ -8,7 +8,7 @@ the tests only after these graph facts have been established.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 from .exhaustive_solver import PROVED_DRAW, ExhaustiveSolver, SolverState
 from .independent_graph import (
@@ -117,6 +117,83 @@ def prove_two_vital_regions(
     if len(vital) < 2:
         raise ValueError("fewer than two exclusive vital regions")
     return VitalRegionProof(color, target.stones, tuple(vital))
+
+
+def independent_japanese_score_from_graph_facts(
+    board: Sequence[int],
+    adjacency: Sequence[Sequence[int]],
+    *,
+    group: frozenset[int],
+    vital_regions: Sequence[frozenset[int]],
+    group_status: str = "alive",
+    captures: tuple[int, int] = (0, 0),
+    dead_stones: tuple[int, int] = (0, 0),
+    komi: float = 0.5,
+) -> dict[str, Any]:
+    """Calculate one Japanese expected score from already-proven graph facts.
+
+    This is intentionally a narrow test-only arithmetic bridge for the
+    non-empty V1 product fixture.  It does not implement production scoring:
+    the graph facts establish one alive black group and its two exclusive
+    territory regions, after which the Japanese prisoner/komi arithmetic is
+    written out directly.
+    """
+
+    if group_status != "alive":
+        raise ValueError("the score bridge requires an explicitly alive group")
+    if len(captures) != 2 or any(value < 0 for value in captures):
+        raise ValueError("captures must be a non-negative black/white pair")
+    if len(dead_stones) != 2 or any(value < 0 for value in dead_stones):
+        raise ValueError("dead_stones must be a non-negative black/white pair")
+    if len(vital_regions) != 2:
+        raise ValueError("the score bridge requires exactly two vital regions")
+
+    groups = tuple(item for item in find_groups(board, adjacency) if item.color == BLACK)
+    if len(groups) != 1 or groups[0].stones != group:
+        raise ValueError("graph facts must describe the complete black group")
+
+    regions = empty_regions(board, adjacency)
+    expected_regions = {frozenset(region) for region in vital_regions}
+    actual_regions = {
+        region.points
+        for region in regions
+        if region.bordering_colors == frozenset((BLACK,))
+        and region.bordering_black_groups == (group,)
+        and not region.bordering_white_groups
+    }
+    if actual_regions != expected_regions or len(actual_regions) != len(regions):
+        raise ValueError("graph facts must account for every empty point as exclusive black territory")
+
+    black_territory = sum(len(region) for region in vital_regions)
+    white_territory = 0
+    neutral = 0
+    seki = 0
+    black_captures, white_captures = captures
+    black_dead, white_dead = dead_stones
+    black_prisoners = black_captures + white_dead
+    white_prisoners = white_captures + black_dead
+    black_score = float(black_territory + black_prisoners)
+    white_score = float(white_territory + white_prisoners + komi)
+    winner = "draw" if black_score == white_score else ("black" if black_score > white_score else "white")
+
+    return {
+        "rule_set": "japanese",
+        "black": black_score,
+        "white": white_score,
+        "komi": float(komi),
+        "territory": {
+            "black": black_territory,
+            "white": white_territory,
+            "neutral": neutral,
+            "seki": seki,
+        },
+        "stones_on_board": {"black": len(group), "white": 0},
+        "captures": [black_captures, white_captures],
+        "prisoners": [black_prisoners, white_prisoners],
+        "dead_stones": {"black": black_dead, "white": white_dead},
+        "winner": winner,
+        "margin": abs(black_score - white_score),
+    }
 
 
 def prove_opponent_placement_exhaustion(

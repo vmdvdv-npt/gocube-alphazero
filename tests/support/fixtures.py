@@ -465,7 +465,7 @@ def cube_verification_fixtures() -> tuple[VerificationFixture, ...]:
                 },
             },
             oracle="independent_graph",
-            evidence="independent two-vital-region graph proof plus independent Japanese score_position oracle",
+            evidence="independent graph proof of two exclusive black territory regions plus test-only Japanese territory arithmetic; production score_position is compared against this expected result",
             notes="Non-empty product scoring boundary: the single logical black group is manually marked alive after two MAIN passes; both graph-proven eyes become black territory.",
         ),
     )

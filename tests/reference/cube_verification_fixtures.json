@@ -2431,7 +2431,7 @@
     ],
     "cleanup_metadata": {},
     "difference_id": null,
-    "evidence": "independent two-vital-region graph proof plus independent Japanese score_position oracle",
+    "evidence": "independent graph proof of two exclusive black territory regions plus test-only Japanese territory arithmetic; production score_position is compared against this expected result",
     "expected": {
       "independent_proof": "one connected black group has two exclusive graph-vital regions",
       "status": "verified",

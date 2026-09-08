@@ -51,6 +51,7 @@ from tests.support.independent_graph import (
     graph_triangles,
 )
 from tests.support.independent_endgame import (
+    independent_japanese_score_from_graph_facts,
     mixed_border_regions,
     prove_opponent_placement_exhaustion,
     prove_settled_seki,
@@ -156,6 +157,12 @@ def test_independent_support_does_not_import_production_rule_helpers():
             if isinstance(node, ast.ImportFrom) and node.module
         }
         assert not any(module.startswith("alphazero.envs.gocube") for module in modules)
+        names = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
+        }
+        assert not names.intersection({"score_position", "final_v3_score", "final_score"})
 
 
 @pytest.mark.parametrize("size", (2, 3, 4, 5, 6, 7))
@@ -425,6 +432,24 @@ def test_v1_nonempty_score_fixture_matches_independent_graph_and_japanese_oracle
     }
     assert len(proof.group) == len(fixture.black)
 
+    regions = empty_regions(board, topology.neighbors_by_index)
+    assert len(regions) == 2
+    assert all(region.bordering_colors == frozenset((BLACK,)) for region in regions)
+    assert all(region.bordering_black_groups == (proof.group,) for region in regions)
+    assert all(not region.bordering_white_groups for region in regions)
+
+    expected = independent_japanese_score_from_graph_facts(
+        board,
+        topology.neighbors_by_index,
+        group=proof.group,
+        vital_regions=proof.vital_regions,
+        group_status="alive",
+        captures=(0, 0),
+        dead_stones=(0, 0),
+        komi=0.5,
+    )
+    assert expected == fixture.expected["verified_final_score"]
+
     state = replace(initial_state(topology), board=np.asarray(board, dtype=np.uint8))
     score = score_position(
         state,
@@ -457,7 +482,7 @@ def test_v1_nonempty_score_fixture_matches_independent_graph_and_japanese_oracle
         "winner": score.winner,
         "margin": score.margin,
     }
-    assert actual == fixture.expected["verified_final_score"]
+    assert actual == expected
 
 
 def test_v1_settled_seki_has_pinned_katago_rectangular_scoring_analog():
