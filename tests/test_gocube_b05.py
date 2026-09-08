@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -77,6 +78,6 @@ def test_hardware_telemetry_summarizes_temperature_and_power(tmp_path):
 
 
 def test_komi_audit_has_no_applicable_production_7_5_literal():
-    audit = gocube_b05._komi_audit(gocube_b05.EXPECTED_REPO)
+    audit = gocube_b05._komi_audit(Path(__file__).resolve().parents[1])
     assert audit["canonical_komi"] == 0.5
     assert audit["applicable_production_matches"] == []
