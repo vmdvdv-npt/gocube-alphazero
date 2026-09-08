@@ -1352,7 +1352,7 @@
     },
     "ko_state": {},
     "notes": "A reviewed shared-liberty seki fixture; no production life helper supplies the expected classification.",
-    "oracle/source": "manual_reviewed_graph_proof",
+    "oracle/source": "independent_graph",
     "phase": "main",
     "previous_board": null,
     "rotation_index": null,

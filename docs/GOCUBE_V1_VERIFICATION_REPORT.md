@@ -10,7 +10,8 @@ This report records the local V1 gate from the branch
 | --- | --- |
 | F0 base SHA | `25b9f7f063acd0fa1921ab8f3c5a2adb8e8c8bad` |
 | Branch | `codex/v1-independent-rule-verification` |
-| Final HEAD | recorded at handoff after the final verification commit |
+| V1 implementation commit | `f74fe33ac52a6b1ddc03ec07764be89458e03279` |
+| Final branch HEAD | reported by the final task handoff after this report commit |
 
 ## KataGo
 
