@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from alphazero.envs.gocube.b_experiment_contract import (
     DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET,
     build_b_experiment_contract,
@@ -14,6 +16,7 @@ from alphazero.envs.gocube.production_training import (
     recover_cumulative_training_counters,
     write_training_progress,
 )
+from alphazero.envs.gocube.katago_train import KataGoSearchCoach
 from tools import gocube_b_experiment
 from tools._c4_overnight_runtime import render_markdown_report
 
@@ -83,6 +86,7 @@ def test_manifest_recovery_does_not_count_replay_window_as_new_samples(tmp_path)
     manifest_path.write_text(
         json.dumps(
             {
+                "iteration": 2,
                 "aggregate_metrics": {
                     "sample_accounting": {
                         "selfplay_games_completed": 256,
@@ -107,6 +111,139 @@ def test_manifest_recovery_does_not_count_replay_window_as_new_samples(tmp_path)
     assert recovered.new_samples_accepted == 700
     assert recovered.optimizer_steps == 7
     assert recovered.optimizer_examples_seen == 768
+
+
+def _write_iteration_manifest(tmp_path, iteration, *, games=256, samples=700, examples=768):
+    path = tmp_path / "run" / "records" / f"iteration-{iteration:04d}" / "iteration-manifest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "iteration": iteration,
+                "aggregate_metrics": {
+                    "sample_accounting": {
+                        "selfplay_games_completed": games,
+                        "positions_generated": samples,
+                        "saved_replay_samples": samples,
+                        "new_samples_accepted": samples,
+                    },
+                    "training": {
+                        "actual_optimizer_steps": 7,
+                        "actual_training_samples": examples,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_resume_reconciles_lagging_progress_to_the_loaded_checkpoint(tmp_path):
+    write_training_progress(
+        tmp_path,
+        "run",
+        counters=CumulativeTrainingCounters(
+            selfplay_games_completed=4 * 256,
+            positions_generated=4_000,
+            saved_replay_samples=4_000,
+            new_samples_accepted=4_000,
+        ),
+        latest_iteration=4,
+    )
+    _write_iteration_manifest(tmp_path, 5, games=256, samples=900)
+
+    recovered = recover_cumulative_training_counters(
+        tmp_path,
+        "run",
+        checkpoint_iteration=5,
+        optimizer_steps=51,
+        optimizer_examples_seen=5_568,
+    )
+
+    assert recovered.selfplay_games_completed == 5 * 256
+    assert recovered.positions_generated == 4_900
+    assert recovered.saved_replay_samples == 4_900
+    assert recovered.new_samples_accepted == 4_900
+    assert recovered.optimizer_steps == 51
+    assert recovered.optimizer_examples_seen == 5_568
+
+
+def test_resume_repairs_progress_artifact_to_the_loaded_checkpoint(tmp_path):
+    write_training_progress(
+        tmp_path,
+        "run",
+        counters=CumulativeTrainingCounters(new_samples_accepted=4_000),
+        latest_iteration=4,
+    )
+    _write_iteration_manifest(tmp_path, 5, games=256, samples=900)
+    coach = object.__new__(KataGoSearchCoach)
+    coach.args = type("Args", (), {"data": str(tmp_path), "run_name": "run"})()
+    coach.train_net = type(
+        "Network",
+        (),
+        {"total_optimizer_updates": 51, "total_training_samples": 5_568},
+    )()
+
+    coach._initialize_training_accounting(resumed_checkpoint_iteration=5)
+
+    repaired = load_training_progress(tmp_path, "run")
+    assert repaired is not None
+    assert repaired["latest_iteration"] == 5
+    assert repaired["cumulative"]["new_samples_accepted"] == 4_900
+    assert repaired["cumulative_optimizer_steps"] == 51
+    assert repaired["cumulative_optimizer_examples_seen"] == 5_568
+
+
+def test_resume_fails_closed_when_progress_is_ahead_of_checkpoint(tmp_path):
+    write_training_progress(
+        tmp_path,
+        "run",
+        counters=CumulativeTrainingCounters(
+            selfplay_games_completed=6 * 256,
+            new_samples_accepted=6_000,
+        ),
+        latest_iteration=6,
+    )
+
+    with pytest.raises(ValueError, match="ahead of the selected checkpoint"):
+        recover_cumulative_training_counters(
+            tmp_path,
+            "run",
+            checkpoint_iteration=5,
+            optimizer_steps=50,
+            optimizer_examples_seen=5_000,
+        )
+
+
+def test_resume_fails_closed_on_unreadable_manifest_needed_through_checkpoint(tmp_path):
+    write_training_progress(
+        tmp_path,
+        "run",
+        counters=CumulativeTrainingCounters(new_samples_accepted=4_000),
+        latest_iteration=4,
+    )
+    manifest = tmp_path / "run" / "records" / "iteration-0005" / "iteration-manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="iteration 5 manifest is missing or unreadable"):
+        recover_cumulative_training_counters(
+            tmp_path,
+            "run",
+            checkpoint_iteration=5,
+            optimizer_steps=50,
+            optimizer_examples_seen=5_000,
+        )
+
+
+def test_manifest_fallback_fails_closed_on_unreadable_json(tmp_path):
+    manifest = tmp_path / "run" / "records" / "iteration-0001" / "iteration-manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="iteration 1 manifest is missing or unreadable"):
+        recover_cumulative_training_counters(tmp_path, "run")
 
 
 def test_training_ratio_uses_actual_new_samples_and_not_replay_window():

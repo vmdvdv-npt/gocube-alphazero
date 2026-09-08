@@ -111,9 +111,21 @@ class HardenedKataGoSearchCoach(KataGoSearchCoach):
             init_args = args.copy()
             init_args.load_model = False
             init_args.startIter = int(last_valid) + 1
-            super().__init__(game_cls, nnet, init_args)
+            super().__init__(
+                game_cls,
+                nnet,
+                init_args,
+                initialize_training_accounting=False,
+            )
             self.args.load_model = True
             self._load_model(self.train_net, int(last_valid))
+            # The checkpoint must establish the optimizer/sample clock before
+            # generation accounting is recovered.  In particular, a crash
+            # after saving checkpoint N but before publishing progress N must
+            # still resume with all generation deltas through N.
+            self._initialize_training_accounting(
+                resumed_checkpoint_iteration=int(last_valid)
+            )
             # A normal resume may reinitialize the wrapper from saved args;
             # explicit parameter-sweep overrides intentionally load weights and
             # training state without replacing current CLI args. Reconnecting
@@ -304,7 +316,8 @@ def main(argv=None):
     network._gocube_checkpoint_arg_overrides = checkpoint_arg_overrides(cli, args)
     coach = HardenedKataGoSearchCoach(game_cls, network, args)
     coach.learn()
-    target = coach._sample_budget_target()
+    target_builder = getattr(coach, "_sample_budget_target", None)
+    target = target_builder() if callable(target_builder) else None
     if target is not None and not coach._training_budget_reached():
         counters = getattr(coach, "_cumulative_training_counters", None)
         current = target.current(counters) if counters is not None else 0

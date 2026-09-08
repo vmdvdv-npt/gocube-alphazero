@@ -85,6 +85,14 @@ class CumulativeTrainingCounters:
         self.optimizer_steps = max(self.optimizer_steps, steps)
         self.optimizer_examples_seen = max(self.optimizer_examples_seen, examples_seen)
 
+    def set_authoritative_optimizer_totals(self, *, steps: int, examples_seen: int) -> None:
+        """Replace optimizer totals with values read from the resumed checkpoint."""
+
+        self.optimizer_steps = _non_negative_counter(steps, "optimizer_steps")
+        self.optimizer_examples_seen = _non_negative_counter(
+            examples_seen, "optimizer_examples_seen"
+        )
+
     def as_dict(self) -> dict[str, int]:
         return {key: int(getattr(self, key)) for key in TRAINING_COUNTER_KEYS}
 
@@ -298,7 +306,7 @@ def _manifest_counter_delta(aggregate: object) -> dict[str, int]:
     training = aggregate.get("training")
     if not isinstance(training, dict):
         training = {}
-    return {
+    values = {
         "selfplay_games_completed": int(sample.get("selfplay_games_completed", sample.get("games", 0))),
         "positions_generated": int(sample.get("positions_generated", sample.get("base_positions", 0))),
         "saved_replay_samples": int(
@@ -314,6 +322,66 @@ def _manifest_counter_delta(aggregate: object) -> dict[str, int]:
             training.get("actual_training_samples", training.get("examples_seen", 0))
         ),
     }
+    return {
+        key: _non_negative_counter(value, key)
+        for key, value in values.items()
+    }
+
+
+def _read_committed_iteration_manifest(
+    manifest_root: Path,
+    iteration: int,
+) -> dict[str, int]:
+    """Read one committed manifest or fail closed for scientific recovery."""
+
+    path = manifest_root / f"iteration-{int(iteration):04d}" / "iteration-manifest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"is missing or unreadable: {path}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"is not an object: {path}"
+        )
+    try:
+        manifest_iteration = int(payload.get("iteration", -1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has an invalid iteration field: {path}"
+        ) from exc
+    if manifest_iteration != int(iteration):
+        raise ValueError(
+            f"Cannot recover scientific accounting: manifest {path} claims "
+            f"iteration {manifest_iteration}, expected {iteration}"
+        )
+    aggregate = payload.get("aggregate_metrics")
+    if not isinstance(aggregate, dict):
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has invalid aggregate metrics: {path}"
+        )
+    if "sample_accounting" in aggregate and not isinstance(aggregate["sample_accounting"], dict):
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has invalid sample accounting: {path}"
+        )
+    if "training" in aggregate and not isinstance(aggregate["training"], dict):
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has invalid training metrics: {path}"
+        )
+    try:
+        return _manifest_counter_delta(aggregate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Cannot recover scientific accounting: iteration {iteration} manifest "
+            f"has invalid aggregate metrics: {path}"
+        ) from exc
 
 
 def recover_cumulative_training_counters(
@@ -322,29 +390,87 @@ def recover_cumulative_training_counters(
     *,
     optimizer_steps: int = 0,
     optimizer_examples_seen: int = 0,
+    checkpoint_iteration: int | None = None,
 ) -> CumulativeTrainingCounters:
-    """Recover generation counters from committed manifests for a resume.
+    """Recover counters without crossing the selected checkpoint boundary.
 
-    The progress artifact is preferred because it is written after the
-    checkpoint and manifest commit.  The manifest scan is a conservative
-    fallback for runs created before the artifact existed.
+    On a production resume, ``checkpoint_iteration`` must be the already
+    loaded last-valid checkpoint.  Progress is trusted only when its
+    ``latest_iteration`` is at or before that checkpoint: a lagging artifact is
+    completed from committed manifests, while an artifact ahead of the
+    checkpoint fails closed.  Optimizer totals always come from the checkpoint
+    in this mode; generation totals come from progress plus the missing
+    iteration manifests.
     """
 
+    if checkpoint_iteration is not None:
+        checkpoint_iteration = _non_negative_counter(
+            checkpoint_iteration, "checkpoint_iteration"
+        )
+
     progress = load_training_progress(data_root, run_name)
+    manifest_root = Path(data_root) / str(run_name) / "records"
     if progress is not None:
+        try:
+            latest_iteration = int(progress.get("latest_iteration", -1))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Cannot recover scientific accounting: training progress has "
+                "an invalid latest_iteration"
+            ) from exc
+        if latest_iteration < 0:
+            raise ValueError(
+                "Cannot recover scientific accounting: training progress has "
+                "a negative latest_iteration"
+            )
+        if checkpoint_iteration is not None and latest_iteration > checkpoint_iteration:
+            raise ValueError(
+                "Cannot recover scientific accounting: training progress is ahead "
+                f"of the selected checkpoint ({latest_iteration} > {checkpoint_iteration})"
+            )
         counters = CumulativeTrainingCounters.from_mapping(progress)
-        counters.set_optimizer_totals(steps=optimizer_steps, examples_seen=optimizer_examples_seen)
+        if checkpoint_iteration is not None:
+            for iteration in range(latest_iteration + 1, checkpoint_iteration + 1):
+                delta = _read_committed_iteration_manifest(manifest_root, iteration)
+                counters.add_generation(
+                    selfplay_games_completed=delta["selfplay_games_completed"],
+                    positions_generated=delta["positions_generated"],
+                    saved_replay_samples=delta["saved_replay_samples"],
+                    new_samples_accepted=delta["new_samples_accepted"],
+                )
+            counters.set_authoritative_optimizer_totals(
+                steps=optimizer_steps,
+                examples_seen=optimizer_examples_seen,
+            )
+        else:
+            counters.set_optimizer_totals(steps=optimizer_steps, examples_seen=optimizer_examples_seen)
         return counters
 
     counters = CumulativeTrainingCounters()
-    manifest_root = Path(data_root) / str(run_name) / "records"
+    if checkpoint_iteration is not None:
+        for iteration in range(1, checkpoint_iteration + 1):
+            delta = _read_committed_iteration_manifest(manifest_root, iteration)
+            counters.add_generation(
+                selfplay_games_completed=delta["selfplay_games_completed"],
+                positions_generated=delta["positions_generated"],
+                saved_replay_samples=delta["saved_replay_samples"],
+                new_samples_accepted=delta["new_samples_accepted"],
+            )
+        counters.set_authoritative_optimizer_totals(
+            steps=optimizer_steps,
+            examples_seen=optimizer_examples_seen,
+        )
+        return counters
+
     paths = sorted(manifest_root.glob("iteration-*/iteration-manifest.json"))
     for path in paths:
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            continue
-        delta = _manifest_counter_delta((payload or {}).get("aggregate_metrics"))
+            iteration = int(path.parent.name.removeprefix("iteration-"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Cannot recover scientific accounting: invalid iteration manifest path: {path}"
+            ) from exc
+        delta = _read_committed_iteration_manifest(manifest_root, iteration)
         counters.add_generation(
             selfplay_games_completed=delta["selfplay_games_completed"],
             positions_generated=delta["positions_generated"],
@@ -355,12 +481,8 @@ def recover_cumulative_training_counters(
         # still contain per-iteration optimizer deltas, so recover those too;
         # a checkpoint-provided absolute scheduler total below remains
         # authoritative when it is available.
-        counters.optimizer_steps += _non_negative_counter(
-            delta["optimizer_steps"], "optimizer_steps"
-        )
-        counters.optimizer_examples_seen += _non_negative_counter(
-            delta["optimizer_examples_seen"], "optimizer_examples_seen"
-        )
+        counters.optimizer_steps += delta["optimizer_steps"]
+        counters.optimizer_examples_seen += delta["optimizer_examples_seen"]
     counters.set_optimizer_totals(steps=optimizer_steps, examples_seen=optimizer_examples_seen)
     return counters
 

@@ -44,6 +44,7 @@ from alphazero.envs.gocube.production_training import (
     build_sample_budget_target,
     build_replay_training_plan,
     canonical_training_counters,
+    load_training_progress,
     recover_cumulative_training_counters,
     summarize_arena_outcomes,
     write_training_progress,
@@ -210,12 +211,14 @@ def checkpoint_arg_overrides(cli, args) -> dict[str, object]:
 class KataGoSearchCoach(GoCubeCoach):
     """Pinned GoCube search with sample-ratio training and observational Arena."""
 
-    def __init__(self, game_cls, nnet, args):
+    def __init__(self, game_cls, nnet, args, *, initialize_training_accounting=True):
         super().__init__(game_cls, nnet, args)
         self.score_tensors = []
         self.ownership_tensors = []
         self._arena_telemetry = None
-        self._initialize_training_accounting()
+        self._training_accounting_latest_iteration = None
+        if initialize_training_accounting:
+            self._initialize_training_accounting()
 
     @staticmethod
     def _arg(args, name, default=None):
@@ -226,8 +229,8 @@ class KataGoSearchCoach(GoCubeCoach):
         except (AttributeError, KeyError):
             return default
 
-    def _initialize_training_accounting(self):
-        """Restore generation counters while taking optimizer totals from the checkpoint clock."""
+    def _initialize_training_accounting(self, *, resumed_checkpoint_iteration=None):
+        """Restore generation counters after the checkpoint clock is authoritative."""
 
         data_root = self._arg(self.args, "data", "data")
         run_name = self._arg(self.args, "run_name", "")
@@ -238,8 +241,82 @@ class KataGoSearchCoach(GoCubeCoach):
             run_name,
             optimizer_steps=optimizer_steps,
             optimizer_examples_seen=optimizer_examples,
+            checkpoint_iteration=resumed_checkpoint_iteration,
         )
+        self._training_accounting_latest_iteration = (
+            None
+            if resumed_checkpoint_iteration is None
+            else int(resumed_checkpoint_iteration)
+        )
+        if resumed_checkpoint_iteration is not None:
+            self._publish_recovered_training_progress(
+                int(resumed_checkpoint_iteration)
+            )
         self._training_budget_status = None
+
+    def _publish_recovered_training_progress(self, checkpoint_iteration):
+        """Publish checkpoint-consistent accounting before another iteration starts."""
+
+        data_root = self._arg(self.args, "data", "data")
+        run_name = self._arg(self.args, "run_name", "")
+        progress = load_training_progress(data_root, run_name)
+        latest_metrics = None
+        if progress is not None:
+            try:
+                progress_iteration = int(progress.get("latest_iteration", -1))
+            except (TypeError, ValueError):
+                progress_iteration = -1
+            if progress_iteration == int(checkpoint_iteration):
+                candidate = progress.get("latest_iteration_metrics")
+                if isinstance(candidate, dict):
+                    latest_metrics = candidate
+
+        # A lagging progress artifact may be missing the post-training patch,
+        # but the committed iteration manifest still has the generation-side
+        # episode metrics. Preserve those in the repaired artifact when they
+        # are available; never let optional reporting data block recovery.
+        if latest_metrics is None:
+            manifest_path = os.path.join(
+                data_root,
+                str(run_name),
+                "records",
+                f"iteration-{int(checkpoint_iteration):04d}",
+                ITERATION_MANIFEST_FILENAME,
+            )
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as handle:
+                    manifest = json.load(handle)
+                aggregate = manifest.get("aggregate_metrics", {})
+                training = aggregate.get("training", {}) if isinstance(aggregate, dict) else {}
+                sample = aggregate.get("sample_accounting", {}) if isinstance(aggregate, dict) else {}
+                latest_metrics = dict(training) if isinstance(training, dict) else {}
+                if isinstance(sample, dict):
+                    for key in (
+                        "average_game_length",
+                        "no_result_games",
+                        "episode_move_limit_games",
+                    ):
+                        if key in sample:
+                            latest_metrics[key] = sample[key]
+                if not latest_metrics:
+                    latest_metrics = None
+            except (OSError, TypeError, ValueError):
+                latest_metrics = None
+
+        target = self._sample_budget_target()
+        target_status = (
+            target.status(self._cumulative_training_counters)
+            if target is not None
+            else None
+        )
+        write_training_progress(
+            data_root,
+            run_name,
+            counters=self._cumulative_training_counters,
+            latest_iteration=int(checkpoint_iteration),
+            target_status=target_status,
+            latest_iteration_metrics=latest_metrics,
+        )
 
     def _sample_budget_target(self):
         return build_sample_budget_target(
