@@ -1,26 +1,28 @@
 # GoCube V3 state and observation audit (H1) / exact simple ko (M1)
 
-Status: H1 audit completed; M1 production fix completed.
+Status: original H1 audit and M1 production fix completed; F0 post-merge
+re-verification completed below.
 
-This audit was run against `codex/h1-m1-state-ko-audit` at `main` commit
-`84a878e`, after verification-groundwork and S2/model-contract work. The
-audited production V3 observation has 17 planes. The pinned self-play wrapper
-adds plane 17 (`passWouldEndPhase`) and uses
-`gocube-observation-v4-pass-would-end-phase` with 18 planes. G1 structural
-features were not included in this audit and must be re-probed after G1 is
-merged.
+The original audit was run against `codex/h1-m1-state-ko-audit` at `main` commit
+`84a878e`, after verification-groundwork and S2/model-contract work. Its
+historical result is preserved in this document. The original production V3
+observation has 17 planes; the pinned self-play wrapper adds plane 17
+(`passWouldEndPhase`) and uses `gocube-observation-v4-pass-would-end-phase`
+with 18 planes. G1 and final S3 were not part of that original run; the
+integrated post-merge probe is documented in the F0 section below.
 
 ## State inventory
 
 The authoritative exact game state is the frozen `V3State` in
 `alphazero/envs/gocube/katago_v3.py`. `GoGame` is the framework facade and
-`Pinned*JapaneseGame` adds search/self-play metadata. `V3State` has 25 fields:
+`Pinned*JapaneseGame` adds search/self-play metadata. `V3State` has 27 fields
+in the integrated tree:
 
 | Field | Type | Legality | Phase | Score | Root/search | Technical stop | In observation | Exactly reconstructible | Classification |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `board` | `uint8[N]` | yes | yes | yes | yes | no | planes 0/1 | state/replay | A |
 | `current_player` | `int` | yes | yes | no | yes | no | plane 4 | state/replay | A |
-| `turns` | `int` | no direct | no | no | no | move cap | no | state/replay only | D |
+| `turns` | `int` | no direct | no | no | no | formal history | no | state/replay only | D |
 | `consecutive_passes` | `int` | yes | yes | no | yes | yes | plane 5 | immediate state | A |
 | `captures` | `(int, int)` | no direct | no | yes | score context | no | planes 6/7, normalized | replay/state exact count | A |
 | `white_bonus_score` | `float` | no direct | no | yes | score utility context | no | no | replay/state only | D |
@@ -38,6 +40,8 @@ The authoritative exact game state is the frozen `V3State` in
 | `cleanup1_moves` | `(int, int)` | no | accounting | no | search context | no | no | replay/state | C |
 | `terminal_kind` | `str \| None` | terminal gate | yes | yes | yes | yes | no; terminal API | state/replay | D |
 | `no_result_reason` | `str \| None` | no | yes | no | yes | yes | no; terminal API | state/replay | D |
+| `termination_reason` | `str \| None` | no | terminal reason | target/runtime provenance | yes | yes | no; terminal/record API | state/replay | D |
+| `result_provenance` | `str \| None` | no | terminal provenance | target provenance | yes | yes | no; terminal/record API | state/replay | D |
 | `pass_alive_early_end` | `bool` | no | terminal gate | no | root stop | yes | no | replay/state | D |
 | `entered_cleanup1` | `bool` | no | provenance | no | no | no | no | replay/state | C |
 | `entered_cleanup2` | `bool` | no | provenance | no | no | no | no | replay/state | C |
@@ -61,7 +65,7 @@ The per-field lifecycle/preservation audit is:
 | `captures` | setup; every placement capture | preserved | final position |
 | `white_bonus_score` | setup from board/captures; MAIN/CLEANUP_1 placement updates | preserved | final position |
 | `previous_board` | setup optional; every accepted action | preserved | final position |
-| `phase` | setup; second PASS, cycle, cap, and scoring transitions | preserved | final position |
+| `phase` | setup; second PASS, cycle, and scoring transitions | preserved | final position |
 | `ko_recap_blocked` | setup; cleanup ko placement/unblock; phase reset clears | preserved | final position |
 | `phase_history` | setup; every accepted action; phase reset starts a segment | preserved | omitted; replay only |
 | `history_since_pass` | setup; placement/unblock/cycle; PASS starts a segment | preserved | omitted; replay only |
@@ -72,8 +76,10 @@ The per-field lifecycle/preservation audit is:
 | `cleanup2_moves` | setup; CLEANUP_2 placements | preserved | final position/diagnostics |
 | `main_moves` | setup; MAIN placements | preserved | final position/diagnostics |
 | `cleanup1_moves` | setup; CLEANUP_1 placements | preserved | final position/diagnostics |
-| `terminal_kind` | setup terminal fixtures; cycle/cap/phase scoring | preserved | final position and terminal |
-| `no_result_reason` | cycle/cap terminal transitions | preserved | final position and terminal |
+| `terminal_kind` | setup terminal fixtures; cycle/phase scoring | preserved | final position and terminal |
+| `no_result_reason` | cycle terminal transitions | preserved | final position and terminal |
+| `termination_reason` | formal/cycle/runtime terminal transitions | preserved | final position, target, and record |
+| `result_provenance` | formal/cycle/runtime terminal transitions | preserved | target and record |
 | `pass_alive_early_end` | initialized false; pinned/game wrapper early-end check | preserved | final position/diagnostics |
 | `entered_cleanup1` | setup if cleanup; first cleanup transition | preserved | final position/diagnostics |
 | `entered_cleanup2` | setup if CLEANUP_2; second cleanup transition | preserved | final position/diagnostics |
@@ -88,9 +94,8 @@ silently omitted from the audit.
 `main_moves` and `cleanup1_moves` are retained telemetry. The current scorer
 uses the explicit `white_bonus_score`/capture/setup state and does not select
 a score algorithm from those counters. `cleanup_captures` and
-`ko_unblock_actions` are diagnostic counters. `turns` remains technically
-relevant because `apply_v3_action` has an emergency cap, but its semantics are
-owned by S3.
+`ko_unblock_actions` are diagnostic counters. `turns` remains formal transition
+history; the episode move count and limit are runner-owned S3 runtime state.
 
 ## Wrapper and pinned state
 
@@ -111,6 +116,9 @@ second source of rules truth. The pinned wrapper stores:
 | `_pinned_move_history` | ordered `(player, action)` history | copied | fork/root pruning |
 | `_pinned_state_history` | saved state prefix for forks | copied | fork reconstruction |
 | `_pinned_state_history_offset` | absolute history alignment | copied | fork reconstruction |
+| `_pinned_episode_move_count` | runner-owned episode counter | reset/copied | runtime termination only |
+| `_pinned_episode_type` | ordinary/cleanup/fork provenance | copied | runtime telemetry only |
+| `_pinned_episode_limit_override` | controlled runner limit | copied | runtime termination only |
 
 The diversified wrapper additionally stores early/ordinary fork probabilities,
 fork-pool capacity, fork provenance/suppression, training state history, and
@@ -142,6 +150,7 @@ separately.
 | 15 | repetition-pressure projection |
 | 16 | cleanup ko-repeat-forbidden projection |
 | 17 (pinned only) | exact `passWouldEndPhase` bit |
+| 18--19 (G1 only) | topology-derived triangle membership and normalized distance to triangle |
 
 The previous-board planes are sufficient for immediate MAIN simple-ko
 context. The cleanup projections are intentionally not treated as a lossless
@@ -184,14 +193,13 @@ The audit found no other production consumer of the old helper: root pruning
 continues to use its independent pass-alive condition, and cleanup legality
 continues to use the V3 rule transition/ko-block state.
 
-Current technical behavior is an emergency cap of
-`256 + 24 * point_count` accepted actions in `apply_v3_action`. The raw V3
-path emits `NO_RESULT` with reason `move-cap`; the pinned wrapper converts
-that specific crossing to an immediate scored terminal to match its current
-KataGo training path. This is recorded as current behavior only. The
-`turns=cap-1` same-observation probe is kept as a manually injected diagnostic
-and is not included in the reachable collision search. Any redesign of
-move-cap/episode-limit semantics is deferred to S3.
+S3 owns the self-play episode limit outside the formal transition. The runner
+tracks `episode_move_count` independently and force-scores at
+`256 + 24 * point_count` with `termination_reason=episode_move_limit` and
+`result_provenance=runtime`. `apply_v3_action` has no emergency move cap, and
+search clones never enforce the runner limit. The `turns=cap-1` observation
+probe remains a manually injected diagnostic for this separation and is not
+part of the reachable collision search.
 
 ## M1 exact simple-ko fix
 
@@ -294,7 +302,7 @@ phase and side to move
 PASS result (phase, side, terminal kind, reason)
 score-relevant offset/capture/start-color state
 exact simple-ko context
-whether the next accepted action reaches the technical cap
+formal terminal kind and NO_RESULT reason
 ```
 
 The signature deliberately does not include learned network output.
@@ -337,13 +345,13 @@ inclusion of both synthetic cleanup phases and all three fork families.
 | cleanup ko/repetition context | no semantic collision in bound; exact M1 helper used | D; preserve fixture coverage |
 | second-cleanup start colors | direct planes 11/12; no collision | A for the encoded colors |
 | captures and score initialization | direct normalized capture planes; exact offset remains engine state | D for `white_bonus_score`; revalidate after any S1 changes |
-| `turns` / technical budget | no reachable cap collision searched | `BLOCKED_BY_S3_SEMANTICS`; diagnostic only |
+| `turns` / runner budget | formal history is separate from runner-owned count | D; runtime limit is audited separately |
 | raw game-record serialization | final-position record omits full history tuples | serialization boundary, not confirmed H1 observation collision |
 
 The artificial `turns=0` versus `turns=cap-1` construction remains only a
 technical diagnostic. It is not used as an H1 finding because it is not a
-legal replay or official setup. S3 must decide whether this budget remains
-part of the environment state.
+legal replay or official setup. It verifies that the runner budget remains
+outside formal transition and search-clone state.
 
 ## Clone and serialization boundary
 
@@ -370,22 +378,22 @@ S1 contract (`katago-boardhistory-clear-v1`). Any future S1 scoring change
 requires revalidation of the score-offset rows and cleanup fixtures. This PR
 does not change scoring.
 
-### S3-dependent cases
+### S3 integrated result
 
-Move-cap crossing and technical episode termination are documented as current
-behavior, not redesigned. The H1 technical-budget candidate must be rerun
-after S3 decides whether the budget is removed, changed, or represented in the
-search state.
+S3 moved the episode limit to the runner. `episode_move_count` and
+`episode_move_limit` are runtime fields, not formal `V3State` transition
+inputs and not NN observation channels. Cube 4 uses `256 + 24 * 96 = 2560`
+runner actions; search clones do not enforce this limit. Formal pass,
+rule-cycle `NO_RESULT`, and runtime force-score retain distinct reasons and
+provenance in the terminal/target/record APIs.
 
-### G1-dependent follow-up
+### G1 integrated result
 
-G1 changes structural NN inputs and architecture. This branch deliberately
-does not touch observation shape, channels, masks, network projection, replay,
-or architecture IDs. After G1 merges, rerun the H1 collision suite against
-the new observation and record whether any candidate collision disappears or
-remains.
+F0 reruns this same corpus and semantic signature through the baseline and G1
+encoders. G1 adds only the two deterministic topology-derived channels; it
+does not change rules, action indexing, topology, or correctness semantics.
 
-## Tests and changed files
+## Original H1/M1 tests and changed files (historical)
 
 Targeted M1/H1 tests:
 
@@ -420,8 +428,40 @@ docs/GOCUBE_VERIFICATION_GROUNDWORK.md
 docs/KATAGO_PINNED_SEARCH.md
 ```
 
-Scope check: no G1 architecture change, S3 move-limit change, S1 scorer
-change, new observation channel, training hyperparameter change, replay
-migration, or target-semantics change was made in this change set. The only
-production semantic change is M1 exact simple-ko detection and its explicit
-search-contract version bump.
+Scope check: no G1 architecture, S3 runtime behavior, S1 scorer, or replay
+numeric-target change was made here. F0 changes only the versioned search ID,
+verification coverage, snapshot, and documentation; M1 exact simple-ko and
+S3/G1 behavior are re-verified as integrated inputs.
+
+## F0 post-merge re-verification
+
+F0 uses integration base commit `efe31b7eefacbdd09abf4454a84ab66ffc1c9054`
+and keeps the original H1 audit above as historical context. The one bounded
+corpus is run through two observation encoders:
+
+| Profile | Observation schema | Shape | Samples | Observation groups | Collisions | Semantic collisions |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| `baseline` | `gocube-observation-v4-pass-would-end-phase` | `(18, 96, 1)` | 267 | 263 | 3 | 0 |
+| `g1` | `gocube-observation-v5-structural-features` | `(20, 96, 1)` | 267 | 263 | 3 | 0 |
+
+The corpus retains the ordinary start BFS (depth 6, cap 256), six-PASS phase
+boundaries, ordinary/early/seki fork samples, and synthetic CLEANUP_1/
+CLEANUP_2 samples. The three collision groups are expected aliases with equal
+semantic signatures. The result is conservatively stated as:
+
+```text
+no semantic collision found within bounded search
+```
+
+This is not a proof of full Markov sufficiency. The semantic signature checks
+legal actions, side to move, phase, formal terminal behavior, PASS transition,
+score-relevant state, exact simple-ko state, and cleanup behavior. Runtime
+termination is checked separately because its counter and limit belong to the
+runner boundary, not the NN observation.
+
+F0 also confirms eight Cube 4 graph triangles, 24 triangle points, two G1
+channels, zero artificial Torus 9 triangle features, 24-rotation regressions,
+the S1 `W-B = -3.5` scorer case, M1 false/true exact-ko fixtures, S2 model
+resolver round-trips for both profiles, S3 formal/cycle/runtime provenance,
+and the protected 50/20/50 search budgets. V1 full independent Cube
+verification and V2 full product compatibility verification remain pending.

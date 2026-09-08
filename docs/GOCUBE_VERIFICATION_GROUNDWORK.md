@@ -1,8 +1,9 @@
 # GoCube verification groundwork
 
 This change set prepares an independent verification layer. It does not
-change production rules, scoring, observation channels, model contracts,
-search budgets, cleanup semantics, or the TypeScript product.
+change production rules, scoring, observation channels, model architecture,
+search budgets, cleanup semantics, or the TypeScript product. F0 adds only the
+integrated contract/version snapshot and verification documentation.
 
 ## Method
 
@@ -121,6 +122,11 @@ policy now consumes the exact rule-derived check; the M1 change and its
 root-effect regression are documented in
 `docs/GOCUBE_V3_STATE_OBSERVATION_AUDIT.md`.
 
+M1 is integrated production behavior, not a diagnostic-only experiment. The
+F0 search contract is `katago-pinned-search-v4`, which includes exact M1 ko,
+the S3 runner/search-clone boundary, and the same pinned utility/exploration
+semantics.
+
 ## H1 state-field audit
 
 The table distinguishes an absent observation field from a proven reachable
@@ -130,7 +136,7 @@ semantic ambiguity. Absence alone is not a bug classification.
 | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | `board` | yes | yes | yes | yes | no | planes 0/1 | no |
 | `current_player` | yes | yes | no | yes | no | plane 4 | no |
-| `turns` | no direct | no | no | no | move cap context | no | partly from replay |
+| `turns` | no direct | no | no | no | formal history only | no | partly from replay |
 | `consecutive_passes` | yes | yes | no | yes | yes | plane 5 | yes for immediate state |
 | `captures` | no direct | no | yes (Japanese) | target context | no | planes 6/7 | no, unless replayed |
 | `white_bonus_score` | no | no | yes | yes | no | no | no |
@@ -146,6 +152,8 @@ semantic ambiguity. Absence alone is not a bug classification.
 | `main_moves` | no | phase accounting | score setup context | yes | no | no | replay only |
 | `cleanup1_moves` | no | phase accounting | no | yes | no | no | replay only |
 | `terminal_kind` / `no_result_reason` | no | yes | yes | yes | yes | not direct | terminal API |
+| `termination_reason` | no | terminal reason | target/runtime provenance | yes | yes | not direct | terminal/record API |
+| `result_provenance` | no | terminal provenance | target provenance | yes | yes | not direct | terminal/record API |
 | `pass_alive_early_end` | no | yes | no | root stop | yes | not direct | replay only |
 | `entered_cleanup1/2` | no | yes | no | yes | no | not direct | replay only |
 | `cleanup_captures` | no | yes | no | no | no | diagnostic only | replay only |
@@ -167,6 +175,21 @@ This is recorded as “not found within bounded search,” not as proof of full
 Markov sufficiency. The synthetic probe test also demonstrates that the same
 observation with different legal/phase semantics is reported as a semantic
 collision.
+
+## F0 post-merge status
+
+The integrated F0 probe runs the same corpus and semantic signature through
+both production encoders: baseline `(18, 96, 1)` and G1 `(20, 96, 1)`. Each
+run examined 267 samples in 263 observation groups, with three expected alias
+groups and zero semantic collisions. This bounded result means only “no
+semantic collision found within bounded search”; it does not prove full Markov
+sufficiency. `termination_reason`, `result_provenance`, and the independent
+runner episode counter remain authoritative terminal/target/runtime metadata,
+not added observation channels.
+
+F0 confirms that integrated S1/S2/S3/G1/H1/M1 correctness identities agree
+between baseline and G1. V1 full independent Cube verification and V2 full
+product compatibility verification are still pending.
 
 ## Applicability matrix
 

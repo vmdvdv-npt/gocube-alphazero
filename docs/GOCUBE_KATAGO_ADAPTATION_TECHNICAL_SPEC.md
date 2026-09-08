@@ -181,7 +181,7 @@ build_hardened_training_args
 - Тип цели выбирается по документированному контракту; техническую остановку не переименовывают молча в `NO_RESULT` или обычный финал.
 - Переход к новому поведению версионирован. Для качества новой модели отдельно сообщается частота технических завершений.
 
-S3 compatibility IDs: search contract `katago-pinned-search-v3`, game record
+S3 compatibility IDs: search contract `katago-pinned-search-v4`, game record
 schema v3, replay format v4, training contract v3, and termination contract
 `gocube-termination-provenance-v1`. Replay/training remain at S1's numeric v3
 for the seven neural-network tensors and optimizer/sample semantics; replay v4

@@ -4,6 +4,7 @@ import json
 from dataclasses import fields, replace
 
 import numpy as np
+import pytest
 
 from alphazero.envs.gocube import (
     CLEANUP_1,
@@ -14,7 +15,11 @@ from alphazero.envs.gocube import (
     initial_v3_state,
     v3_valid_moves,
 )
-from alphazero.envs.gocube.diversified_game import DiversifiedPinnedCube4JapaneseGame
+from alphazero.envs.gocube.diversified_game import (
+    DiversifiedPinnedCube4JapaneseGame,
+    diversified_baseline_pinned_game_class,
+    diversified_structural_pinned_game_class,
+)
 from alphazero.envs.gocube.katago_v3 import V3State, apply_v3_action
 from alphazero.envs.gocube.katago_v3 import (
     EMERGENCY_MOVE_CAP_BASE,
@@ -167,10 +172,19 @@ def _all_h1_samples():
     return ordinary + tuple(_fork_samples()) + tuple(_synthetic_cleanup_samples())
 
 
-def _observation_for_state(state: V3State):
-    if len(state.board) == 24:
-        return Cube2JapaneseGame(state).observation()
-    return PinnedCube4JapaneseGame(state).observation()
+def _observation_for_state(state: V3State, profile: str = "baseline"):
+    """Encode one corpus through the selected production observation profile."""
+
+    base_game_cls = Cube2JapaneseGame if len(state.board) == 24 else Cube4JapaneseGame
+    factories = {
+        "baseline": diversified_baseline_pinned_game_class,
+        "g1": diversified_structural_pinned_game_class,
+    }
+    try:
+        game_cls = factories[profile](base_game_cls)
+    except KeyError as exc:
+        raise ValueError(f"Unknown H1 observation profile: {profile!r}") from exc
+    return game_cls(state).observation()
 
 
 def test_v3_state_audit_covers_all_fields():
@@ -241,7 +255,8 @@ def test_serialization_round_trip_marks_the_supported_record_boundary():
     assert topology.point_count == len(restored_payload["board"])
 
 
-def test_observation_collision_probe_uses_reachable_state_families():
+@pytest.mark.parametrize("profile", ("baseline", "g1"))
+def test_observation_collision_probe_uses_reachable_state_families(profile):
     samples = _all_h1_samples()
     categories = {sample.category for sample in samples}
     assert {
@@ -254,7 +269,7 @@ def test_observation_collision_probe_uses_reachable_state_families():
     } <= categories
     report = find_observation_collisions(
         samples,
-        _observation_for_state,
+        lambda state: _observation_for_state(state, profile),
         lambda state: v3_immediate_semantic_signature(
             state,
             cube_topology(2) if len(state.board) == 24 else cube_topology(4),
@@ -303,7 +318,7 @@ def test_collision_probe_is_deterministic():
     ]
     first_report = find_observation_collisions(
         first,
-        _observation_for_state,
+        lambda state: _observation_for_state(state, "baseline"),
         lambda state: v3_immediate_semantic_signature(
             state,
             cube_topology(2) if len(state.board) == 24 else cube_topology(4),
@@ -311,7 +326,7 @@ def test_collision_probe_is_deterministic():
     )
     second_report = find_observation_collisions(
         second,
-        _observation_for_state,
+        lambda state: _observation_for_state(state, "baseline"),
         lambda state: v3_immediate_semantic_signature(
             state,
             cube_topology(2) if len(state.board) == 24 else cube_topology(4),

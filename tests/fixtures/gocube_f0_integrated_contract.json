@@ -1,0 +1,79 @@
+{
+  "contract_id": "gocube-f0-integrated-freeze-v1",
+  "integration_base_commit": "efe31b7eefacbdd09abf4454a84ab66ffc1c9054",
+  "katago_reference_commit": "f6bc4b19a1686caa2d088b56251e8c11c8be6d51",
+  "rules_version": 3,
+  "rules_implementation": "gocube-katago-rules-v3-implementation-v5",
+  "rules_implementation_version": 5,
+  "search_contract": "katago-pinned-search-v4",
+  "replay_format_version": 4,
+  "training_contract_version": 3,
+  "termination_contract": "gocube-termination-provenance-v1",
+  "target_provenance_semantics": "formal-runtime-result-provenance-v1",
+  "target_provenance_encoding": "gocube-target-provenance-encoding-v1",
+  "komi": 0.5,
+  "replay": {
+    "tensor_count": 7,
+    "tensor_suffixes": [
+      "-data.pkl",
+      "-policy.pkl",
+      "-value.pkl",
+      "-score.pkl",
+      "-score-mask.pkl",
+      "-ownership.pkl",
+      "-ownership-mask.pkl"
+    ],
+    "target_provenance_sidecar": "-target-provenance.pkl",
+    "completion_marker": "-complete.json"
+  },
+  "protected_search_budgets": {
+    "source_fixture": "tests/fixtures/gocube_production_profile_baseline.json",
+    "fields": ["regular_sims", "fast_sims", "arena_sims"]
+  },
+  "profiles": {
+    "baseline": {
+      "model_profile": "baseline",
+      "network_architecture_id": "gocube-graph-v1",
+      "network_architecture_fingerprint": "15d5552612a206b0188c8741799e9d70cd28b4b2ad82ade276ef97618fb9fa2b",
+      "observation_schema": "gocube-observation-v4-pass-would-end-phase",
+      "observation_shape": [18, 96, 1],
+      "structural_feature_schema": null,
+      "structural_feature_channels": 0,
+      "action_schema": "gocube-action-point-id-pass-v1",
+      "action_size": 97,
+      "point_count": 96,
+      "topology": "cube",
+      "size": 4,
+      "topology_fingerprint": "14bcf71905ae22ee802b64791201e578edc38e54c35917d8f22c634d048ee6d4",
+      "point_order_fingerprint": "77e5cd9e1f896f9dcb10f225edf39324be34dbadc506df05fc8597c607677e03",
+      "adjacency_fingerprint": "b9974545fcd0dbc97a2903159c564d841837d2d05de3898dcbeba3b27dc1b26e",
+      "rules_fingerprint": "e183e170b4d782e4e6169f3c1e8320c2223d5b50d1cc9b5098ab30b0bbdcbdb9",
+      "rules_implementation": "gocube-katago-rules-v3-implementation-v5",
+      "terminal_adjudicator": "gocube-katago-japanese-v3",
+      "katago_reference_commit": "f6bc4b19a1686caa2d088b56251e8c11c8be6d51",
+      "komi": 0.5
+    },
+    "g1": {
+      "model_profile": "g1",
+      "network_architecture_id": "gocube-graph-structural-v1",
+      "network_architecture_fingerprint": "dd69567b66ca2299facb5d9db3efe6159245fb556918a0c386bea86107c9bb99",
+      "observation_schema": "gocube-observation-v5-structural-features",
+      "observation_shape": [20, 96, 1],
+      "structural_feature_schema": "gocube-structural-features-v1",
+      "structural_feature_channels": 2,
+      "action_schema": "gocube-action-point-id-pass-v1",
+      "action_size": 97,
+      "point_count": 96,
+      "topology": "cube",
+      "size": 4,
+      "topology_fingerprint": "14bcf71905ae22ee802b64791201e578edc38e54c35917d8f22c634d048ee6d4",
+      "point_order_fingerprint": "77e5cd9e1f896f9dcb10f225edf39324be34dbadc506df05fc8597c607677e03",
+      "adjacency_fingerprint": "b9974545fcd0dbc97a2903159c564d841837d2d05de3898dcbeba3b27dc1b26e",
+      "rules_fingerprint": "e183e170b4d782e4e6169f3c1e8320c2223d5b50d1cc9b5098ab30b0bbdcbdb9",
+      "rules_implementation": "gocube-katago-rules-v3-implementation-v5",
+      "terminal_adjudicator": "gocube-katago-japanese-v3",
+      "katago_reference_commit": "f6bc4b19a1686caa2d088b56251e8c11c8be6d51",
+      "komi": 0.5
+    }
+  }
+}

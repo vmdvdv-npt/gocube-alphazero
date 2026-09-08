@@ -12,9 +12,10 @@ LEGACY_SEARCH_UTILITY_MODE = "legacy"
 KATAGO_PINNED_SEARCH_UTILITY_MODE = "katago-pinned-f6bc4b19"
 # M1 makes root ending ko suppression depend on the exact rule transition,
 # rather than the historical two-changed-points heuristic.
-# v3 records the semantic boundary change: episode move budgets are enforced
-# by the runner and are never terminal transitions inside cloned search states.
-KATAGO_SEARCH_CONTRACT = "katago-pinned-search-v3"
+# v4 is the integrated post-S1/S2/S3/H1/M1 search identity: exact rule-derived
+# simple-ko handling plus runner-owned episode limits, with the pinned utility
+# and exploration semantics below unchanged.
+KATAGO_SEARCH_CONTRACT = "katago-pinned-search-v4"
 
 # Values explicitly set in cpp/configs/training/selfplay8b20.cfg are copied
 # from the pinned commit. conservativePass and fillDameBeforePass are omitted
