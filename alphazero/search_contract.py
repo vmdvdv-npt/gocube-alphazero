@@ -10,7 +10,9 @@ import numpy as np
 KATAGO_REFERENCE_COMMIT = "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
 LEGACY_SEARCH_UTILITY_MODE = "legacy"
 KATAGO_PINNED_SEARCH_UTILITY_MODE = "katago-pinned-f6bc4b19"
-KATAGO_SEARCH_CONTRACT = "katago-pinned-search-v2"
+# M1 makes root ending ko suppression depend on the exact rule transition,
+# rather than the historical two-changed-points heuristic.
+KATAGO_SEARCH_CONTRACT = "katago-pinned-search-v3"
 
 # Values explicitly set in cpp/configs/training/selfplay8b20.cfg are copied
 # from the pinned commit. conservativePass and fillDameBeforePass are omitted
@@ -295,14 +297,22 @@ def _is_non_pass_alive_self_connection(
 
 
 def _simple_ko_likely_active(game: Any) -> bool:
+    """Compatibility wrapper for the exact rule-derived simple-ko state.
+
+    The historical name is kept for callers that imported this private helper,
+    but the changed-point count is no longer treated as sufficient evidence.
+    """
+
     state = getattr(game, "semantic_state", None)
-    board = getattr(state, "board", None) if state is not None else None
-    previous = getattr(state, "previous_board", None) if state is not None else None
-    if board is None or previous is None:
+    topology = getattr(game, "logical_topology", None)
+    if state is None or topology is None:
         return False
-    # A simple one-stone ko transition changes exactly the played point and the
-    # captured point. This mirrors the only ko shape relevant to the root bonus.
-    return int(np.count_nonzero(np.asarray(board) != np.asarray(previous))) == 2
+    try:
+        from alphazero.envs.gocube.katago_v3 import is_simple_ko_state
+
+        return bool(is_simple_ko_state(state, topology()))
+    except (ImportError, TypeError, ValueError):
+        return False
 
 
 def _would_capture(game: Any, action: int, player: int) -> bool:

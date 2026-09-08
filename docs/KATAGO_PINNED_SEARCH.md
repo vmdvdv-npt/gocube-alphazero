@@ -8,7 +8,12 @@ The rules and terminal state machine remain the existing GoCube Japanese V3 impl
 
 `f6bc4b19a1686caa2d088b56251e8c11c8be6d51`
 
-The search contract version is `katago-pinned-search-v2`.
+The search contract version is `katago-pinned-search-v3`. M1 changed only the
+root ending ko signal: the search layer now consumes an exact rule-derived
+simple-ko check, so an ordinary one-stone capture is not treated as ko merely
+because two board points changed. The ID is versioned because this changes
+root move preferences and therefore search semantics, while leaving network
+shapes and training targets unchanged.
 
 The new search layer ports the relevant behavior from that same pinned source. Cube and Torus topology differences remain isolated behind `Topology.neighbor_indices(...)` and the existing graph Benson/pass-alive implementation.
 

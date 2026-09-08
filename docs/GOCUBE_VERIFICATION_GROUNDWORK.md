@@ -117,7 +117,9 @@ and this is not simple ko, regardless of any production heuristic result.
 `cube4_true_simple_ko_001` independently proves the contrasting pattern:
 one point is captured, the immediate recapture is locally legal without a ko
 restriction, and it restores the entire initial coloring. Production ko
-policy is intentionally not modified here.
+policy now consumes the exact rule-derived check; the M1 change and its
+root-effect regression are documented in
+`docs/GOCUBE_V3_STATE_OBSERVATION_AUDIT.md`.
 
 ## H1 state-field audit
 
@@ -131,7 +133,7 @@ semantic ambiguity. Absence alone is not a bug classification.
 | `turns` | no direct | no | no | no | move cap context | no | partly from replay |
 | `consecutive_passes` | yes | yes | no | yes | yes | plane 5 | yes for immediate state |
 | `captures` | no direct | no | yes (Japanese) | target context | no | planes 6/7 | no, unless replayed |
-| `white_bonus_score` | not present on 842de66 | not applicable | not applicable | not applicable | no | no | no |
+| `white_bonus_score` | no | no | yes | yes | no | no | no |
 | `previous_board` | yes (simple ko) | no | no | yes | no | planes 2/3 | no |
 | `ko_recap_blocked` | yes (cleanup) | yes | no | yes | no | plane 10/mask 16 | no |
 | `phase_history` | yes (cycle checks) | yes | no | yes | yes | not direct | no |

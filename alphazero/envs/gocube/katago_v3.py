@@ -468,6 +468,60 @@ def _is_ko_move(old_board: np.ndarray, new_board: np.ndarray, player: int, actio
     return np.array_equal(reply_board, old_board)
 
 
+def is_simple_ko_state(state: V3State, topology: Topology) -> bool:
+    """Return whether ``state`` is immediately recapturable simple ko.
+
+    ``previous_board`` is the board from the immediately preceding accepted
+    action snapshot.  The test first uses the two-point shape as a cheap
+    prefilter, then applies the opponent's actual capture/suicide transition
+    at the only possible recapture point and requires exact restoration of
+    that snapshot.  Cleanup ko blocks are intentionally ignored here: this is
+    a rule fact about the unblocked local recapture, while cleanup policy
+    decides whether the point is currently blocked or can be lifted by
+    PASS-for-ko.
+    """
+
+    if state.phase not in (MAIN, CLEANUP_1, CLEANUP_2) or state.previous_board is None:
+        return False
+
+    before = np.asarray(state.previous_board)
+    current = np.asarray(state.board)
+    if before.shape != current.shape or before.shape != (topology.point_count,):
+        return False
+
+    # A simple ko transition has one newly placed opponent stone and one
+    # removed stone. This is only a prefilter; it is not the proof.
+    changed = np.flatnonzero(before != current)
+    if changed.size != 2:
+        return False
+
+    opponent_color = WHITE if state.current_player == 0 else BLACK
+    placed_points = [
+        int(point)
+        for point in changed
+        if int(before[point]) == EMPTY and int(current[point]) == opponent_color
+    ]
+    recapture_points = [
+        int(point)
+        for point in changed
+        if int(before[point]) == (BLACK if state.current_player == 0 else WHITE)
+        and int(current[point]) == EMPTY
+    ]
+    if len(placed_points) != 1 or len(recapture_points) != 1:
+        return False
+
+    try:
+        recaptured, captured_groups = _pseudolegal_candidate(
+            current, state.current_player, recapture_points[0], topology
+        )
+    except V3IllegalMove:
+        # In particular, a false-positive single capture often has a
+        # suicide-shaped apparent recapture.
+        return False
+    captured_points = tuple(point for group in captured_groups for point in group)
+    return len(captured_points) == 1 and np.array_equal(recaptured, before)
+
+
 def _pass_for_ko_unblock_target(state: V3State, action: int, topology: Topology) -> int | None:
     """Return the ko-recap block lifted by this KataGo pass-for-ko action."""
 
