@@ -36,6 +36,10 @@ EXPECTED_USER = "codex"
 EXPECTED_HOSTNAME = "Legion"
 EXPECTED_LOGICAL_CPUS = 16
 MIN_RAM_BYTES = 32 * 1024**3
+# B05 is a bounded integration proof and has a separately approved memory
+# floor.  The shared production preflight keeps the stricter MIN_RAM_BYTES
+# default; only validate_b05_production_preflight opts into this threshold.
+B05_MIN_RAM_BYTES = 29 * 1024**3
 EXPECTED_GPU_TOKEN = "RTX 3060"
 MIN_GPU_VRAM_BYTES = 5 * 1024**3
 REQUIRED_BRANCH = "main"
@@ -332,7 +336,7 @@ def collect_production_preflight(
     return attach_environment_fingerprint(report)
 
 
-def _validate_common(report: dict[str, Any]) -> None:
+def _validate_common(report: dict[str, Any], *, min_ram_bytes: int = MIN_RAM_BYTES) -> None:
     if int(report.get("schema_version", -1)) != PREFLIGHT_SCHEMA_VERSION:
         raise RuntimeError("Unsupported production preflight schema")
     source = report["source"]
@@ -371,8 +375,11 @@ def _validate_common(report: dict[str, Any]) -> None:
         raise RuntimeError(
             f"Process CPU affinity must expose all {EXPECTED_LOGICAL_CPUS} CPUs"
         )
-    if int(hardware.get("physical_memory_bytes", 0)) < MIN_RAM_BYTES:
-        raise RuntimeError("Insufficient physical RAM for the Legion production profile")
+    if int(hardware.get("physical_memory_bytes", 0)) < int(min_ram_bytes):
+        raise RuntimeError(
+            "Insufficient physical RAM for the Legion production profile: "
+            f"{int(hardware.get('physical_memory_bytes', 0))} < {int(min_ram_bytes)} bytes"
+        )
     if str(hardware.get("selected_device")) != "cuda":
         raise RuntimeError("Production sweep requires CUDA; CPU mode is test/debug only")
     if not bool(hardware.get("cuda_available")) or int(hardware.get("cuda_device_count", 0)) < 1:
@@ -429,7 +436,7 @@ def validate_b05_production_preflight(
     the same as the production preflight above.
     """
 
-    _validate_common(report)
+    _validate_common(report, min_ram_bytes=B05_MIN_RAM_BYTES)
     source = report["source"]
     if not bool(source.get("remote_verified")):
         raise RuntimeError("B05 must verify the freshly fetched GitHub origin/main")

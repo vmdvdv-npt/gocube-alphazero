@@ -109,6 +109,27 @@ def test_new_preflight_requires_legion_cuda_profile():
         preflight.validate_new_production_preflight(restricted)
 
 
+def test_b05_uses_its_approved_ram_floor_without_weakening_common_preflight(monkeypatch):
+    report = _valid_report()
+    report["hardware"]["physical_memory_bytes"] = 30 * 1024**3
+    monkeypatch.setattr(preflight, "_git", lambda repo, *args: "a" * 40)
+    report["source"].update(
+        {
+            "branch": "codex/b05",
+            "remote_verified": True,
+            "remote_main_sha": "a" * 40,
+        }
+    )
+
+    preflight.validate_b05_production_preflight(report)
+    with pytest.raises(RuntimeError, match="Insufficient physical RAM"):
+        preflight.validate_new_production_preflight(report)
+
+    report["hardware"]["physical_memory_bytes"] = 28 * 1024**3
+    with pytest.raises(RuntimeError, match="Insufficient physical RAM"):
+        preflight.validate_b05_production_preflight(report)
+
+
 def test_resume_requires_exact_source_and_environment_fingerprint():
     baseline = _valid_report()
     current = copy.deepcopy(baseline)

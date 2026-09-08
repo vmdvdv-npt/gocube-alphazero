@@ -76,11 +76,23 @@ def _read_memory() -> dict[str, float]:
     if not total or available is None:
         return {}
     used = max(0, total - available)
-    return {
+    memory = {
         "ram_used_gib": used / (1024.0 * 1024.0),
         "ram_total_gib": total / (1024.0 * 1024.0),
         "ram_used_percent": 100.0 * used / total,
     }
+    swap_total = values.get("SwapTotal")
+    swap_free = values.get("SwapFree")
+    if swap_total is not None and swap_free is not None:
+        swap_used = max(0, swap_total - swap_free)
+        memory.update(
+            {
+                "swap_used_gib": swap_used / (1024.0 * 1024.0),
+                "swap_total_gib": swap_total / (1024.0 * 1024.0),
+                "swap_used_percent": 100.0 * swap_used / swap_total if swap_total else 0.0,
+            }
+        )
+    return memory
 
 
 def _read_nvidia_smi() -> list[dict[str, float | int]]:
@@ -248,7 +260,16 @@ class HardwareTelemetry:
                 continue
             sample_count += 1
             phase = str(row.get("phase", "UNKNOWN"))
-            for key in ("cpu_util_percent", "ram_used_gib", "ram_used_percent", "loadavg_1m"):
+            for key in (
+                "cpu_util_percent",
+                "ram_used_gib",
+                "ram_total_gib",
+                "ram_used_percent",
+                "swap_used_gib",
+                "swap_total_gib",
+                "swap_used_percent",
+                "loadavg_1m",
+            ):
                 value = row.get(key)
                 if isinstance(value, (int, float)) and math.isfinite(float(value)):
                     by_phase[phase][key].append(float(value))
@@ -297,9 +318,27 @@ class HardwareTelemetry:
                 }
                 for key, values in sorted(metrics.items())
             }
+        peaks = {}
+        for key in ("ram_used_gib", "ram_used_percent", "swap_used_gib", "swap_used_percent"):
+            values = [
+                value
+                for metrics in by_phase.values()
+                for value in metrics.get(key, [])
+            ]
+            peaks[key] = max(values) if values else None
+        capacities = {}
+        for key in ("ram_total_gib", "swap_total_gib"):
+            values = [
+                value
+                for metrics in by_phase.values()
+                for value in metrics.get(key, [])
+            ]
+            capacities[key] = max(values) if values else None
         return {
             "samples": sample_count,
             "gpu_samples": gpu_samples,
+            "capacities": capacities,
+            "peaks": peaks,
             "phases": phases,
         }
 

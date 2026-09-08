@@ -77,6 +77,30 @@ def test_hardware_telemetry_summarizes_temperature_and_power(tmp_path):
     assert summary["phases"]["TRAIN"]["gpu_power_w"]["max"] == 42
 
 
+def test_hardware_telemetry_reports_peak_ram_and_swap(tmp_path):
+    path = tmp_path / "telemetry.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "phase": "TRAIN",
+                "ram_used_gib": 12.5,
+                "ram_total_gib": 30.945,
+                "ram_used_percent": 40.0,
+                "swap_used_gib": 0.75,
+                "swap_total_gib": 8.0,
+                "swap_used_percent": 9.375,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    summary = HardwareTelemetry(path).summary()
+    assert summary["peaks"]["ram_used_gib"] == 12.5
+    assert summary["peaks"]["swap_used_gib"] == 0.75
+    assert summary["capacities"]["swap_total_gib"] == 8.0
+    assert summary["phases"]["TRAIN"]["swap_used_percent"]["max"] == 9.375
+
+
 def test_komi_audit_has_no_applicable_production_7_5_literal():
     audit = gocube_b05._komi_audit(Path(__file__).resolve().parents[1])
     assert audit["canonical_komi"] == 0.5

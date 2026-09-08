@@ -67,6 +67,7 @@ from alphazero.envs.gocube.production_training import (
 from tools import analyze_gocube_b_evaluation
 from tools.evaluate_gocube_b05_dryrun import main as evaluate_b05_main
 from tools.gocube_production_preflight import (
+    B05_MIN_RAM_BYTES,
     EXPECTED_REPO,
     SUPERVISED_ENV,
     UNIT_ENV,
@@ -625,6 +626,7 @@ def _render_markdown(report: Mapping[str, object]) -> str:
         lines.extend(["", "## Fail-closed reason", "", f"`{failure.get('type')}: {failure.get('message')}`"])
     for title, key in (
         ("Komi audit", "komi_audit"),
+        ("B05 RAM gate", "b05_ram_gate"),
         ("Frozen suite", "frozen_suite"),
         ("Effective configs", "effective_configs"),
         ("Run manifests diff", "manifests_diff"),
@@ -634,6 +636,7 @@ def _render_markdown(report: Mapping[str, object]) -> str:
         ("Cross-profile evaluation", "cross_profile_evaluation"),
         ("B4 analyzer boundary", "analyzer_boundary"),
         ("Storage extrapolation", "storage_extrapolation"),
+        ("Hardware telemetry", "hardware_telemetry"),
         ("Background load", "background_load"),
     ):
         if key in report:
@@ -666,6 +669,14 @@ def _run_pipeline(repo: Path, args: argparse.Namespace) -> int:
     try:
         preflight = collect_production_preflight(repo, argparse.Namespace(device=args.device), verify_remote=True)
         report["preflight"] = preflight
+        observed_ram_bytes = int((preflight.get("hardware") or {}).get("physical_memory_bytes", 0))
+        report["b05_ram_gate"] = {
+            "minimum_ram_bytes": B05_MIN_RAM_BYTES,
+            "minimum_ram_gib": B05_MIN_RAM_BYTES / (1024.0**3),
+            "observed_physical_memory_bytes": observed_ram_bytes,
+            "observed_physical_memory_gib": observed_ram_bytes / (1024.0**3),
+            "passed": observed_ram_bytes >= B05_MIN_RAM_BYTES,
+        }
         report["background_load"] = _background_snapshot(repo)
         report["komi_audit"] = _komi_audit(repo)
         report["gates"]["komi_7_5_audit"] = "PASS"
