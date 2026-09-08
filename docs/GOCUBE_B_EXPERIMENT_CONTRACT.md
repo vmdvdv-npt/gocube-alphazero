@@ -146,11 +146,15 @@ reported 95% percentile interval is on overall delta from 0.5. Classification
 is `B1_BETTER` when its low endpoint is positive, `B0_BETTER` when its high
 endpoint is negative, and `INCONCLUSIVE` otherwise.
 
-After mandatory seeds 0, 1, and 2 at the 100% milestone, extension to seeds 3
-and 4 is permitted only when the pre-registered criterion
+After mandatory seeds 0, 1, and 2 have been evaluated at the final registered
+milestone `cumulative_new_samples=40,000,000`, extension to seeds 3 and 4 is
+permitted only when the pre-registered criterion
 `extend-to-five-seeds-only-if-mandatory-seed-bootstrap-ambiguity-or-variance-v1`
 finds bootstrap ambiguity or sample standard deviation of mandatory seed
-deltas at least 0.10. The extension decision is written separately as JSON.
+deltas at least 0.10. The decision JSON must carry the same
+`scientific_clock` and `scientific_milestone`; decisions cannot be created or
+used at the 10M, 20M, or 30M intermediate milestones, nor at an unregistered
+clock or target. The extension decision is written separately as JSON.
 The legacy `tools/evaluate_gocube_checkpoints.py` aggregate Wilson evaluator
 rejects checkpoints marked with the B contract and cannot be used for final B
 analysis.

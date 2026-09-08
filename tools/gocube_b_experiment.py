@@ -25,6 +25,8 @@ from alphazero.envs.gocube.b_experiment_contract import (
     B1_MODEL_PROFILE,
     B1_TREATMENT,
     B_EXTENSION_SEEDS,
+    B_FINAL_EVALUATION_CLOCK,
+    B_FINAL_EVALUATION_MILESTONE,
     B_SEED_LIST,
     DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET,
     preflight_b_experiment,
@@ -119,6 +121,14 @@ def parse_args(argv=None):
         )
     except ValueError as exc:
         parser.error(str(exc))
+    if args.seed in B_EXTENSION_SEEDS and (
+        args.scientific_target.kind != B_FINAL_EVALUATION_CLOCK
+        or args.scientific_target.target != B_FINAL_EVALUATION_MILESTONE
+    ):
+        parser.error(
+            "extension seeds require the final registered B milestone: "
+            f"{B_FINAL_EVALUATION_CLOCK}={B_FINAL_EVALUATION_MILESTONE}"
+        )
     return args
 
 

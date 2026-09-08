@@ -14,6 +14,9 @@ from alphazero.envs.gocube.b_evaluation import (
     B_HELDOUT_SUITE_ID,
     B_HELDOUT_SUITE_POSITION_COUNT,
     B_HELDOUT_SUITE_SHA256,
+    B_FINAL_EVALUATION_CLOCK,
+    B_FINAL_EVALUATION_MILESTONE,
+    B_REGISTERED_EVALUATION_MILESTONES,
     B_STATISTICAL_METHOD_IDENTIFIER,
     authoritative_suite_game_class,
     canonical_json_bytes,
@@ -24,6 +27,10 @@ from alphazero.envs.gocube.b_evaluation import (
     select_checkpoint_at_or_after,
     validate_frozen_suite,
     validate_pairing_invariants,
+)
+from alphazero.envs.gocube.b_experiment_contract import (
+    ExperimentContractError,
+    validate_extension_seed_decision,
 )
 from tools.build_gocube_b_heldout_suite import build_payload
 from tools import evaluate_gocube_b_experiment as b_evaluator
@@ -145,6 +152,73 @@ def test_extension_criterion_includes_boundary_and_stop_case():
     )
     assert stopped["approved"] is False
     assert stopped["decision"] == "stop_at_three"
+
+
+def test_extension_decision_is_pinned_to_final_registered_milestone(tmp_path):
+    final = extension_seed_decision(
+        {0: 0.0, 1: 0.10, 2: -0.10},
+        {"ci95_delta": [0.01, 0.20]},
+        experiment_contract_sha256="a" * 64,
+    )
+    assert final["scientific_clock"] == B_FINAL_EVALUATION_CLOCK
+    assert final["scientific_milestone"] == B_FINAL_EVALUATION_MILESTONE
+    with pytest.raises(ValueError, match="final registered B milestone"):
+        extension_seed_decision(
+            {0: 0.0, 1: 0.10, 2: -0.10},
+            {"ci95_delta": [0.01, 0.20]},
+            experiment_contract_sha256="a" * 64,
+            scientific_clock=B_FINAL_EVALUATION_CLOCK,
+            scientific_milestone=B_REGISTERED_EVALUATION_MILESTONES[0],
+        )
+
+    for early_milestone in B_REGISTERED_EVALUATION_MILESTONES[:-1]:
+        early = {**final, "scientific_milestone": early_milestone}
+        path = tmp_path / f"decision-{early_milestone}.json"
+        path.write_text(json.dumps(early), encoding="utf-8")
+        with pytest.raises(ExperimentContractError, match="final registered B milestone"):
+            validate_extension_seed_decision(path, contract_sha256="a" * 64)
+
+    non_integer = {**final, "scientific_milestone": B_FINAL_EVALUATION_MILESTONE + 0.5}
+    non_integer_path = tmp_path / "decision-non-integer.json"
+    non_integer_path.write_text(json.dumps(non_integer), encoding="utf-8")
+    with pytest.raises(ExperimentContractError, match="final registered B milestone"):
+        validate_extension_seed_decision(non_integer_path, contract_sha256="a" * 64)
+
+    final_path = tmp_path / "decision-final.json"
+    final_path.write_text(json.dumps(final), encoding="utf-8")
+    assert validate_extension_seed_decision(final_path, contract_sha256="a" * 64)[
+        "scientific_milestone"
+    ] == B_FINAL_EVALUATION_MILESTONE
+
+
+def test_extension_evaluator_rejects_nonfinal_or_unregistered_target(tmp_path):
+    decision = extension_seed_decision(
+        {0: 0.0, 1: 0.10, 2: -0.10},
+        {"ci95_delta": [0.01, 0.20]},
+        experiment_contract_sha256="a" * 64,
+    )
+    decision_path = tmp_path / "decision.json"
+    decision_path.write_text(json.dumps(decision), encoding="utf-8")
+    with pytest.raises(ValueError, match="final registered B milestone"):
+        b_evaluator.evaluate_seed(
+            b0_checkpoint=tmp_path / "missing-b0",
+            b1_checkpoint=tmp_path / "missing-b1",
+            suite_path=SUITE,
+            training_seed=3,
+            sample_milestone=B_REGISTERED_EVALUATION_MILESTONES[0],
+            extension_seed_decision=decision_path,
+        )
+    with pytest.raises(SystemExit):
+        b_evaluator.main(
+            [
+                "--b0-checkpoint", "missing-b0",
+                "--b1-checkpoint", "missing-b1",
+                "--suite", str(SUITE),
+                "--training-seed", "0",
+                "--sample-milestone", "12345678",
+                "--output", str(tmp_path / "out.json"),
+            ]
+        )
 
 
 def test_milestone_selects_first_checkpoint_by_cumulative_counter():

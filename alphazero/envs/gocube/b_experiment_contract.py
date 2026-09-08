@@ -35,6 +35,10 @@ from .b_evaluation import (
     B_HELDOUT_SUITE_ID,
     B_HELDOUT_SUITE_POSITION_COUNT,
     B_HELDOUT_SUITE_SHA256,
+    B_FINAL_EVALUATION_CLOCK,
+    B_FINAL_EVALUATION_MILESTONE,
+    B_REGISTERED_EVALUATION_CLOCK,
+    require_registered_b_evaluation_target,
     validate_frozen_suite,
 )
 from .production_contract import CUBE4_PRODUCTION, GOCUBE_KOMI
@@ -50,7 +54,7 @@ B0_TREATMENT = "B0"
 B1_TREATMENT = "B1"
 B0_MODEL_PROFILE = "baseline"
 B1_MODEL_PROFILE = "g1"
-DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET = 40_000_000
+DEFAULT_B_CUMULATIVE_NEW_SAMPLES_TARGET = B_FINAL_EVALUATION_MILESTONE
 EVALUATION_MILESTONE_FRACTIONS = (0.25, 0.50, 0.75, 1.0)
 B_SEED_LIST = (0, 1, 2, 3, 4)
 B_INITIAL_SEED_COUNT = 3
@@ -219,12 +223,24 @@ def validate_extension_seed_decision(
         ) from exc
     if not isinstance(payload, Mapping):
         raise ExperimentContractError("Extension-seed decision must be a JSON object")
+    try:
+        require_registered_b_evaluation_target(
+            payload["scientific_clock"],
+            payload["scientific_milestone"],
+            final_only=True,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ExperimentContractError(
+            "Extension-seed decision must target the final registered B milestone"
+        ) from exc
     expected = {
         "approved": True,
         "decision": "extend_to_five",
         "criterion_id": B_EXTENSION_SEED_CRITERION_ID,
         "mandatory_seed_count": B_INITIAL_SEED_COUNT,
         "extension_seed_count": B_EXTENSION_SEED_COUNT,
+        "scientific_clock": B_REGISTERED_EVALUATION_CLOCK,
+        "scientific_milestone": B_FINAL_EVALUATION_MILESTONE,
     }
     for key, value in expected.items():
         if payload.get(key) != value:

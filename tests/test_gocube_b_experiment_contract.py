@@ -278,6 +278,8 @@ def test_launcher_accepts_mandatory_and_approved_extension_seeds(tmp_path):
                 ),
                 "mandatory_seed_count": 3,
                 "extension_seed_count": 5,
+                "scientific_clock": "cumulative_new_samples",
+                "scientific_milestone": 40_000_000,
                 "criterion_evidence": {
                     "ambiguity_detected": True,
                     "variance_exceeded": False,

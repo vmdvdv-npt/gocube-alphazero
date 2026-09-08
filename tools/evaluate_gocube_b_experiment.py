@@ -28,9 +28,13 @@ from alphazero.envs.gocube.b_evaluation import (
     B_HELDOUT_SUITE_ID,
     B_HELDOUT_SUITE_SHA256,
     B_HELDOUT_SUITE_POSITION_COUNT,
+    B_FINAL_EVALUATION_CLOCK,
+    B_FINAL_EVALUATION_MILESTONE,
+    B_REGISTERED_EVALUATION_MILESTONES,
     B_STATISTICAL_METHOD_IDENTIFIER,
     authoritative_suite_game_class,
     replay_actions,
+    require_registered_b_evaluation_target,
     select_checkpoint_at_or_after,
     semantic_state_fingerprint,
     summarize_game_diagnostics,
@@ -223,14 +227,27 @@ def evaluate_seed(
 ) -> dict[str, object]:
     if training_seed not in B_SEED_LIST:
         raise ValueError(f"training seed must be one of {B_SEED_LIST}")
+    try:
+        registered_milestone = require_registered_b_evaluation_target(
+            sample_clock,
+            sample_milestone,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("B evaluator received an unregistered scientific target") from exc
+    if training_seed in B_EXTENSION_SEEDS and (
+        sample_clock != B_FINAL_EVALUATION_CLOCK
+        or registered_milestone != B_FINAL_EVALUATION_MILESTONE
+    ):
+        raise ValueError(
+            "Extension seeds can only be evaluated at the final registered B milestone"
+        )
     suite_payload, replayed = validate_frozen_suite(suite_path)
     if suite_payload.get("suite_id") != B_HELDOUT_SUITE_ID:
         raise ValueError("B evaluator received a non-canonical suite")
     if sample_milestone < 0:
         raise ValueError("sample milestone must be non-negative")
-
-    b0_selected = select_checkpoint_at_or_after(b0_checkpoint, sample_milestone, clock=sample_clock)
-    b1_selected = select_checkpoint_at_or_after(b1_checkpoint, sample_milestone, clock=sample_clock)
+    b0_selected = select_checkpoint_at_or_after(b0_checkpoint, registered_milestone, clock=sample_clock)
+    b1_selected = select_checkpoint_at_or_after(b1_checkpoint, registered_milestone, clock=sample_clock)
     for label, selected in (("B0", b0_selected), ("B1", b1_selected)):
         if selected.get("cumulative_new_samples") is None or selected.get("cumulative_optimizer_examples") is None:
             raise ValueError(
@@ -266,12 +283,9 @@ def evaluate_seed(
     if contract_a.topology_kind != "cube" or contract_a.topology_size != 4:
         raise ValueError("B evaluator only supports Cube-4 checkpoints")
     require_gocube_komi(contract_a.komi, context="B evaluator checkpoint")
-    if sample_clock not in {"cumulative_new_samples", "cumulative_optimizer_examples"}:
-        raise ValueError("unsupported sample clock")
-
     # The paths may point at a run directory.  Selection is by the scientific
     # cumulative clock, never by matching iteration numbers across profiles.
-    if b0_selected["scientific_counter"] < sample_milestone or b1_selected["scientific_counter"] < sample_milestone:
+    if b0_selected["scientific_counter"] < registered_milestone or b1_selected["scientific_counter"] < registered_milestone:
         raise ValueError("Selected checkpoint does not reach the requested scientific milestone")
 
     semantic_cls = _authoritative_game_class(contract_a)
@@ -314,11 +328,11 @@ def evaluate_seed(
                     training_seed=training_seed,
                     evaluation_seed=(
                         int(training_seed) * 1_000_003
-                        + int(sample_milestone) * 1_009
+                        + registered_milestone * 1_009
                         + position_index * 2
                         + pair_game_index
                     ),
-                    sample_milestone=sample_milestone,
+                    sample_milestone=registered_milestone,
                     move_limit=move_limit,
                 )
             )
@@ -341,7 +355,7 @@ def evaluate_seed(
     diagnostics = summarize_game_diagnostics(games)
     return {
         "schema_version": 1,
-        "evaluation_id": f"gocube-b-evaluation-seed{training_seed}-m{sample_milestone}",
+        "evaluation_id": f"gocube-b-evaluation-seed{training_seed}-m{registered_milestone}",
         "experiment_contract_id": B_EXPERIMENT_CONTRACT_ID,
         "experiment_contract_version": B_EXPERIMENT_CONTRACT_VERSION,
         "experiment_contract_sha256": contract_sha_a,
@@ -353,7 +367,7 @@ def evaluate_seed(
         "komi": GOCUBE_KOMI,
         "rules_fingerprint": contract_a.rules_fingerprint,
         "scientific_clock": sample_clock,
-        "scientific_milestone": int(sample_milestone),
+        "scientific_milestone": registered_milestone,
         "training_seed": int(training_seed),
         "b0_checkpoint": {
             "path": str(b0_checkpoint.resolve()),
@@ -361,7 +375,7 @@ def evaluate_seed(
             "sha256": str(b0_selected.get("checkpoint_sha256", "")),
             "cumulative_new_samples": b0_selected.get("cumulative_new_samples"),
             "cumulative_optimizer_examples": b0_selected.get("cumulative_optimizer_examples"),
-            "milestone_target": int(sample_milestone),
+            "milestone_target": registered_milestone,
             "overshoot": int(b0_selected["overshoot"]),
             "profile": "baseline",
             "model_contract": contract_a.to_dict(),
@@ -372,7 +386,7 @@ def evaluate_seed(
             "sha256": str(b1_selected.get("checkpoint_sha256", "")),
             "cumulative_new_samples": b1_selected.get("cumulative_new_samples"),
             "cumulative_optimizer_examples": b1_selected.get("cumulative_optimizer_examples"),
-            "milestone_target": int(sample_milestone),
+            "milestone_target": registered_milestone,
             "overshoot": int(b1_selected["overshoot"]),
             "profile": "g1",
             "model_contract": contract_b.to_dict(),
@@ -403,11 +417,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--b1-checkpoint", required=True)
     parser.add_argument("--suite", "--heldout-suite", dest="suite", required=True)
     parser.add_argument("--training-seed", required=True, type=int)
-    parser.add_argument("--sample-milestone", required=True, type=int)
+    parser.add_argument(
+        "--sample-milestone",
+        required=True,
+        type=int,
+        choices=B_REGISTERED_EVALUATION_MILESTONES,
+    )
     parser.add_argument(
         "--sample-clock",
-        choices=("cumulative_new_samples", "cumulative_optimizer_examples"),
-        default="cumulative_new_samples",
+        choices=(B_FINAL_EVALUATION_CLOCK,),
+        default=B_FINAL_EVALUATION_CLOCK,
     )
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--extension-seed-decision", default=None)

@@ -27,11 +27,14 @@ from alphazero.envs.gocube.b_evaluation import (
     B_HELDOUT_SUITE_ID,
     B_HELDOUT_SUITE_POSITION_COUNT,
     B_HELDOUT_SUITE_SHA256,
+    B_FINAL_EVALUATION_CLOCK,
+    B_FINAL_EVALUATION_MILESTONE,
     B_STATISTICAL_METHOD_IDENTIFIER,
     classify_delta_interval,
     extension_seed_decision,
     hierarchical_paired_bootstrap,
     outcome_score_b1,
+    require_registered_b_evaluation_target,
     summarize_game_diagnostics,
     validate_pairing_invariants,
 )
@@ -117,6 +120,13 @@ def validate_seed_evaluation(payload: Mapping[str, object]) -> dict[str, object]
         raise ValueError("B seed evaluation must be Cube-4")
     if float(payload.get("komi", float("nan"))) != 0.5:
         raise ValueError("B seed evaluation komi must be exactly 0.5")
+    try:
+        registered_milestone = require_registered_b_evaluation_target(
+            payload["scientific_clock"],
+            payload["scientific_milestone"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("B seed evaluation uses an unregistered scientific target") from exc
     if int(payload.get("position_count", -1)) != B_HELDOUT_SUITE_POSITION_COUNT:
         raise ValueError("B seed evaluation must contain 16 positions")
     if int(payload.get("games_per_position", -1)) != B_GAMES_PER_POSITION:
@@ -124,8 +134,6 @@ def validate_seed_evaluation(payload: Mapping[str, object]) -> dict[str, object]
     seed = int(payload["training_seed"])
     if seed not in B_SEED_LIST:
         raise ValueError(f"B seed evaluation has unsupported training seed: {seed}")
-    if int(payload["scientific_milestone"]) < 0:
-        raise ValueError("B seed evaluation scientific milestone must be non-negative")
     games = payload.get("games")
     if not isinstance(games, list) or len(games) != B_HELDOUT_SUITE_POSITION_COUNT * B_GAMES_PER_POSITION:
         raise ValueError("B seed evaluation must contain exactly 32 games")
@@ -135,7 +143,11 @@ def validate_seed_evaluation(payload: Mapping[str, object]) -> dict[str, object]
         _validate_game_record(game)
         if int(game["training_seed"]) != seed:
             raise ValueError("B seed evaluation game has the wrong training seed")
-        if int(game["sample_milestone"]) != int(payload["scientific_milestone"]):
+        if (
+            isinstance(game["sample_milestone"], bool)
+            or not isinstance(game["sample_milestone"], int)
+            or game["sample_milestone"] != registered_milestone
+        ):
             raise ValueError("B seed evaluation game has the wrong scientific milestone")
     grouped = validate_pairing_invariants(games, expected_position_ids=B_HELDOUT_POSITION_IDS)
     position_results = payload.get("position_results")
@@ -195,7 +207,7 @@ def analyze_evaluations(
     evaluation_payloads: Sequence[Mapping[str, object]],
     *,
     extension_decision_payload: Mapping[str, object] | None = None,
-) -> tuple[dict[str, object], dict[str, object]]:
+) -> tuple[dict[str, object], dict[str, object] | None]:
     """Return final JSON report and the separate extension decision payload."""
 
     if not evaluation_payloads:
@@ -242,15 +254,29 @@ def analyze_evaluations(
         seed=B_BOOTSTRAP_SEED,
         confidence=0.95,
     )
-    decision = extension_seed_decision(
-        {int(item["training_seed"]): float(item["seed_delta"]) for item in artifacts if int(item["training_seed"]) in (0, 1, 2)},
-        mandatory_bootstrap,
-        experiment_contract_sha256=str(artifacts[0]["experiment_contract_sha256"]),
+    scientific_clock = str(artifacts[0]["scientific_clock"])
+    scientific_milestone = int(artifacts[0]["scientific_milestone"])
+    final_milestone = (
+        scientific_clock == B_FINAL_EVALUATION_CLOCK
+        and scientific_milestone == B_FINAL_EVALUATION_MILESTONE
     )
+    if len(artifacts) == 5 and not final_milestone:
+        raise ValueError("Extension seeds are only allowed at the final registered B milestone")
+    decision = None
+    if final_milestone:
+        decision = extension_seed_decision(
+            {int(item["training_seed"]): float(item["seed_delta"]) for item in artifacts if int(item["training_seed"]) in (0, 1, 2)},
+            mandatory_bootstrap,
+            experiment_contract_sha256=str(artifacts[0]["experiment_contract_sha256"]),
+            scientific_clock=scientific_clock,
+            scientific_milestone=scientific_milestone,
+        )
     if extension_decision_payload is not None:
+        if decision is None:
+            raise ValueError("Extension decision artifacts can only be supplied at the final registered B milestone")
         if dict(extension_decision_payload) != decision:
             raise ValueError("Provided extension decision does not match the pre-registered criterion")
-    if len(artifacts) == 5 and not bool(decision["approved"]):
+    if len(artifacts) == 5 and not bool(decision and decision["approved"]):
         raise ValueError("Extension seeds were supplied although the registered criterion says stop at three")
 
     position_results = []
@@ -368,6 +394,8 @@ def render_markdown_summary(report: Mapping[str, object]) -> str:
         f"Bootstrap: {B_BOOTSTRAP_REPLICATES} replicates, seed {B_BOOTSTRAP_SEED}",
         f"Extension criterion: {B_EXTENSION_CRITERION_ID}",
     ])
+    if report.get("extension_seed_decision") is None:
+        lines.extend(["", "Extension decision: unavailable before the final registered milestone."])
     return "\n".join(lines) + "\n"
 
 
@@ -389,6 +417,10 @@ def main(argv: list[str] | None = None) -> int:
     payloads = [_read_json(Path(path)) for path in args.evaluations]
     supplied_decision = _read_json(Path(args.extension_decision)) if args.extension_decision else None
     report, decision = analyze_evaluations(payloads, extension_decision_payload=supplied_decision)
+    if args.extension_decision_output and decision is None:
+        raise ValueError(
+            "--extension-decision-output is only valid at the final registered B milestone"
+        )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(output.suffix + ".tmp")
