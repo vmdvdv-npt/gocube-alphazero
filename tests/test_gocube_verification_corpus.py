@@ -14,7 +14,13 @@ from tests.support.fixtures import (
     fixture_counts,
     write_fixture_json,
 )
-from tests.support.product_boundary import KOMI, PRODUCT_BOUNDARY_SCHEMA, export_product_boundary_fixture, write_product_boundary_json
+from tests.support.product_boundary import (
+    KOMI,
+    PRODUCT_BOUNDARY_SCHEMA,
+    export_product_boundary_fixture,
+    export_verified_product_boundary_fixtures,
+    write_product_boundary_json,
+)
 
 
 def test_rotation_safe_corpus_keeps_source_fixture_grouped_in_splits():
@@ -81,6 +87,40 @@ def test_product_boundary_requires_consecutive_passes_not_any_two_passes():
     assert "front:0:0" in boundary.board_after_first_pass["white"]
 
 
+def test_v2_export_is_coupled_to_verified_v1_status():
+    topology = cube_topology(4)
+    source = next(item for item in cube_verification_fixtures() if item.family == "captures")
+    unresolved = replace(source, status="unresolved")
+    with pytest.raises(ValueError, match="verified V1"):
+        export_product_boundary_fixture(
+            unresolved,
+            topology,
+            require_verified=True,
+        )
+
+
+def test_v2_export_contains_explicit_mapping_steps_and_deterministic_boundary():
+    topology = cube_topology(4)
+    sources = cube_verification_fixtures()
+    exported = export_verified_product_boundary_fixtures(sources, topology)
+    assert len(exported) >= 10
+    source_by_id = {fixture.source_id: fixture for fixture in sources}
+    assert all(source_by_id[fixture.source_verification_id].phase == "main" for fixture in exported)
+    assert not any("cleanup" in fixture.fixture_id for fixture in exported)
+    for fixture in exported:
+        document = fixture.to_dict()
+        assert document["source_verification_status"] == "verified"
+        assert len(document["topology_contract"]["point_mapping"]) == 96
+        assert len(document["topology_contract"]["adjacency"]) == 96
+        assert len(document["steps"]) == len(document["main_actions"])
+        assert document["after_second_pass"]["consecutive_passes"] == 2
+        assert document["expected_product_boundary"]["phase"] == "endgame"
+
+    first = exported[0].to_dict()
+    second = exported[0].to_dict()
+    assert first == second
+
+
 def test_corpus_counts_are_reportable_without_a_statistical_rotation_multiplier():
     counts = fixture_counts(cube_verification_fixtures())
     assert sum(counts.values()) == len(cube_verification_fixtures())
@@ -95,4 +135,5 @@ def test_checked_in_corpus_exports_match_typed_registry():
     assert all(item["oracle/source"] for item in corpus)
     boundary = json.loads((root / "gocube_product_boundary_fixtures.json").read_text(encoding="utf-8"))
     assert boundary["schema"] == PRODUCT_BOUNDARY_SCHEMA
-    assert len(boundary["fixtures"]) == 3
+    assert len(boundary["fixtures"]) >= 10
+    assert all(item["source_verification_status"] == "verified" for item in boundary["fixtures"])
