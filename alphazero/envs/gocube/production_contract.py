@@ -31,8 +31,10 @@ class Cube4ProductionContract:
     workers: int = 16
     regular_sims: int = 50
     fast_sims: int = 20
+    fast_probability: float = 0.25
     games_per_iteration: int = 256
     train_batch_size: int = 1024
+    train_samples_per_new_sample: float = 1.0
     arena_sims: int = 50
 
     def validate_checkpoint_args(self, args: Mapping[str, object]) -> None:
@@ -42,12 +44,27 @@ class Cube4ProductionContract:
             ("gocube_size", self.size),
             ("numMCTSSims", self.regular_sims),
             ("numFastSims", self.fast_sims),
+            ("arenaMCTSSims", self.arena_sims),
+            ("train_batch_size", self.train_batch_size),
+            ("workers", self.workers),
         )
         for key, expected in checks:
             actual = args.get(key)
             if actual != expected:
                 raise ValueError(
                     f"Cube-4 production checkpoint requires {key}={expected!r}, got {actual!r}"
+                )
+        for key, expected in (
+            ("probFastSim", self.fast_probability),
+            ("gocube_train_samples_per_new_sample", self.train_samples_per_new_sample),
+        ):
+            try:
+                matches = math.isclose(float(args.get(key)), float(expected), rel_tol=0.0, abs_tol=1e-12)
+            except (TypeError, ValueError):
+                matches = False
+            if not matches:
+                raise ValueError(
+                    f"Cube-4 production checkpoint requires {key}={expected!r}, got {args.get(key)!r}"
                 )
 
 

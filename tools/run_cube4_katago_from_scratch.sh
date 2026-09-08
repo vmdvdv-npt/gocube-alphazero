@@ -42,7 +42,7 @@ fi
   --arena-sims 50 \
   --games-per-iteration 256 \
   --iterations 8 \
-  --train-batch-size 256 \
+  --train-batch-size 1024 \
   --fast-game-prob 0.25 \
   --endgame-sample-weight 1 \
   --seed "$SEED" \

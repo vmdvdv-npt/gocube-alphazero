@@ -18,6 +18,7 @@ from time import time
 from math import ceil
 from enum import Enum
 
+import copy
 import numpy as np
 import torch
 import pickle
@@ -119,7 +120,11 @@ DEFAULT_ARGS = dotdict({
 
 
 def get_args(args=None, **kwargs):
-    new_args = DEFAULT_ARGS
+    # DEFAULT_ARGS contains nested mutable values (scheduler/optimizer
+    # settings and architecture lists).  Returning the module-level object
+    # made sequential config resolution order-dependent: a later B1 build
+    # could silently mutate the already-resolved B0 config.
+    new_args = dotdict(copy.deepcopy(dict(DEFAULT_ARGS)))
     if args:
         new_args.update(args)
     for key, value in kwargs.items():
@@ -236,6 +241,9 @@ class Coach:
         try:
 
             while self.model_iter <= self.args.numIters:
+                if self._training_budget_reached():
+                    print('Scientific training budget already reached; stopping before another generation chunk.')
+                    break
                 print(f'------ITER {self.model_iter}------')
 
                 if (
@@ -269,6 +277,10 @@ class Coach:
                 if self.stop_train.is_set():
                     break
 
+                if self._training_budget_reached():
+                    print('Scientific training budget reached; stopping after this generation chunk.')
+                    break
+
                 if self.args.compareWithBaseline and (self.model_iter - 1) % self.args.baselineCompareFreq == 0:
                     self.compareToBaseline(self.model_iter)
                     if self.stop_train.is_set():
@@ -296,6 +308,11 @@ class Coach:
                 # Preserve the original exception while ensuring a failed
                 # training iteration never leaves child processes behind.
                 self._abort_selfplay_agents()
+
+    def _training_budget_reached(self):
+        """Hook for production coaches with a sample-based stopping target."""
+
+        return False
 
     def _drain_worker_error_queue(self):
         payloads = []

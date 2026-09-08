@@ -8,12 +8,13 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import torch
 
 from .atomic_io import atomic_json_write
 from .contract_versions import (
+    B_EXPERIMENT_CONTRACT_ID,
     OWNERSHIP_TARGET_SEMANTICS,
     REPLAY_FORMAT_VERSION,
     SCORE_TARGET_SEMANTICS,
@@ -49,6 +50,8 @@ _RESUME_MANIFEST_FIELDS = (
     "termination_contract",
     "sample_clock_contract",
     "training_contract_version",
+    "experiment_contract_id",
+    "experiment_contract_version",
 )
 
 
@@ -80,6 +83,12 @@ def _json_artifact_bytes(payload: object) -> bytes:
 
 def _sha256_json_artifact(payload: object) -> str:
     return hashlib.sha256(_json_artifact_bytes(payload)).hexdigest()
+
+
+def _optional_arg(args: Any, key: str, default: Any = None) -> Any:
+    if isinstance(args, Mapping):
+        return args.get(key, default)
+    return getattr(args, key, default)
 
 
 def effective_config(args: Any, game_cls) -> dict[str, object]:
@@ -128,7 +137,30 @@ def effective_config(args: Any, game_cls) -> dict[str, object]:
         "sample_clock_contract": getattr(args, "gocube_training_contract", "sample-clock-v2"),
         "training_contract_version": TRAINING_CONTRACT_VERSION,
         "seed_derivation_contract": SEED_DERIVATION_CONTRACT,
+        "experiment_contract_id": _optional_arg(args, "gocube_experiment_contract_id"),
+        "experiment_contract_version": _optional_arg(args, "gocube_experiment_contract_version"),
     })
+    if _optional_arg(args, "gocube_experiment_contract_id") == B_EXPERIMENT_CONTRACT_ID:
+        # Keep the B experiment's canonical vocabulary visible next to the
+        # legacy argument names.  Both are derived from the same effective
+        # args object, so a batch-size drift cannot hide behind naming.
+        config.update({
+            "training_batch_size": int(args.train_batch_size),
+            "self_play_simulations": int(args.numMCTSSims),
+            "fast_simulations": int(args.numFastSims),
+            "arena_simulations": int(args.arenaMCTSSims),
+            "fast_probability": float(args.probFastSim),
+            "worker_count": int(args.workers),
+            "train_samples_per_new_sample": float(
+                args.gocube_train_samples_per_new_sample
+            ),
+            "replay_window": {
+                "mode": "production-schedule",
+                "min_iterations": 4,
+                "max_iterations": 20,
+                "increment_iterations": 2,
+            },
+        })
     return dict(sorted(config.items()))
 
 
@@ -200,6 +232,8 @@ def validate_existing_reproducible_manifest(
         "rules_fingerprint": game_cls.rules_fingerprint(),
         "komi": float(game_cls.KOMI),
         "model_profile": getattr(args, "gocube_model_profile", "baseline"),
+        "experiment_contract_id": _optional_arg(args, "gocube_experiment_contract_id"),
+        "experiment_contract_version": _optional_arg(args, "gocube_experiment_contract_version"),
         "master_seed": int(getattr(args, "master_seed", 0)),
         "replay_format_version": REPLAY_FORMAT_VERSION,
         "value_target_semantics": VALUE_TARGET_SEMANTICS,
@@ -344,6 +378,8 @@ def create_reproducible_manifest(
         "training_contract_version": TRAINING_CONTRACT_VERSION,
         "komi": float(game_cls.KOMI),
         "model_profile": getattr(args, "gocube_model_profile", "baseline"),
+        "experiment_contract_id": _optional_arg(args, "gocube_experiment_contract_id"),
+        "experiment_contract_version": _optional_arg(args, "gocube_experiment_contract_version"),
     }
     atomic_json_write(manifest, checkpoint_run / RUN_MANIFEST_FILENAME)
     return manifest

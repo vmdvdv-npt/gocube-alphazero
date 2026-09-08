@@ -25,3 +25,6 @@ TERMINATION_CONTRACT = "gocube-termination-provenance-v1"
 
 SEED_DERIVATION_CONTRACT = "gocube-seed-derivation-v1"
 DEFAULT_MASTER_SEED = 0
+
+B_EXPERIMENT_CONTRACT_ID = "gocube-b-experiment-contract-v1"
+B_EXPERIMENT_CONTRACT_VERSION = 1

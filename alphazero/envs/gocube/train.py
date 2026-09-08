@@ -187,6 +187,9 @@ class GoCubeCoach(Coach):
             "endgame_weight": int(self.args.gocube_endgame_sample_weight),
             "endgame_extra_samples": 0,
             "saved_total": 0,
+            "positions_generated": 0,
+            "saved_replay_samples": 0,
+            "new_samples_accepted": 0,
             "termination/episode_move_limit": 0,
         }
         return telemetry
@@ -215,6 +218,10 @@ class GoCubeCoach(Coach):
         total = regular + fast
         realized = fast / total if total else 0.0
         self._iteration_telemetry.update(snapshot)
+        # ``base_positions`` is the number of generated training positions
+        # before symmetry/retention weighting.  It is intentionally distinct
+        # from saved replay rows and from the replay window used for training.
+        self._iteration_telemetry["positions_generated"] = int(snapshot.get("base_positions", 0))
         self._iteration_telemetry["total_decisions"] = total
         self._iteration_telemetry["realized_fast_fraction"] = realized
         self.writer.add_scalar("selfplay/regular_decisions", regular, iteration)
@@ -439,6 +446,10 @@ class GoCubeCoach(Coach):
                 pickle_protocol=pickle.HIGHEST_PROTOCOL,
             )
         self._iteration_telemetry["saved_total"] = num_samples
+        self._iteration_telemetry["saved_replay_samples"] = num_samples
+        # A row becomes a new accepted sample only when this iteration's
+        # replay artifact is assembled.  Never use the replay-window total.
+        self._iteration_telemetry["new_samples_accepted"] = num_samples
         if current_s3_replay:
             write_replay_marker(filename, iteration=iteration, row_count=num_samples)
         self.writer.add_scalar("samples/base_positions", base_positions, iteration)
@@ -446,6 +457,8 @@ class GoCubeCoach(Coach):
         self.writer.add_scalar("samples/endgame_weight", endgame_weight, iteration)
         self.writer.add_scalar("samples/endgame_extra_samples", extra_samples, iteration)
         self.writer.add_scalar("samples/saved_total", num_samples, iteration)
+        self.writer.add_scalar("samples/positions_generated", base_positions, iteration)
+        self.writer.add_scalar("samples/new_samples_accepted", num_samples, iteration)
 
     @_set_state(TrainState.PROCESS_RESULTS)
     def processGameResults(self, iteration):
@@ -544,6 +557,11 @@ class GoCubeCoach(Coach):
         ):
             counters[key] = int(self._iteration_telemetry.get(key, 0))
         denominator = max(1, num_games)
+        self._iteration_telemetry["average_game_length"] = length_sum / denominator
+        self._iteration_telemetry["no_result_games"] = int(counters["terminal/no_result_games"])
+        self._iteration_telemetry["episode_move_limit_games"] = int(
+            counters["termination/episode_move_limit"]
+        )
         for i in range(len(wins)):
             self.writer.add_scalar(
                 f'win_rate/player{i}',
@@ -581,6 +599,19 @@ class GoCubeCoach(Coach):
                 },
                 **counters,
             }
+            aggregate_metrics["sample_accounting"] = {
+                "selfplay_games_completed": int(num_games),
+                "positions_generated": int(self._iteration_telemetry.get("positions_generated", 0)),
+                "saved_replay_samples": int(self._iteration_telemetry.get("saved_replay_samples", 0)),
+                "new_samples_accepted": int(self._iteration_telemetry.get("new_samples_accepted", 0)),
+                "samples_per_game": (
+                    int(self._iteration_telemetry.get("saved_replay_samples", 0)) / denominator
+                    if denominator else 0.0
+                ),
+                "average_game_length": length_sum / denominator,
+                "no_result_games": int(counters["terminal/no_result_games"]),
+                "episode_move_limit_games": int(counters["termination/episode_move_limit"]),
+            }
             aggregate_metrics["terminal/training_valid_fraction"] = (
                 counters["terminal/training_valid_fraction"] / denominator
             )
@@ -615,6 +646,8 @@ class GoCubeCoach(Coach):
             "planned_optimizer_steps": int(planned_steps),
             "actual_optimizer_steps": actual_steps,
             "examples_seen": examples_seen,
+            "optimizer_steps": actual_steps,
+            "optimizer_examples_seen": examples_seen,
             "effective_sample_passes": effective_passes,
             "learning_rate": learning_rate,
         }

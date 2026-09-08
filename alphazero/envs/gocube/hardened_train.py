@@ -21,6 +21,11 @@ from alphazero.envs.gocube.atomic_io import (
     write_replay_marker,
 )
 from alphazero.envs.gocube.exploration_contract import KATAGO_PINNED_EXPLORATION_DEFAULTS
+from alphazero.envs.gocube.contract_versions import (
+    B_EXPERIMENT_CONTRACT_ID,
+    B_EXPERIMENT_CONTRACT_VERSION,
+)
+from alphazero.envs.gocube.production_contract import CUBE4_PRODUCTION
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
 from alphazero.envs.gocube.katago_train import (
     KataGoSearchCoach,
@@ -209,6 +214,13 @@ def build_hardened_training_args(cli):
     # wraps it with the diversified pinned class. The checkpoint contract must
     # fingerprint the class that is actually used for training and resume.
     args.gocube_rules_fingerprint = game_cls.rules_fingerprint()
+    # The generic pilot builder intentionally retains its historical 256 batch
+    # default.  Once the hardened production launcher selects the canonical
+    # 1024 batch, all other B production settings become fail-closed too.
+    if int(args.train_batch_size) == CUBE4_PRODUCTION.train_batch_size:
+        CUBE4_PRODUCTION.validate_checkpoint_args(args)
+        args.gocube_experiment_contract_id = B_EXPERIMENT_CONTRACT_ID
+        args.gocube_experiment_contract_version = B_EXPERIMENT_CONTRACT_VERSION
     args.gocube_recovery_contract = RECOVERY_CONTRACT
     args.gocube_chosen_move_temperature_early = defaults["chosen_move_temperature_early"]
     args.gocube_chosen_move_temperature = defaults["chosen_move_temperature"]

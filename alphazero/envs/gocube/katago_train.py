@@ -38,10 +38,15 @@ from alphazero.envs.gocube.exploration_contract import (
 )
 from alphazero.envs.gocube.integration.manifest import ensure_training_manifest
 from alphazero.envs.gocube.production_training import (
+    CumulativeTrainingCounters,
     anchor_checkpoint_iteration,
     arena_regression_signals,
+    build_sample_budget_target,
     build_replay_training_plan,
+    canonical_training_counters,
+    recover_cumulative_training_counters,
     summarize_arena_outcomes,
+    write_training_progress,
 )
 from alphazero.envs.gocube.records import ITERATION_MANIFEST_FILENAME
 from alphazero.envs.gocube.sample_clock import SampleClockNNetWrapper, TRAINING_CONTRACT
@@ -144,6 +149,16 @@ _SWEEP_FLAG_TO_ARG_KEYS = {
     "--fast-game-prob": ("probFastSim",),
     "--train-samples-per-new-sample": ("gocube_train_samples_per_new_sample",),
     "--arena-batched": ("gocube_arena_batched", "arenaBatched"),
+    # Budget targets are restored with the checkpoint when a target-driven run
+    # is resumed. They are orchestration controls, not optimizer semantics.
+    "--cumulative-new-samples-target": ("gocube_cumulative_new_samples_target",),
+    "--cumulative-optimizer-examples-target": (
+        "gocube_cumulative_optimizer_examples_target",
+    ),
+}
+_BUDGET_FLAG_ALIASES = {
+    "--cumulative-new-samples-target": ("--new-samples-target", "--sample-target"),
+    "--cumulative-optimizer-examples-target": ("--optimizer-examples-target",),
 }
 
 _DIVERSIFICATION_COUNTER_KEYS = (
@@ -200,6 +215,48 @@ class KataGoSearchCoach(GoCubeCoach):
         self.score_tensors = []
         self.ownership_tensors = []
         self._arena_telemetry = None
+        self._initialize_training_accounting()
+
+    @staticmethod
+    def _arg(args, name, default=None):
+        if isinstance(args, dict):
+            return args.get(name, default)
+        try:
+            return getattr(args, name)
+        except (AttributeError, KeyError):
+            return default
+
+    def _initialize_training_accounting(self):
+        """Restore generation counters while taking optimizer totals from the checkpoint clock."""
+
+        data_root = self._arg(self.args, "data", "data")
+        run_name = self._arg(self.args, "run_name", "")
+        optimizer_steps = int(getattr(self.train_net, "total_optimizer_updates", 0))
+        optimizer_examples = int(getattr(self.train_net, "total_training_samples", 0))
+        self._cumulative_training_counters = recover_cumulative_training_counters(
+            data_root,
+            run_name,
+            optimizer_steps=optimizer_steps,
+            optimizer_examples_seen=optimizer_examples,
+        )
+        self._training_budget_status = None
+
+    def _sample_budget_target(self):
+        return build_sample_budget_target(
+            cumulative_new_samples_target=self._arg(
+                self.args, "gocube_cumulative_new_samples_target", None
+            ),
+            cumulative_optimizer_examples_target=self._arg(
+                self.args, "gocube_cumulative_optimizer_examples_target", None
+            ),
+        )
+
+    def _training_budget_reached(self):
+        target = self._sample_budget_target()
+        if target is None:
+            return False
+        counters = getattr(self, "_cumulative_training_counters", CumulativeTrainingCounters())
+        return target.current(counters) >= target.target
 
     def _load_model(self, model, iteration):
         overrides = getattr(self.train_net, "_gocube_checkpoint_arg_overrides", None)
@@ -305,8 +362,65 @@ class KataGoSearchCoach(GoCubeCoach):
         new_samples = int(latest_iteration_samples)
         effective_ratio = actual_samples / new_samples if new_samples else 0.0
         effective_passes = actual_samples / window_samples if window_samples else 0.0
+        counters = getattr(self, "_cumulative_training_counters", None)
+        if counters is None:
+            counters = CumulativeTrainingCounters()
+            self._cumulative_training_counters = counters
+        accepted_samples = int(
+            self._iteration_telemetry.get("new_samples_accepted", new_samples)
+        )
+        saved_replay_samples = int(
+            self._iteration_telemetry.get("saved_replay_samples", accepted_samples)
+        )
+        positions_generated = int(
+            self._iteration_telemetry.get(
+                "positions_generated",
+                self._iteration_telemetry.get("base_positions", 0),
+            )
+        )
+        games_completed = int(self._iteration_telemetry.get("games", 0))
+        # A normal learn() call accounts for one new generation chunk.  The
+        # accepted count comes from the current replay artifact only; the
+        # replay window loaded below is never added to this delta.
+        deltas = {
+            "selfplay_games_completed": games_completed,
+            "positions_generated": positions_generated,
+            "saved_replay_samples": saved_replay_samples,
+            "new_samples_accepted": accepted_samples,
+            "optimizer_steps": int(self.train_net.last_train_actual_steps),
+            "optimizer_examples_seen": actual_samples,
+        }
+        before = counters.copy()
+        counters.add_generation(
+            selfplay_games_completed=games_completed,
+            positions_generated=positions_generated,
+            saved_replay_samples=saved_replay_samples,
+            new_samples_accepted=accepted_samples,
+        )
+        counters.set_optimizer_totals(
+            steps=int(getattr(self.train_net, "total_optimizer_updates", 0)),
+            examples_seen=int(getattr(self.train_net, "total_training_samples", 0)),
+        )
+        target = self._sample_budget_target()
+        target_status = None
+        if target is not None:
+            target_status = target.status(
+                counters,
+                before=target.current(before),
+                generation_chunk_games=games_completed,
+            )
+        canonical = canonical_training_counters(counters, deltas=deltas)
         extras = {
             "new_selfplay_samples": new_samples,
+            "new_samples_accepted": accepted_samples,
+            "positions_generated": positions_generated,
+            "saved_replay_samples": saved_replay_samples,
+            "selfplay_games_completed": games_completed,
+            "average_game_length": float(self._iteration_telemetry.get("average_game_length", 0.0)),
+            "no_result_games": int(self._iteration_telemetry.get("no_result_games", 0)),
+            "episode_move_limit_games": int(
+                self._iteration_telemetry.get("episode_move_limit_games", 0)
+            ),
             "replay_window_samples": int(window_samples),
             "train_samples_per_new_sample": float(self.args.gocube_train_samples_per_new_sample),
             "planned_training_samples": int(planned_training_samples),
@@ -322,10 +436,20 @@ class KataGoSearchCoach(GoCubeCoach):
             "gradient_norm_pre_clip_max": float(self.train_net.last_train_gradient_norm_max),
             "gradient_clip_events": int(self.train_net.last_train_clipping_events),
             "gradient_clip_frequency": float(self.train_net.last_train_clipping_frequency),
+            "cumulative_counters": canonical["cumulative_counters"],
+            "counter_deltas": canonical["iteration"],
+            "cumulative_new_samples": int(counters.new_samples_accepted),
+            "cumulative_optimizer_examples": int(counters.optimizer_examples_seen),
+            **canonical["cumulative"],
+            **canonical["cumulative_counters"],
         }
+        if target_status is not None:
+            extras["sample_budget"] = target_status
         self._training_telemetry.update(extras)
+        self._training_budget_status = target_status
         for key, value in extras.items():
-            self.writer.add_scalar(f"training/{key}", value, iteration)
+            if isinstance(value, (int, float)):
+                self.writer.add_scalar(f"training/{key}", value, iteration)
 
     def _print_iteration_summary(self, iteration):
         super()._print_iteration_summary(iteration)
@@ -354,6 +478,18 @@ class KataGoSearchCoach(GoCubeCoach):
         print("Sample-clock training:")
         print(f"  total training samples:  {training.get('total_training_samples', 0)}")
         print(f"  total optimizer updates: {training.get('total_optimizer_updates', 0)}")
+        print(f"  cumulative games:        {training.get('cumulative_counters', {}).get('selfplay_games_completed', 0)}")
+        print(f"  cumulative positions:    {training.get('cumulative_counters', {}).get('positions_generated', 0)}")
+        print(f"  cumulative replay:       {training.get('cumulative_counters', {}).get('saved_replay_samples', 0)}")
+        print(f"  cumulative new samples:  {training.get('cumulative_new_samples', 0)}")
+        print(f"  cumulative steps:        {training.get('cumulative_counters', {}).get('optimizer_steps', 0)}")
+        print(f"  cumulative examples:     {training.get('cumulative_optimizer_examples', 0)}")
+        if training.get("sample_budget") is not None:
+            budget = training["sample_budget"]
+            print(
+                f"  scientific target:       {budget.get('kind')}={budget.get('target')} "
+                f"(after={budget.get('after')}, overshoot={budget.get('overshoot', 0)})"
+            )
         print(f"  effective LR:            {training.get('effective_lr', self.args.lr):g}")
         print(f"  samples since LR change: {training.get('samples_since_lr_change', 0)}")
         print(f"  pre-clip grad norm:      {training.get('gradient_norm_pre_clip', 0.0):.4f}")
@@ -361,40 +497,65 @@ class KataGoSearchCoach(GoCubeCoach):
 
     def _patch_iteration_manifest(self):
         path = getattr(self, "_iteration_record_manifest_path", None)
-        if not path or not os.path.exists(path):
-            return
-        with open(path, "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-        aggregate = manifest.setdefault("aggregate_metrics", {})
-        aggregate["training"] = dict(getattr(self, "_training_telemetry", {}))
         sample = self._iteration_telemetry
-        fork_count = int(sample.get("fork_depth_count", 0))
-        aggregate["selfplay_diversification"] = {
-            "normal_starts": int(sample.get("normal_starts", 0)),
-            "early_forks": int(sample.get("early_forks", 0)),
-            "ordinary_forks": int(sample.get("ordinary_forks", 0)),
-            "policy_initialized_starts": int(sample.get("policy_initialized_starts", 0)),
-            "average_fork_depth": (
-                float(sample.get("fork_depth_sum", 0)) / fork_count if fork_count else 0.0
-            ),
-        }
-        aggregate["exploration_policy_target"] = {
-            "telemetry_positions": int(sample.get("exploration_telemetry_positions", 0)),
-            "raw_root_visits": int(sample.get("exploration_raw_visits", 0)),
-            "forced_exploration_visits_removed": int(sample.get("exploration_forced_visits", 0)),
-            "target_visits_after_correction": int(sample.get("exploration_target_visits", 0)),
-            "forced_visit_fraction": float(sample.get("exploration_forced_visit_fraction", 0.0)),
-            "per_position_detail": "game records -> moves[].search_telemetry",
-        }
-        if self._arena_telemetry is not None:
-            aggregate["arena"] = self._arena_telemetry
-        temporary = path + ".training.tmp"
-        with open(temporary, "w", encoding="utf-8") as handle:
-            json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        if path and os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            aggregate = manifest.setdefault("aggregate_metrics", {})
+            aggregate["training"] = dict(getattr(self, "_training_telemetry", {}))
+            counters = getattr(self, "_cumulative_training_counters", CumulativeTrainingCounters())
+            aggregate["cumulative_counters"] = counters.as_dict()
+            aggregate["cumulative_counter_fields"] = counters.as_cumulative_dict()
+            aggregate["sample_accounting"] = {
+                "selfplay_games_completed": int(sample.get("games", 0)),
+                "positions_generated": int(sample.get("positions_generated", sample.get("base_positions", 0))),
+                "saved_replay_samples": int(sample.get("saved_replay_samples", sample.get("saved_total", 0))),
+                "new_samples_accepted": int(sample.get("new_samples_accepted", sample.get("saved_total", 0))),
+            }
+            fork_count = int(sample.get("fork_depth_count", 0))
+            aggregate["selfplay_diversification"] = {
+                "normal_starts": int(sample.get("normal_starts", 0)),
+                "early_forks": int(sample.get("early_forks", 0)),
+                "ordinary_forks": int(sample.get("ordinary_forks", 0)),
+                "policy_initialized_starts": int(sample.get("policy_initialized_starts", 0)),
+                "average_fork_depth": (
+                    float(sample.get("fork_depth_sum", 0)) / fork_count if fork_count else 0.0
+                ),
+            }
+            aggregate["exploration_policy_target"] = {
+                "telemetry_positions": int(sample.get("exploration_telemetry_positions", 0)),
+                "raw_root_visits": int(sample.get("exploration_raw_visits", 0)),
+                "forced_exploration_visits_removed": int(sample.get("exploration_forced_visits", 0)),
+                "target_visits_after_correction": int(sample.get("exploration_target_visits", 0)),
+                "forced_visit_fraction": float(sample.get("exploration_forced_visit_fraction", 0.0)),
+                "per_position_detail": "game records -> moves[].search_telemetry",
+            }
+            if self._arena_telemetry is not None:
+                aggregate["arena"] = self._arena_telemetry
+            temporary = path + ".training.tmp"
+            with open(temporary, "w", encoding="utf-8") as handle:
+                json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+
+        # The progress artifact is intentionally written after the checkpoint
+        # save and manifest patch.  If a process dies earlier, resume can still
+        # recover generation deltas from the committed iteration manifest and
+        # optimizer totals from the checkpoint sample clock.
+        target = self._sample_budget_target()
+        target_status = getattr(self, "_training_budget_status", None)
+        if target is not None and target_status is None:
+            target_status = target.status(self._cumulative_training_counters)
+        write_training_progress(
+            self._arg(self.args, "data", "data"),
+            self._arg(self.args, "run_name", ""),
+            counters=getattr(self, "_cumulative_training_counters", CumulativeTrainingCounters()),
+            latest_iteration=int(getattr(self, "model_iter", 0)),
+            target_status=target_status,
+            latest_iteration_metrics=dict(getattr(self, "_training_telemetry", {})),
+        )
 
     def _replay_iterations(self, iteration):
         explicit_window = (
@@ -894,6 +1055,24 @@ def parse_args(argv=None):
         type=float,
         default=DEFAULT_TRAIN_SAMPLES_PER_NEW_SAMPLE,
     )
+    budget_targets = parser.add_mutually_exclusive_group()
+    budget_targets.add_argument(
+        "--cumulative-new-samples-target",
+        "--new-samples-target",
+        "--sample-target",
+        dest="cumulative_new_samples_target",
+        type=int,
+        default=None,
+        help="Stop after this cumulative count of newly accepted replay samples.",
+    )
+    budget_targets.add_argument(
+        "--cumulative-optimizer-examples-target",
+        "--optimizer-examples-target",
+        dest="cumulative_optimizer_examples_target",
+        type=int,
+        default=None,
+        help="Stop after this cumulative count of optimizer-consumed examples.",
+    )
     parser.add_argument("--replay-window-iters", type=int, default=None)
     parser.add_argument("--fast-game-prob", type=float, default=0.25)
     parser.add_argument(
@@ -974,7 +1153,11 @@ def parse_args(argv=None):
     parsed._explicit_sweep_flags = frozenset(
         flag
         for flag in _SWEEP_FLAG_TO_ARG_KEYS
-        if any(token == flag or token.startswith(flag + "=") for token in raw_argv)
+        if any(
+            token == candidate or token.startswith(candidate + "=")
+            for candidate in (flag, *_BUDGET_FLAG_ALIASES.get(flag, ()))
+            for token in raw_argv
+        )
     )
     return parsed
 
@@ -1009,6 +1192,10 @@ def build_katago_training_args(cli):
         replay_window_samples=1,
         train_samples_per_new_sample=cli.train_samples_per_new_sample,
         batch_size=cli.train_batch_size,
+    )
+    build_sample_budget_target(
+        cumulative_new_samples_target=cli.cumulative_new_samples_target,
+        cumulative_optimizer_examples_target=cli.cumulative_optimizer_examples_target,
     )
 
     profile = production_model_profile(
@@ -1096,6 +1283,16 @@ def build_katago_training_args(cli):
     args.master_seed = int(cli.seed)
     args.seed_derivation_contract = SEED_DERIVATION_CONTRACT
     args.gocube_train_samples_per_new_sample = float(cli.train_samples_per_new_sample)
+    args.gocube_cumulative_new_samples_target = (
+        None
+        if cli.cumulative_new_samples_target is None
+        else int(cli.cumulative_new_samples_target)
+    )
+    args.gocube_cumulative_optimizer_examples_target = (
+        None
+        if cli.cumulative_optimizer_examples_target is None
+        else int(cli.cumulative_optimizer_examples_target)
+    )
     args.gocube_replay_window_iters = (
         None if cli.replay_window_iters is None else int(cli.replay_window_iters)
     )
@@ -1186,6 +1383,18 @@ def print_katago_search_configuration(args):
     print("Sample-based replay training:")
     print(f"  contract = {args.gocube_training_contract}")
     print(f"  train samples/new sample = {args.gocube_train_samples_per_new_sample:g}")
+    if args.gocube_cumulative_new_samples_target is not None:
+        print(
+            "  scientific target = cumulative new samples "
+            f"{args.gocube_cumulative_new_samples_target}"
+        )
+    elif args.gocube_cumulative_optimizer_examples_target is not None:
+        print(
+            "  scientific target = cumulative optimizer examples "
+            f"{args.gocube_cumulative_optimizer_examples_target}"
+        )
+    else:
+        print("  scientific target = disabled (iteration limit only)")
     if args.gocube_replay_window_iters is None:
         print("  replay window = production schedule")
     else:

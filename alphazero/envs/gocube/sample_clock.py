@@ -248,6 +248,8 @@ class SampleClockNNetWrapper(NNetWrapper):
             "train_samples_per_new_sample": float(self.args.gocube_train_samples_per_new_sample),
             "total_training_samples": self.total_training_samples,
             "total_optimizer_updates": self.total_optimizer_updates,
+            "cumulative_optimizer_examples_seen": self.cumulative_optimizer_examples_seen,
+            "cumulative_optimizer_steps": self.cumulative_optimizer_steps,
             "samples_since_lr_change": self.scheduler.samples_since_last_lr_change,
             "effective_lr": float(self.optimizer.param_groups[0]["lr"]),
             "replay_format_version": REPLAY_FORMAT_VERSION,
@@ -339,6 +341,30 @@ class SampleClockNNetWrapper(NNetWrapper):
     @property
     def total_optimizer_updates(self) -> int:
         return int(self.scheduler.total_optimizer_updates)
+
+    @property
+    def cumulative_optimizer_steps(self) -> int:
+        """Canonical orchestration name for the scheduler's update counter."""
+
+        return self.total_optimizer_updates
+
+    @property
+    def cumulative_optimizer_examples_seen(self) -> int:
+        """Canonical orchestration name for examples consumed by the optimizer."""
+
+        return self.total_training_samples
+
+    @property
+    def sample_clock_state(self) -> dict[str, int | float | str]:
+        """Expose the production sample clock without reaching into internals."""
+
+        return {
+            "training_contract": TRAINING_CONTRACT,
+            "cumulative_optimizer_steps": self.cumulative_optimizer_steps,
+            "cumulative_optimizer_examples_seen": self.cumulative_optimizer_examples_seen,
+            "effective_lr": float(self.optimizer.param_groups[0]["lr"]),
+            "samples_since_lr_change": int(self.scheduler.samples_since_last_lr_change),
+        }
 
     def train(self, batches, train_steps):
         self.total_steps = train_steps
