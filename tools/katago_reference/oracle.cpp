@@ -51,9 +51,26 @@ struct OracleGame {
     if(setup.contains("white"))
       for(const auto& p : setup.at("white"))
         this->board.setStone(point(p.at(0), p.at(1)), C_WHITE);
+    // The protocol names capture counts by captured colour, matching
+    // KataGo's Board fields.  This is distinct from GoCube's public state,
+    // which stores counts by capturing player.
+    if(setup.contains("captures")) {
+      const auto& captures = setup.at("captures");
+      this->board.numBlackCaptures = captures.value("black", 0);
+      this->board.numWhiteCaptures = captures.value("white", 0);
+    }
     std::string player = setup.value("next_player", "B");
     nextPlayer = (player == "W" || player == "white") ? P_WHITE : P_BLACK;
-    history.clear(board, nextPlayer, history.rules, 0);
+    int encorePhase = setup.value("encore_phase", 0);
+    history.clear(board, nextPlayer, history.rules, encorePhase);
+    if(setup.contains("second_cleanup_start_colors")) {
+      const auto& colors = setup.at("second_cleanup_start_colors");
+      if(!colors.is_array() || colors.size() != static_cast<size_t>(xSize * ySize))
+        throw std::runtime_error("second_cleanup_start_colors must contain one value per point");
+      for(int y = 0; y < ySize; y++)
+        for(int x = 0; x < xSize; x++)
+          history.secondEncoreStartColors[point(x, y)] = colors.at(y * xSize + x).get<int>();
+    }
   }
 
   json snapshot() const {
@@ -128,6 +145,19 @@ struct OracleGame {
     };
     result["all_points_pass_alive"] = allPointsPassAlive;
     result["encore_phase"] = history.encorePhase;
+    Color formalArea[Board::MAX_ARR_SIZE];
+    history.getAreaNow(board, formalArea);
+    result["formal_area"] = json::array();
+    for(int y = 0; y < ySize; y++)
+      for(int x = 0; x < xSize; x++)
+        result["formal_area"].push_back((int)formalArea[point(x, y)]);
+    result["white_bonus_score"] = history.whiteBonusScore;
+    result["second_cleanup_start_colors"] = json::array();
+    for(int y = 0; y < ySize; y++)
+      for(int x = 0; x < xSize; x++)
+        result["second_cleanup_start_colors"].push_back(
+          (int)history.secondEncoreStartColors[point(x, y)]
+        );
     return result;
   }
 

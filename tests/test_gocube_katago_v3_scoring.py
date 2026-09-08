@@ -53,8 +53,8 @@ def test_exact_territory_captures_komi_and_winner():
     assert score.territory.black == 2
     assert score.territory.white == 2
     assert score.captures == (2, 1)
-    assert score.black == 4.0
-    assert score.white == 3.5
+    assert score.black == 15.0
+    assert score.white == 14.5
     assert score.margin == 0.5
     assert score.winner == "black"
 
@@ -97,7 +97,7 @@ def test_same_fill_in_cleanup1_has_no_cleanup2_compensation():
     assert played.cleanup2_moves == (0, 0)
     comparable = replace(played, phase=CLEANUP_2, second_cleanup_start_colors=bytes(state.board.tolist()))
     after_score, _, _ = final_v3_score(comparable, t, 0.0)
-    assert after_score.black == before_score.black - 1
+    assert after_score.white - after_score.black == before_score.white - before_score.black + 1
 
 
 def test_cleanup2_new_stone_inside_independent_life_is_counted_without_penalty():
@@ -125,7 +125,7 @@ def test_upstream_1158_strict_rules_can_leave_single_eye_area_unscored():
     state = replace(state, second_cleanup_start_colors=bytes(state.board.tolist()))
     score, _, _ = final_v3_score(state, t, 0.0)
     assert score.territory.black == 0
-    assert score.black == 0.0
+    assert score.black == 8.0
 
 
 def test_cube_seam_and_torus_wrap_territory_score_by_logical_graph():

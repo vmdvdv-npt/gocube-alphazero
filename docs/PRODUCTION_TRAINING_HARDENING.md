@@ -75,7 +75,7 @@ A process crash before the replace leaves the previous visible checkpoint unchan
 
 ## 5. Atomic replay logical commits
 
-Each iteration's seven replay tensors are first written into a staging directory on the same filesystem:
+Each iteration's seven replay tensors (replay format v3) are first written into a staging directory on the same filesystem:
 
 1. observation data;
 2. policy targets;
@@ -85,7 +85,7 @@ Each iteration's seven replay tensors are first written into a staging directory
 6. ownership targets;
 7. ownership point masks.
 
-Only after all six files exist are they promoted into the run directory. A completion marker `iteration-NNNN-complete.json` is written **last**.
+Only after all seven files exist are they promoted into the run directory. A completion marker `iteration-NNNN-complete.json` is written **last**.
 
 Replay loading is fail-closed: an iteration without a valid marker, with a missing tensor, or with inconsistent row counts is ignored rather than partially entering the replay window.
 
@@ -103,7 +103,7 @@ effective parameter, topology, rules fingerprint, pinned KataGo commit, komi,
 master seed, target semantic, sample-clock contract, or replay version aborts
 the run. The rich manifest is never overwritten during resume.
 
-Old checkpoints are not silently reinterpreted under the new semantics. The exploration contract is versioned as `katago-pinned-exploration-v2`, and hardened checkpoints additionally persist the recovery and move/value/LCB fields.
+Old checkpoints are not silently reinterpreted under the new semantics. The exploration contract is versioned as `katago-pinned-exploration-v2`, and hardened checkpoints additionally persist the recovery and move/value/LCB fields. S1 also requires replay format v3, target semantics `win-loss-noresult-s1-v2`, `normalized-score-with-applicability-mask-s1-v2`, `formal-v3-s1-with-point-mask-v2`, and score initialization `katago-boardhistory-clear-v1`; older artifacts fail closed.
 
 ## 7. Initial network reproducibility
 

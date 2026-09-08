@@ -21,8 +21,16 @@ from typing import Any, Iterable, Mapping
 import numpy as np
 
 from .core import BLACK, EMPTY, WHITE
+from .contract_versions import (
+    OWNERSHIP_TARGET_SEMANTICS,
+    REPLAY_FORMAT_VERSION,
+    SCORE_INITIALIZATION_CONTRACT,
+    SCORE_TARGET_SEMANTICS,
+    TRAINING_CONTRACT_VERSION,
+    VALUE_TARGET_SEMANTICS,
+)
 
-GAME_RECORD_SCHEMA_VERSION = 1
+GAME_RECORD_SCHEMA_VERSION = 2
 ITERATION_MANIFEST_SCHEMA_VERSION = 1
 ITERATION_MANIFEST_FILENAME = "iteration-manifest.json"
 _COUNTER_FILENAME = "game-id-counter.json"
@@ -168,7 +176,7 @@ def _final_position(game: Any) -> dict[str, Any]:
             "ko_recap_blocked", "cleanup2_moves", "main_moves", "cleanup1_moves",
             "terminal_kind", "no_result_reason", "pass_alive_early_end",
             "entered_cleanup1", "entered_cleanup2", "cleanup_captures",
-            "ko_unblock_actions",
+            "ko_unblock_actions", "white_bonus_score",
         ):
             if hasattr(state, field):
                 value = getattr(state, field)
@@ -258,7 +266,14 @@ def build_game_record(
             "observation_schema": getattr(game, "OBSERVATION_SCHEMA", None),
             "rules_fingerprint": game.rules_fingerprint() if hasattr(game, "rules_fingerprint") else None,
             "katago_rules_version": getattr(game, "KATAGO_RULES_VERSION", None),
+            "rules_implementation_version": getattr(game, "KATAGO_RULES_IMPLEMENTATION_VERSION", None),
             "katago_reference_commit": getattr(game, "KATAGO_REFERENCE_COMMIT", None),
+            "score_initialization_contract": SCORE_INITIALIZATION_CONTRACT,
+            "replay_format_version": REPLAY_FORMAT_VERSION,
+            "training_contract_version": TRAINING_CONTRACT_VERSION,
+            "value_target_semantics": VALUE_TARGET_SEMANTICS,
+            "score_target_semantics": SCORE_TARGET_SEMANTICS,
+            "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
         },
         "effective_parameters": _json_safe(dict(parameters)),
         "moves": [_json_safe(dict(move)) for move in moves],

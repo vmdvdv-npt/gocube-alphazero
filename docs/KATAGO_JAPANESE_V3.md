@@ -49,28 +49,45 @@ Cleanup state includes `ko-recapture-blocked` points and phase-local ko history.
 
 KataGo pass-for-ko has two board-point forms, both represented in the existing `point_count + PASS` action space and both leaving the board unchanged while consuming the turn. A player may choose the blocked opposing single stone in atari itself, or choose the empty ko-capture point whose unique capturable one-stone target is that blocked stone. In either case the corresponding ko-recapture block is removed. No extra action type is introduced.
 
-## Final Tax=SEKI scoring
+## Score initialization and final Tax=SEKI scoring
+
+Every formal V3 state carries the equivalent of KataGo's
+`BoardHistory::whiteBonusScore`. `BoardHistory::clear` initializes it to the
+black setup-stone count minus the white setup-stone count, then applies the
+capture-counter correction using KataGo's captured-colour counters. GoCube's
+capture tuple is stored by capturing player, so the equivalent is
+`black_stones - white_stones - black_captures + white_captures`. A real move in
+MAIN or CLEANUP_1 adds `+1` for Black or `-1` for White; CLEANUP_2 adds no such
+offset because its start-colour accounting is part of the formal area score.
+This value is explicit state and is rebuilt by synthetic cleanup rebasing.
+
+`main_moves`, `cleanup1_moves`, and `cleanup2_moves` remain useful replay
+telemetry, but none of them selects a scoring implementation.
 
 For a position that enters CLEANUP_2 and ends without a real CLEANUP_2 move,
-KataGo's Rules V3 scorer keeps the board and capture counters unchanged. If a
-real CLEANUP_2 move was played, the port applies the pinned self-play
-pass-alive prisoner accounting before independent-life scoring. This is the
-same distinction as KataGo's second-encore/start-color accounting and avoids
-inventing captures for an immediate pass-only phase.
+KataGo's Rules V3 scorer keeps the board and capture counters unchanged for a
+pass-only CLEANUP_2 finish. If a real CLEANUP_2 move was played, the port uses
+the pinned second-encore start-colour accounting before independent-life
+scoring. This avoids inventing captures for an immediate pass-only phase.
 
 An independent-life region for a color is a maximal non-opponent region containing neither a dame region nor a stone region in atari. This is the V3 source of Tax=SEKI territory; no heuristic `seki` classifier is authoritative.
 
-For each color:
+The authoritative score is the formal board-area score plus the explicit
+white-oriented bonus above and komi. For the public GoCube breakdown, the
+bonus is represented on White so that `white - black` is the canonical final
+margin; it is not a territory/prisoner decomposition. The formal area itself
+is computed as follows:
 
 1. +1 for every empty point inside that color's independent-life regions.
-2. + captures of the opposing color.
-3. +1 for every real move made by that color during CLEANUP_2.
-4. -1 for every stone of that color outside its independent-life regions that was not that color at the start of CLEANUP_2.
-5. White additionally receives komi.
+2. remaining stones count before CLEANUP_2, or only when their color matches
+   `second_cleanup_start_colors` in CLEANUP_2;
+3. White additionally receives the explicit bonus and komi.
 
 Winner, margin, score-head target, and ownership target derive only from this final V3 calculation. Cleanup captures are therefore part of the formal final result.
 
-The implementation follows the corrected post-issue-#1158 behavior: unassigned single-color empty components are not silently dropped, and scoring is based on the complete final position rather than only stones matching `second_cleanup_start_colors`.
+The implementation follows the corrected post-issue-#1158 behavior: unassigned
+single-color empty components are not silently dropped, and scoring is based
+on the complete final position rather than a `main_moves`-selected fallback.
 
 ## NO_RESULT and training targets
 
@@ -92,4 +109,4 @@ This state exposes cleanup legality and score-relevant state used by the current
 
 V1 Chinese, Japanese Cleanup V2, and V3 have separate Game classes and manifest versions. New production training defaults only to V3 and the namespace `gocube-{topology}-{size}-katago-v3-pilot`.
 
-Checkpoint/run metadata records rule set, komi, terminal adjudicator, observation schema, topology, size, KataGo rules version, KataGo reference commit, and deterministic SHA-256 rules fingerprint. The rules implementation version is bumped whenever production move legality or adjudication semantics change; adding the second KataGo pass-for-ko form therefore changes the V3 fingerprint. V3 loading fails closed if required metadata is missing or differs. V2 samples/checkpoints are never silently resumed as V3.
+Checkpoint/run metadata records rule set, komi, terminal adjudicator, observation schema, topology, size, KataGo rules version, KataGo reference commit, score initialization contract, target contracts, and deterministic SHA-256 rules fingerprint. The local rules implementation version is `4` for S1. V3 loading fails closed if required metadata is missing or differs. Replay/checkpoint artifacts from pre-S1 contracts are never silently resumed as S1.

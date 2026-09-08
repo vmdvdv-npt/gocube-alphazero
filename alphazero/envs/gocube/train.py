@@ -33,6 +33,7 @@ from alphazero.envs.gocube.atomic_io import REPLAY_TENSOR_SUFFIXES
 from alphazero.envs.gocube.contract_versions import (
     OWNERSHIP_TARGET_SEMANTICS,
     REPLAY_FORMAT_VERSION,
+    SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
     TRAINING_CONTRACT_VERSION,
     VALUE_TARGET_SEMANTICS,
@@ -763,6 +764,7 @@ def build_training_args(cli):
         gocube_value_target_semantics=VALUE_TARGET_SEMANTICS,
         gocube_score_target_semantics=SCORE_TARGET_SEMANTICS,
         gocube_ownership_target_semantics=OWNERSHIP_TARGET_SEMANTICS,
+        gocube_score_initialization_contract=SCORE_INITIALIZATION_CONTRACT,
         ownership_loss_weight=0.5,
         score_loss_weight=0.5,
         gocube_endgame_sample_weight=cli.endgame_sample_weight,

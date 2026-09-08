@@ -14,8 +14,9 @@ def test_authoritative_training_docs_state_the_same_production_contract():
         )
     )
     assert "sample-clock-v2" in docs
-    assert "replay format v2" in docs.lower()
-    assert "win-loss-noresult-v1" in docs
+    assert "replay format v3" in docs.lower()
+    assert "win-loss-noresult-s1-v2" in docs
+    assert "katago-boardhistory-clear-v1" in docs
     assert "f6bc4b19a1686caa2d088b56251e8c11c8be6d51" in docs
     assert "komi `0.5`" in docs
     assert "tools/run_cube4_katago_from_scratch.sh" in docs

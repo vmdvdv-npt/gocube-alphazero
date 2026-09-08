@@ -13,6 +13,7 @@ import torch
 from .contract_versions import (
     OWNERSHIP_TARGET_SEMANTICS,
     REPLAY_FORMAT_VERSION,
+    SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
     VALUE_TARGET_SEMANTICS,
 )
@@ -121,6 +122,7 @@ def write_replay_marker(iteration_base: str, *, iteration: int, row_count: int) 
             "schema_version": REPLAY_MARKER_SCHEMA_VERSION,
             "replay_format_version": REPLAY_FORMAT_VERSION,
             "recovery_contract": RECOVERY_CONTRACT,
+            "score_initialization_contract": SCORE_INITIALIZATION_CONTRACT,
             "value_target_semantics": VALUE_TARGET_SEMANTICS,
             "score_target_semantics": SCORE_TARGET_SEMANTICS,
             "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
@@ -156,6 +158,7 @@ def load_replay_marker(iteration_base: str | os.PathLike[str]) -> dict[str, obje
         "value_target_semantics": VALUE_TARGET_SEMANTICS,
         "score_target_semantics": SCORE_TARGET_SEMANTICS,
         "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
+        "score_initialization_contract": SCORE_INITIALIZATION_CONTRACT,
     }
     for key, expected in semantic_fields.items():
         if payload.get(key) != expected:
