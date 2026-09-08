@@ -182,10 +182,13 @@ build_hardened_training_args
 - Переход к новому поведению версионирован. Для качества новой модели отдельно сообщается частота технических завершений.
 
 S3 compatibility IDs: search contract `katago-pinned-search-v3`, game record
-schema v3, replay format v3, training contract v3, and termination contract
+schema v3, replay format v4, training contract v3, and termination contract
 `gocube-termination-provenance-v1`. Replay/training remain at S1's numeric v3
-because the seven-tensor layout and optimizer/sample semantics are unchanged;
-the new marker/checkpoint fields are required and therefore fail closed.
+for the seven neural-network tensors and optimizer/sample semantics; replay v4
+adds a required row-aligned `uint8 [N]` provenance sidecar encoded by
+`gocube-target-provenance-encoding-v1`. The sidecar is not a network input and
+the new marker/checkpoint fields are required, so incomplete or older artifacts
+fail closed.
 Existing records/replay/checkpoints are not rewritten; artifacts that lack the
 new immutable contract are rejected by the current resume/load path or
 classified as `unknown_legacy_termination` by the read-only record audit.

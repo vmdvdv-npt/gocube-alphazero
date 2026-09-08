@@ -9,6 +9,7 @@ import torch
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.envs.gocube.game import legacy_game_class
 from alphazero.envs.gocube.contract_versions import (
+    TARGET_PROVENANCE_ENCODING,
     TARGET_PROVENANCE_SEMANTICS,
     TERMINATION_CONTRACT,
 )
@@ -109,6 +110,7 @@ def _validate_saved_gocube_metadata(
         # contract, but a current pinned loader must still require them.
         for key, expected_value in (
             ("gocube_target_provenance_semantics", TARGET_PROVENANCE_SEMANTICS),
+            ("gocube_target_provenance_encoding", TARGET_PROVENANCE_ENCODING),
             ("gocube_termination_contract", TERMINATION_CONTRACT),
         ):
             actual = _metadata_value(args, key, None)

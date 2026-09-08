@@ -64,12 +64,23 @@ jobs:
           grep -Eq 'Optimizer steps actual:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
           grep -Eq 'Examples seen:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
           python - <<'PY'
-          import glob
+          import os
           import torch
-          files = sorted(glob.glob('data/ci-cube4-v3-budget-smoke/iteration-0001-*.pkl'))
-          assert len(files) == 7, files
+          from alphazero.envs.gocube.atomic_io import (
+              REPLAY_TARGET_PROVENANCE_SUFFIX,
+              REPLAY_TENSOR_SUFFIXES,
+              load_replay_marker,
+              load_replay_target_provenance,
+          )
+          base = 'data/ci-cube4-v3-budget-smoke/iteration-0001'
+          marker = load_replay_marker(base)
+          files = [base + suffix for suffix in REPLAY_TENSOR_SUFFIXES]
           rows = [int(torch.load(path).size(0)) for path in files]
           assert len(set(rows)) == 1 and rows[0] > 0, rows
+          provenance = load_replay_target_provenance(base, marker=marker)
+          assert provenance.dtype == torch.uint8
+          assert provenance.shape == (rows[0],)
+          assert os.path.getsize(base + REPLAY_TARGET_PROVENANCE_SUFFIX) > 0
           print('Cube 4 tensor rows:', rows[0])
           PY
 
@@ -87,12 +98,23 @@ jobs:
           grep -Eq 'Optimizer steps actual:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
           grep -Eq 'Examples seen:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
           python - <<'PY'
-          import glob
+          import os
           import torch
-          files = sorted(glob.glob('data/ci-torus9-v3-budget-smoke/iteration-0001-*.pkl'))
-          assert len(files) == 7, files
+          from alphazero.envs.gocube.atomic_io import (
+              REPLAY_TARGET_PROVENANCE_SUFFIX,
+              REPLAY_TENSOR_SUFFIXES,
+              load_replay_marker,
+              load_replay_target_provenance,
+          )
+          base = 'data/ci-torus9-v3-budget-smoke/iteration-0001'
+          marker = load_replay_marker(base)
+          files = [base + suffix for suffix in REPLAY_TENSOR_SUFFIXES]
           rows = [int(torch.load(path).size(0)) for path in files]
           assert len(set(rows)) == 1 and rows[0] > 0, rows
+          provenance = load_replay_target_provenance(base, marker=marker)
+          assert provenance.dtype == torch.uint8
+          assert provenance.shape == (rows[0],)
+          assert os.path.getsize(base + REPLAY_TARGET_PROVENANCE_SUFFIX) > 0
           print('Torus 9 tensor rows:', rows[0])
           PY
 
@@ -112,7 +134,12 @@ jobs:
           import json
           import os
           import torch
-          from alphazero.envs.gocube.atomic_io import RECOVERY_CONTRACT, REPLAY_TENSOR_SUFFIXES
+          from alphazero.envs.gocube.atomic_io import (
+              RECOVERY_CONTRACT,
+              REPLAY_TARGET_PROVENANCE_SUFFIX,
+              REPLAY_TENSOR_SUFFIXES,
+              load_replay_target_provenance,
+          )
 
           run = 'ci-cube4-katago-hardened-smoke'
           base = os.path.join('data', run, 'iteration-0001')
@@ -126,6 +153,10 @@ jobs:
               rows.append(int(torch.load(path).size(0)))
           assert len(set(rows)) == 1 and rows[0] > 0, rows
           assert marker['row_count'] == rows[0], (marker, rows)
+          provenance = load_replay_target_provenance(base, marker=marker)
+          assert provenance.dtype == torch.uint8
+          assert provenance.shape == (rows[0],)
+          assert os.path.getsize(base + REPLAY_TARGET_PROVENANCE_SUFFIX) > 0
           checkpoint = torch.load(os.path.join('checkpoint', run, 'iteration-0001.pkl'), map_location='cpu')
           assert checkpoint['training_state']['training_contract'] == 'sample-clock-v2'
           assert checkpoint['args']['gocube_recovery_contract'] == RECOVERY_CONTRACT

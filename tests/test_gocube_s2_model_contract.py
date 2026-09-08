@@ -67,6 +67,15 @@ def test_real_training_checkpoint_round_trips_all_four_heads_and_both_perspectiv
     assert manifest.model_contract["networkArchitectureId"] == "gocube-graph-structural-v1"
     assert descriptor.model_contract["pointOrderFingerprint"]
     assert descriptor.model_contract["adjacencyFingerprint"]
+    assert descriptor.model_contract["rulesImplementation"].endswith("implementation-v5")
+    assert manifest.model_contract == descriptor.model_contract
+    checkpoint = torch.load(descriptor.path, map_location="cpu")
+    assert checkpoint["args"]["gocube_rules_implementation"] == descriptor.model_contract[
+        "rulesImplementation"
+    ]
+    assert checkpoint["args"]["gocube_target_provenance_encoding"] == (
+        "gocube-target-provenance-encoding-v1"
+    )
 
     game = game_cls()
     observations = [game.observation()]
@@ -138,6 +147,7 @@ def test_catalog_loader_and_generator_use_the_same_resolved_contract(real_checkp
         ("adjacencyFingerprint", "changed-adjacency", "adjacency_fingerprint"),
         ("observationSchema", "gocube-observation-v3", "gocube_observation_schema"),
         ("networkArchitectureId", "gocube-resnet-v1", "gocube_network_architecture"),
+        ("rulesImplementation", "gocube-katago-rules-v3-implementation-v4", "rules_implementation"),
         ("targetsSchema", {"value": "wrong-targets", "score": "wrong", "ownership": "wrong"}, "targets_schema"),
     ],
 )
@@ -176,7 +186,11 @@ def test_fingerprints_are_deterministic_and_geometry_sensitive(real_checkpoint):
 
 @pytest.mark.parametrize(
     "missing_field",
-    ["gocube_target_provenance_semantics", "gocube_termination_contract"],
+    [
+        "gocube_target_provenance_semantics",
+        "gocube_target_provenance_encoding",
+        "gocube_termination_contract",
+    ],
 )
 def test_current_pinned_loader_rejects_missing_s3_checkpoint_markers(
     real_checkpoint, tmp_path, missing_field

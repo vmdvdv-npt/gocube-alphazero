@@ -29,7 +29,7 @@ KATAGO_RULES_VERSION = 3
 # The scorer/setup contract changed in S1.  Keep this separate from the
 # upstream rules number: KataGo still supplies Rules V3, while this is the
 # version of our faithful state/adjudicator implementation.
-KATAGO_RULES_IMPLEMENTATION_VERSION = 4
+KATAGO_RULES_IMPLEMENTATION_VERSION = 5
 KATAGO_REFERENCE_COMMIT = "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
 KATAGO_REFERENCE_VERSION = "1.18.0+ Rules Version 3"
 

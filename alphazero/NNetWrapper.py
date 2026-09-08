@@ -50,6 +50,7 @@ _SEARCH_CONTRACT_ARG_KEYS = (
 
 _TERMINATION_CONTRACT_ARG_KEYS = (
     "gocube_target_provenance_semantics",
+    "gocube_target_provenance_encoding",
     "gocube_termination_contract",
 )
 

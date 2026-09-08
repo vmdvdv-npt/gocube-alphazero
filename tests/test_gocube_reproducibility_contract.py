@@ -13,6 +13,7 @@ from alphazero.envs.gocube.reproducibility import derive_worker_seed
 from alphazero.envs.gocube.contract_versions import (
     REPLAY_FORMAT_VERSION,
     SCORE_INITIALIZATION_CONTRACT,
+    TARGET_PROVENANCE_ENCODING,
     TARGET_PROVENANCE_SEMANTICS,
     TERMINATION_CONTRACT,
     VALUE_TARGET_SEMANTICS,
@@ -61,9 +62,10 @@ def test_effective_config_contains_pinned_immutable_fields():
     config = effective_config(args, game_cls)
     assert config["komi"] == 0.5
     assert config["katago_reference_commit"] == game_cls.KATAGO_REFERENCE_COMMIT
-    assert config["replay_format_version"] == REPLAY_FORMAT_VERSION == 3
+    assert config["replay_format_version"] == REPLAY_FORMAT_VERSION == 4
     assert config["value_target_semantics"] == VALUE_TARGET_SEMANTICS
     assert config["score_initialization_contract"] == SCORE_INITIALIZATION_CONTRACT
     assert config["target_provenance_semantics"] == TARGET_PROVENANCE_SEMANTICS
+    assert config["target_provenance_encoding"] == TARGET_PROVENANCE_ENCODING
     assert config["termination_contract"] == TERMINATION_CONTRACT
     assert config["sample_clock_contract"] == "sample-clock-v2"

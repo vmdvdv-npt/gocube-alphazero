@@ -32,7 +32,11 @@ from alphazero.envs.gocube.integration.contract import (
 )
 from alphazero.envs.gocube.integration.errors import CheckpointMetadataInvalid
 from alphazero.envs.gocube.integration.models import CheckpointModelLoader
-from alphazero.envs.gocube.atomic_io import REPLAY_TENSOR_SUFFIXES, write_replay_marker
+from alphazero.envs.gocube.atomic_io import (
+    REPLAY_TARGET_PROVENANCE_SUFFIX,
+    REPLAY_TENSOR_SUFFIXES,
+    write_replay_marker,
+)
 from alphazero.envs.gocube.hardened_train import HardenedKataGoSearchCoach
 from alphazero.envs.gocube.katago_train import parse_args
 from alphazero.envs.gocube.hardened_train import build_hardened_training_args
@@ -573,6 +577,10 @@ def test_historical_replay_observation_shape_is_rejected_by_g1_loader(tmp_path):
     )
     for suffix, tensor in zip(REPLAY_TENSOR_SUFFIXES, tensors):
         torch.save(tensor, str(base) + suffix)
+    torch.save(
+        torch.ones(1, dtype=torch.uint8),
+        str(base) + REPLAY_TARGET_PROVENANCE_SUFFIX,
+    )
     write_replay_marker(str(base), iteration=1, row_count=1)
 
     coach = object.__new__(HardenedKataGoSearchCoach)

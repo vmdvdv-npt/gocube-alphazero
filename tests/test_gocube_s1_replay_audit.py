@@ -8,7 +8,7 @@ def test_persisted_replay_audit_is_read_only_and_reports_all_current_records():
     report = audit([root])
 
     assert report["read_only"] is True
-    assert report["s1_contract"]["replay_format_version"] == 3
+    assert report["s1_contract"]["replay_format_version"] == 4
     assert report["overall"]["total"] == sum(
         bucket["total"] for bucket in report["by_start_type"].values()
     )

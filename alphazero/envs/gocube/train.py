@@ -30,17 +30,26 @@ from alphazero.envs.gocube.records import (
 from alphazero.inference_batching import collect_ready_worker_ids, process_coalesced_inference
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
 from alphazero.utils import get_iter_file
-from alphazero.envs.gocube.atomic_io import REPLAY_TENSOR_SUFFIXES
+from alphazero.envs.gocube.atomic_io import (
+    REPLAY_TARGET_PROVENANCE_SUFFIX,
+    REPLAY_TENSOR_SUFFIXES,
+    atomic_torch_save,
+    load_replay_marker,
+    load_replay_target_provenance,
+    write_replay_marker,
+)
 from alphazero.envs.gocube.contract_versions import (
     OWNERSHIP_TARGET_SEMANTICS,
     REPLAY_FORMAT_VERSION,
     SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
+    TARGET_PROVENANCE_ENCODING,
     TARGET_PROVENANCE_SEMANTICS,
     TERMINATION_CONTRACT,
     TRAINING_CONTRACT_VERSION,
     VALUE_TARGET_SEMANTICS,
 )
+from alphazero.envs.gocube.replay_provenance import validate_target_provenance_tensor
 
 
 _TELEMETRY_COUNTER_KEYS = (
@@ -355,7 +364,20 @@ class GoCubeCoach(Coach):
                 raise ValueError(
                     f"V3 saved sample accounting mismatch: queue={num_samples}, expected={expected_total}"
                 )
-        print(f"Saving {num_samples} KataGo Japanese V3 samples (scored + NO_RESULT)")
+        current_s3_replay = (
+            getattr(self.args, "gocube_target_provenance_semantics", None)
+            == TARGET_PROVENANCE_SEMANTICS
+        )
+        if (
+            current_s3_replay
+            and getattr(self.args, "gocube_target_provenance_encoding", None)
+            != TARGET_PROVENANCE_ENCODING
+        ):
+            raise ValueError("S3 replay provenance encoding is missing or invalid")
+        print(
+            f"Saving {num_samples} KataGo Japanese V3 samples (scored + NO_RESULT)"
+            + (" with target provenance" if current_s3_replay else "")
+        )
         data_tensor = torch.zeros([num_samples, *self.game_cls.observation_size()])
         policy_tensor = torch.zeros([num_samples, self.game_cls.action_size()])
         value_tensor = torch.zeros([num_samples, self.game_cls.num_players() + 1])
@@ -363,11 +385,26 @@ class GoCubeCoach(Coach):
         score_mask_tensor = torch.zeros([num_samples, 1])
         ownership_tensor = torch.zeros([num_samples, self.game_cls.logical_topology().point_count, 3])
         ownership_mask_tensor = torch.zeros([num_samples, self.game_cls.logical_topology().point_count])
+        target_provenance_tensor = (
+            torch.empty([num_samples], dtype=torch.uint8)
+            if current_s3_replay
+            else None
+        )
         for i in range(num_samples):
             sample = pending[i] if pending is not None else self.file_queue.get()
-            if len(sample) != 7:
-                raise ValueError(f"V3 training sample must contain 7 tensors, got {len(sample)}")
-            data, policy, value, score, score_mask, ownership, ownership_mask = sample
+            expected_fields = 8 if current_s3_replay else 7
+            if len(sample) != expected_fields:
+                raise ValueError(
+                    f"V3 training sample must contain {expected_fields} fields, got {len(sample)}"
+                )
+            if current_s3_replay:
+                (
+                    data, policy, value, score, score_mask, ownership,
+                    ownership_mask, provenance_code,
+                ) = sample
+                target_provenance_tensor[i] = int(provenance_code)
+            else:
+                data, policy, value, score, score_mask, ownership, ownership_mask = sample
             data_tensor[i] = torch.from_numpy(data)
             policy_tensor[i] = torch.from_numpy(policy)
             value_tensor[i] = torch.from_numpy(value)
@@ -380,6 +417,11 @@ class GoCubeCoach(Coach):
             score_mask_tensor, ownership_tensor, ownership_mask_tensor,
         )
         validate_v3_target_tensors(tensors)
+        if current_s3_replay:
+            validate_target_provenance_tensor(
+                target_provenance_tensor,
+                expected_rows=num_samples,
+            )
         folder = os.path.join(self.args.data, self.args.run_name)
         filename = os.path.join(folder, get_iter_file(iteration).replace('.pkl', ''))
         os.makedirs(folder, exist_ok=True)
@@ -390,7 +432,15 @@ class GoCubeCoach(Coach):
         torch.save(score_mask_tensor, filename + '-score-mask.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
         torch.save(ownership_tensor, filename + '-ownership.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
         torch.save(ownership_mask_tensor, filename + '-ownership-mask.pkl', pickle_protocol=pickle.HIGHEST_PROTOCOL)
+        if current_s3_replay:
+            atomic_torch_save(
+                target_provenance_tensor,
+                filename + REPLAY_TARGET_PROVENANCE_SUFFIX,
+                pickle_protocol=pickle.HIGHEST_PROTOCOL,
+            )
         self._iteration_telemetry["saved_total"] = num_samples
+        if current_s3_replay:
+            write_replay_marker(filename, iteration=iteration, row_count=num_samples)
         self.writer.add_scalar("samples/base_positions", base_positions, iteration)
         self.writer.add_scalar("samples/base_endgame_positions", base_endgame, iteration)
         self.writer.add_scalar("samples/endgame_weight", endgame_weight, iteration)
@@ -609,12 +659,32 @@ class GoCubeCoach(Coach):
         def add_tensor_dataset(train_iter, tensor_dataset_list, run_name=self.args.run_name):
             nonlocal num_train_steps, sample_counter
             filename = os.path.join(self.args.data, run_name, get_iter_file(train_iter).replace('.pkl', ''))
+            current_s3_replay = (
+                getattr(self.args, "gocube_target_provenance_semantics", None)
+                == TARGET_PROVENANCE_SEMANTICS
+            )
+            if (
+                current_s3_replay
+                and getattr(self.args, "gocube_target_provenance_encoding", None)
+                != TARGET_PROVENANCE_ENCODING
+            ):
+                raise ValueError("S3 replay provenance encoding is missing or invalid")
+            marker = None
+            if current_s3_replay:
+                try:
+                    marker = load_replay_marker(filename)
+                    load_replay_target_provenance(filename, marker=marker)
+                except (FileNotFoundError, OSError, ValueError) as exc:
+                    print('Warning: could not find complete S3 V3 replay data. ' + str(exc))
+                    return
             try:
                 tensors = [torch.load(filename + suffix) for suffix in REPLAY_TENSOR_SUFFIXES]
-            except FileNotFoundError as exc:
+            except (FileNotFoundError, OSError, RuntimeError, EOFError) as exc:
                 print('Warning: could not find complete V3 tensor data. ' + str(exc))
                 return
             row_count = validate_v3_target_tensors(tensors)
+            if marker is not None and row_count != int(marker["row_count"]):
+                raise ValueError("Replay marker row count does not match tensor rows")
             if tensors[0].shape[1:] != self.game_cls.observation_size():
                 raise ValueError("V3 dataset observation schema/shape mismatch")
             tensor_dataset_list.append(TensorDataset(*tensors))
@@ -796,6 +866,7 @@ def build_training_args(cli):
         gocube_ownership_target_semantics=OWNERSHIP_TARGET_SEMANTICS,
         gocube_score_initialization_contract=SCORE_INITIALIZATION_CONTRACT,
         gocube_target_provenance_semantics=TARGET_PROVENANCE_SEMANTICS,
+        gocube_target_provenance_encoding=TARGET_PROVENANCE_ENCODING,
         gocube_termination_contract=TERMINATION_CONTRACT,
         # ``None`` selects the production formula. Tests may inject a small
         # positive override into the runner without changing that formula.

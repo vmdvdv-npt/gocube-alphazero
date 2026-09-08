@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import numpy as np
 
+import alphazero.envs.gocube.katago_v3 as katago_v3
 from alphazero.envs.gocube import (
     CLEANUP_1,
     CLEANUP_2,
@@ -20,9 +21,13 @@ from alphazero.envs.gocube import (
     episode_move_limit,
 )
 from alphazero.envs.gocube.katago_v3 import (
+    KATAGO_REFERENCE_COMMIT,
+    KATAGO_RULES_VERSION,
+    KATAGO_RULES_IMPLEMENTATION_VERSION,
     NO_RESULT,
     _cycle_check_and_record,
     initial_v3_state,
+    rules_fingerprint,
     v3_state_from_board,
 )
 from alphazero.envs.gocube.pinned_game import PinnedCube4JapaneseGame
@@ -35,6 +40,23 @@ from alphazero.envs.gocube.selfplay_semantics import (
     rebase_cleanup_training_state,
     should_stop_episode,
 )
+
+
+def test_s3_rules_identity_bumps_implementation_without_changing_pinned_upstream_rules():
+    topology = Cube4JapaneseGame.logical_topology()
+    assert KATAGO_RULES_VERSION == 3
+    assert KATAGO_RULES_IMPLEMENTATION_VERSION == 5
+    assert Cube4JapaneseGame.KATAGO_RULES_IMPLEMENTATION_VERSION == 5
+    assert Cube4JapaneseGame.KATAGO_REFERENCE_COMMIT == KATAGO_REFERENCE_COMMIT
+
+    current = rules_fingerprint(topology)
+    assert current == Cube4JapaneseGame.rules_fingerprint()
+    katago_v3.KATAGO_RULES_IMPLEMENTATION_VERSION = 4
+    try:
+        legacy_s1 = rules_fingerprint(topology)
+    finally:
+        katago_v3.KATAGO_RULES_IMPLEMENTATION_VERSION = 5
+    assert legacy_s1 != current
 
 
 def test_cube4_episode_limit_remains_the_production_formula():

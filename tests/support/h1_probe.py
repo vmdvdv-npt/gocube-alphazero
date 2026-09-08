@@ -145,6 +145,8 @@ V3_STATE_AUDIT_FIELDS = {
     "cleanup1_moves": {"classification": "C"},
     "terminal_kind": {"classification": "D"},
     "no_result_reason": {"classification": "D"},
+    "termination_reason": {"classification": "D"},
+    "result_provenance": {"classification": "D"},
     "pass_alive_early_end": {"classification": "D"},
     "entered_cleanup1": {"classification": "C"},
     "entered_cleanup2": {"classification": "C"},
@@ -165,6 +167,9 @@ PINNED_WRAPPER_AUDIT_FIELDS = {
     "_pinned_move_history": "D",
     "_pinned_state_history": "D",
     "_pinned_state_history_offset": "D",
+    "_pinned_episode_move_count": "D",
+    "_pinned_episode_type": "D",
+    "_pinned_episode_limit_override": "D",
 }
 
 

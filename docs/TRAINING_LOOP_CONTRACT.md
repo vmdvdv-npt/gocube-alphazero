@@ -25,8 +25,9 @@ The optimizer clock is `sample-clock-v2`: scheduler state advances by the
 number of examples consumed, not by wall-clock time or nominal iteration
 number. Checkpoints and resume state must carry this contract identifier.
 
-Replay format v3 is one atomic logical commit of seven tensors, in this exact
-order:
+Replay format v4 is one atomic logical commit of seven training tensors plus a
+required row-aligned target-provenance sidecar. The seven tensors remain in
+this exact order:
 
 1. observations;
 2. policy targets;
@@ -36,8 +37,14 @@ order:
 6. formal Rules V3 ownership targets;
 7. ownership point masks.
 
-The completion marker is published last. Replay v1 and v2 are rejected: their
-score/ownership labels do not carry the corrected S1 semantics.
+The sidecar is `-target-provenance.pkl`, a `torch.uint8` tensor with shape
+`[N]`; it is not an eighth neural-network input. Its encoding is
+`gocube-target-provenance-encoding-v1`: `0` is unknown/legacy-only, `1` is
+formal, `2` is `rule_no_result`, and `3` is runtime. Current S3 production
+rows must use codes 1–3, sourced from `V3TrainingTargets.result_provenance`.
+Duplicate/symmetry rows repeat the corresponding code. The completion marker
+is published last and records the semantics, encoding, sidecar suffix, row
+count, and termination contract. Replay v1–v3 are rejected at this boundary.
 
 Score initialization is the explicit contract
 `katago-boardhistory-clear-v1`. Setup, ordinary replay, and synthetic cleanup
@@ -45,7 +52,8 @@ starts all initialize the equivalent of KataGo
 `BoardHistory::clear(..., encorePhase)`, including setup stones and capture
 counters. `main_moves` is telemetry and never selects a scoring algorithm.
 
-Replay v3 (the S1 tensor-format identifier) also records the termination/target provenance contract; missing S3 marker fields are rejected. Per-game
+Replay v4 also records the termination/target provenance contract; missing S3
+marker fields or the sidecar are rejected. Per-game
 records carry the exact `termination_reason`, `result_provenance`, episode
 type, and runtime move count; historical records without enough information
 are classified as `unknown_legacy_termination` rather than rewritten.

@@ -15,9 +15,14 @@ from .contract_versions import (
     REPLAY_FORMAT_VERSION,
     SCORE_INITIALIZATION_CONTRACT,
     SCORE_TARGET_SEMANTICS,
+    TARGET_PROVENANCE_ENCODING,
     TARGET_PROVENANCE_SEMANTICS,
     TERMINATION_CONTRACT,
     VALUE_TARGET_SEMANTICS,
+)
+from .replay_provenance import (
+    REPLAY_TARGET_PROVENANCE_SUFFIX,
+    validate_target_provenance_tensor,
 )
 
 
@@ -32,6 +37,7 @@ REPLAY_TENSOR_SUFFIXES = (
     "-ownership.pkl",
     "-ownership-mask.pkl",
 )
+REPLAY_ARTIFACT_SUFFIXES = REPLAY_TENSOR_SUFFIXES + (REPLAY_TARGET_PROVENANCE_SUFFIX,)
 _CHECKPOINT_RE = re.compile(r"^iteration-(\d+)\.pkl$")
 
 
@@ -118,6 +124,10 @@ def remove_replay_marker(iteration_base: str | os.PathLike[str]) -> None:
 
 
 def write_replay_marker(iteration_base: str, *, iteration: int, row_count: int) -> str:
+    row_count = int(row_count)
+    if row_count < 0:
+        raise ValueError("Replay marker row count must be non-negative")
+    _load_target_provenance_sidecar(iteration_base, expected_rows=row_count)
     marker = replay_marker_path(iteration_base)
     atomic_json_write(
         {
@@ -129,9 +139,12 @@ def write_replay_marker(iteration_base: str, *, iteration: int, row_count: int) 
             "score_target_semantics": SCORE_TARGET_SEMANTICS,
             "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
             "target_provenance_semantics": TARGET_PROVENANCE_SEMANTICS,
+            "target_provenance_encoding": TARGET_PROVENANCE_ENCODING,
+            "target_provenance_sidecar": REPLAY_TARGET_PROVENANCE_SUFFIX,
+            "target_provenance_rows": row_count,
             "termination_contract": TERMINATION_CONTRACT,
             "iteration": int(iteration),
-            "row_count": int(row_count),
+            "row_count": row_count,
             "tensor_suffixes": list(REPLAY_TENSOR_SUFFIXES),
         },
         marker,
@@ -143,6 +156,8 @@ def load_replay_marker(iteration_base: str | os.PathLike[str]) -> dict[str, obje
     marker = replay_marker_path(iteration_base)
     with open(marker, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Replay completion marker must be an object: {marker}")
     if payload.get("schema_version") == 1 or payload.get("replay_format_version") == 1:
         raise ValueError(
             "Replay v1 cannot be used with win/loss/no-result training contract: "
@@ -164,13 +179,24 @@ def load_replay_marker(iteration_base: str | os.PathLike[str]) -> dict[str, obje
         "ownership_target_semantics": OWNERSHIP_TARGET_SEMANTICS,
         "score_initialization_contract": SCORE_INITIALIZATION_CONTRACT,
         "target_provenance_semantics": TARGET_PROVENANCE_SEMANTICS,
+        "target_provenance_encoding": TARGET_PROVENANCE_ENCODING,
         "termination_contract": TERMINATION_CONTRACT,
     }
     for key, expected in semantic_fields.items():
         if payload.get(key) != expected:
             raise ValueError(f"Replay marker {key} mismatch: {marker}")
-    if int(payload.get("row_count", -1)) < 0:
+    try:
+        row_count = int(payload.get("row_count", -1))
+        provenance_rows = int(payload.get("target_provenance_rows", -1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Replay marker row count is invalid: {marker}") from exc
+    if row_count < 0:
         raise ValueError(f"Replay marker row count is invalid: {marker}")
+    if payload.get("target_provenance_sidecar") != REPLAY_TARGET_PROVENANCE_SUFFIX:
+        raise ValueError(f"Replay marker target provenance sidecar mismatch: {marker}")
+    if provenance_rows != row_count:
+        raise ValueError(f"Replay marker target provenance row count mismatch: {marker}")
+    _load_target_provenance_sidecar(iteration_base, expected_rows=row_count)
     return payload
 
 
@@ -179,6 +205,64 @@ def _trusted_torch_load(path: str):
         return torch.load(path, map_location="cpu", weights_only=False)
     except TypeError:
         return torch.load(path, map_location="cpu")
+
+
+def _load_target_provenance_sidecar(
+    iteration_base: str | os.PathLike[str],
+    *,
+    expected_rows: int | None = None,
+) -> torch.Tensor:
+    path = os.fspath(iteration_base) + REPLAY_TARGET_PROVENANCE_SUFFIX
+    try:
+        tensor = _trusted_torch_load(path)
+    except FileNotFoundError as exc:
+        raise ValueError(f"Replay target provenance sidecar is missing: {path}") from exc
+    except Exception as exc:
+        raise ValueError(f"Replay target provenance sidecar is unreadable: {path}") from exc
+    try:
+        return validate_target_provenance_tensor(tensor, expected_rows=expected_rows)
+    except ValueError as exc:
+        raise ValueError(f"Invalid replay target provenance sidecar {path}: {exc}") from exc
+
+
+def load_replay_target_provenance(
+    iteration_base: str | os.PathLike[str],
+    *,
+    marker: dict[str, object] | None = None,
+) -> torch.Tensor:
+    """Load the row-aligned provenance sidecar for a current replay artifact."""
+
+    if marker is None:
+        marker = load_replay_marker(iteration_base)
+    if not isinstance(marker, dict):
+        raise ValueError("Replay marker must be an object")
+    if marker.get("schema_version") != REPLAY_MARKER_SCHEMA_VERSION:
+        raise ValueError("Replay target provenance requires the current marker schema")
+    if marker.get("replay_format_version") != REPLAY_FORMAT_VERSION:
+        raise ValueError("Replay target provenance requires the current replay format")
+    if marker.get("recovery_contract") != RECOVERY_CONTRACT:
+        raise ValueError("Replay target provenance recovery contract mismatch")
+    if tuple(marker.get("tensor_suffixes", ())) != REPLAY_TENSOR_SUFFIXES:
+        raise ValueError("Replay target provenance tensor set mismatch")
+    if marker.get("target_provenance_encoding") != TARGET_PROVENANCE_ENCODING:
+        raise ValueError("Replay target provenance encoding mismatch")
+    if marker.get("target_provenance_sidecar") != REPLAY_TARGET_PROVENANCE_SUFFIX:
+        raise ValueError("Replay target provenance sidecar mismatch")
+    if marker.get("target_provenance_semantics") != TARGET_PROVENANCE_SEMANTICS:
+        raise ValueError("Replay target provenance semantics mismatch")
+    if marker.get("termination_contract") != TERMINATION_CONTRACT:
+        raise ValueError("Replay termination contract mismatch")
+    try:
+        row_count = int(marker.get("row_count", -1))
+        provenance_rows = int(marker.get("target_provenance_rows", -1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Replay target provenance row count is invalid") from exc
+    if provenance_rows != row_count:
+        raise ValueError("Replay target provenance row count mismatch")
+    return _load_target_provenance_sidecar(
+        iteration_base,
+        expected_rows=row_count,
+    )
 
 
 def checkpoint_iteration(path: str | os.PathLike[str]) -> int | None:
