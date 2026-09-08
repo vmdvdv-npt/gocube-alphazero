@@ -1,0 +1,65 @@
+[
+  {
+    "difference_id": "coordinate-encoding",
+    "upstream_behavior": "KataGo uses rectangular Loc and [x,y] coordinates.",
+    "local_behavior": "GoCube uses canonical PointId and integer point actions.",
+    "reason": "Coordinate normalization only.",
+    "scope": "adapter",
+    "verification": "T1 rectangular topology bridge",
+    "status": "EXPLAINED_DIFFERENCE"
+  },
+  {
+    "difference_id": "action-indexing",
+    "upstream_behavior": "KataGo PASS is Board::PASS_LOC.",
+    "local_behavior": "GoCube PASS is Topology.point_count.",
+    "reason": "Action adapter only.",
+    "scope": "adapter",
+    "verification": "KatagoOracleProcess and v3_valid_moves",
+    "status": "EXPLAINED_DIFFERENCE"
+  },
+  {
+    "difference_id": "graph-neighbor-source",
+    "upstream_behavior": "KataGo derives rectangular edges from board dimensions.",
+    "local_behavior": "GoCube reads Topology.neighbor_indices.",
+    "reason": "Rectangular adapter versus closed-surface graph.",
+    "scope": "adapter",
+    "verification": "Native masks plus independent graph fixtures",
+    "status": "EXPLAINED_DIFFERENCE"
+  },
+  {
+    "difference_id": "score-sign",
+    "upstream_behavior": "KataGo exposes white-minus-black final score.",
+    "local_behavior": "The training score head uses black-minus-white.",
+    "reason": "Consumer-facing comparison normalization.",
+    "scope": "consumer",
+    "verification": "assert_snapshot_equal and normalized_score_target_v3",
+    "status": "EXPLAINED_DIFFERENCE"
+  },
+  {
+    "difference_id": "cube-topology-scope",
+    "upstream_behavior": "Pinned KataGo Board is rectangular.",
+    "local_behavior": "Cube has six-face seams and vertex triangles.",
+    "reason": "No direct upstream equivalent exists.",
+    "scope": "oracle-applicability",
+    "verification": "Cube2-Cube7 invariants, Cube4 graph corpus, rotations",
+    "status": "EXPLAINED_DIFFERENCE"
+  },
+  {
+    "difference_id": "torus-topology-scope",
+    "upstream_behavior": "Pinned KataGo Board has no wrap topology.",
+    "local_behavior": "Torus has horizontal and vertical wrap edges.",
+    "reason": "No direct upstream equivalent exists.",
+    "scope": "oracle-applicability",
+    "verification": "Torus9 wrap group/capture/ko corpus",
+    "status": "EXPLAINED_DIFFERENCE"
+  },
+  {
+    "difference_id": "runtime-episode-policy",
+    "upstream_behavior": "KataGo maxMovesPerGame is runner policy.",
+    "local_behavior": "GoCube episode_move_limit is runner policy.",
+    "reason": "Runtime boundary is outside the formal transition.",
+    "scope": "runtime",
+    "verification": "S3 near-limit test; apply_v3_action remains formal-only",
+    "status": "EXPLAINED_DIFFERENCE"
+  }
+]

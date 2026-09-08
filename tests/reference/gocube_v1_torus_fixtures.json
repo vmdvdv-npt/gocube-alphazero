@@ -1,0 +1,213 @@
+[
+  {
+    "actions": [],
+    "black": [
+      "0,4",
+      "8,4"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "difference_id": null,
+    "evidence": "independent graph connectivity across x=0/x=8 seam",
+    "expected": {
+      "group": [
+        "0,4",
+        "8,4"
+      ],
+      "status": "verified",
+      "wrap_axis": "horizontal"
+    },
+    "external_context": {},
+    "family": "wrap_group",
+    "generator_version": null,
+    "id": "torus9_wrap_group_001",
+    "initial_position": {
+      "black": [
+        "0,4",
+        "8,4"
+      ],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "The two points are adjacent only through Torus wrap-around.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "torus_dihedral_smoke",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 9,
+    "source_fixture_id": null,
+    "status": "verified",
+    "to_move": "black",
+    "topology_kind": "torus",
+    "white": []
+  },
+  {
+    "actions": [
+      "0,5"
+    ],
+    "black": [
+      "8,4",
+      "1,4",
+      "0,3"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "difference_id": null,
+    "evidence": "independent graph placement/capture over the horizontal wrap edge",
+    "expected": {
+      "capture_count": 1,
+      "captured": [
+        "0,4"
+      ],
+      "legal": true,
+      "status": "verified"
+    },
+    "external_context": {},
+    "family": "wrap_capture",
+    "generator_version": null,
+    "id": "torus9_wrap_capture_001",
+    "initial_position": {
+      "black": [
+        "8,4",
+        "1,4",
+        "0,3"
+      ],
+      "white": [
+        "0,4"
+      ]
+    },
+    "ko_state": {},
+    "notes": "The final liberty of the white stone is filled from the opposite x seam.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "torus_dihedral_smoke",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 9,
+    "source_fixture_id": null,
+    "status": "verified",
+    "to_move": "black",
+    "topology_kind": "torus",
+    "white": [
+      "0,4"
+    ]
+  },
+  {
+    "actions": [
+      "8,4",
+      "0,4"
+    ],
+    "black": [
+      "1,4",
+      "0,3",
+      "0,5"
+    ],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "difference_id": null,
+    "evidence": "independent positional-restoration proof across horizontal Torus wrap",
+    "expected": {
+      "captured": [
+        "0,4"
+      ],
+      "recapture_legal_without_ko": true,
+      "restores_initial_board": true,
+      "simple_ko": true,
+      "status": "verified"
+    },
+    "external_context": {},
+    "family": "wrap_ko",
+    "generator_version": null,
+    "id": "torus9_wrap_ko_001",
+    "initial_position": {
+      "black": [
+        "1,4",
+        "0,3",
+        "0,5"
+      ],
+      "white": [
+        "0,4",
+        "7,4",
+        "8,3",
+        "8,5"
+      ]
+    },
+    "ko_state": {},
+    "notes": "The simple-ko proof uses only occupancy and Torus adjacency; production ko policy is checked separately.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "torus_dihedral_smoke",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 9,
+    "source_fixture_id": null,
+    "status": "verified",
+    "to_move": "black",
+    "topology_kind": "torus",
+    "white": [
+      "0,4",
+      "7,4",
+      "8,3",
+      "8,5"
+    ]
+  },
+  {
+    "actions": [],
+    "black": [],
+    "captures": [
+      0,
+      0
+    ],
+    "cleanup_metadata": {},
+    "difference_id": null,
+    "evidence": "independent graph clique scan and degree profile",
+    "expected": {
+      "degree": 4,
+      "graph_triangles": 0,
+      "status": "verified"
+    },
+    "external_context": {},
+    "family": "topology_invariant",
+    "generator_version": null,
+    "id": "torus9_no_cube_triangles_001",
+    "initial_position": {
+      "black": [],
+      "white": []
+    },
+    "ko_state": {},
+    "notes": "Torus has wrap-around edges but no Cube vertex triangles.",
+    "oracle/source": "independent_graph",
+    "phase": "main",
+    "previous_board": null,
+    "rotation_index": null,
+    "rotation_policy": "torus_dihedral_smoke",
+    "rotation_safe": true,
+    "second_cleanup_start_colors": null,
+    "seed": null,
+    "size": 9,
+    "source_fixture_id": null,
+    "status": "verified",
+    "to_move": "black",
+    "topology_kind": "torus",
+    "white": []
+  }
+]

@@ -209,3 +209,13 @@ product compatibility verification are still pending.
 This is groundwork. It does not establish full Cube rule correctness, prove
 all life-and-death outcomes, claim KataGo proves Cube geometry, or claim full
 GoCube product compatibility.
+
+## V1 completion
+
+The groundwork corpus and support APIs were extended by the accepted V1
+verification layer.  See [the pinned KataGo mapping](GOCUBE_V1_KATAGO_RULE_MAPPING.md),
+[the canonical V1 matrix](GOCUBE_V1_VERIFICATION_MATRIX.md), and [the difference
+registry](GOCUBE_V1_DIFFERENCE_REGISTRY.md).  The historical status table above
+is retained as the record of the initial groundwork; its `structural-only` and
+product-boundary wording describes that earlier stage, not the accepted V1
+matrix.
