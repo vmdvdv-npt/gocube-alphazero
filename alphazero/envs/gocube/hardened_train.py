@@ -34,6 +34,7 @@ from alphazero.envs.gocube.reproducible_manifest import (
     create_reproducible_manifest,
     validate_existing_reproducible_manifest,
 )
+from alphazero.envs.gocube.reproducibility import seed_process
 from alphazero.envs.gocube.train import validate_v3_target_tensors
 from alphazero.utils import const_temp_scaling, get_iter_file
 
@@ -283,6 +284,7 @@ def main(argv=None):
     args.effective_config_sha256 = manifest["effective_config_sha256"]
     print_hardened_configuration(args)
     ensure_training_manifest(args.checkpoint, args.run_name, game_cls)
+    seed_process(int(args.master_seed))
     network = AtomicSampleClockNNetWrapper(game_cls, args)
     network._gocube_checkpoint_arg_overrides = checkpoint_arg_overrides(cli, args)
     coach = HardenedKataGoSearchCoach(game_cls, network, args)

@@ -105,6 +105,12 @@ the run. The rich manifest is never overwritten during resume.
 
 Old checkpoints are not silently reinterpreted under the new semantics. The exploration contract is versioned as `katago-pinned-exploration-v2`, and hardened checkpoints additionally persist the recovery and move/value/LCB fields.
 
+## 7. Initial network reproducibility
+
+The production entrypoint applies `master_seed` before constructing the initial trainable network. Therefore fresh runs from the same source and configuration with the same `master_seed` start from the same initial `train_net` parameters.
+
+This does not claim bitwise reproducibility of the complete multiprocessing training run. Worker and game RNG streams continue to use the existing seed-derivation contract.
+
 ## Entrypoint
 
 Start a new Cube 4 run:
