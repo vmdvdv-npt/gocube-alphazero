@@ -29,7 +29,7 @@ def _cube4_args():
 
 def test_pinned_reference_and_defaults_are_explicit():
     assert KATAGO_REFERENCE_COMMIT == "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
-    assert KATAGO_SEARCH_CONTRACT == "katago-pinned-search-v2"
+    assert KATAGO_SEARCH_CONTRACT == "katago-pinned-search-v3"
     assert KATAGO_SEARCH_DEFAULTS["win_loss_utility_factor"] == 1.0
     assert KATAGO_SEARCH_DEFAULTS["dynamic_score_utility_factor"] == 0.30
     assert KATAGO_SEARCH_DEFAULTS["dynamic_score_center_zero_weight"] == 0.25

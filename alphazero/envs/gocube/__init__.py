@@ -19,7 +19,7 @@ from .katago_v3 import (
     VALUE_WIN, all_points_pass_alive,
     apply_v3_action, build_v3_training_targets, final_v3_score,
     independent_life_analysis, initial_v3_state, normalized_score_target_v3,
-    pass_alive_analysis, rules_fingerprint,
+    is_simple_ko_state, pass_alive_analysis, rules_fingerprint,
     terminal_from_state, v3_state_from_board, v3_valid_moves,
 )
 from .contract_versions import SCORE_INITIALIZATION_CONTRACT
