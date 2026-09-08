@@ -50,6 +50,17 @@ optimizer steps, and examples seen, so acceptance can be stated as:
 
 > B0 and B1 were trained to the same cumulative sample budget.
 
-The canonical hardened training batch is `1024`. The shell launcher, B
-contract, checkpoint validator, and B effective configs all validate and
-report that same value.
+## Canonical Cube-4 training batch
+
+The approved canonical hardened Cube-4 training batch is **`1024`**.
+
+This value is intentional and supersedes the older launcher value of `256`.
+For the B0/B1 experiment, `1024` is the source-of-truth value and must agree
+across the shell launcher, `Cube4ProductionContract`, the B experiment
+contract, checkpoint validation, and both effective configs.
+
+A future reduction to `512` is permitted only by a new explicit project
+decision accompanied by a contract/documentation update. Values below `512`
+are not approved for this experiment. Code or documentation that still treats
+`256` as the canonical production training batch is stale and must not be used
+to override the B experiment contract.
