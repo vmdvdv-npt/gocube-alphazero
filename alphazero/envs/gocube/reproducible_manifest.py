@@ -92,6 +92,20 @@ def effective_config(args: Any, game_cls) -> dict[str, object]:
         "network_type": getattr(args, "nnet_type", None),
         "observation_shape": list(game_cls.observation_size()),
         "action_size": int(game_cls.action_size()),
+        "action_schema": contract.action_schema,
+        "model_contract": contract.to_dict(),
+        "model_contract_id": contract.contract_id,
+        "model_contract_version": contract.contract_version,
+        "game_class_id": contract.game_class_id,
+        "rules_implementation": contract.rules_implementation,
+        "point_order_fingerprint": contract.point_order_fingerprint,
+        "adjacency_fingerprint": contract.adjacency_fingerprint,
+        "topology_fingerprint": contract.topology_fingerprint,
+        "network_architecture_id": contract.network_architecture_id,
+        "network_architecture_fingerprint": contract.network_architecture_fingerprint,
+        "search_contract_id": contract.search_contract_id,
+        "terminal_adjudicator_id": contract.terminal_adjudicator_id,
+        "output_heads": contract.output_heads,
         "value_output_size": 3,
         "replay_format_version": REPLAY_FORMAT_VERSION,
         "value_target_semantics": VALUE_TARGET_SEMANTICS,
@@ -184,7 +198,7 @@ def validate_existing_reproducible_manifest(
             mismatches.append(
                 f"{key}: saved={manifest.get(key)!r}, current={expected_manifest_values[key]!r}"
             )
-    if manifest.get("model_contract") is not None and manifest.get("model_contract") != current_config["model_contract"]:
+    if manifest.get("model_contract") is not None and manifest.get("model_contract") != current_config.get("model_contract"):
         mismatches.append("model_contract: run-manifest conflicts with effective-config")
     if mismatches:
         raise RuntimeError(
