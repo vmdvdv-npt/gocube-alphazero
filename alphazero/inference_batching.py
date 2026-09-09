@@ -61,6 +61,8 @@ def process_coalesced_inference(
     batch_ready,
     score_tensors=None,
     ownership_tensors=None,
+    routing_keys=None,
+    result_queues=None,
 ):
     """Run one NN call for several ready workers and split all search heads.
 
@@ -68,6 +70,12 @@ def process_coalesced_inference(
     search supplies both ``score_tensors`` and ``ownership_tensors``; all four
     heads come from the same network forward pass and are copied back to the
     worker-owned shared-memory slices before the worker is released.
+
+    ``routing_keys`` may contain one key per row for each worker.  When
+    supplied, the same ordered keys are sent to ``result_queues`` after the
+    output tensors have been copied.  The worker validates that response
+    token before applying it to its MCTS slots, which closes the slot-reuse
+    (ABA) race.
 
     Returns the number of positions evaluated in the combined neural batch.
     """
@@ -82,6 +90,21 @@ def process_coalesced_inference(
     total_rows = sum(batch_sizes)
     if total_rows <= 0:
         raise RuntimeError("coalesced inference batch must contain at least one position")
+
+    normalized_keys = {}
+    if routing_keys is not None:
+        for worker_id, batch_size in zip(worker_ids, batch_sizes):
+            if isinstance(routing_keys, dict):
+                keys = tuple(routing_keys.get(worker_id, ()))
+            else:
+                position = list(worker_ids).index(worker_id)
+                keys = tuple(routing_keys[position])
+            if len(keys) != batch_size:
+                raise RuntimeError(
+                    "coalesced inference routing key count does not match worker rows: "
+                    f"worker={worker_id}, keys={len(keys)}, rows={batch_size}"
+                )
+            normalized_keys[worker_id] = keys
 
     if len(worker_ids) == 1:
         combined = input_tensors[worker_ids[0]]
@@ -133,4 +156,26 @@ def process_coalesced_inference(
         batch_ready[worker_id].set()
         offset = end
 
+    if result_queues is not None:
+        for worker_id in worker_ids:
+            result_queues[worker_id].put({
+                "routing_keys": normalized_keys.get(worker_id, ()),
+            })
+
     return total_rows
+
+
+def collect_routed_rows(worker_ids, input_tensors, routing_keys):
+    """Return ``[(routing_key, tensor_row), ...]`` in coalescer order."""
+
+    rows = []
+    for worker_id in worker_ids:
+        batch = input_tensors[worker_id]
+        keys = tuple(routing_keys[worker_id])
+        if len(keys) != int(batch.size(0)):
+            raise RuntimeError(
+                "routing key count does not match input rows: "
+                f"worker={worker_id}, keys={len(keys)}, rows={int(batch.size(0))}"
+            )
+        rows.extend((key, batch[row]) for row, key in enumerate(keys))
+    return rows

@@ -169,7 +169,7 @@ def test_real_b0_vs_b1_arena_uses_loaded_checkpoints_and_model_shapes(
     )
     eval_args.cuda = False
     eval_args.workers = 2
-    eval_args.arena_batch_size = 1
+    eval_args.arena_batch_size = 2
     eval_args.use_draws_for_winrate = True
     eval_args.gocube_arena_seed = 20260908
 
@@ -192,18 +192,20 @@ def test_real_b0_vs_b1_arena_uses_loaded_checkpoints_and_model_shapes(
         players,
         semantic_game_cls,
         eval_args,
-        games=2,
+        games=4,
         seed=20260908,
         wait_ms=0.1,
     )
 
-    assert summary["games"] == 2
-    assert summary["by_color"]["black"]["games"] == 1
-    assert summary["by_color"]["white"]["games"] == 1
+    assert summary["games"] == 4
+    assert summary["completed_game_ids"] == [0, 1, 2, 3]
+    assert summary["unique_game_ids"] == 4
+    assert summary["by_color"]["black"]["games"] == 2
+    assert summary["by_color"]["white"]["games"] == 2
     assert observed_shapes["baseline"]
     assert observed_shapes["g1"]
-    assert all(shape == (1, 18, 96, 1) for shape in observed_shapes["baseline"])
-    assert all(shape == (1, 20, 96, 1) for shape in observed_shapes["g1"])
+    assert all(shape[0] in (1, 2) and shape[1:] == (18, 96, 1) for shape in observed_shapes["baseline"])
+    assert all(shape[0] in (1, 2) and shape[1:] == (20, 96, 1) for shape in observed_shapes["g1"])
     assert descriptors["baseline"].model_contract["observationShape"] == [18, 96, 1]
     assert descriptors["g1"].model_contract["observationShape"] == [20, 96, 1]
 

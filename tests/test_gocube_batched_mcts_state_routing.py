@@ -3,6 +3,7 @@ from queue import Queue
 from threading import Event
 
 import numpy as np
+import pytest
 import torch
 
 from alphazero.MCTS import MCTS
@@ -117,7 +118,7 @@ class _PlayerRelativeWhiteWinNet:
         )
 
 
-def _new_agent(args, game, *, arena=False, batch_size=1):
+def _new_agent(args, game, *, arena=False, batch_size=1, arena_game_ids=None, arena_result_queue=None):
     action_size = int(GAME.action_size())
     point_count = int(GAME.logical_topology().point_count)
     policy = torch.zeros(batch_size, action_size, dtype=torch.float32)
@@ -145,6 +146,8 @@ def _new_agent(args, game, *, arena=False, batch_size=1):
         _is_arena=arena,
         score_tensor=score,
         ownership_tensor=ownership,
+        arena_game_ids=arena_game_ids,
+        arena_result_queue=arena_result_queue,
     )
     if game is not None:
         agent.games[0] = GAME(game.semantic_state)
@@ -386,3 +389,46 @@ def test_arena_batch_redistribution_keeps_each_leaf_with_its_network_row():
         assert recorder.received["score"][0] == 500.0 + row
         assert recorder.received["ownership"][0, 0] == 600.0 + row
     assert agent.search_states == [None] * batch_size
+
+
+def test_arena_game_identity_generation_rejects_stale_slot_response_and_keeps_mcts_per_game():
+    args = _search_args()
+    response_queue = Queue()
+    agent = _new_agent(
+        args,
+        None,
+        arena=True,
+        batch_size=2,
+        arena_game_ids=(0, 1, 2),
+        arena_result_queue=response_queue,
+    )
+
+    assert agent.arena_slots[0].identity.game_id == 0
+    assert agent.arena_slots[1].identity.game_id == 1
+    assert agent.arena_slots[0].identity.player_to_index == (0, 1)
+    assert agent.arena_slots[1].identity.player_to_index == (1, 0)
+    assert agent.mcts[0] is not agent.mcts[1]
+    assert agent.mcts[0][0] is not agent.mcts[1][0]
+
+    agent.generateBatch()
+    first_payload = agent.output_queue.get()
+    first_keys = tuple(agent._arena_batch_routing_keys)
+    assert tuple(key.game_id for key in first_keys) == (0, 1)
+    assert tuple(key for keys in first_payload["routing_keys"] for key in keys) == first_keys
+
+    assert agent._recycle_arena_slot(0) is True
+    assert agent.arena_slots[0].identity.game_id == 2
+    assert agent.arena_slots[0].identity.generation == 1
+    assert agent.mcts[0] is not agent.mcts[1]
+
+    agent.generateBatch()
+    agent.output_queue.get()
+    second_keys = tuple(agent._arena_batch_routing_keys)
+    assert second_keys[0].game_id == 2
+    assert second_keys[0] != first_keys[0]
+
+    # A delayed response for game 0 must never be applied to recycled game 2.
+    response_queue.put({"routing_keys": first_keys})
+    agent.batch_ready.set()
+    with pytest.raises(RuntimeError, match="routing mismatch"):
+        agent.processBatch()

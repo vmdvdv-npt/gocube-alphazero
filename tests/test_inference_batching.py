@@ -5,9 +5,12 @@ import pytest
 import torch
 
 from alphazero.inference_batching import (
+    collect_routed_rows,
     collect_ready_worker_ids,
     process_coalesced_inference,
 )
+from alphazero.arena_bookkeeping import ArenaRoutingKey
+from alphazero.search_contract import SearchOutput
 
 
 class RecordingNet:
@@ -109,3 +112,57 @@ def test_process_coalesced_inference_rejects_wrong_network_batch_size():
             value_tensors=value_tensors,
             batch_ready=batch_ready,
         )
+
+
+def test_process_coalesced_inference_routes_all_four_heads_by_explicit_key():
+    class FourHeadNet:
+        def __init__(self):
+            self.calls = []
+
+        def process_for_search(self, batch):
+            self.calls.append(batch.clone())
+            rows = int(batch.size(0))
+            values = torch.arange(rows, dtype=torch.float32).view(rows, 1)
+            return SearchOutput(
+                policy=values + 10,
+                value=values + 20,
+                score=values + 30,
+                ownership=values.view(rows, 1, 1) + 40,
+            )
+
+    nnet = FourHeadNet()
+    inputs = [torch.tensor([[1.0], [2.0]]), torch.tensor([[3.0]])]
+    policies = [torch.zeros(2, 1), torch.zeros(1, 1)]
+    values = [torch.zeros(2, 1), torch.zeros(1, 1)]
+    scores = [torch.zeros(2, 1), torch.zeros(1, 1)]
+    ownership = [torch.zeros(2, 1, 1), torch.zeros(1, 1, 1)]
+    ready = [Event(), Event()]
+    responses = [Queue(), Queue()]
+    keys = {
+        0: [ArenaRoutingKey(0, 0, 0, 10), ArenaRoutingKey(0, 1, 0, 11)],
+        1: [ArenaRoutingKey(1, 0, 0, 12)],
+    }
+
+    assert collect_routed_rows([1, 0], inputs, {1: keys[1], 0: keys[0]})[0][0] == keys[1][0]
+    rows = process_coalesced_inference(
+        nnet,
+        worker_ids=[1, 0],
+        input_tensors=inputs,
+        policy_tensors=policies,
+        value_tensors=values,
+        batch_ready=ready,
+        score_tensors=scores,
+        ownership_tensors=ownership,
+        routing_keys=keys,
+        result_queues=responses,
+    )
+
+    assert rows == 3
+    assert len(nnet.calls) == 1
+    assert torch.equal(policies[1], torch.tensor([[10.0]]))
+    assert torch.equal(policies[0], torch.tensor([[11.0], [12.0]]))
+    assert torch.equal(values[1], torch.tensor([[20.0]]))
+    assert torch.equal(scores[0], torch.tensor([[31.0], [32.0]]))
+    assert torch.equal(ownership[1], torch.tensor([[[40.0]]]))
+    assert responses[1].get_nowait()["routing_keys"] == tuple(keys[1])
+    assert responses[0].get_nowait()["routing_keys"] == tuple(keys[0])
