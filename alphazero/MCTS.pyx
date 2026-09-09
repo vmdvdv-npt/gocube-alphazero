@@ -26,6 +26,7 @@ from alphazero.envs.gocube.exploration_contract import (
 from alphazero.search_contract import (
     KATAGO_PINNED_SEARCH_UTILITY_MODE,
     SearchOutput,
+    assert_search_contract,
     combined_white_utility,
     conservative_root_observation,
     normalized_black_minus_white_to_white_score,
@@ -318,6 +319,7 @@ cdef class MCTS:
         cdef float[:] v
         cdef float[:] p
         cdef object out
+        assert_search_contract(gs, self.search_utility_mode)
         self.max_depth = 0
         for _ in range(sims):
             leaf = self.find_leaf(gs)
@@ -343,6 +345,7 @@ cdef class MCTS:
         cdef Py_ssize_t policy_size = gs.action_size()
         cdef float[:] v = np.zeros(gs.num_players() + 1, dtype=np.float32)
         cdef float[:] p = np.full(policy_size, 1, dtype=np.float32)
+        assert_search_contract(gs, self.search_utility_mode, forced_legacy=True)
         self.max_depth = 0
         self._force_legacy_search = True
         try:
@@ -494,6 +497,11 @@ cdef class MCTS:
         return child
 
     cpdef object find_leaf(self, object gs):
+        assert_search_contract(
+            gs,
+            self.search_utility_mode,
+            forced_legacy=bool(self._force_legacy_search),
+        )
         self.depth = 0
         self._curnode = self._root
         self._path = []
@@ -523,6 +531,14 @@ cdef class MCTS:
     cpdef void process_results(self, object gs, float[:] value, float[:] pi, bint add_root_noise, bint add_root_temp):
         cdef float[:] valids
         cdef Node c
+        assert_search_contract(
+            gs,
+            self.search_utility_mode,
+            # This method is the legacy value-update contract even when a
+            # caller constructed MCTS with pinned defaults and invokes it
+            # directly.
+            forced_legacy=True,
+        )
         if self._curnode.e.any():
             value = np.array(self._curnode.e, dtype=np.float32)
         else:
@@ -726,6 +742,7 @@ cdef class MCTS:
         cdef bint score_available = True
         cdef bint was_terminal = self._curnode.e.any()
 
+        assert_search_contract(gs, self.search_utility_mode)
         if not self._katago_search:
             raise RuntimeError('process_search_results called outside KataGo-derived search mode')
         self._point_count = int(gs.logical_topology().point_count)

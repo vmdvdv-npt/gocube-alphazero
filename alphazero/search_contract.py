@@ -39,6 +39,29 @@ KATAGO_SEARCH_DEFAULTS = {
 }
 
 
+def is_gocube_v3_game(game: Any) -> bool:
+    """Return whether ``game`` carries the player-relative GoCube V3 contract."""
+
+    game_cls = game if isinstance(game, type) else type(game)
+    return bool(getattr(game_cls, "GOCUBE_V3", False))
+
+
+def assert_search_contract(
+    game: Any,
+    search_utility_mode: Any,
+    *,
+    forced_legacy: bool = False,
+) -> None:
+    """Reject the unsafe GoCube V3/legacy search combination at the boundary."""
+
+    effective_mode = LEGACY_SEARCH_UTILITY_MODE if forced_legacy else search_utility_mode
+    if is_gocube_v3_game(game) and effective_mode != KATAGO_PINNED_SEARCH_UTILITY_MODE:
+        raise RuntimeError(
+            "GoCube V3 requires the pinned KataGo search contract; "
+            "legacy search semantics are retired"
+        )
+
+
 @dataclass(frozen=True)
 class SearchOutput:
     """All neural heads consumed by GoCube search from one forward pass."""

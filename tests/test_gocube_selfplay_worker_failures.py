@@ -10,8 +10,7 @@ from torch import multiprocessing as mp
 
 import alphazero.Coach as coach_module
 from alphazero.Coach import Coach
-from alphazero.envs.gocube.game import Cube4JapaneseGame
-from alphazero.envs.gocube import train as train_module
+from alphazero.envs.connect4.connect4 import Game as Connect4Game
 from alphazero.envs.gocube.atomic_io import (
     REPLAY_TENSOR_SUFFIXES,
     atomic_torch_save,
@@ -30,8 +29,8 @@ class _Writer:
 class _InferenceNetwork:
     def process(self, batch):
         return (
-            torch.zeros(batch.size(0), Cube4JapaneseGame.action_size()),
-            torch.zeros(batch.size(0), Cube4JapaneseGame.num_players() + 1),
+            torch.zeros(batch.size(0), Connect4Game.action_size()),
+            torch.zeros(batch.size(0), Connect4Game.num_players() + 1),
         )
 
 
@@ -65,7 +64,7 @@ def _agent_args():
 def _runtime_coach():
     coach = object.__new__(Coach)
     coach.args = _agent_args()
-    coach.game_cls = Cube4JapaneseGame
+    coach.game_cls = Connect4Game
     coach.model_iter = 37
     coach.warmup = False
     coach.agents = []
@@ -170,9 +169,9 @@ def test_finish_game_exception_uses_the_same_parent_propagation_contract(monkeyp
 def test_parent_inference_failure_is_re_raised_with_iteration_and_batch_context():
     coach = _runtime_coach()
     coach.args.workers = 1
-    coach.input_tensors = [torch.zeros(1, *Cube4JapaneseGame.observation_size())]
-    coach.policy_tensors = [torch.zeros(1, Cube4JapaneseGame.action_size())]
-    coach.value_tensors = [torch.zeros(1, Cube4JapaneseGame.num_players() + 1)]
+    coach.input_tensors = [torch.zeros(1, *Connect4Game.observation_size())]
+    coach.policy_tensors = [torch.zeros(1, Connect4Game.action_size())]
+    coach.value_tensors = [torch.zeros(1, Connect4Game.num_players() + 1)]
     coach.batch_ready = [mp.Event()]
     coach.ready_queue.put(0)
 
@@ -287,7 +286,9 @@ def test_replay_write_failure_leaves_no_completion_marker_and_preserves_checkpoi
             raise RuntimeError("TEST_REPLAY_WRITE_FAILURE")
         return real_save(*args, **kwargs)
 
-    monkeypatch.setattr(train_module.torch, "save", flaky_save)
+    import alphazero.envs.gocube.training_common as training_common
+
+    monkeypatch.setattr(training_common.torch, "save", flaky_save)
     with pytest.raises(RuntimeError, match="TEST_REPLAY_WRITE_FAILURE"):
         coach.saveIterationSamples(1)
 

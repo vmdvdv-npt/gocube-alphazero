@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from alphazero.NNetWrapper import NNetWrapper
 from alphazero.SelfPlayAgent import SelfPlayAgent
-from alphazero.envs.gocube.train import (
+from alphazero.envs.gocube.training_common import (
     expected_saved_samples,
     resolve_train_steps,
     validate_tensor_row_counts,

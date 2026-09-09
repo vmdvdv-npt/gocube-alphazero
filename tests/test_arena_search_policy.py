@@ -8,6 +8,7 @@ from alphazero.Arena import Arena
 from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.envs.gocube.game import Cube4JapaneseGame
+from alphazero.search_contract import KATAGO_PINNED_SEARCH_UTILITY_MODE, SearchOutput
 from alphazero.utils import const_temp_scaling, dotdict
 
 
@@ -163,6 +164,16 @@ class _UniformTechnicalNet:
         value = np.zeros(self.value_size, dtype=np.float32)
         return policy, value
 
+    def predict_for_search(self, _observation):
+        self.calls += 1
+        point_count = Cube4JapaneseGame.logical_topology().point_count
+        return SearchOutput(
+            policy=np.full(self.action_size, 1.0 / self.action_size, dtype=np.float32),
+            value=np.array([0.5, 0.5, 0.0], dtype=np.float32),
+            score=np.array([0.0], dtype=np.float32),
+            ownership=np.zeros((point_count, 3), dtype=np.float32),
+        )
+
 
 def _functional_arena_args():
     return dotdict({
@@ -180,6 +191,7 @@ def _functional_arena_args():
         "fpu_reduction": 0.2,
         "cpuct": 1.25,
         "_num_players": Cube4JapaneseGame.num_players() + Cube4JapaneseGame.has_draw(),
+        "search_utility_mode": KATAGO_PINNED_SEARCH_UTILITY_MODE,
         "use_draws_for_winrate": True,
         "temp_scaling_fn": const_temp_scaling,
     })

@@ -41,6 +41,7 @@ jobs:
             tests/test_gocube_katago_v3_scoring.py \
             tests/test_gocube_katago_v3_benson_topology.py \
             tests/test_gocube_train_entrypoint.py \
+            tests/test_gocube_legacy_training_retirement.py \
             tests/test_gocube_training_budget_telemetry.py \
             tests/test_gocube_hardened_production.py
 
@@ -52,12 +53,14 @@ jobs:
 
       - name: Run Cube 4 training accounting smoke
         run: |
-          python -m alphazero.envs.gocube.train \
+          python -m alphazero.envs.gocube.katago_train \
             --topology cube --size 4 --workers 1 --sims 1 --arena-sims 1 \
             --games-per-iteration 4 --iterations 1 --train-batch-size 256 \
-            --endgame-sample-weight 1 --smoke --run-name ci-cube4-v3-budget-smoke \
+            --train-samples-per-new-sample 1 --endgame-sample-weight 1 \
+            --no-arena --smoke --run-name ci-cube4-v3-budget-smoke \
             | tee /tmp/cube-training-smoke.log
           grep -Eq 'Games:[[:space:]]+4' /tmp/cube-training-smoke.log
+          grep -Eq 'komi = 0\.5' /tmp/cube-training-smoke.log
           grep -Eq 'Regular decisions:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
           grep -Eq 'Fast decisions:[[:space:]]+0' /tmp/cube-training-smoke.log
           grep -Eq 'Saved samples:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
@@ -86,12 +89,14 @@ jobs:
 
       - name: Run Torus 9 training accounting smoke
         run: |
-          python -m alphazero.envs.gocube.train \
+          python -m alphazero.envs.gocube.katago_train \
             --topology torus --size 9 --workers 1 --sims 1 --arena-sims 1 \
             --games-per-iteration 4 --iterations 1 --train-batch-size 256 \
-            --endgame-sample-weight 1 --smoke --run-name ci-torus9-v3-budget-smoke \
+            --train-samples-per-new-sample 1 --endgame-sample-weight 1 \
+            --no-arena --smoke --run-name ci-torus9-v3-budget-smoke \
             | tee /tmp/torus-training-smoke.log
           grep -Eq 'Games:[[:space:]]+4' /tmp/torus-training-smoke.log
+          grep -Eq 'komi = 0\.5' /tmp/torus-training-smoke.log
           grep -Eq 'Regular decisions:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
           grep -Eq 'Fast decisions:[[:space:]]+0' /tmp/torus-training-smoke.log
           grep -Eq 'Saved samples:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log

@@ -172,7 +172,7 @@ def test_plain_training_checkpoint_uses_official_arena_resolution(tmp_path):
     """Reproduce the plain train.py checkpoint path without metadata edits."""
 
     from alphazero.NNetWrapper import NNetWrapper
-    from alphazero.envs.gocube.train import build_training_args
+    from alphazero.envs.gocube.training_common import build_base_training_args
     from tools import gocube_checkpoint_arena as checkpoint_arena
 
     cli = SimpleNamespace(
@@ -193,7 +193,7 @@ def test_plain_training_checkpoint_uses_official_arena_resolution(tmp_path):
         smoke=True,
         run_name="plain-contract-e2e",
     )
-    game_cls, args = build_training_args(cli)
+    game_cls, args = build_base_training_args(cli)
     args = args.copy()
     args.checkpoint = str(tmp_path)
     args.run_name = "plain-contract-e2e"
@@ -253,7 +253,7 @@ def test_real_b19_v1_plain_checkpoint_migrates_through_arena_and_network_load(tm
     """A V1 payload must verify its old fingerprint, then load normally."""
 
     from alphazero.NNetWrapper import NNetWrapper
-    from alphazero.envs.gocube.train import build_training_args
+    from alphazero.envs.gocube.training_common import build_base_training_args
     from tools import gocube_checkpoint_arena as checkpoint_arena
 
     cli = SimpleNamespace(
@@ -274,7 +274,7 @@ def test_real_b19_v1_plain_checkpoint_migrates_through_arena_and_network_load(tm
         smoke=True,
         run_name="b19-v1-plain-contract",
     )
-    game_cls, args = build_training_args(cli)
+    game_cls, args = build_base_training_args(cli)
     args = args.copy()
     args.cuda = False
 
