@@ -59,7 +59,7 @@ rejected before neural inference, so this cannot silently generate new data.
 
 The real production network wrapper overfits a 16-row synthetic target set:
 the parameter digest changes, 200 optimizer steps are reported, combined
-policy/value loss falls below 5% of its initial value, and both target
+policy/value loss falls below 15% of its initial value, and both target
 probabilities exceed 0.95.
 
 ### H3 — checkpoint save/load changes predictions
