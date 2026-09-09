@@ -155,6 +155,9 @@ class _TopologyAdapter(GameState):
 class GoGame(_TopologyAdapter):
     """Production GoCube Japanese-like training game using KataGo Rules V3 semantics."""
 
+    # This identity is part of the checkpoint contract.  It describes the
+    # semantic game timeline, not the network/profile that consumes it.
+    GOCUBE_SEMANTIC_GAME_VARIANT: ClassVar[str] = "plain"
     KOMI: ClassVar[float] = V3_DEFAULT_KOMI
     TERMINAL_ADJUDICATOR_ID: ClassVar[str] = KATAGO_JAPANESE_ADJUDICATOR_V3
     OBSERVATION_SCHEMA: ClassVar[str] = OBSERVATION_SCHEMA_V3
@@ -310,6 +313,7 @@ class GoGame(_TopologyAdapter):
 class _LegacyGoGame(_TopologyAdapter):
     """Historical V1/V2 adapter retained for replay/evaluation compatibility."""
 
+    GOCUBE_SEMANTIC_GAME_VARIANT: ClassVar[str] = "plain"
     TERMINAL_ADJUDICATOR_ID: ClassVar[str] = JAPANESE_CLEANUP_ADJUDICATOR_V2
     OBSERVATION_SCHEMA: ClassVar[str] = "gocube-observation-v2"
     OBSERVATION_FEATURES: ClassVar[int] = V2_OBSERVATION_FEATURES

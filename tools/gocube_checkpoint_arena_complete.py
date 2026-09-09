@@ -21,17 +21,18 @@ from alphazero.Arena import Arena
 from alphazero.GenericPlayers import MCTSPlayer
 from alphazero.NNetWrapper import NNetWrapper
 from tools.gocube_balanced_arena import BalancedArenaSelfPlayAgent
-from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
-from alphazero.envs.gocube.game import game_class
 from alphazero.envs.gocube.integration.contract import (
     ContractError,
     EVALUATION_SHARED_ARG_KEYS,
     EVALUATION_SHARED_CONTRACT_FIELDS,
+    contract_compatibility_differences,
     evaluation_argument_differences,
+    evaluation_contract_differences,
     ResolvedGoCubeContract,
     resolve_game_class_from_contract,
     resolve_model_contract,
     resolve_model_contract_from_metadata,
+    resolve_semantic_game_class_from_contract,
 )
 from alphazero.envs.gocube.observation import GoCubeObservationAdapter
 from alphazero.envs.gocube.production_contract import GOCUBE_KOMI, require_gocube_komi
@@ -92,7 +93,7 @@ def _resolve_checkpoint_contract(saved_args, label: str):
         computed = resolve_model_contract(model_game_cls, saved_args)
     except (ContractError, TypeError, ValueError) as exc:
         raise ValueError(f"Checkpoint {label} has invalid saved model contract: {exc}") from exc
-    differences = contract.differences(computed)
+    differences = contract_compatibility_differences(contract, computed)
     if differences:
         field, (saved, expected) = next(iter(differences.items()))
         raise ValueError(
@@ -146,14 +147,13 @@ def _require_compatible_contracts(
                 f"A={value_a!r}, B={value_b!r}"
             )
 
-    for field in _SHARED_CONTRACT_FIELDS:
-        value_a = getattr(contract_a, field)
-        value_b = getattr(contract_b, field)
-        if value_a != value_b:
-            raise ValueError(
-                f"Checkpoint Arena requires matching {field}: "
-                f"A={value_a!r}, B={value_b!r}"
-            )
+    for field, (value_a, value_b) in evaluation_contract_differences(
+        contract_a, contract_b
+    ).items():
+        raise ValueError(
+            f"Checkpoint Arena requires matching {field}: "
+            f"A={value_a!r}, B={value_b!r}"
+        )
 
 
 def _require_same_contract(args_a, args_b) -> None:
@@ -165,37 +165,12 @@ def _require_same_contract(args_a, args_b) -> None:
 
 
 def _authoritative_game_class(contract: ResolvedGoCubeContract):
-    """Return the single profile-neutral semantic game used by Arena."""
+    """Return the semantic game explicitly named by the checkpoint contract."""
 
-    if contract.terminal_adjudicator_id != "gocube-katago-japanese-v3":
-        raise ValueError(
-            "Checkpoint Arena cross-profile path requires KataGo Japanese V3 semantics"
-        )
-    topology = game_class(contract.topology_kind, contract.topology_size, "japanese")
-    semantic_game_cls = diversified_pinned_game_class(topology)
-    semantic_contract = resolve_model_contract(semantic_game_cls, None)
-    for field in (
-        "rules_implementation",
-        "action_schema",
-        "action_size",
-        "topology_kind",
-        "topology_size",
-        "point_count",
-        "point_order_fingerprint",
-        "adjacency_fingerprint",
-        "topology_fingerprint",
-        "terminal_adjudicator_id",
-        "rules_fingerprint",
-        "komi",
-    ):
-        if getattr(semantic_contract, field) != getattr(contract, field):
-            raise ValueError(
-                f"Current semantic game does not match checkpoint {field}: "
-                f"game={getattr(semantic_contract, field)!r}, "
-                f"checkpoint={getattr(contract, field)!r}"
-            )
-    require_gocube_komi(semantic_game_cls.KOMI, context="Checkpoint Arena semantic game")
-    return semantic_game_cls
+    try:
+        return resolve_semantic_game_class_from_contract(contract)
+    except (ContractError, TypeError, ValueError) as exc:
+        raise ValueError(f"Cannot resolve checkpoint semantic game: {exc}") from exc
 
 
 def _resolve_device(requested: str) -> str:

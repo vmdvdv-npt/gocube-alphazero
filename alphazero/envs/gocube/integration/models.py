@@ -20,6 +20,7 @@ from .catalog import CheckpointCatalog, CheckpointDescriptor
 from .contract import (
     ContractError,
     ResolvedGoCubeContract,
+    contract_compatibility_differences,
     resolve_game_class_from_contract,
     resolve_model_contract_from_metadata,
     resolve_model_contract,
@@ -57,6 +58,7 @@ def _contract_error_field(field: str) -> str:
         "topology_size": "gocube_size",
         "point_count": "gocube_point_count",
         "network_architecture_id": "gocube_network_architecture",
+        "semantic_game_variant": "gocube_semantic_game_variant",
         "gocube_model_profile": "gocube_model_profile",
         "gocube_structural_feature_schema": "gocube_structural_feature_schema",
         "gocube_structural_feature_channels": "gocube_structural_feature_channels",
@@ -282,8 +284,11 @@ class CheckpointModelLoader:
                 contract = saved_contract or fallback
                 if saved_args is not None:
                     _validate_descriptor_against_contract(descriptor, contract)
-                if requested_contract is not None and contract.differences(requested_contract):
-                    field, (saved, expected) = next(iter(contract.differences(requested_contract).items()))
+                if requested_contract is not None and contract_compatibility_differences(
+                    contract, requested_contract
+                ):
+                    differences = contract_compatibility_differences(contract, requested_contract)
+                    field, (saved, expected) = next(iter(differences.items()))
                     raise CheckpointMetadataInvalid(
                         f"Checkpoint GoCube contract mismatch for {_contract_error_field(field)}: "
                         f"saved={saved!r}, expected={expected!r}"
@@ -291,8 +296,9 @@ class CheckpointModelLoader:
                 cls = resolve_game_class_from_contract(contract)
                 if saved_args is not None:
                     computed = resolve_model_contract(cls, saved_args)
-                    if contract.differences(computed):
-                        field, (saved, expected) = next(iter(contract.differences(computed).items()))
+                    differences = contract_compatibility_differences(contract, computed)
+                    if differences:
+                        field, (saved, expected) = next(iter(differences.items()))
                         raise CheckpointMetadataInvalid(
                             f"Checkpoint GoCube contract mismatch for {_contract_error_field(field)}: "
                             f"saved={saved!r}, expected={expected!r}"

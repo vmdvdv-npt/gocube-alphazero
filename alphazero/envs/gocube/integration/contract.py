@@ -14,10 +14,17 @@ from typing import Any, Mapping
 
 from ..production_contract import require_gocube_komi
 
-MODEL_CONTRACT_VERSION = 1
-MODEL_CONTRACT_ID = "gocube-model-contract-v1"
+MODEL_CONTRACT_VERSION = 2
+SUPPORTED_MODEL_CONTRACT_VERSIONS = (1, 2)
+MODEL_CONTRACT_ID = "gocube-model-contract-v2"
+LEGACY_MODEL_CONTRACT_ID = "gocube-model-contract-v1"
 ACTION_SCHEMA = "gocube-action-point-id-pass-v1"
 _MISSING = object()
+SUPPORTED_SEMANTIC_GAME_VARIANTS = (
+    "plain",
+    "pinned",
+    "diversified_pinned",
+)
 
 
 class ContractError(ValueError):
@@ -81,6 +88,16 @@ def _class_id(game_cls) -> str:
     return f"{game_cls.__module__}.{game_cls.__qualname__}"
 
 
+def _semantic_game_variant(game_cls) -> str:
+    variant = getattr(game_cls, "GOCUBE_SEMANTIC_GAME_VARIANT", None)
+    if variant not in SUPPORTED_SEMANTIC_GAME_VARIANTS:
+        raise ContractError(
+            f"GoCube game class {game_cls!r} has unsupported or missing "
+            f"semantic game variant: {variant!r}"
+        )
+    return str(variant)
+
+
 def _rules_implementation(game_cls) -> str:
     explicit = getattr(game_cls, "GOCUBE_RULES_IMPLEMENTATION", None)
     if explicit:
@@ -121,7 +138,7 @@ def _architecture_config(args: Any, game_cls=None) -> dict[str, object]:
         "policy_head_channels", "input_fc_layers", "value_dense_layers",
         "policy_dense_layers", "score_dense_layers", "gocube_auxiliary_targets",
         "gocube_model_profile",
-        "gocube_network_architecture", "gocube_structural_feature_schema",
+        "gocube_structural_feature_schema",
         "gocube_structural_feature_channels",
     )
     result = (
@@ -129,6 +146,11 @@ def _architecture_config(args: Any, game_cls=None) -> dict[str, object]:
         if nnet_type is not None
         else {}
     )
+    # Persist the effective architecture ID in the fingerprint, rather than
+    # relying on whether it happened to be a user argument or a derived
+    # checkpoint field.  This keeps plain train.py checkpoints stable after
+    # NNetWrapper adds the flat contract fields during save.
+    result.setdefault("gocube_network_architecture", _architecture_id(args, game_cls))
     if game_cls is not None and hasattr(game_cls, "GOCUBE_MODEL_PROFILE"):
         result.setdefault("gocube_model_profile", str(game_cls.GOCUBE_MODEL_PROFILE))
     if game_cls is not None and hasattr(game_cls, "GOCUBE_NETWORK_ARCHITECTURE_ID"):
@@ -210,6 +232,7 @@ class ResolvedGoCubeContract:
     contract_id: str
     contract_version: int
     game_class_id: str
+    semantic_game_variant: str
     rules_implementation: str
     observation_schema: str
     observation_shape: tuple[int, int, int]
@@ -255,6 +278,7 @@ class ResolvedGoCubeContract:
             "contractId": self.contract_id,
             "contractVersion": self.contract_version,
             "gameClassId": self.game_class_id,
+            "semanticGameVariant": self.semantic_game_variant,
             "rulesImplementation": self.rules_implementation,
             "observationSchema": self.observation_schema,
             "observationShape": list(self.observation_shape),
@@ -283,6 +307,7 @@ class ResolvedGoCubeContract:
             "gocube_model_contract_id": self.contract_id,
             "gocube_model_contract_version": self.contract_version,
             "gocube_game_class_id": self.game_class_id,
+            "gocube_semantic_game_variant": self.semantic_game_variant,
             "gocube_rules_implementation": self.rules_implementation,
             "gocube_observation_schema": self.observation_schema,
             "gocube_observation_shape": tuple(self.observation_shape),
@@ -315,6 +340,38 @@ class ResolvedGoCubeContract:
                     return data[key]
             raise ContractError(f"Model contract is missing field: {name}")
 
+        try:
+            raw_contract_version = int(required("contractVersion", "contract_version"))
+        except (TypeError, ValueError) as exc:
+            raise ContractError(f"Invalid model contract version: {exc}") from exc
+        if raw_contract_version not in SUPPORTED_MODEL_CONTRACT_VERSIONS:
+            raise ContractError(f"Unsupported model contract version: {raw_contract_version}")
+        game_class_id = str(required("gameClassId", "game_class_id"))
+        semantic_variant = data.get(
+            "semanticGameVariant",
+            data.get("semantic_game_variant", _MISSING),
+        )
+        if semantic_variant is _MISSING:
+            if raw_contract_version != 1:
+                raise ContractError("Model contract is missing field: semanticGameVariant")
+            # V1 persisted an exact class identity.  Use that identity to
+            # migrate old checkpoints; never infer a variant from geometry or
+            # observation-channel counts.
+            matches = [
+                candidate for candidate in _candidate_game_classes()
+                if _class_id(candidate) == game_class_id
+            ]
+            variants = {_semantic_game_variant(candidate) for candidate in matches}
+            if len(variants) != 1:
+                raise ContractError(
+                    "Legacy model contract cannot unambiguously restore "
+                    f"semantic game variant for gameClassId={game_class_id!r}"
+                )
+            semantic_variant = variants.pop()
+        semantic_variant = str(semantic_variant)
+        if semantic_variant not in SUPPORTED_SEMANTIC_GAME_VARIANTS:
+            raise ContractError(f"Unsupported semanticGameVariant: {semantic_variant!r}")
+
         shape = required("observationShape", "observation_shape")
         if not isinstance(shape, (list, tuple)) or len(shape) != 3:
             raise ContractError("Model contract observationShape must contain three dimensions")
@@ -324,8 +381,9 @@ class ResolvedGoCubeContract:
         try:
             result = cls(
                 contract_id=str(required("contractId", "contract_id")),
-                contract_version=int(required("contractVersion", "contract_version")),
-                game_class_id=str(required("gameClassId", "game_class_id")),
+                contract_version=raw_contract_version,
+                game_class_id=game_class_id,
+                semantic_game_variant=semantic_variant,
                 rules_implementation=str(required("rulesImplementation", "rules_implementation")),
                 observation_schema=str(required("observationSchema", "observation_schema")),
                 observation_shape=tuple(int(x) for x in shape),
@@ -348,17 +406,27 @@ class ResolvedGoCubeContract:
             )
         except (TypeError, ValueError) as exc:
             raise ContractError(f"Invalid model contract: {exc}") from exc
-        if result.contract_id != MODEL_CONTRACT_ID:
-            raise ContractError(f"Unsupported model contract id: {result.contract_id!r}")
-        if result.contract_version != MODEL_CONTRACT_VERSION:
-            raise ContractError(f"Unsupported model contract version: {result.contract_version}")
+        expected_ids = {
+            1: LEGACY_MODEL_CONTRACT_ID,
+            MODEL_CONTRACT_VERSION: MODEL_CONTRACT_ID,
+        }
+        if result.contract_id != expected_ids[result.contract_version]:
+            raise ContractError(
+                f"Model contract id/version mismatch: id={result.contract_id!r}, "
+                f"version={result.contract_version}"
+            )
         if any(d <= 0 for d in result.observation_shape) or result.point_count <= 0:
             raise ContractError("Model contract contains invalid geometry")
+        try:
+            require_gocube_komi(result.komi, context="GoCube model contract")
+        except (TypeError, ValueError) as exc:
+            raise ContractError(str(exc)) from exc
         return result
 
     def differences(self, other: "ResolvedGoCubeContract") -> dict[str, tuple[object, object]]:
         fields = (
-            "contract_id", "contract_version", "game_class_id", "rules_implementation",
+            "contract_id", "contract_version", "game_class_id", "semantic_game_variant",
+            "rules_implementation",
             "observation_schema", "observation_shape", "action_schema", "action_size",
             "topology_kind", "topology_size", "point_count", "point_order_fingerprint",
             "adjacency_fingerprint", "topology_fingerprint", "network_architecture_id",
@@ -373,6 +441,24 @@ class ResolvedGoCubeContract:
         }
 
 
+def contract_compatibility_differences(
+    saved: ResolvedGoCubeContract,
+    current: ResolvedGoCubeContract,
+) -> dict[str, tuple[object, object]]:
+    """Compare contracts while allowing the additive V1 -> V2 migration.
+
+    V1 persisted an exact ``gameClassId``.  V2 adds the explicit semantic
+    variant; old checkpoints are migrated from that exact id, so only the
+    version number itself is allowed to differ during this transition.
+    """
+
+    differences = saved.differences(current)
+    if {saved.contract_version, current.contract_version} == {1, MODEL_CONTRACT_VERSION}:
+        differences.pop("contract_id", None)
+        differences.pop("contract_version", None)
+    return differences
+
+
 # Model-specific observation and architecture identity are intentionally not
 # part of this compatibility view.  The Arena/evaluation caller still has to
 # load each model against its complete own contract; this helper only answers
@@ -380,6 +466,7 @@ class ResolvedGoCubeContract:
 EVALUATION_SHARED_CONTRACT_FIELDS = (
     "contract_id",
     "contract_version",
+    "semantic_game_variant",
     "rules_implementation",
     "action_schema",
     "action_size",
@@ -475,11 +562,15 @@ def evaluation_contract_differences(
 ) -> dict[str, tuple[object, object]]:
     """Return only differences that prevent one semantic evaluation game."""
 
-    return {
+    differences = {
         field: (getattr(first, field), getattr(second, field))
         for field in EVALUATION_SHARED_CONTRACT_FIELDS
         if getattr(first, field) != getattr(second, field)
     }
+    if {first.contract_version, second.contract_version} == {1, MODEL_CONTRACT_VERSION}:
+        differences.pop("contract_id", None)
+        differences.pop("contract_version", None)
+    return differences
 
 
 def resolve_model_contract(game_cls, args: Any = None) -> ResolvedGoCubeContract:
@@ -510,6 +601,7 @@ def resolve_model_contract(game_cls, args: Any = None) -> ResolvedGoCubeContract
         contract_id=MODEL_CONTRACT_ID,
         contract_version=MODEL_CONTRACT_VERSION,
         game_class_id=_class_id(game_cls),
+        semantic_game_variant=_semantic_game_variant(game_cls),
         rules_implementation=_rules_implementation(game_cls),
         observation_schema=str(getattr(game_cls, "OBSERVATION_SCHEMA")),
         observation_shape=observation_shape,
@@ -602,6 +694,7 @@ def _class_matches_metadata(game_cls, metadata: Any) -> bool:
         ("gocube_action_size", game_cls.action_size()),
         ("gocube_terminal_adjudicator", game_cls.TERMINAL_ADJUDICATOR_ID),
         ("gocube_rules_fingerprint", _rules_fingerprint(game_cls, game_cls.logical_topology())),
+        ("gocube_semantic_game_variant", _semantic_game_variant(game_cls)),
     )
     for key, expected in checks:
         actual = _get(metadata, key, None)
@@ -642,7 +735,7 @@ def resolve_game_class_from_contract(contract: ResolvedGoCubeContract):
         # Network/search fields are not class properties; compare only the
         # game/inference portion before returning the class.
         differences = {
-            field: values for field, values in contract.differences(actual).items()
+            field: values for field, values in contract_compatibility_differences(contract, actual).items()
             if field not in {
                 "network_architecture_id", "network_architecture_fingerprint",
                 "search_contract_id", "targets_schema", "output_heads",
@@ -665,10 +758,69 @@ def resolve_game_class_from_contract(contract: ResolvedGoCubeContract):
             f"point_order_fingerprint={contract.point_order_fingerprint!r}, "
             f"adjacency_fingerprint={contract.adjacency_fingerprint!r})"
         )
-    # Pinned and diversified classes intentionally share inference semantics;
-    # legacy metadata has no class id, so use the pinned inference class.
-    pinned = [candidate for candidate in matching if "pinned_game" in candidate.__module__]
-    return pinned[0] if pinned else matching[0]
+    # Without an exact class identity, multiple variants can have identical
+    # legacy inference fields.  Choosing one would silently reinterpret the
+    # checkpoint, so legacy metadata must be unambiguous.
+    raise ContractError(
+        "Model contract matches multiple GoCube game classes; "
+        "semantic game variant is not unambiguous"
+    )
+
+
+def resolve_semantic_game_class_from_contract(contract: ResolvedGoCubeContract):
+    """Build the semantic game named by a checkpoint contract.
+
+    Model profile classes may differ in observation representation, but they
+    share one semantic game variant.  The variant is selected from explicit
+    contract metadata and then every semantic field is checked against the
+    reconstructed class.
+    """
+
+    if contract.terminal_adjudicator_id != "gocube-katago-japanese-v3":
+        raise ContractError(
+            "Only GoCube Japanese V3 semantic games are supported by this resolver"
+        )
+    from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
+    from alphazero.envs.gocube.game import game_class
+    from alphazero.envs.gocube.pinned_game import pinned_game_class
+
+    base = game_class(contract.topology_kind, contract.topology_size, "japanese")
+    factories = {
+        "plain": lambda: base,
+        "pinned": lambda: pinned_game_class(base),
+        "diversified_pinned": lambda: diversified_pinned_game_class(base),
+    }
+    try:
+        semantic_game_cls = factories[contract.semantic_game_variant]()
+    except KeyError as exc:
+        raise ContractError(
+            f"Unsupported semantic game variant: {contract.semantic_game_variant!r}"
+        ) from exc
+
+    semantic_contract = resolve_model_contract(semantic_game_cls, None)
+    for field in (
+        "semantic_game_variant",
+        "rules_implementation",
+        "action_schema",
+        "action_size",
+        "topology_kind",
+        "topology_size",
+        "point_count",
+        "point_order_fingerprint",
+        "adjacency_fingerprint",
+        "topology_fingerprint",
+        "terminal_adjudicator_id",
+        "rules_fingerprint",
+        "komi",
+    ):
+        if getattr(semantic_contract, field) != getattr(contract, field):
+            raise ContractError(
+                f"Semantic game contract mismatch for {field}: "
+                f"game={getattr(semantic_contract, field)!r}, "
+                f"checkpoint={getattr(contract, field)!r}"
+            )
+    require_gocube_komi(semantic_game_cls.KOMI, context="GoCube semantic game")
+    return semantic_game_cls
 
 
 def _class_contract_matches(game_cls, contract: ResolvedGoCubeContract) -> bool:
@@ -680,6 +832,7 @@ def _class_contract_matches(game_cls, contract: ResolvedGoCubeContract) -> bool:
             "action_size", "topology_kind", "topology_size", "point_count",
             "point_order_fingerprint", "adjacency_fingerprint", "topology_fingerprint",
             "terminal_adjudicator_id", "rules_fingerprint", "komi",
+            "semantic_game_variant",
         )
     )
 
@@ -698,6 +851,12 @@ def resolve_model_contract_from_metadata(metadata: Any, *, fallback: ResolvedGoC
             actual = _get(metadata, key, None)
             if actual is None:
                 continue
+            if (
+                key == "gocube_model_contract_version"
+                and contract.contract_version == 1
+                and int(actual) == 1
+            ):
+                continue
             if isinstance(expected, tuple) and isinstance(actual, list):
                 actual = tuple(actual)
             if actual != expected:
@@ -711,6 +870,7 @@ def resolve_model_contract_from_metadata(metadata: Any, *, fallback: ResolvedGoC
         "gocube_game_class_id", "gocube_topology", "gocube_size",
         "gocube_point_count", "gocube_observation_schema", "gocube_action_size",
         "gocube_terminal_adjudicator", "gocube_rules_fingerprint",
+        "gocube_semantic_game_variant",
     )
     if fallback is not None and not any(_get(metadata, key, None) is not None for key in identity_keys):
         return fallback
@@ -723,10 +883,12 @@ def resolve_model_contract_from_metadata(metadata: Any, *, fallback: ResolvedGoC
         if fallback is not None:
             return fallback
         raise ContractError("Checkpoint metadata does not identify a supported GoCube inference contract")
-    # Old V4 checkpoints predate the explicit class id.  Pinned is the
-    # inference-equivalent class; new checkpoints always carry the exact id.
-    pinned = [candidate for candidate in candidates if "pinned_game" in candidate.__module__]
-    game_cls = pinned[0] if pinned else candidates[0]
+    if len(candidates) != 1:
+        raise ContractError(
+            "Checkpoint metadata does not identify one semantic game variant; "
+            "an exact gocube_game_class_id or semantic variant is required"
+        )
+    game_cls = candidates[0]
     args_for_contract = metadata
     contract = resolve_model_contract(game_cls, args_for_contract)
     # A legacy checkpoint may not have the newer fingerprints.  Validate every
@@ -737,6 +899,8 @@ def resolve_model_contract_from_metadata(metadata: Any, *, fallback: ResolvedGoC
         actual = _get(metadata, key)
         if isinstance(expected, tuple) and isinstance(actual, list):
             actual = tuple(actual)
+        if key == "gocube_model_contract_version" and actual == 1 and expected == 2:
+            continue
         if actual != expected:
             raise ContractError(
                 f"GoCube contract metadata conflict for {key}: saved={actual!r}, expected={expected!r}"

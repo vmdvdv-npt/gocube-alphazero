@@ -5,9 +5,7 @@ import operator
 import numpy as np
 
 from alphazero.envs.gocube.core import BLACK, EMPTY, PLAYING, WHITE
-from alphazero.envs.gocube.diversified_game import diversified_pinned_game_class
 from alphazero.envs.gocube.evaluation import prepare_evaluation_args
-from alphazero.envs.gocube.game import game_class
 from alphazero.envs.gocube.katago_v3 import RESULT_PROVENANCE_RUNTIME
 from alphazero.envs.gocube.observation import GoCubeObservationAdapter
 from alphazero.envs.gocube.production_contract import require_gocube_komi
@@ -20,6 +18,7 @@ from .contract import (
     resolve_contract_for_descriptor,
     resolve_game_class_from_contract,
     resolve_model_contract,
+    resolve_semantic_game_class_from_contract,
 )
 from .errors import GenerationFailed
 
@@ -140,11 +139,9 @@ class GameGenerator:
                     f"black={black_value!r}, white={white_value!r}"
                 )
             if black_contract.terminal_adjudicator_id == "gocube-katago-japanese-v3":
-                # The loaded model classes may be B0/B1 profile classes.  The
-                # generated game is their one profile-neutral semantic game.
-                game_cls = diversified_pinned_game_class(
-                    game_class(black_contract.topology_kind, black_contract.topology_size, "japanese")
-                )
+                # Resolve the exact semantic variant saved by the checkpoint;
+                # B0/B1 profile classes still share the diversified variant.
+                game_cls = resolve_semantic_game_class_from_contract(black_contract)
             elif self.game_cls_resolver is not None:
                 game_cls = self.game_cls_resolver(
                     black.topology, black.size, black.rule_set

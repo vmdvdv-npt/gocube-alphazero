@@ -60,7 +60,7 @@ _TERMINATION_CONTRACT_ARG_KEYS = (
 # treated as mismatches.
 _S2_MODEL_CONTRACT_KEYS = frozenset({
     'gocube_model_contract_id', 'gocube_model_contract_version',
-    'gocube_game_class_id', 'gocube_rules_implementation',
+    'gocube_game_class_id', 'gocube_semantic_game_variant', 'gocube_rules_implementation',
     'gocube_observation_shape', 'gocube_action_schema', 'gocube_action_size',
     'gocube_point_count', 'gocube_point_order_fingerprint',
     'gocube_adjacency_fingerprint', 'gocube_topology_fingerprint',
@@ -391,6 +391,18 @@ class NNetWrapper(BaseWrapper):
                     continue
                 if strict_v3:
                     raise ValueError(f'Checkpoint missing required GoCube V3 metadata: {key}')
+                continue
+            if (
+                key == 'gocube_model_contract_version'
+                and saved_value == 1
+                and value == 2
+            ):
+                continue
+            if (
+                key == 'gocube_model_contract_id'
+                and saved_value == 'gocube-model-contract-v1'
+                and value == 'gocube-model-contract-v2'
+            ):
                 continue
             if saved_value != value:
                 raise ValueError(

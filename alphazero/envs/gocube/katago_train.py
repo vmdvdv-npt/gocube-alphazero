@@ -1319,6 +1319,18 @@ def build_katago_training_args(cli):
 
     args.search_utility_mode = KATAGO_PINNED_SEARCH_UTILITY_MODE
     args.gocube_model_profile = profile.name
+    # Save the exact model class and semantic variant before checkpoint
+    # serialization.  Baseline/G1 profile classes share diversified
+    # semantics, while the exact class id disambiguates the model input
+    # contract without relying on topology or channel-count heuristics.
+    args.gocube_game_class_id = str(
+        getattr(
+            game_cls,
+            "GOCUBE_GAME_CLASS_ID",
+            f"{game_cls.__module__}.{game_cls.__qualname__}",
+        )
+    )
+    args.gocube_semantic_game_variant = str(game_cls.GOCUBE_SEMANTIC_GAME_VARIANT)
     args.gocube_network_architecture = profile.network_architecture_id
     args.gocube_structural_feature_schema = profile.structural_feature_schema
     args.gocube_structural_feature_channels = profile.structural_feature_channels
