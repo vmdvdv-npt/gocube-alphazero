@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import random
+import sys
 import time
 from pathlib import Path
 from typing import Mapping
@@ -19,6 +20,11 @@ import numpy as np
 import pyximport
 
 pyximport.install()
+
+if __package__ in (None, ""):
+    # Keep the documented ``python tools/<entrypoint>.py`` invocation usable
+    # without requiring callers to export PYTHONPATH first.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 

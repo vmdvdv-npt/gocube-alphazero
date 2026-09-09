@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -39,8 +41,22 @@ from tools.evaluate_gocube_checkpoints import reject_b_experiment_checkpoint
 
 
 SUITE = Path(__file__).parents[1] / "evaluation" / "gocube-b-heldout-suite-v1.json"
+EVALUATOR = Path(__file__).parents[1] / "tools" / "evaluate_gocube_b_experiment.py"
 DEFAULT_EVALUATION_CLOCK = SampleBudgetTarget.NEW_SAMPLES
 DEFAULT_EVALUATION_MILESTONES = (10_000_000, 20_000_000, 30_000_000, 40_000_000)
+
+
+def test_b4_evaluator_file_entrypoint_bootstraps_repository_imports():
+    result = subprocess.run(
+        [sys.executable, str(EVALUATOR), "--help"],
+        cwd=EVALUATOR.parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Evaluate one B0/B1 training seed" in result.stdout
 
 
 def test_canonical_suite_is_frozen_and_reproducible():
