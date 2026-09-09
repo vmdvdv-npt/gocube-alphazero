@@ -42,6 +42,7 @@ jobs:
             tests/test_gocube_katago_v3_benson_topology.py \
             tests/test_gocube_train_entrypoint.py \
             tests/test_gocube_legacy_training_retirement.py \
+            tests/test_gocube_learning_pipeline_diagnostics.py \
             tests/test_gocube_training_budget_telemetry.py \
             tests/test_gocube_hardened_production.py
 
