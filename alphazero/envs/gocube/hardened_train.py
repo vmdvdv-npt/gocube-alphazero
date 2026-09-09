@@ -42,7 +42,7 @@ from alphazero.envs.gocube.reproducible_manifest import (
     validate_existing_reproducible_manifest,
 )
 from alphazero.envs.gocube.reproducibility import seed_process
-from alphazero.envs.gocube.train import validate_v3_target_tensors
+from alphazero.envs.gocube.training_common import validate_v3_target_tensors
 from alphazero.utils import const_temp_scaling, get_iter_file
 
 

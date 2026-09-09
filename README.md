@@ -77,7 +77,7 @@ At the top left, the Arena tab can be toggled as seen above. Here, a separate se
 For now, Arena is still displayed in the console, but eventually there will be support for each environment to implement its own graphical interface to play games (agent-agent, agent-player, player-player).
 
 ### Try one of the existing examples
-1. Adjust the hyperparameters in one of the examples to your preference (in the GUI editor, or path is ```alphazero/envs/<env name>/train.py```). Take a look at Coach.py where the default arguments are stored to see the available options. For example, edit ```alphazero/envs/connect4/train.py```.
+1. Adjust the hyperparameters in one of the examples to your preference (in the GUI editor, or in the environment-specific entrypoint). Take a look at Coach.py where the default arguments are stored to see the available options. For GoCube V3, use `alphazero.envs.gocube.katago_train` or `hardened_train`; the retired `gocube.train` entrypoint is not a training path.
 
 
 2. After that, you can start training AlphaZero on your chosen environment by pressing the 'play' button in the GUI, or running the following in the console:

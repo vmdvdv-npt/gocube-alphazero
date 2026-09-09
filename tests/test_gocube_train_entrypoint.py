@@ -6,9 +6,9 @@ import pytest
 from alphazero.Coach import Coach
 from alphazero.utils import dotdict
 from alphazero.envs.gocube.katago_v3 import KATAGO_REFERENCE_COMMIT, KATAGO_RULES_VERSION
-from alphazero.envs.gocube.train import (
+from alphazero.envs.gocube.training_common import (
     GoCubeCoach,
-    build_training_args,
+    build_base_training_args,
     parse_args,
     print_training_configuration,
 )
@@ -35,7 +35,7 @@ def test_training_args_without_optional_master_seed_do_not_fail_lookup():
 
 
 def test_v3_contract_and_training_controls_are_forwarded():
-    game_cls, args = build_training_args(cli_args())
+    game_cls, args = build_base_training_args(cli_args())
     assert game_cls.RULESET == "japanese"
     assert game_cls.TERMINAL_ADJUDICATOR_ID == "gocube-katago-japanese-v3"
     assert game_cls.OBSERVATION_SCHEMA == "gocube-observation-v3"
@@ -68,7 +68,7 @@ def test_v3_contract_and_training_controls_are_forwarded():
 def test_v3_cli_defaults_are_conservative_pilot_defaults(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["train.py"])
     cli = parse_args()
-    game_cls, args = build_training_args(cli)
+    game_cls, args = build_base_training_args(cli)
     assert game_cls.topology_kind() == "torus"
     assert args.numMCTSSims == 100
     assert args.arenaMCTSSims == 100
@@ -85,12 +85,12 @@ def test_v3_cli_defaults_are_conservative_pilot_defaults(monkeypatch):
 
 
 def test_default_run_name_uses_new_pilot_methodology_namespace():
-    _, args = build_training_args(cli_args(run_name=None))
+    _, args = build_base_training_args(cli_args(run_name=None))
     assert args.run_name == "gocube-torus-9-katago-v3-pilot"
 
 
 def test_smoke_mode_is_one_iteration_without_arena_comparisons():
-    _, args = build_training_args(cli_args(iterations=50, smoke=True))
+    _, args = build_base_training_args(cli_args(iterations=50, smoke=True))
     assert args.numIters == 1
     assert args.compareWithBaseline is False
     assert args.compareWithPast is False
@@ -101,27 +101,27 @@ def test_smoke_mode_is_one_iteration_without_arena_comparisons():
 
 
 def test_fixed_train_steps_override_disables_auto_mode():
-    _, args = build_training_args(cli_args(train_steps_per_iteration=17))
+    _, args = build_base_training_args(cli_args(train_steps_per_iteration=17))
     assert args.autoTrainSteps is False
     assert args.train_steps_per_iteration == 17
 
 
 def test_arena_on_gating_off_is_default_pilot_configuration():
-    _, args = build_training_args(cli_args())
+    _, args = build_base_training_args(cli_args())
     assert args.compareWithBaseline is True
     assert args.compareWithPast is True
     assert args.model_gating is False
 
 
 def test_arena_on_gating_on_is_explicit_opt_in():
-    _, args = build_training_args(cli_args(model_gating=True))
+    _, args = build_base_training_args(cli_args(model_gating=True))
     assert args.compareWithBaseline is True
     assert args.compareWithPast is True
     assert args.model_gating is True
 
 
 def test_arena_off_gating_off_is_supported():
-    _, args = build_training_args(cli_args(no_arena=True))
+    _, args = build_base_training_args(cli_args(no_arena=True))
     assert args.compareWithBaseline is False
     assert args.compareWithPast is False
     assert args.model_gating is False
@@ -129,12 +129,12 @@ def test_arena_off_gating_off_is_supported():
 
 def test_arena_off_gating_on_fails_fast():
     with pytest.raises(ValueError, match="model gating requires arena evaluation"):
-        build_training_args(cli_args(no_arena=True, model_gating=True))
+        build_base_training_args(cli_args(no_arena=True, model_gating=True))
 
 
 def test_smoke_with_model_gating_fails_fast():
     with pytest.raises(ValueError, match="model gating requires arena evaluation"):
-        build_training_args(cli_args(smoke=True, model_gating=True))
+        build_base_training_args(cli_args(smoke=True, model_gating=True))
 
 
 def test_cli_exposes_arena_budget_model_gating_and_fixed_steps(monkeypatch):
@@ -151,7 +151,7 @@ def test_cli_exposes_arena_budget_model_gating_and_fixed_steps(monkeypatch):
 
 
 def test_training_configuration_reports_training_arena_and_gating(capsys):
-    _, args = build_training_args(cli_args())
+    _, args = build_base_training_args(cli_args())
     print_training_configuration(args)
     output = capsys.readouterr().out
     assert "Self-play:" in output
@@ -227,4 +227,4 @@ def test_gating_keeps_self_play_version_owned_by_arena(monkeypatch):
 )
 def test_invalid_training_counts_fail_fast(field, value, message):
     with pytest.raises(ValueError, match=message):
-        build_training_args(cli_args(**{field: value}))
+        build_base_training_args(cli_args(**{field: value}))

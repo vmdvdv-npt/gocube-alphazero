@@ -18,7 +18,7 @@ from alphazero.envs.gocube.production_training import (
     build_replay_training_plan,
     summarize_arena_outcomes,
 )
-from alphazero.envs.gocube.train import GoCubeCoach
+from alphazero.envs.gocube.training_common import GoCubeCoach
 from alphazero.utils import dotdict
 
 

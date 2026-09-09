@@ -69,9 +69,9 @@ from alphazero.envs.gocube.selfplay_semantics import (
     KATAGO_CLEANUP_TRAINING_DEFAULTS,
     KATAGO_PINNED_SELFPLAY_DEFAULTS,
 )
-from alphazero.envs.gocube.train import (
+from alphazero.envs.gocube.training_common import (
     GoCubeCoach,
-    build_training_args,
+    build_base_training_args,
     print_training_configuration,
     validate_tensor_row_counts,
     validate_v3_target_tensors,
@@ -1305,7 +1305,7 @@ def build_katago_training_args(cli):
     profile = production_model_profile(
         getattr(cli, "gocube_model_profile", DEFAULT_PRODUCTION_MODEL_PROFILE)
     )
-    base_game_cls, args = build_training_args(cli)
+    base_game_cls, args = build_base_training_args(cli)
     args = args.copy()
     game_cls = profile.game_factory(base_game_cls)
     defaults = KATAGO_SEARCH_DEFAULTS
@@ -1425,7 +1425,7 @@ def build_katago_training_args(cli):
     args.fpu_reduction = defaults["fpu_reduction_max"]
     args.numMCTSSims = int(cli.sims)
     args.arenaMCTSSims = int(cli.arena_sims)
-    args.probFastSim = float(cli.fast_game_prob)
+    args.probFastSim = 0.0 if cli.smoke else float(cli.fast_game_prob)
     args.numWarmupIters = 0
     args.autoTrainSteps = True
     args.train_steps_per_iteration = None
