@@ -20,6 +20,7 @@ if __package__ in (None, ""):
     # without requiring the operator to export PYTHONPATH.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from alphazero.envs.gocube.atomic_io import find_last_valid_contiguous_checkpoint
 from alphazero.envs.gocube.b_experiment_contract import (
     B0_MODEL_PROFILE,
     B0_TREATMENT,
@@ -45,6 +46,10 @@ TREATMENT_TO_PROFILE = {
     B0_TREATMENT: B0_MODEL_PROFILE,
     B1_TREATMENT: B1_MODEL_PROFILE,
 }
+
+_ITERATION_CEILING_ERROR = (
+    "Scientific sample target was not reached before the iteration safety ceiling:"
+)
 
 
 def _treatment(value: str) -> str:
@@ -81,7 +86,17 @@ def parse_args(argv=None):
         "--iterations",
         type=int,
         default=4096,
-        help="maximum iteration safety ceiling; sample target controls stopping",
+        help="maximum absolute iteration safety ceiling; sample target controls stopping",
+    )
+    parser.add_argument(
+        "--chunk-iterations",
+        type=int,
+        default=None,
+        help=(
+            "run one operational chunk of this many iterations; on resume the child safety "
+            "ceiling advances from the last valid checkpoint, and a fully committed chunk "
+            "may exit successfully before the scientific sample target"
+        ),
     )
     budget_targets = parser.add_mutually_exclusive_group()
     budget_targets.add_argument(
@@ -112,7 +127,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--allow-existing-run",
         action="store_true",
-        help="Resume an existing hardened namespace after its checkpoint is validated.",
+        help="resume the selected B run namespace from its last valid contiguous checkpoint",
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
@@ -133,6 +148,8 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.iterations < 1:
         parser.error("--iterations must be positive")
+    if args.chunk_iterations is not None and args.chunk_iterations < 1:
+        parser.error("--chunk-iterations must be positive")
     if args.seed not in B_SEED_LIST:
         parser.error(
             "B experiment seed must be one of the contract seed_list values: "
@@ -173,11 +190,35 @@ def parse_args(argv=None):
     return args
 
 
+def _checkpoint_folder(repo: Path, run_name: str) -> Path:
+    return repo / "checkpoint" / str(run_name)
+
+
+def resolve_iteration_ceiling(args, *, repo: Path) -> int:
+    """Resolve the absolute child ceiling for a scientific run or one chunk."""
+
+    chunk_iterations = getattr(args, "chunk_iterations", None)
+    if chunk_iterations is None:
+        return int(args.iterations)
+    if not bool(getattr(args, "allow_existing_run", False)):
+        return int(chunk_iterations)
+
+    last_valid, _ignored = find_last_valid_contiguous_checkpoint(
+        _checkpoint_folder(repo, args.run_name)
+    )
+    if last_valid is None:
+        raise RuntimeError(
+            "--allow-existing-run with --chunk-iterations requires a valid existing checkpoint"
+        )
+    return int(last_valid) + int(chunk_iterations)
+
+
 def training_command(
     args,
     *,
     python: str | None = None,
     contract_sha256: str | None = None,
+    iteration_ceiling: int | None = None,
 ) -> list[str]:
     """Return the fully pinned child command for the selected treatment."""
 
@@ -190,6 +231,9 @@ def training_command(
         "train_batch_size": CUBE4_PRODUCTION.train_batch_size,
         "fast_probability": CUBE4_PRODUCTION.fast_probability,
     }
+    child_iteration_ceiling = (
+        int(args.iterations) if iteration_ceiling is None else int(iteration_ceiling)
+    )
     command = [
         interpreter,
         "-m",
@@ -209,7 +253,7 @@ def training_command(
         "--games-per-iteration",
         str(settings["games_per_iteration"]),
         "--iterations",
-        str(args.iterations),
+        str(child_iteration_ceiling),
         "--train-batch-size",
         str(settings["train_batch_size"]),
         "--fast-game-prob",
@@ -264,6 +308,34 @@ def training_command(
     return command
 
 
+def normalize_chunk_returncode(
+    returncode: int,
+    stderr: str,
+    *,
+    args,
+    iteration_ceiling: int,
+    repo: Path,
+) -> int:
+    """Accept only the known post-chunk scientific-ceiling failure as success."""
+
+    if int(returncode) == 0 or getattr(args, "chunk_iterations", None) is None:
+        return int(returncode)
+    if _ITERATION_CEILING_ERROR not in str(stderr):
+        return int(returncode)
+
+    last_valid, _ignored = find_last_valid_contiguous_checkpoint(
+        _checkpoint_folder(repo, args.run_name)
+    )
+    if last_valid is None or int(last_valid) != int(iteration_ceiling):
+        return int(returncode)
+
+    print(
+        "Operational B chunk committed successfully at iteration "
+        f"{last_valid}; scientific sample target is not reached yet."
+    )
+    return 0
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     if args.heldout_suite is None and not args.dry_run:
@@ -299,17 +371,35 @@ def main(argv=None) -> int:
         if preflight_payload is None
         else str(preflight_payload["experiment_contract_sha256"])
     )
+    iteration_ceiling = resolve_iteration_ceiling(args, repo=repo)
     command = training_command(
         args,
         python=str(repo / ".venv" / "bin" / "python"),
         contract_sha256=contract_sha256,
+        iteration_ceiling=iteration_ceiling,
     )
     print(f"B experiment contract: {contract_path}")
     print("Launching: " + shlex.join(command))
     if args.dry_run:
         return 0
-    completed = subprocess.run(command, cwd=repo, check=False)
-    return int(completed.returncode)
+    completed = subprocess.run(
+        command,
+        cwd=repo,
+        check=False,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    child_stderr = completed.stderr or ""
+    if child_stderr:
+        sys.stderr.write(child_stderr)
+        sys.stderr.flush()
+    return normalize_chunk_returncode(
+        int(completed.returncode),
+        child_stderr,
+        args=args,
+        iteration_ceiling=iteration_ceiling,
+        repo=repo,
+    )
 
 
 if __name__ == "__main__":
