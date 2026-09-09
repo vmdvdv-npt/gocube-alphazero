@@ -9,6 +9,13 @@ import time
 import os
 
 from alphazero.MCTS import MCTS
+from alphazero.arena_bookkeeping import (
+    ArenaGameIdentity,
+    ArenaGameSlot,
+    ArenaResult,
+    model_a_color_for_game_id,
+    player_to_index_for_game_id,
+)
 from alphazero.envs.gocube.records import reserve_game_id
 from alphazero.envs.gocube.selfplay_semantics import (
     CLEANUP_1,
@@ -40,7 +47,8 @@ class SelfPlayAgent(mp.Process):
                  value_tensor, output_queue, result_queue, complete_count, games_played,
                  stop_event: mp.Event, pause_event: mp.Event(), args, _is_arena=False, _is_warmup=False,
                  telemetry=None, score_tensor=None, ownership_tensor=None,
-                 worker_error_queue=None, iteration=0, observation_adapters=None):
+                 worker_error_queue=None, iteration=0, observation_adapters=None,
+                 arena_game_ids=None, arena_result_queue=None):
         super().__init__()
         self.id = id
         self.game_cls = game_cls
@@ -57,6 +65,7 @@ class SelfPlayAgent(mp.Process):
         self.ownership_tensor = ownership_tensor
         self.output_queue = output_queue
         self.result_queue = result_queue
+        self.arena_result_queue = arena_result_queue
         self.games = []
         self.histories = []
         self.temps = []
@@ -132,6 +141,18 @@ class SelfPlayAgent(mp.Process):
         self.cleanup_training_metadata = []
         self.root_policy_cache = []
 
+        # Arena identity is deliberately separate from the mutable ``games``
+        # and ``mcts`` arrays.  The parent receives the identity in both the
+        # inference payload and the final result, so a recycled slot cannot be
+        # confused with its previous generation.
+        self.arena_slots = []
+        self._arena_fixed_schedule = arena_game_ids is not None
+        self._arena_game_ids = tuple(int(game_id) for game_id in (arena_game_ids or ()))
+        self._arena_next_game_id = 0
+        self._arena_active_slots = set()
+        self._arena_completed_count = 0
+        self._arena_batch_routing_keys = []
+
         self.recording_enabled = bool(
             getattr(args, "gocube_recording_enabled", False) and not _is_arena
         )
@@ -172,10 +193,108 @@ class SelfPlayAgent(mp.Process):
             self.cleanup_training_metadata.append(None)
             self.root_policy_cache.append(None)
 
+        if self._is_arena:
+            if self._arena_fixed_schedule:
+                initial_ids = self._arena_game_ids[:self.batch_size]
+                self._arena_next_game_id = len(initial_ids)
+                active_count = len(initial_ids)
+            else:
+                initial_ids = tuple(
+                    int(self.id) * 1000000 + slot for slot in range(self.batch_size)
+                )
+                self._arena_next_game_id = self.batch_size
+                active_count = self.batch_size
+            self.arena_slots = [None] * self.batch_size
+            for slot_id in range(active_count):
+                self._install_arena_slot(slot_id, initial_ids[slot_id], generation=0)
+
     def _get_mcts(self):
         if self._is_arena:
             return tuple([MCTS(self.args) for _ in range(self.game_cls.num_players())])
         return MCTS(self.args)
+
+    def _install_arena_slot(self, slot_id, game_id, generation):
+        """Install an immutable identity for the current slot generation."""
+
+        slot_id = int(slot_id)
+        game_id = int(game_id)
+        mapping = player_to_index_for_game_id(game_id)
+        identity = ArenaGameIdentity(
+            game_id=game_id,
+            worker_id=int(self.id),
+            slot_id=slot_id,
+            generation=int(generation),
+            model_a_color=model_a_color_for_game_id(game_id),
+            player_to_index=tuple(mapping),
+        )
+        slot = ArenaGameSlot(identity, self.games[slot_id], self.mcts[slot_id])
+        if len(self.arena_slots) != self.batch_size:
+            self.arena_slots = [None] * self.batch_size
+        self.arena_slots[slot_id] = slot
+        self._arena_active_slots.add(slot_id)
+        # Keep the legacy attribute useful for callers that inspect a worker,
+        # but never use it as the routing source for an active slot.
+        self.player_to_index = list(mapping)
+
+    def _arena_slot(self, index):
+        slot = self.arena_slots[int(index)]
+        if slot is None or slot.completion_state != 'active':
+            raise RuntimeError(f'Arena slot {index} is not active')
+        slot.game_state = self.games[int(index)]
+        slot.mcts_state = self.mcts[int(index)]
+        return slot
+
+    def _arena_active_indices(self):
+        if not hasattr(self, '_arena_active_slots'):
+            return range(self.batch_size)
+        return sorted(int(index) for index in self._arena_active_slots)
+
+    def _arena_player_to_index(self, index):
+        if not self._arena_fixed_schedule:
+            # Legacy unit-test/direct-agent construction has no global game
+            # schedule. Production Arena always supplies one and therefore
+            # takes the immutable per-game route below.
+            return tuple(self.player_to_index)
+        return self._arena_slot(index).identity.player_to_index
+
+    def _arena_next_game(self):
+        if self._arena_fixed_schedule:
+            if self._arena_next_game_id >= len(self._arena_game_ids):
+                return None
+            game_id = self._arena_game_ids[self._arena_next_game_id]
+            self._arena_next_game_id += 1
+            return int(game_id)
+        game_id = int(self.id) * 1000000 + int(self._arena_next_game_id)
+        self._arena_next_game_id += 1
+        return game_id
+
+    def _recycle_arena_slot(self, index):
+        """Recycle a finished slot, or retire it when its fixed quota is done."""
+
+        index = int(index)
+        previous = self._arena_slot(index)
+        next_game_id = self._arena_next_game()
+        previous.completion_state = 'completed'
+        self._arena_active_slots.discard(index)
+        if next_game_id is None:
+            self.arena_slots[index] = None
+            self.search_states[index] = None
+            return False
+
+        self.games[index] = self.game_cls()
+        self.game_sequences[index] += 1
+        self.histories[index] = []
+        self.temps[index] = self.args.startTemp
+        self.mcts[index] = self._get_mcts()
+        self.search_states[index] = None
+        self._cleanup_slot_set('cleanup_training_metadata', index, None)
+        self._cleanup_slot_set('root_policy_cache', index, None)
+        self._install_arena_slot(
+            index,
+            next_game_id,
+            generation=int(previous.identity.generation) + 1,
+        )
+        return True
 
     def _mcts(self, index: int) -> MCTS:
         mcts = self.mcts[index]
@@ -188,7 +307,7 @@ class SelfPlayAgent(mp.Process):
 
         adapter = None
         if self._is_arena and self.observation_adapters:
-            model_index = self.player_to_index[self.games[index].player]
+            model_index = self._arena_player_to_index(index)[self.games[index].player]
             adapter = self.observation_adapters[model_index]
         if adapter is not None:
             return self._mcts(index).search_observation(state, adapter)
@@ -219,8 +338,21 @@ class SelfPlayAgent(mp.Process):
         if not accepted:
             return False
 
+        if getattr(self, '_is_arena', False):
+            self._arena_completed_count += 1
         self._set_worker_context(self._current_game_slot, 'enqueue_result')
-        self.result_queue.put((final_game, winstate, self.id))
+        if getattr(self, '_is_arena', False):
+            slot = self._arena_slot(self._current_game_slot)
+            result = ArenaResult.from_slot(
+                slot,
+                final_game,
+                np.array(winstate, dtype=np.uint8, copy=True),
+            )
+            self.result_queue.put(result)
+        else:
+            # Preserve the historical training/test queue shape outside the
+            # explicit Arena protocol.
+            self.result_queue.put((final_game, winstate, self.id))
         return True
 
     def _worker_error_payload(self, exc):
@@ -387,7 +519,11 @@ class SelfPlayAgent(mp.Process):
                     ))
                 self._set_worker_context(i, 'initialization')
                 self._sample_cleanup_training_plan(i)
-            while not self.stop_event.is_set() and self.games_played.value < self.args.gamesPerIteration:
+            while (
+                not self.stop_event.is_set()
+                and self.games_played.value < self.args.gamesPerIteration
+                and (not self._is_arena or self._arena_active_slots)
+            ):
                 self._set_worker_context(0 if self.batch_size else None, 'search_generate')
                 self._check_pause()
                 sims = self._select_search_sims()
@@ -422,7 +558,11 @@ class SelfPlayAgent(mp.Process):
         if self._is_arena:
             batch_tensor = [[] for _ in range(self.game_cls.num_players())]
             arena_slots_by_player = [[] for _ in range(self.game_cls.num_players())]
-        for i in range(self.batch_size):
+            arena_routing_keys_by_player = [[] for _ in range(self.game_cls.num_players())]
+            active_indices = self._arena_active_indices()
+        else:
+            active_indices = range(self.batch_size)
+        for i in active_indices:
             self._set_worker_context(i, 'search_generate')
             self._check_pause()
             state = self._mcts(i).find_leaf(self.games[i])
@@ -438,7 +578,7 @@ class SelfPlayAgent(mp.Process):
             observation = self._observation_for_search(i, state)
             data = torch.from_numpy(observation)
             if self._is_arena:
-                player = self.player_to_index[self.games[i].player]
+                player = self._arena_player_to_index(i)[self.games[i].player]
                 adapter = self.observation_adapters[player] if self.observation_adapters else None
                 if adapter is not None:
                     observation_shape = adapter.observation_size()
@@ -447,6 +587,9 @@ class SelfPlayAgent(mp.Process):
                 data = data.view(-1, *observation_shape)
                 batch_tensor[player].append(data)
                 arena_slots_by_player[player].append(i)
+                arena_routing_keys_by_player[player].append(
+                    self._arena_slot(i).identity.routing_key
+                )
             else:
                 self.batch_tensor[i].copy_(data)
         if self._is_arena:
@@ -455,11 +598,20 @@ class SelfPlayAgent(mp.Process):
                 data = batch_tensor[player]
                 if data:
                     batch_tensor[player] = torch.cat(data)
-            self.output_queue.put(batch_tensor)
+            self._arena_batch_routing_keys = [
+                key
+                for model_keys in arena_routing_keys_by_player
+                for key in model_keys
+            ]
+            self.output_queue.put({
+                'batches': batch_tensor,
+                'routing_keys': arena_routing_keys_by_player,
+            })
             row_to_slot = list(itertools.chain.from_iterable(arena_slots_by_player))
-            if len(row_to_slot) != self.batch_size:
+            if len(row_to_slot) != len(active_indices):
                 raise RuntimeError(
-                    f'Arena batch row mapping has {len(row_to_slot)} rows for {self.batch_size} game slots'
+                    f'Arena batch row mapping has {len(row_to_slot)} rows for '
+                    f'{len(active_indices)} active game slots'
                 )
             self.batch_indices = [None] * self.batch_size
             for row, slot in enumerate(row_to_slot):
@@ -478,7 +630,17 @@ class SelfPlayAgent(mp.Process):
             if self.stop_event.is_set():
                 return
             self.batch_ready.clear()
-        for i in range(self.batch_size):
+            if self._is_arena and self.arena_result_queue is not None:
+                response = self.arena_result_queue.get()
+                received_keys = tuple(response.get('routing_keys', ()))
+                expected_keys = tuple(self._arena_batch_routing_keys)
+                if received_keys != expected_keys:
+                    raise RuntimeError(
+                        'Arena inference response routing mismatch: '
+                        f'expected={expected_keys!r}, received={received_keys!r}'
+                    )
+        active_indices = self._arena_active_indices() if self._is_arena else range(self.batch_size)
+        for i in active_indices:
             self._set_worker_context(i, 'search_process')
             self._check_pause()
             index = self.batch_indices[i] if self._is_arena else i
@@ -513,7 +675,8 @@ class SelfPlayAgent(mp.Process):
 
     def playMoves(self):
         recording_enabled = getattr(self, "recording_enabled", False)
-        for i in range(self.batch_size):
+        active_indices = self._arena_active_indices() if self._is_arena else range(self.batch_size)
+        for i in active_indices:
             self._set_worker_context(i, 'play_move')
             self._check_pause()
             self.temps[i] = self.args.temp_scaling_fn(
@@ -721,6 +884,10 @@ class SelfPlayAgent(mp.Process):
                                 self.output_queue.put(sample)
                             if repeat > 1:
                                 self._telemetry_add('endgame_extra_samples', repeat - 1)
+
+            if self._is_arena:
+                self._recycle_arena_slot(i)
+                continue
 
             self.games[i] = self.game_cls()
             self.game_sequences[i] += 1

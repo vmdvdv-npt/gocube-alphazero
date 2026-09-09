@@ -176,6 +176,7 @@ def test_batched_arena_smoke_completes_with_four_heads_and_keeps_exploration_off
     ])
     game_cls, args = build_hardened_training_args(cli)
     args.cuda = False
+    args.workers = 1
     args._num_players = game_cls.num_players() + game_cls.has_draw()
     args.arena_batch_size = 4
     args.numMCTSSims = 1
@@ -202,7 +203,7 @@ def test_batched_arena_smoke_completes_with_four_heads_and_keeps_exploration_off
     assert len(winrates) == 2
     assert net_a.batch_calls > 0
     assert net_b.batch_calls > 0
-    assert arena.args.arena_batch_size == 1
+    assert arena.args.arena_batch_size == 4
     assert arena.args.numMCTSSims == 1
     assert arena.args.arenaMCTSSims == 1
     assert arena.args.probFastSim == 0.0

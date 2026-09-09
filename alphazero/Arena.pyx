@@ -2,6 +2,7 @@
 from alphazero.Game import GameState
 from alphazero.GenericPlayers import BasePlayer
 from alphazero.SelfPlayAgent import SelfPlayAgent
+from alphazero.arena_bookkeeping import arena_game_ids_by_worker
 from alphazero.pytorch_classification.utils import Bar, AverageMeter
 from alphazero.search_contract import KATAGO_PINNED_SEARCH_UTILITY_MODE, SearchOutput
 from alphazero.utils import dotdict
@@ -105,6 +106,7 @@ class Arena:
         self.no_results = 0
         self._player_color_results = []
         self._agents = []
+        self._batched_game_ids = set()
         self.stop_event = mp.Event()
         self.pause_event = mp.Event()
         self.__reset_color_results()
@@ -158,10 +160,26 @@ class Arena:
             num_games, self.draws if self.args.use_draws_for_winrate else 0
         ) for s in self.__player_stats]
 
-    def __record_batched_color_result(self, state, winstate, agent_id):
+    def __result_parts(self, result):
+        """Return result state, outcome, and its immutable color mapping."""
+
+        if hasattr(result, 'player_to_index'):
+            return result.final_state, result.winstate, list(result.player_to_index)
+        state, winstate, agent_id = result
+        return state, winstate, list(self._agents[int(agent_id)].player_to_index)
+
+    def __validate_result_identity(self, result):
+        if not hasattr(result, 'game_id'):
+            return
+        game_id = int(result.game_id)
+        if game_id in self._batched_game_ids:
+            raise RuntimeError(f'Batched Arena received duplicate game_id={game_id}')
+        self._batched_game_ids.add(game_id)
+
+    def __record_batched_color_result(self, state, winstate, player_to_index):
         if self.game_cls.num_players() != 2:
             return
-        player_to_index = list(self._agents[agent_id].player_to_index)
+        player_to_index = list(player_to_index)
         if len(player_to_index) < 2:
             return
         color_by_index = {
@@ -205,8 +223,9 @@ class Arena:
                     result = result_queue.get_nowait()
                 except Empty:
                     break
-                state, winstate, agent_id = result
-                self.__record_batched_color_result(state, winstate, agent_id)
+                self.__validate_result_identity(result)
+                state, winstate, player_to_index = self.__result_parts(result)
+                self.__record_batched_color_result(state, winstate, player_to_index)
                 has_draw_slot = len(winstate) > self.game_cls.num_players()
                 if has_draw_slot and winstate[-1]:
                     if getattr(state, 'terminal_kind', None) == 'no_result':
@@ -216,7 +235,7 @@ class Arena:
                 else:
                     for player, is_win in enumerate(winstate[:self.game_cls.num_players()]):
                         if is_win:
-                            index = self._agents[agent_id].player_to_index[player]
+                            index = player_to_index[player]
                             wins[index] += 1
                 result_count += 1
         else:
@@ -229,8 +248,9 @@ class Arena:
                         'Batched Arena result finalization expected '
                         f'{expected_count} remaining accepted results, but only received {result_count}'
                     ) from exc
-                state, winstate, agent_id = result
-                self.__record_batched_color_result(state, winstate, agent_id)
+                self.__validate_result_identity(result)
+                state, winstate, player_to_index = self.__result_parts(result)
+                self.__record_batched_color_result(state, winstate, player_to_index)
                 has_draw_slot = len(winstate) > self.game_cls.num_players()
                 if has_draw_slot and winstate[-1]:
                     if getattr(state, 'terminal_kind', None) == 'no_result':
@@ -240,7 +260,7 @@ class Arena:
                 else:
                     for player, is_win in enumerate(winstate[:self.game_cls.num_players()]):
                         if is_win:
-                            index = self._agents[agent_id].player_to_index[player]
+                            index = player_to_index[player]
                             wins[index] += 1
                 result_count += 1
 
@@ -311,6 +331,12 @@ class Arena:
                         f'player={player_index}, games={color_games}, '
                         f'final_games_played={final_games_played}'
                     )
+        if self._batched_game_ids and self._batched_game_ids != set(range(int(num))):
+            raise RuntimeError(
+                'Batched Arena game identity invariant violated: '
+                f'expected game IDs 0..{int(num) - 1}, '
+                f'received={sorted(self._batched_game_ids)}'
+            )
 
         self.games_played = final_games_played
         return final_games_played, results_accounted
@@ -417,6 +443,7 @@ class Arena:
         bar = Bar('Arena.play_games', max=num)
         end = time.time()
         self.__reset_stats()
+        self._batched_game_ids = set()
 
         if self.use_batched_mcts:
             self.__check_players_valid()
@@ -434,15 +461,11 @@ class Arena:
                 else getattr(self.args, 'search_utility_mode', 'legacy') == KATAGO_PINNED_SEARCH_UTILITY_MODE
             )
             point_count = int(self.game_cls.logical_topology().point_count) if score_aware else 0
-            if score_aware:
-                # The historical batched Arena's row->game mapping becomes
-                # ambiguous once multiple game slots in one worker finish at
-                # different times. One active game per worker preserves the
-                # existing scheduling while making the mapping exact.
-                self.args.arena_batch_size = 1
 
             self.args.gamesPerIteration = num
             self._agents = []
+            arena_game_ids = arena_game_ids_by_worker(int(num), int(self.args.workers))
+            self.args.arena_game_id_schedule = arena_game_ids
             observation_adapters = [
                 getattr(player, 'observation_adapter', None) for player in self.players
             ]
@@ -462,6 +485,7 @@ class Arena:
             ownership_tensors = []
             batch_ready = []
             batch_queues = []
+            batch_result_queues = []
             self.stop_event = mp.Event()
             self.pause_event = mp.Event()
             ready_queue = mp.Queue()
@@ -472,6 +496,7 @@ class Arena:
             for i in range(self.args.workers):
                 input_tensors = [[] for _ in range(self.game_cls.num_players())]
                 batch_queues.append(mp.Queue())
+                batch_result_queues.append(mp.Queue())
 
                 policy_tensors.append(torch.zeros(
                     [self.args.arena_batch_size, self.game_cls.action_size()]
@@ -506,6 +531,8 @@ class Arena:
                         score_tensor=score_tensors[i] if score_aware else None,
                         ownership_tensor=ownership_tensors[i] if score_aware else None,
                         observation_adapters=observation_adapters,
+                        arena_game_ids=arena_game_ids[i],
+                        arena_result_queue=batch_result_queues[i],
                     )
                 )
                 self._agents[i].daemon = True
@@ -525,9 +552,24 @@ class Arena:
                     score = []
                     ownership = []
                     data = batch_queues[id].get()
+                    routing_keys = None
+                    if isinstance(data, dict):
+                        routing_keys = data.get('routing_keys')
+                        data = data.get('batches')
+                    response_routing_keys = []
                     for player in range(len(self.players)):
                         batch = data[player]
                         if not isinstance(batch, list):
+                            if routing_keys is None:
+                                batch_keys = [None] * int(batch.size(0))
+                            else:
+                                batch_keys = list(routing_keys[player])
+                                if len(batch_keys) != int(batch.size(0)):
+                                    raise RuntimeError(
+                                        'Arena inference payload routing key count does not '
+                                        f'match model {player} batch rows'
+                                    )
+                            response_routing_keys.extend(batch_keys)
                             if score_aware:
                                 out = self.players[player].nn.process_for_search(batch)
                                 if not isinstance(out, SearchOutput):
@@ -545,11 +587,15 @@ class Arena:
                                 policy.append(p.to(policy_tensors[id].device))
                                 value.append(v.to(value_tensors[id].device))
 
-                    policy_tensors[id].copy_(torch.cat(policy))
-                    value_tensors[id].copy_(torch.cat(value))
+                    active_rows = len(response_routing_keys)
+                    policy_tensors[id][:active_rows].copy_(torch.cat(policy))
+                    value_tensors[id][:active_rows].copy_(torch.cat(value))
                     if score_aware:
-                        score_tensors[id].copy_(torch.cat(score))
-                        ownership_tensors[id].copy_(torch.cat(ownership))
+                        score_tensors[id][:active_rows].copy_(torch.cat(score))
+                        ownership_tensors[id][:active_rows].copy_(torch.cat(ownership))
+                    batch_result_queues[id].put({
+                        'routing_keys': tuple(response_routing_keys),
+                    })
                     batch_ready[id].set()
                 except Empty:
                     pass
@@ -610,6 +656,8 @@ class Arena:
             empty_queue(ready_queue)
             empty_queue(result_queue)
             for q in batch_queues:
+                empty_queue(q)
+            for q in batch_result_queues:
                 empty_queue(q)
 
             for _ in self._agents:

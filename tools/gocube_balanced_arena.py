@@ -4,6 +4,11 @@ import traceback
 from dataclasses import dataclass
 
 from alphazero.SelfPlayAgent import SelfPlayAgent
+from alphazero.arena_bookkeeping import (
+    arena_game_ids_by_worker,
+    model_a_color_for_game_id,
+    player_to_index_for_game_id,
+)
 from alphazero.envs.gocube.reproducibility import derive_worker_seed, seed_process
 
 
@@ -11,81 +16,64 @@ from alphazero.envs.gocube.reproducibility import derive_worker_seed, seed_proce
 class ArenaWorkerAssignment:
     worker_id: int
     quota: int
-    model_a_color: str
-    player_to_index: tuple[int, int]
+    game_ids: tuple[int, ...]
 
+    @property
+    def model_a_colors(self) -> tuple[str, ...]:
+        return tuple(model_a_color_for_game_id(game_id) for game_id in self.game_ids)
 
-def _split_quota(total: int, count: int) -> list[int]:
-    if count <= 0:
-        if total:
-            raise ValueError("cannot assign Arena games to an empty worker group")
-        return []
-    base, remainder = divmod(int(total), int(count))
-    return [base + (1 if index < remainder else 0) for index in range(count)]
+    @property
+    def player_to_indices(self) -> tuple[tuple[int, int], ...]:
+        return tuple(player_to_index_for_game_id(game_id) for game_id in self.game_ids)
 
+    @property
+    def model_a_color(self) -> str:
+        """Compatibility summary; active games use the per-game property."""
+
+        colors = set(self.model_a_colors)
+        if not colors:
+            return "mixed"
+        return next(iter(colors)) if len(colors) == 1 else "mixed"
+
+    @property
+    def player_to_index(self) -> tuple[int, int]:
+        """Compatibility summary for callers that only have one game."""
+
+        return self.player_to_indices[0] if self.player_to_indices else (0, 1)
 
 def arena_worker_assignments(total_games: int, workers: int) -> tuple[ArenaWorkerAssignment, ...]:
-    """Return a fixed-color worker schedule with an exact global color split.
-
-    Workers keep one model/color mapping for their whole lifetime, so the parent
-    process can safely interpret results without racing a child-side color flip.
-    The per-worker quotas make the aggregate schedule independent of worker
-    speed. For an even number of games, model A receives exactly half black and
-    half white games. For an odd number, the unavoidable imbalance is one game.
-    """
+    """Return a deterministic per-game schedule partitioned into worker quotas."""
     total_games = int(total_games)
     workers = int(workers)
     if total_games < 1:
         raise ValueError("Arena must contain at least one game")
     if workers < 1:
         raise ValueError("Arena must contain at least one worker")
-    if workers == 1 and total_games > 1:
-        raise ValueError(
-            "Balanced batched Arena with more than one game requires at least two workers"
-        )
-
-    black_games = (total_games + 1) // 2
-    white_games = total_games // 2
-    black_workers = (workers + 1) // 2
-    white_workers = workers - black_workers
-
-    black_quotas = _split_quota(black_games, black_workers)
-    white_quotas = _split_quota(white_games, white_workers)
-    assignments: list[ArenaWorkerAssignment] = []
-
-    for worker_id, quota in enumerate(black_quotas):
-        assignments.append(ArenaWorkerAssignment(worker_id, quota, "black", (0, 1)))
-    for offset, quota in enumerate(white_quotas):
-        worker_id = black_workers + offset
-        assignments.append(ArenaWorkerAssignment(worker_id, quota, "white", (1, 0)))
-
-    if len(assignments) != workers:
-        raise RuntimeError("Arena worker schedule did not cover every worker")
+    schedules = arena_game_ids_by_worker(total_games, workers)
+    assignments = tuple(
+        ArenaWorkerAssignment(worker_id, len(game_ids), tuple(game_ids))
+        for worker_id, game_ids in enumerate(schedules)
+    )
     if sum(item.quota for item in assignments) != total_games:
         raise RuntimeError("Arena worker quotas do not sum to the requested game count")
-    scheduled_black = sum(item.quota for item in assignments if item.model_a_color == "black")
-    scheduled_white = sum(item.quota for item in assignments if item.model_a_color == "white")
-    if scheduled_black != black_games or scheduled_white != white_games:
-        raise RuntimeError("Arena worker schedule does not satisfy the color-balance contract")
-    return tuple(assignments)
+    return assignments
 
 
 class BalancedArenaSelfPlayAgent(SelfPlayAgent):
-    """Checkpoint-Arena worker with deterministic color and game quota."""
+    """Checkpoint-Arena worker with deterministic per-game quota and colors."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self._is_arena:
             return
-        if self.batch_size != 1:
-            raise ValueError("Balanced checkpoint Arena requires exactly one active game per worker")
-        assignments = arena_worker_assignments(self.args.gamesPerIteration, self.args.workers)
-        assignment = assignments[int(self.id)]
-        self._arena_game_quota = int(assignment.quota)
-        # player_to_index[color] -> model index. Keep this mapping constant for
-        # the worker so the parent process always interprets queued results with
-        # the exact mapping that the child used during search.
-        self.player_to_index = list(assignment.player_to_index)
+        if self._arena_fixed_schedule:
+            self._arena_game_quota = len(self._arena_game_ids)
+        else:
+            assignments = arena_worker_assignments(
+                self.args.gamesPerIteration, self.args.workers
+            )
+            assignment = assignments[int(self.id)]
+            self._arena_game_quota = int(assignment.quota)
 
     def run(self):
         if not self._is_arena:
@@ -94,7 +82,11 @@ class BalancedArenaSelfPlayAgent(SelfPlayAgent):
             master_seed = int(getattr(self.args, "gocube_arena_seed", 0))
             seed_process(derive_worker_seed(master_seed, self.iteration, int(self.id), 0, 0))
             local_completed = 0
-            while not self.stop_event.is_set() and local_completed < self._arena_game_quota:
+            while (
+                not self.stop_event.is_set()
+                and local_completed < self._arena_game_quota
+                and self._arena_active_slots
+            ):
                 self._check_pause()
                 sims = self._select_search_sims()
                 for _ in range(sims):
@@ -107,14 +99,9 @@ class BalancedArenaSelfPlayAgent(SelfPlayAgent):
                 if self.stop_event.is_set():
                     break
 
-                # With checkpoint Arena batch_size=1, a finished game is
-                # replaced by a new game object inside SelfPlayAgent.playMoves.
-                # Object identity therefore gives an exact local completion
-                # count without reading the racy global games_played counter.
-                previous_game = self.games[0]
+                completed_before = self._arena_completed_count
                 self.playMoves()
-                if self.games[0] is not previous_game:
-                    local_completed += 1
+                local_completed += self._arena_completed_count - completed_before
 
             if local_completed != self._arena_game_quota and not self.stop_event.is_set():
                 raise RuntimeError(

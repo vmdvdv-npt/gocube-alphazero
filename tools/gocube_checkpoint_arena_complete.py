@@ -36,6 +36,11 @@ from alphazero.envs.gocube.integration.contract import (
 from alphazero.envs.gocube.observation import GoCubeObservationAdapter
 from alphazero.envs.gocube.production_contract import GOCUBE_KOMI, require_gocube_komi
 from alphazero.inference_batching import collect_ready_worker_ids
+from alphazero.arena_bookkeeping import (
+    arena_game_ids_by_worker,
+    flatten_routing_keys,
+    routing_keys_for_payload,
+)
 from alphazero.search_contract import SearchOutput
 from alphazero.utils import const_temp_scaling, get_iter_file
 
@@ -355,17 +360,23 @@ def _non_batched_summary(arena, game_cls, games: int, seed: int) -> dict[str, ob
 
 
 def _copy_search_output(output, worker_rows, policy_tensors, value_tensors, score_tensors, ownership_tensors) -> None:
+    normalized_worker_rows = []
+    for item in worker_rows:
+        if len(item) == 2:
+            normalized_worker_rows.append((item[0], item[1], ()))
+        else:
+            normalized_worker_rows.append((item[0], item[1], item[2]))
     policy = output.policy.detach().cpu()
     value = output.value.detach().cpu()
     score = output.score.detach().cpu() if output.score is not None else None
     ownership = output.ownership.detach().cpu() if output.ownership is not None else None
-    expected = sum(rows for _, rows in worker_rows)
+    expected = sum(rows for _, rows, _ in normalized_worker_rows)
     if score is None or ownership is None:
         raise RuntimeError("Checkpoint Arena requires score and ownership search heads")
     if not all(int(tensor.size(0)) == expected for tensor in (policy, value, score, ownership)):
         raise RuntimeError("Checkpoint Arena network returned inconsistent coalesced batch rows")
     offset = 0
-    for worker_id, rows in worker_rows:
+    for worker_id, rows, _ in normalized_worker_rows:
         end = offset + rows
         policy_tensors[worker_id][:rows].copy_(policy[offset:end])
         value_tensors[worker_id][:rows].copy_(value[offset:end])
@@ -374,13 +385,25 @@ def _copy_search_output(output, worker_rows, policy_tensors, value_tensors, scor
         offset = end
 
 
-def _drain_results(result_queue, agents, outcomes, lengths, diagnostics) -> None:
+def _result_parts(result, agents):
+    if hasattr(result, "player_to_index"):
+        return result.final_state, result.winstate, tuple(result.player_to_index)
+    final_state, winstate, agent_id = result
+    return final_state, winstate, tuple(agents[int(agent_id)].player_to_index)
+
+
+def _drain_results(result_queue, agents, outcomes, lengths, diagnostics, game_ids=None) -> None:
     while True:
         try:
-            final_state, winstate, agent_id = result_queue.get_nowait()
+            result = result_queue.get_nowait()
         except Empty:
             return
-        mapping = list(agents[int(agent_id)].player_to_index)
+        final_state, winstate, mapping = _result_parts(result, agents)
+        if game_ids is not None and hasattr(result, "game_id"):
+            game_id = int(result.game_id)
+            if game_id in game_ids:
+                raise RuntimeError(f"duplicate Arena result for game_id={game_id}")
+            game_ids.add(game_id)
         outcomes.append(_result_for_model_a(final_state, winstate, mapping))
         lengths.append(int(final_state.turns))
         diagnostics.append(_terminal_diagnostics(final_state))
@@ -391,7 +414,9 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
     random.seed(int(seed))
     torch.manual_seed(int(seed) & 0x7FFFFFFF)
     workers = int(eval_args.workers)
-    eval_args.arena_batch_size = 1
+    batch_size = int(eval_args.arena_batch_size)
+    if batch_size < 1:
+        raise ValueError("arena_batch_size must be at least one")
     eval_args.gamesPerIteration = int(games)
     point_count = int(game_cls.logical_topology().point_count)
     ready_queue = mp.Queue()
@@ -402,6 +427,8 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
     pause_event = mp.Event()
     batch_ready = [mp.Event() for _ in range(workers)]
     batch_queues = [mp.Queue() for _ in range(workers)]
+    batch_result_queues = [mp.Queue() for _ in range(workers)]
+    arena_game_ids = arena_game_ids_by_worker(int(games), workers)
     policy_tensors, value_tensors, score_tensors, ownership_tensors, agents = [], [], [], [], []
     observation_adapters = [
         getattr(player, "observation_adapter", None) for player in players
@@ -409,10 +436,10 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
     if not any(adapter is not None for adapter in observation_adapters):
         observation_adapters = None
     for worker_id in range(workers):
-        policy = torch.zeros([1, game_cls.action_size()])
-        value = torch.zeros([1, game_cls.num_players() + 1])
-        score = torch.zeros([1, 1])
-        ownership = torch.zeros([1, point_count, 3])
+        policy = torch.zeros([batch_size, game_cls.action_size()])
+        value = torch.zeros([batch_size, game_cls.num_players() + 1])
+        score = torch.zeros([batch_size, 1])
+        ownership = torch.zeros([batch_size, point_count, 3])
         for tensor in (policy, value, score, ownership):
             tensor.share_memory_()
             if bool(eval_args.cuda):
@@ -440,6 +467,8 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
             score_tensor=score,
             ownership_tensor=ownership,
             observation_adapters=observation_adapters,
+            arena_game_ids=arena_game_ids[worker_id],
+            arena_result_queue=batch_result_queues[worker_id],
         )
         agent.daemon = True
         agents.append(agent)
@@ -449,21 +478,30 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
     diagnostics: list[dict[str, object]] = []
     inference_rows = 0
     inference_calls = 0
+    completed_game_ids = set()
     try:
         while completed.value != workers:
             worker_ids = collect_ready_worker_ids(ready_queue, workers, wait_ms)
             if worker_ids:
                 data_by_worker = {worker_id: batch_queues[worker_id].get() for worker_id in worker_ids}
+                response_keys_by_worker = {worker_id: [] for worker_id in worker_ids}
                 for model_index, player in enumerate(players):
                     chunks = []
                     worker_rows = []
                     for worker_id in worker_ids:
-                        batch = data_by_worker[worker_id][model_index]
+                        payload = data_by_worker[worker_id]
+                        batch = payload['batches'][model_index]
                         if isinstance(batch, list):
                             continue
                         rows = int(batch.size(0))
+                        keys = routing_keys_for_payload(payload, model_index)
+                        if len(keys) != rows:
+                            raise RuntimeError(
+                                'Arena inference payload routing key count does not '
+                                f'match worker={worker_id} model={model_index} rows={rows}'
+                            )
                         chunks.append(batch)
-                        worker_rows.append((worker_id, rows))
+                        worker_rows.append((worker_id, rows, keys))
                     if not chunks:
                         continue
                     combined = chunks[0] if len(chunks) == 1 else torch.cat(chunks, dim=0)
@@ -471,11 +509,25 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
                     if not isinstance(output, SearchOutput):
                         raise RuntimeError("process_for_search() must return SearchOutput")
                     _copy_search_output(output, worker_rows, policy_tensors, value_tensors, score_tensors, ownership_tensors)
+                    for worker_id, _, keys in worker_rows:
+                        response_keys_by_worker[worker_id].extend(keys)
                     inference_rows += int(combined.size(0))
                     inference_calls += 1
                 for worker_id in worker_ids:
+                    expected_keys = flatten_routing_keys(
+                        routing_keys_for_payload(data_by_worker[worker_id], model_index)
+                        for model_index in range(len(players))
+                    )
+                    if tuple(response_keys_by_worker[worker_id]) != tuple(expected_keys):
+                        raise RuntimeError(
+                            'Arena coalescer dropped or reordered inference routing keys '
+                            f'for worker={worker_id}'
+                        )
+                    batch_result_queues[worker_id].put({
+                        'routing_keys': tuple(response_keys_by_worker[worker_id]),
+                    })
                     batch_ready[worker_id].set()
-            _drain_results(result_queue, agents, outcomes, lengths, diagnostics)
+            _drain_results(result_queue, agents, outcomes, lengths, diagnostics, completed_game_ids)
             dead = sum(not agent.is_alive() for agent in agents)
             if dead > int(completed.value):
                 raise RuntimeError("Checkpoint Arena worker exited before reporting completion")
@@ -488,23 +540,35 @@ def _coalesced_batched_summary(players, game_cls, eval_args, games: int, seed: i
             if agent.is_alive():
                 agent.terminate()
                 agent.join(timeout=2)
-        _drain_results(result_queue, agents, outcomes, lengths, diagnostics)
+        _drain_results(result_queue, agents, outcomes, lengths, diagnostics, completed_game_ids)
         while len(outcomes) < int(games):
             try:
-                final_state, winstate, agent_id = result_queue.get(timeout=0.25)
+                result = result_queue.get(timeout=0.25)
             except Empty:
                 break
-            mapping = list(agents[int(agent_id)].player_to_index)
+            final_state, winstate, mapping = _result_parts(result, agents)
+            if hasattr(result, "game_id"):
+                game_id = int(result.game_id)
+                if game_id in completed_game_ids:
+                    raise RuntimeError(f"duplicate Arena result for game_id={game_id}")
+                completed_game_ids.add(game_id)
             outcomes.append(_result_for_model_a(final_state, winstate, mapping))
             lengths.append(int(final_state.turns))
             diagnostics.append(_terminal_diagnostics(final_state))
     if len(outcomes) != int(games):
         raise RuntimeError(f"coalesced Arena completed {len(outcomes)} games, expected {games}")
+    if completed_game_ids and completed_game_ids != set(range(int(games))):
+        raise RuntimeError(
+            'coalesced Arena returned an unexpected game ID set: '
+            f'expected=0..{int(games) - 1}, received={sorted(completed_game_ids)}'
+        )
     summary = _summarize_outcomes(outcomes)
     summary.update(_summarize_endgame(diagnostics))
     summary["average_game_length"] = sum(lengths) / len(lengths) if lengths else 0.0
     summary["inference_calls"] = inference_calls
     summary["mean_inference_batch_rows"] = inference_rows / inference_calls if inference_calls else 0.0
+    summary["completed_game_ids"] = sorted(completed_game_ids)
+    summary["unique_game_ids"] = len(completed_game_ids)
     return summary
 
 
@@ -599,6 +663,7 @@ def main(argv=None) -> int:
     parser.add_argument("--games", type=int, default=64)
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--batched", action="store_true")
+    parser.add_argument("--arena-batch-size", type=int, default=4)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--arena-inference-batch-wait-ms", type=float, default=1.0)
@@ -611,6 +676,8 @@ def main(argv=None) -> int:
         parser.error("--games must be positive")
     if args.workers < 1 or args.workers > 16:
         parser.error("--workers must be within 1..16")
+    if args.arena_batch_size < 1:
+        parser.error("--arena-batch-size must be positive")
     if args.arena_inference_batch_wait_ms < 0:
         parser.error("--arena-inference-batch-wait-ms must be non-negative")
 
@@ -641,7 +708,8 @@ def main(argv=None) -> int:
     eval_args.startTemp = 0.0
     eval_args.arenaTemp = 0.0
     eval_args.arenaBatched = bool(args.batched)
-    eval_args.arena_batch_size = 1
+    eval_args.arena_batch_size = int(args.arena_batch_size)
+    eval_args.gocube_arena_seed = int(args.seed)
     eval_args.temp_scaling_fn = const_temp_scaling
     eval_args.use_draws_for_winrate = True
     eval_args.arena_inference_batch_wait_ms = float(args.arena_inference_batch_wait_ms)
@@ -704,12 +772,19 @@ def main(argv=None) -> int:
         "wall_time_seconds": float(elapsed),
         "games_per_second": actual_games / elapsed if elapsed > 0.0 else 0.0,
         "workers": int(args.workers),
+        "arena_batch_size": int(args.arena_batch_size),
+        "max_active_games": (
+            min(int(args.games), int(args.workers) * int(args.arena_batch_size))
+            if args.batched else 1
+        ),
         "batched": evaluation_mode == "batched-coalesced",
         "evaluation_mode": evaluation_mode,
         "device": device,
         "arena_inference_batch_wait_ms": float(args.arena_inference_batch_wait_ms),
         "inference_calls": summary.get("inference_calls"),
         "mean_inference_batch_rows": summary.get("mean_inference_batch_rows"),
+        "completed_game_ids": summary.get("completed_game_ids"),
+        "unique_game_ids": summary.get("unique_game_ids"),
         "heldout_suite": str(args.heldout_suite) if args.heldout_suite else None,
         "paired_color_swaps": bool(summary.get("paired_color_swaps", False)),
         "cuda_peak_memory_mib": torch.cuda.max_memory_allocated() / (1024.0 * 1024.0) if device == "cuda" else None,

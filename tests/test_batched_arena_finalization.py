@@ -6,6 +6,7 @@ import pytest
 from torch import multiprocessing as mp
 
 from alphazero.Arena import Arena
+from alphazero.arena_bookkeeping import ArenaResult
 from alphazero.SelfPlayAgent import SelfPlayAgent
 from alphazero.utils import dotdict
 
@@ -128,6 +129,93 @@ def test_batched_arena_finalization_preserves_draw_and_no_result_accounting(
     assert arena.draws == expected_draws
     assert arena.no_results == expected_no_results
     assert sum(arena.wins()) + arena.draws + arena.no_results == 2
+
+
+def test_result_attribution_uses_immutable_game_snapshot_not_current_worker_mapping():
+    arena = _new_arena()
+    result_queue = Queue()
+    result_queue.put(ArenaResult(
+        final_state=_ResultState(),
+        winstate=np.array([True, False, False]),
+        game_id=0,
+        worker_id=0,
+        slot_id=1,
+        generation=3,
+        model_a_color="white",
+        player_to_index=(1, 0),
+    ))
+    # The worker can already have recycled the slot and changed this mutable
+    # compatibility attribute by the time the parent accounts for the result.
+    arena._agents[0].player_to_index = [0, 1]
+    games_played = mp.Value('i', 1)
+
+    final_games_played, results_accounted = arena._Arena__finalize_batched_results(
+        result_queue,
+        games_played,
+        results_accounted=0,
+        num=1,
+    )
+
+    assert (final_games_played, results_accounted) == (1, 1)
+    assert arena.wins() == [0, 1]
+    assert arena.player_color_results(0)["white"]["losses"] == 1
+    assert arena.player_color_results(1)["black"]["wins"] == 1
+
+
+def test_out_of_order_game_results_keep_color_and_winner_attribution():
+    arena = _new_arena()
+    result_queue = Queue()
+    # Results intentionally arrive in a different order from their global IDs.
+    for game_id in (3, 1, 2, 0):
+        mapping = (1, 0) if game_id % 2 else (0, 1)
+        result_queue.put(ArenaResult(
+            final_state=_ResultState(),
+            winstate=np.array([True, False, False]),
+            game_id=game_id,
+            worker_id=game_id % 2,
+            slot_id=game_id % 2,
+            generation=0,
+            model_a_color="white" if game_id % 2 else "black",
+            player_to_index=mapping,
+        ))
+    games_played = mp.Value('i', 4)
+
+    final_games_played, results_accounted = arena._Arena__finalize_batched_results(
+        result_queue,
+        games_played,
+        results_accounted=0,
+        num=4,
+    )
+
+    assert (final_games_played, results_accounted) == (4, 4)
+    assert arena.wins() == [2, 2]
+    assert arena.player_color_results(0)["black"]["games"] == 2
+    assert arena.player_color_results(0)["white"]["games"] == 2
+
+
+def test_duplicate_game_result_is_rejected_before_double_accounting():
+    arena = _new_arena()
+    result_queue = Queue()
+    result = ArenaResult(
+        final_state=_ResultState(),
+        winstate=np.array([True, False, False]),
+        game_id=0,
+        worker_id=0,
+        slot_id=0,
+        generation=0,
+        model_a_color="black",
+        player_to_index=(0, 1),
+    )
+    result_queue.put(result)
+    result_queue.put(result)
+
+    with pytest.raises(RuntimeError, match="duplicate game_id"):
+        arena._Arena__finalize_batched_results(
+            result_queue,
+            mp.Value('i', 2),
+            results_accounted=0,
+            num=2,
+        )
 
 
 def test_non_recording_rejected_terminal_game_is_not_published():
