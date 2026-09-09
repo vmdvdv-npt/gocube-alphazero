@@ -14,6 +14,7 @@ __all__ = [
     "ResolvedGoCubeContract",
     "resolve_model_contract",
     "resolve_model_contract_from_metadata",
+    "resolve_semantic_game_class_from_contract",
 ]
 
 
@@ -29,18 +30,20 @@ def __getattr__(name):
         return {"GoCubeAlphaZeroService": GoCubeAlphaZeroService, "PROTOCOL_VERSION": PROTOCOL_VERSION}[name]
     if name in {
         "GoCubeModelContract", "ResolvedGoCubeContract", "resolve_model_contract",
-        "resolve_model_contract_from_metadata",
+        "resolve_model_contract_from_metadata", "resolve_semantic_game_class_from_contract",
     }:
         from .contract import (
             GoCubeModelContract,
             ResolvedGoCubeContract,
             resolve_model_contract,
             resolve_model_contract_from_metadata,
+            resolve_semantic_game_class_from_contract,
         )
         return {
             "GoCubeModelContract": GoCubeModelContract,
             "ResolvedGoCubeContract": ResolvedGoCubeContract,
             "resolve_model_contract": resolve_model_contract,
             "resolve_model_contract_from_metadata": resolve_model_contract_from_metadata,
+            "resolve_semantic_game_class_from_contract": resolve_semantic_game_class_from_contract,
         }[name]
     raise AttributeError(name)

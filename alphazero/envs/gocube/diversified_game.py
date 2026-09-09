@@ -60,6 +60,9 @@ def sample_fork_depth(rng, *, kind: str, move_count: int, point_count: int,
 
 
 class _DiversifiedStartMixin:
+    # Diversification changes episode-start semantics while retaining the
+    # pinned game implementation used by production profiles.
+    GOCUBE_SEMANTIC_GAME_VARIANT = "diversified_pinned"
     _PLAIN_FORK_POOL = []
 
     def __init__(self, *args, **kwargs):

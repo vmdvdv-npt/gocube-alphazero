@@ -3,7 +3,11 @@ from alphazero.pytorch_classification.utils import Bar, AverageMeter
 from alphazero.Game import GameState
 from alphazero.search_contract import SearchOutput
 from alphazero.utils import dotdict
-from alphazero.envs.gocube.integration.contract import ContractError, resolve_model_contract
+from alphazero.envs.gocube.integration.contract import (
+    ContractError,
+    legacy_v1_network_architecture_fingerprint,
+    resolve_model_contract,
+)
 from threading import Event
 from abc import ABC, abstractmethod
 from typing import Tuple, Optional
@@ -60,7 +64,7 @@ _TERMINATION_CONTRACT_ARG_KEYS = (
 # treated as mismatches.
 _S2_MODEL_CONTRACT_KEYS = frozenset({
     'gocube_model_contract_id', 'gocube_model_contract_version',
-    'gocube_game_class_id', 'gocube_rules_implementation',
+    'gocube_game_class_id', 'gocube_semantic_game_variant', 'gocube_rules_implementation',
     'gocube_observation_shape', 'gocube_action_schema', 'gocube_action_size',
     'gocube_point_count', 'gocube_point_order_fingerprint',
     'gocube_adjacency_fingerprint', 'gocube_topology_fingerprint',
@@ -382,6 +386,21 @@ class NNetWrapper(BaseWrapper):
     def _validate_saved_contract(self, saved_args, allow_legacy_search_contract=False):
         expected = self._checkpoint_contract()
         strict_v3 = expected.get('gocube_terminal_adjudicator') == 'gocube-katago-japanese-v3'
+        saved_contract_version = _optional_arg(saved_args, 'gocube_model_contract_version', _MISSING)
+        if saved_contract_version is _MISSING:
+            nested_contract = _optional_arg(saved_args, 'gocube_model_contract', None)
+            if isinstance(nested_contract, dict):
+                saved_contract_version = nested_contract.get(
+                    'contractVersion', nested_contract.get('contract_version', _MISSING)
+                )
+        legacy_v1_architecture_fingerprint = None
+        if (
+            expected.get('gocube_model_contract_version') == 2
+            and saved_contract_version == 1
+        ):
+            legacy_v1_architecture_fingerprint = (
+                legacy_v1_network_architecture_fingerprint(self.game_cls, saved_args)
+            )
         for key, value in expected.items():
             saved_value = _optional_arg(saved_args, key, _MISSING)
             if saved_value is _MISSING:
@@ -391,6 +410,24 @@ class NNetWrapper(BaseWrapper):
                     continue
                 if strict_v3:
                     raise ValueError(f'Checkpoint missing required GoCube V3 metadata: {key}')
+                continue
+            if (
+                key == 'gocube_model_contract_version'
+                and saved_value == 1
+                and value == 2
+            ):
+                continue
+            if (
+                key == 'gocube_model_contract_id'
+                and saved_value == 'gocube-model-contract-v1'
+                and value == 'gocube-model-contract-v2'
+            ):
+                continue
+            if (
+                key == 'gocube_network_architecture_fingerprint'
+                and legacy_v1_architecture_fingerprint is not None
+                and saved_value == legacy_v1_architecture_fingerprint
+            ):
                 continue
             if saved_value != value:
                 raise ValueError(

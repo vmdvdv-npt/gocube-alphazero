@@ -2,7 +2,9 @@
 
 GoCube model compatibility is resolved once at the training boundary.  The
 concrete training game class and its effective network arguments produce the
-`gocube-model-contract-v1` object.  The same object is recorded in
+`gocube-model-contract-v2` object.  Contract version 2 adds the explicit
+`semanticGameVariant` identity; version 1 checkpoints are accepted only when
+their persisted exact `gameClassId` proves that identity.  The same object is recorded in
 `gocube-run.json` as `modelContract`, in the rich `run-manifest.json` and
 `effective-config.json` artifacts as `model_contract`, and as flat
 `gocube_*` fields plus `gocube_model_contract` in checkpoint args.
@@ -10,6 +12,7 @@ concrete training game class and its effective network arguments produce the
 The contract includes:
 
 - rules implementation, terminal adjudicator, rules fingerprint, and komi;
+- semantic game variant (`plain`, `pinned`, or `diversified_pinned`);
 - observation schema and shape;
 - action schema and action count;
 - topology kind, size, point count, canonical PointId-order fingerprint, and
@@ -21,6 +24,13 @@ The contract includes:
 PointId sequence.  `adjacency_fingerprint` is the digest of the neighbor table
 in that sequence.  They are deterministic and do not use Python's process-
 dependent `hash()`.
+
+During V1-to-V2 migration, the loader also recomputes the exact V1 network
+architecture fingerprint. Plain `train.py` V1 checkpoints are validated
+against the pre-save hash (before the derived `gocube_network_architecture`
+field was copied into checkpoint args); production profile classes retain
+their explicit class-level architecture ID in that legacy computation. A V1
+fingerprint is accepted only when this legacy hash matches exactly.
 
 ## Production model profiles
 
@@ -53,6 +63,31 @@ Conflicts fail closed with the field, saved value, and expected value.  A
 topology/size-only resolver is reserved for explicit historical V1/V2/V3
 manifests, where the terminal-adjudicator version is part of the legacy
 semantics.
+
+## Semantic-game restoration
+
+The supported semantic identities are:
+
+- `plain`: the direct Japanese V3 training class;
+- `pinned`: the pinned pass/endgame observation and episode semantics;
+- `diversified_pinned`: pinned semantics plus the production synthetic-start
+  diversification curriculum.
+
+Baseline and G1 are model/profile identities over the same
+`diversified_pinned` semantic game.  Arena first reads the checkpoint
+contract, resolves topology and size, selects the class factory named by
+`semanticGameVariant`, and recomputes the semantic contract.  It then compares
+rules implementation and fingerprint, action schema/size, topology and all
+point/adjacency fingerprints, terminal adjudicator, semantic variant, and
+komi before starting a game.  Observation/model profile compatibility is
+checked independently for each loaded network.  Thus a plain checkpoint is
+never opened as diversified merely because it is Cube 3 or Cube 4, and an
+ambiguous legacy record is rejected instead of guessed.
+
+To add a semantic variant, add a stable variant token to the contract schema,
+register its concrete class factory in the contract resolver, set the token on
+the class, and add matrix plus negative tests.  Do not infer it from topology,
+observation-channel count, run name, or filename.
 
 The explicit G1 profile records the structural observation contract with shape
 `(20, 96, 1)` for Cube 4 and architecture ID
