@@ -726,6 +726,51 @@ def _class_matches_metadata(game_cls, metadata: Any) -> bool:
     return True
 
 
+def _explicit_production_profile_game_class(metadata: Any):
+    """Resolve the named production profile for flat, pre-save args.
+
+    ``build_katago_training_args`` intentionally keeps the effective training
+    config free of checkpoint-only class identity fields.  Its named B0/B1
+    profile is nevertheless an explicit semantic contract: both production
+    profiles train with the diversified-pinned episode semantics.  Use that
+    declaration only for the otherwise ambiguous in-memory args path; saved
+    checkpoints carry the exact class id and semantic variant directly.
+    """
+
+    profile = _get(metadata, "gocube_model_profile", None)
+    if profile not in {"baseline", "g1"}:
+        return None
+    topology_kind = _get(metadata, "gocube_topology", None)
+    size = _get(metadata, "gocube_size", None)
+    if topology_kind is None or size is None:
+        return None
+
+    from alphazero.envs.gocube.diversified_game import (
+        diversified_baseline_pinned_game_class,
+        diversified_structural_pinned_game_class,
+    )
+    from alphazero.envs.gocube.game import game_class
+
+    try:
+        base = game_class(str(topology_kind), int(size), "japanese")
+        factories = {
+            "baseline": diversified_baseline_pinned_game_class,
+            "g1": diversified_structural_pinned_game_class,
+        }
+        candidate = factories[str(profile)](base)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ContractError(
+            "Unsupported GoCube production profile metadata: "
+            f"profile={profile!r}, topology={topology_kind!r}, size={size!r}"
+        ) from exc
+    if not _class_matches_metadata(candidate, metadata):
+        raise ContractError(
+            "GoCube production profile metadata conflicts with its explicit "
+            f"{profile!r} model class"
+        )
+    return candidate
+
+
 def resolve_game_class_from_contract(contract: ResolvedGoCubeContract):
     candidates = _candidate_game_classes()
     exact = [candidate for candidate in candidates if _class_id(candidate) == contract.game_class_id]
@@ -883,6 +928,17 @@ def resolve_model_contract_from_metadata(metadata: Any, *, fallback: ResolvedGoC
         if fallback is not None:
             return fallback
         raise ContractError("Checkpoint metadata does not identify a supported GoCube inference contract")
+    if len(candidates) != 1:
+        production_profile_class = None
+        if game_class_id is None:
+            production_profile_class = _explicit_production_profile_game_class(metadata)
+        if production_profile_class is not None:
+            candidates = (production_profile_class,)
+        else:
+            raise ContractError(
+                "Checkpoint metadata does not identify one semantic game variant; "
+                "an exact gocube_game_class_id or semantic variant is required"
+            )
     if len(candidates) != 1:
         raise ContractError(
             "Checkpoint metadata does not identify one semantic game variant; "
