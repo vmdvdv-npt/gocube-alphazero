@@ -93,7 +93,12 @@ def _resolve_checkpoint_contract(saved_args, label: str):
         computed = resolve_model_contract(model_game_cls, saved_args)
     except (ContractError, TypeError, ValueError) as exc:
         raise ValueError(f"Checkpoint {label} has invalid saved model contract: {exc}") from exc
-    differences = contract_compatibility_differences(contract, computed)
+    differences = contract_compatibility_differences(
+        contract,
+        computed,
+        legacy_game_cls=model_game_cls,
+        legacy_args=saved_args,
+    )
     if differences:
         field, (saved, expected) = next(iter(differences.items()))
         raise ValueError(

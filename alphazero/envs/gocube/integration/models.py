@@ -284,19 +284,32 @@ class CheckpointModelLoader:
                 contract = saved_contract or fallback
                 if saved_args is not None:
                     _validate_descriptor_against_contract(descriptor, contract)
+                cls = resolve_game_class_from_contract(contract)
                 if requested_contract is not None and contract_compatibility_differences(
-                    contract, requested_contract
+                    contract,
+                    requested_contract,
+                    legacy_game_cls=cls,
+                    legacy_args=saved_args,
                 ):
-                    differences = contract_compatibility_differences(contract, requested_contract)
+                    differences = contract_compatibility_differences(
+                        contract,
+                        requested_contract,
+                        legacy_game_cls=cls,
+                        legacy_args=saved_args,
+                    )
                     field, (saved, expected) = next(iter(differences.items()))
                     raise CheckpointMetadataInvalid(
                         f"Checkpoint GoCube contract mismatch for {_contract_error_field(field)}: "
                         f"saved={saved!r}, expected={expected!r}"
                     )
-                cls = resolve_game_class_from_contract(contract)
                 if saved_args is not None:
                     computed = resolve_model_contract(cls, saved_args)
-                    differences = contract_compatibility_differences(contract, computed)
+                    differences = contract_compatibility_differences(
+                        contract,
+                        computed,
+                        legacy_game_cls=cls,
+                        legacy_args=saved_args,
+                    )
                     if differences:
                         field, (saved, expected) = next(iter(differences.items()))
                         raise CheckpointMetadataInvalid(

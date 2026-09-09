@@ -1,9 +1,12 @@
 """Contract-driven semantic game restoration regressions."""
 
 from copy import deepcopy
+import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 from alphazero.envs.gocube.diversified_game import (
     diversified_baseline_pinned_game_class,
@@ -27,6 +30,7 @@ from alphazero.envs.gocube.integration.contract import (
     resolve_game_class_from_contract,
     resolve_model_contract,
     resolve_model_contract_from_metadata,
+    legacy_v1_network_architecture_fingerprint,
     resolve_semantic_game_class_from_contract,
 )
 from alphazero.envs.gocube.pinned_game import pinned_game_class
@@ -215,3 +219,116 @@ def test_plain_training_checkpoint_uses_official_arena_resolution(tmp_path):
         "cpu",
     )
     assert loaded.game_cls is Cube3JapaneseGame
+
+
+def _b19_plain_architecture_fingerprint(args):
+    """Independent copy of the V1 pre-save architecture hash algorithm."""
+
+    keys = (
+        "nnet_type", "num_channels", "depth", "value_head_channels",
+        "policy_head_channels", "input_fc_layers", "value_dense_layers",
+        "policy_dense_layers", "score_dense_layers", "gocube_auxiliary_targets",
+        "gocube_model_profile", "gocube_network_architecture",
+        "gocube_structural_feature_schema", "gocube_structural_feature_channels",
+    )
+    architecture = {
+        key: args.get(key)
+        for key in keys
+        if key in args and args.get(key) is not None
+    }
+    # b19ff0e computed the plain train.py contract before the serializer added
+    # this derived flat field to saved args.
+    architecture.pop("gocube_network_architecture", None)
+    return hashlib.sha256(
+        json.dumps(
+            architecture,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def test_real_b19_v1_plain_checkpoint_migrates_through_arena_and_network_load(tmp_path):
+    """A V1 payload must verify its old fingerprint, then load normally."""
+
+    from alphazero.NNetWrapper import NNetWrapper
+    from alphazero.envs.gocube.train import build_training_args
+    from tools import gocube_checkpoint_arena as checkpoint_arena
+
+    cli = SimpleNamespace(
+        topology="cube",
+        size=3,
+        workers=1,
+        sims=1,
+        arena_sims=1,
+        games_per_iteration=1,
+        iterations=1,
+        train_batch_size=1,
+        train_steps_per_iteration=1,
+        fast_game_prob=0.0,
+        endgame_sample_weight=1,
+        inference_batch_wait_ms=0.0,
+        no_arena=True,
+        model_gating=False,
+        smoke=True,
+        run_name="b19-v1-plain-contract",
+    )
+    game_cls, args = build_training_args(cli)
+    args = args.copy()
+    args.cuda = False
+
+    # Use real current weights, but serialize their args exactly as the V1
+    # contract writer did: V1 metadata and the pre-save architecture hash.
+    model = NNetWrapper(game_cls, args)
+    current_contract = resolve_model_contract(game_cls, args)
+    legacy_fingerprint = _b19_plain_architecture_fingerprint(args)
+    assert legacy_fingerprint == legacy_v1_network_architecture_fingerprint(game_cls, args)
+    assert legacy_fingerprint != current_contract.network_architecture_fingerprint
+
+    v1_contract = current_contract.to_dict()
+    v1_contract["contractId"] = "gocube-model-contract-v1"
+    v1_contract["contractVersion"] = 1
+    v1_contract.pop("semanticGameVariant")
+    v1_contract["networkArchitectureFingerprint"] = legacy_fingerprint
+
+    saved_args = args.copy()
+    saved_fields = current_contract.to_checkpoint_fields()
+    saved_fields["gocube_model_contract_id"] = "gocube-model-contract-v1"
+    saved_fields["gocube_model_contract_version"] = 1
+    saved_fields.pop("gocube_semantic_game_variant")
+    saved_fields["gocube_network_architecture_fingerprint"] = legacy_fingerprint
+    saved_fields["gocube_model_contract"] = v1_contract
+    saved_args.update(saved_fields)
+
+    checkpoint_path = tmp_path / "iteration-0000.pkl"
+    torch.save(
+        {
+            "state_dict": model.nnet.state_dict(),
+            "opt_state": model.optimizer.state_dict(),
+            "sch_state": model.scheduler.state_dict(),
+            "args": saved_args,
+        },
+        checkpoint_path,
+    )
+
+    payload = checkpoint_arena._load_payload(checkpoint_path)
+    migrated_contract, model_game_cls = checkpoint_arena._resolve_checkpoint_contract(
+        payload["args"], "real b19 V1 plain checkpoint"
+    )
+    assert migrated_contract.contract_version == 1
+    assert migrated_contract.semantic_game_variant == "plain"
+    assert model_game_cls is game_cls
+
+    broken_args = saved_args.copy()
+    broken_contract = deepcopy(v1_contract)
+    broken_contract["networkArchitectureFingerprint"] = "tampered-v1-fingerprint"
+    broken_args["gocube_network_architecture_fingerprint"] = "tampered-v1-fingerprint"
+    broken_args["gocube_model_contract"] = broken_contract
+    with pytest.raises(ValueError, match="network_architecture_fingerprint"):
+        checkpoint_arena._resolve_checkpoint_contract(
+            broken_args, "tampered b19 V1 plain checkpoint"
+        )
+
+    loaded = checkpoint_arena._load_network(model_game_cls, checkpoint_path, "cpu")
+    assert loaded.game_cls is game_cls

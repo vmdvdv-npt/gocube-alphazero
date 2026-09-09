@@ -25,6 +25,13 @@ PointId sequence.  `adjacency_fingerprint` is the digest of the neighbor table
 in that sequence.  They are deterministic and do not use Python's process-
 dependent `hash()`.
 
+During V1-to-V2 migration, the loader also recomputes the exact V1 network
+architecture fingerprint. Plain `train.py` V1 checkpoints are validated
+against the pre-save hash (before the derived `gocube_network_architecture`
+field was copied into checkpoint args); production profile classes retain
+their explicit class-level architecture ID in that legacy computation. A V1
+fingerprint is accepted only when this legacy hash matches exactly.
+
 ## Production model profiles
 
 The production KataGo training path has one explicit architecture selector:

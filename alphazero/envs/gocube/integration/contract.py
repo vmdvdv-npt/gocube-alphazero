@@ -209,6 +209,60 @@ def _architecture_id(args: Any, game_cls=None) -> str:
     return f"gocube-{nnet_type}-v1" if nnet_type else "gocube-network-legacy"
 
 
+def legacy_v1_network_architecture_fingerprint(game_cls, args: Any = None) -> str:
+    """Recompute the architecture fingerprint written by the V1 serializer.
+
+    The V1 checkpoint writer resolved the contract before copying its flat
+    contract fields into saved args.  Plain ``train.py`` classes did not have
+    a class-level architecture id, so the copied
+    ``gocube_network_architecture`` was absent from the V1 fingerprint even
+    though it is present in the saved args.  Production B0/B1 classes do have
+    an explicit class-level id and therefore retain that field in the legacy
+    computation, exactly as V1 did.
+
+    This helper is deliberately separate from the current fingerprint
+    algorithm: callers may accept a V1 value only after this exact legacy hash
+    matches the saved contract.
+    """
+
+    nnet_type = _get(args, "nnet_type", None)
+    keys = (
+        "nnet_type", "num_channels", "depth", "value_head_channels",
+        "policy_head_channels", "input_fc_layers", "value_dense_layers",
+        "policy_dense_layers", "score_dense_layers", "gocube_auxiliary_targets",
+        "gocube_model_profile", "gocube_network_architecture",
+        "gocube_structural_feature_schema", "gocube_structural_feature_channels",
+    )
+    architecture = (
+        {key: _get(args, key) for key in keys if _get(args, key, None) is not None}
+        if nnet_type is not None
+        else {}
+    )
+    if game_cls is not None and hasattr(game_cls, "GOCUBE_MODEL_PROFILE"):
+        architecture.setdefault("gocube_model_profile", str(game_cls.GOCUBE_MODEL_PROFILE))
+    if game_cls is not None and hasattr(game_cls, "GOCUBE_NETWORK_ARCHITECTURE_ID"):
+        architecture.setdefault(
+            "gocube_network_architecture",
+            str(game_cls.GOCUBE_NETWORK_ARCHITECTURE_ID),
+        )
+    if game_cls is not None and hasattr(game_cls, "STRUCTURAL_FEATURE_SCHEMA"):
+        architecture.setdefault(
+            "gocube_structural_feature_schema",
+            getattr(game_cls, "STRUCTURAL_FEATURE_SCHEMA"),
+        )
+    if game_cls is not None and hasattr(game_cls, "STRUCTURAL_FEATURE_CHANNELS"):
+        architecture.setdefault(
+            "gocube_structural_feature_channels",
+            int(getattr(game_cls, "STRUCTURAL_FEATURE_CHANNELS", 2)),
+        )
+    if game_cls is None or not hasattr(game_cls, "GOCUBE_NETWORK_ARCHITECTURE_ID"):
+        # This is the only field added to a plain V1 checkpoint after its
+        # fingerprint was computed.  Do not remove it for explicit production
+        # profile classes: their V1 algorithm included the class-derived id.
+        architecture.pop("gocube_network_architecture", None)
+    return _fingerprint(architecture)
+
+
 def _search_contract_id(args: Any) -> str:
     return str(
         _get(args, "gocube_katago_search_contract", None)
@@ -444,18 +498,31 @@ class ResolvedGoCubeContract:
 def contract_compatibility_differences(
     saved: ResolvedGoCubeContract,
     current: ResolvedGoCubeContract,
+    *,
+    legacy_game_cls=None,
+    legacy_args: Any = None,
 ) -> dict[str, tuple[object, object]]:
     """Compare contracts while allowing the additive V1 -> V2 migration.
 
     V1 persisted an exact ``gameClassId``.  V2 adds the explicit semantic
-    variant; old checkpoints are migrated from that exact id, so only the
-    version number itself is allowed to differ during this transition.
+    variant; old checkpoints are migrated from that exact id.  V1 plain
+    checkpoints also used the pre-save architecture fingerprint algorithm;
+    that one field is allowed to differ only when the exact legacy hash is
+    recomputed from the saved args and matches the V1 value.
     """
 
     differences = saved.differences(current)
     if {saved.contract_version, current.contract_version} == {1, MODEL_CONTRACT_VERSION}:
         differences.pop("contract_id", None)
         differences.pop("contract_version", None)
+        if (
+            "network_architecture_fingerprint" in differences
+            and legacy_game_cls is not None
+            and legacy_args is not None
+            and saved.network_architecture_fingerprint
+            == legacy_v1_network_architecture_fingerprint(legacy_game_cls, legacy_args)
+        ):
+            differences.pop("network_architecture_fingerprint", None)
     return differences
 
 
