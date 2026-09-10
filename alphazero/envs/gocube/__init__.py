@@ -5,6 +5,11 @@ from .core import (
     initial_state, make_topology, score_position, state_from_point_ids,
     stone_groups, torus_topology, valid_moves,
 )
+from .golden_scoring import (
+    GOLDEN_KOMI, GoldenAdjudication, GoldenArea, GoldenOutcome, GoldenScore,
+    GoldenScoreMismatch, GoldenScoringError, adjudicate_game_state,
+    adjudicate_v3_terminal, assert_production_agreement,
+)
 from .endgame import (
     ALIVE_ALGORITHM, AUTOMATIC_DEAD_ALGORITHM, AUTOMATIC_SEKI_ALGORITHM,
     EndgameGroupProposal, assisted_endgame_proposal, proposal_point_ids,
