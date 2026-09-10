@@ -22,7 +22,19 @@ def make_checkpoint(run_dir, iteration=0):
     return path
 
 
-def test_ensure_known_runs_registers_present_run_and_skips_missing(tmp_path):
+def test_default_launcher_does_not_implicitly_relabel_ambiguous_legacy_runs(tmp_path):
+    checkpoint_dir = tmp_path / "checkpoint"
+    checkpoint_dir.mkdir()
+    run_dir = checkpoint_dir / "gocube-cube4-stage4-v1"
+    make_checkpoint(run_dir, 25)
+
+    ready = ensure_known_runs(str(checkpoint_dir), emit=lambda _message: None)
+
+    assert ready == ()
+    assert not (run_dir / "gocube-run.json").exists()
+
+
+def test_ensure_known_runs_registers_explicit_present_run_and_skips_missing(tmp_path):
     checkpoint_dir = tmp_path / "checkpoint"
     checkpoint_dir.mkdir()
     cube_run = checkpoint_dir / "gocube-cube4-stage4-v1"
@@ -32,8 +44,8 @@ def test_ensure_known_runs_registers_present_run_and_skips_missing(tmp_path):
     ready = ensure_known_runs(
         str(checkpoint_dir),
         runs=(
-            KnownRun("gocube-cube4-stage4-v1", "cube", 4),
-            KnownRun("torus-9x9-30iter", "torus", 9),
+            KnownRun("gocube-cube4-stage4-v1", "cube", 4, komi=0.5),
+            KnownRun("torus-9x9-30iter", "torus", 9, komi=0.5),
         ),
         emit=messages.append,
     )
@@ -52,7 +64,7 @@ def test_ensure_known_runs_is_idempotent_for_compatible_manifest(tmp_path):
     checkpoint_dir.mkdir()
     run_dir = checkpoint_dir / "gocube-cube4-stage4-v1"
     make_checkpoint(run_dir, 25)
-    spec = (KnownRun("gocube-cube4-stage4-v1", "cube", 4),)
+    spec = (KnownRun("gocube-cube4-stage4-v1", "cube", 4, komi=0.5),)
 
     first = ensure_known_runs(str(checkpoint_dir), runs=spec, emit=lambda _message: None)
     second = ensure_known_runs(str(checkpoint_dir), runs=spec, emit=lambda _message: None)
@@ -78,7 +90,7 @@ def test_ensure_known_runs_refuses_incompatible_existing_manifest(tmp_path):
     with pytest.raises(ManifestExistsError, match="Refusing to overwrite incompatible"):
         ensure_known_runs(
             str(checkpoint_dir),
-            runs=(KnownRun("gocube-cube4-stage4-v1", "cube", 4),),
+            runs=(KnownRun("gocube-cube4-stage4-v1", "cube", 4, komi=0.5),),
             emit=lambda _message: None,
         )
 

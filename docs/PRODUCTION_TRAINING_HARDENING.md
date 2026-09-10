@@ -1,12 +1,18 @@
 # Production training hardening
 
+> Historical/frozen-path note: this document describes the existing Cube-4
+> production contract, not the project-wide komi policy. Its `0.5` value is a
+> local reproducibility pin for that path. New Torus/reference development
+> follows `docs/KOMI_POLICY.md`, where 0.5 is the default baseline but fair
+> Torus komi remains an open research question and legacy 7.5 is forbidden.
+
 This document describes the production GoCube training contract added on top of the pinned KataGo search port.
 
 ## Scope
 
 The hardened path intentionally does **not** change the network architecture, loss weights, GoCube rules, or the selected search budgets. Production Cube 4 keeps:
 
-- komi: **0.5**;
+- historical baseline komi: **0.5**;
 - regular self-play search: **50 simulations**;
 - fast search: **20 simulations**;
 - fast-game probability: **0.25**;
