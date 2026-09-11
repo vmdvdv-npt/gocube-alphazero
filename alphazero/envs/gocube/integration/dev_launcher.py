@@ -18,12 +18,12 @@ class KnownRun:
     komi: float = 0.5
 
 
-# Legacy runs trained before immutable GoCube metadata/manifests were written
-# automatically. New training runs already create their own manifest.
-KNOWN_LEGACY_RUNS = (
-    KnownRun("gocube-cube4-stage4-v1", "cube", 4),
-    KnownRun("torus-9x9-30iter", "torus", 9),
-)
+# Automatic semantic registration of the old pre-manifest checkpoints is
+# intentionally disabled. Historical documentation recorded some of these
+# names with komi 7.5, while later launchers assumed 0.5. Under the current
+# policy an ambiguous legacy artifact must be audited explicitly rather than
+# silently relabeled. New training runs already create their own manifest.
+KNOWN_LEGACY_RUNS: tuple[KnownRun, ...] = ()
 
 
 def ensure_known_runs(

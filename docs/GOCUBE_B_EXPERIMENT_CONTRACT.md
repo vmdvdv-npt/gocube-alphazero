@@ -1,5 +1,11 @@
 # GoCube B0/B1 experiment contract
 
+> Historical experiment note: B0/B1 is an immutable experiment whose exact
+> `komi=0.5` remains pinned for reproducibility. That pin is local to this
+> experiment and does not mean all new GoCube/Torus code must reject other
+> finite komi values. The current global policy is `docs/KOMI_POLICY.md`;
+> legacy 7.5 is forbidden in current runtime paths.
+
 The hardened B entrypoint is:
 
 ```bash
