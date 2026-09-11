@@ -4,43 +4,30 @@ import math
 from dataclasses import dataclass
 from typing import Mapping
 
-from .komi_policy import (
-    GOCUBE_DEFAULT_KOMI,
-    LEGACY_FORBIDDEN_KOMI,
-    LegacyKomiError,
-    validate_gocube_komi,
-)
 
-
-# Backward-compatible name. It means "current default/baseline", not
-# "the only globally valid GoCube komi".
-GOCUBE_KOMI = GOCUBE_DEFAULT_KOMI
+GOCUBE_KOMI = 0.5
 
 
 def require_gocube_komi(value: object, *, context: str = "GoCube") -> float:
-    """Backward-compatible komi validator.
+    """Validate the single supported GoCube komi and return its canonical value."""
 
-    Historically this function enforced ``komi == 0.5`` globally. It now
-    follows the project-wide komi policy: 0.5 is the default baseline, explicit
-    finite alternatives are allowed, and the legacy value 7.5 fails closed.
-    """
-
-    return validate_gocube_komi(value, context=context)
+    komi = float(value)
+    if not math.isclose(komi, GOCUBE_KOMI, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError(f"{context} requires komi {GOCUBE_KOMI}, got {value!r}")
+    return GOCUBE_KOMI
 
 
 @dataclass(frozen=True)
 class Cube4ProductionContract:
-    """Frozen Cube-4 baseline settings shared by legacy production tooling.
+    """Fixed Cube-4 production settings shared by training and sweep tooling.
 
-    This object is an experiment/path-specific reproducibility contract. Its
-    0.5 komi pin does not define the global GoCube/Torus komi policy. New
-    reference/research paths should use :func:`validate_gocube_komi` and record
-    their explicit komi in rules/checkpoint identity.
+    Sweep axes belong elsewhere. This object contains only values that must not
+    drift between launchers, validation, reporting, and Arena orchestration.
     """
 
     topology: str = "cube"
     size: int = 4
-    komi: float = GOCUBE_DEFAULT_KOMI
+    komi: float = GOCUBE_KOMI
     workers: int = 16
     regular_sims: int = 50
     fast_sims: int = 20
@@ -51,19 +38,7 @@ class Cube4ProductionContract:
     arena_sims: int = 50
 
     def validate_checkpoint_args(self, args: Mapping[str, object]) -> None:
-        actual_komi = validate_gocube_komi(
-            args.get("gocube_komi"),
-            context="Cube-4 frozen production checkpoint",
-        )
-        if not math.isclose(
-            actual_komi, self.komi, rel_tol=0.0, abs_tol=1e-12
-        ):
-            raise ValueError(
-                "Cube-4 frozen production checkpoint requires its historical "
-                f"baseline komi {self.komi}, got {actual_komi!r}. This is an "
-                "experiment-specific reproducibility pin, not the global GoCube "
-                "komi policy."
-            )
+        require_gocube_komi(args.get("gocube_komi"), context="Cube-4 production checkpoint")
         checks = (
             ("gocube_topology", self.topology),
             ("gocube_size", self.size),
@@ -84,12 +59,7 @@ class Cube4ProductionContract:
             ("gocube_train_samples_per_new_sample", self.train_samples_per_new_sample),
         ):
             try:
-                matches = math.isclose(
-                    float(args.get(key)),
-                    float(expected),
-                    rel_tol=0.0,
-                    abs_tol=1e-12,
-                )
+                matches = math.isclose(float(args.get(key)), float(expected), rel_tol=0.0, abs_tol=1e-12)
             except (TypeError, ValueError):
                 matches = False
             if not matches:
