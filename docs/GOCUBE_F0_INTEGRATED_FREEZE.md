@@ -1,11 +1,5 @@
 # GoCube F0 integrated contract freeze
 
-> Historical freeze note: this document preserves the exact F0 contract that
-> was verified at the source anchor below. Its `komi=0.5` assertions are local
-> reproducibility facts, not the current global GoCube/Torus komi policy. See
-> `docs/KOMI_POLICY.md`; new development defaults to 0.5 but may explicitly
-> research other finite values, while legacy 7.5 is forbidden in runtime.
-
 Status: F0 complete on the integrated tree. This is a verification,
 versioning, and documentation freeze; it does not claim V1 or V2 completion.
 
@@ -24,7 +18,7 @@ versioning, and documentation freeze; it does not claim V1 or V2 completion.
 - termination: `gocube-termination-provenance-v1`;
 - target provenance: `formal-runtime-result-provenance-v1`, encoded as
   `gocube-target-provenance-encoding-v1`;
-- F0 experiment komi: `0.5`.
+- current GoCube komi: `0.5`.
 
 `katago-pinned-search-v4` is the integrated semantic identity. It freezes the
 pinned reference, exact rule-derived M1 ko, root ending bonus, player-relative
@@ -81,7 +75,7 @@ The F0 cross-stage regressions cover:
   provenance save/reload;
 - Cube rotations and structural invariants, plus Cube 4/Torus 9 forward and
   MCTS smoke paths;
-- protected `50/20/50` budgets and F0-local komi `0.5`.
+- protected `50/20/50` budgets and komi `0.5`.
 
 No training experiment or B0/B1 strength claim is part of F0. V1 full
 independent Cube verification is pending. V2 full product compatibility

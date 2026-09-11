@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 
-from alphazero.envs.gocube.komi_policy import validate_gocube_komi
 from alphazero.envs.gocube.terminal import CONSERVATIVE_AREA_ADJUDICATOR_V1
 
 from .catalog import CheckpointCatalog
@@ -29,7 +28,6 @@ def register_run(
     if not CheckpointCatalog.checkpoint_files(run_dir):
         raise FileNotFoundError(f"No supported iteration checkpoints found in: {run_dir}")
 
-    komi = validate_gocube_komi(komi, context=f"Legacy run registration {run_name!r}")
     manifest = RunManifest.create(
         run_name=run_name,
         topology=topology,
