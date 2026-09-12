@@ -247,8 +247,16 @@ def _validate_record_provenance(record: GameRecord) -> None:
     for fingerprint in (record.player_A_identity_fingerprint, record.player_B_identity_fingerprint):
         if not _SHA256_RE.fullmatch(fingerprint):
             raise ValueError("GameRecord player identity fingerprint is malformed")
+    if record.search_contract_id != ARENA_CONTRACT_ID:
+        raise ValueError("GameRecord search contract drift")
     if record.search_contract_fingerprint != SEARCH_CONTRACT_FINGERPRINT:
         raise ValueError("GameRecord search contract fingerprint drift")
+    if record.search_implementation_id != SEARCH_IMPLEMENTATION_ID:
+        raise ValueError("GameRecord search implementation id drift")
+    if record.search_implementation_fingerprint != SEARCH_IMPLEMENTATION_FINGERPRINT:
+        raise ValueError("GameRecord search implementation fingerprint drift")
+    if record.search_settings != DEFAULT_ARENA_CONTRACT.search.evidence():
+        raise ValueError("GameRecord search settings drift")
     if record.run_identity_fingerprint != _expected_run_identity(record):
         raise ValueError("GameRecord run identity fingerprint does not recompute")
 
