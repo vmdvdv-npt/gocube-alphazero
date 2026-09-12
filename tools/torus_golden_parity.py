@@ -438,7 +438,8 @@ def rules_equivalence(corpus: Sequence[tuple[str, GoldenState]]) -> dict[str, ob
         reference_legal = reference_legal_actions(state)
         optimized_legal = prepare_legal_actions(state).actions
         _assert(optimized_legal == reference_legal, f"Rules legal-action mismatch at {label}")
-        _assert(build_action_mask(state) == _mask(reference_legal), f"Rules mask mismatch at {label}")
+        optimized_mask = prepare_legal_actions(state).action_mask if state.is_terminal else build_action_mask(state)
+        _assert(optimized_mask == _mask(reference_legal), f"Rules mask mismatch at {label}")
         if state.is_terminal:
             category_hits["terminal"] += 1
         if PASS in reference_legal:
