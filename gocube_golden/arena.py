@@ -194,6 +194,8 @@ def validate_game_record(record: GameRecord) -> None:
     applied_count = 0
     illegal_seen = False
     for evidence_index, evidence in enumerate(record.action_trace):
+        if state.is_terminal:
+            raise ValueError("ActionEvidence exists after formal Golden terminal")
         expected_slot = _slot_for_side(state.side_to_move, record.black_player)
         expected_id = _player_id_for_slot(record, expected_slot)
         if evidence.ply != applied_count + 1:
@@ -215,6 +217,9 @@ def validate_game_record(record: GameRecord) -> None:
             raise ValueError("ActionEvidence marks a legal move as illegal")
         state = transition.after
         applied_count += 1
+
+    if state.is_terminal and record.termination_reason != TerminationReason.DOUBLE_PASS:
+        raise ValueError("Formal Golden terminal requires DOUBLE_PASS termination")
 
     if tuple(int(stone) for stone in state.stones) != record.final_board:
         raise ValueError("GameRecord final_board does not match replayed trace")
