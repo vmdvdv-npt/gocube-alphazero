@@ -546,6 +546,10 @@ class GoldenTrainer:
         observations = torch.tensor([sample.observation for sample in samples], dtype=torch.float32)
         policies = torch.tensor([sample.pi for sample in samples], dtype=torch.float32)
         values = torch.tensor([sample.z for sample in samples], dtype=torch.float32)
+        model_device = next(self.model.parameters()).device
+        observations = observations.to(model_device)
+        policies = policies.to(model_device)
+        values = values.to(model_device)
         generator = torch.Generator(device="cpu")
         generator.manual_seed(int(seed))
         self.model.train()
