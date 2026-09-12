@@ -171,7 +171,6 @@ def run_identity_payload(
         "git_commit_sha": git_commit_sha,
         "git_tree_sha": git_tree_sha,
         "git_worktree_clean": git_worktree_clean,
-        "canonical_evidence": git_worktree_clean,
         "rules_profile_id": rules_profile_id,
         "rules_fingerprint": rules_fingerprint,
         "topology_fingerprint": topology_fingerprint,
@@ -257,8 +256,6 @@ class RunManifest:
         CodeIdentity(self.git_commit_sha, self.git_tree_sha, self.git_worktree_clean).validate(require_canonical=require_canonical)
         if self.canonical_evidence != self.git_worktree_clean:
             raise ValueError("RunManifest canonical_evidence must reflect git working-tree cleanliness")
-        if require_canonical and not self.canonical_evidence:
-            raise ValueError("RunManifest is explicitly non-canonical")
         if self.rules_profile_id != RULES_PROFILE_ID or self.rules_fingerprint != RULES_FINGERPRINT:
             raise ValueError("RunManifest rules identity drift")
         if self.topology_fingerprint != TOPOLOGY_FINGERPRINT:
@@ -304,7 +301,10 @@ class RunManifest:
             raise ValueError("RunManifest pair_schedule does not cover exactly game_count games")
         self.player_A.validate()
         self.player_B.validate()
-        if require_canonical and (self.player_A.player_kind != "checkpoint" or self.player_B.player_kind != "checkpoint"):
+        if require_canonical and (
+            self.player_A.player_kind != "checkpoint"
+            or self.player_B.player_kind != "checkpoint"
+        ):
             raise ValueError("Canonical Golden evidence requires exact checkpoint identities for both players")
 
 
@@ -335,6 +335,8 @@ def derive_seed(master_seed: int, *parts: object) -> int:
 def derive_game_seeds(master_seed: int, pair_id: str, game_id: str) -> tuple[int, int, int]:
     if not pair_id or not game_id:
         raise ValueError("Golden seed derivation requires non-empty pair_id and game_id")
+    if ":" in pair_id or ":" in game_id:
+        raise ValueError("Golden seed derivation ids must not contain ':'")
     seed_game = derive_seed(master_seed, pair_id, game_id, "game")
     return seed_game, derive_seed(seed_game, "A"), derive_seed(seed_game, "B")
 
@@ -455,7 +457,7 @@ def checkpoint_player_identity(
     identity = PlayerIdentity(
         logical_player_id=str(logical_player_id),
         player_kind="checkpoint",
-        source_identity=source_identity or str(path.resolve()),
+        source_identity=source_identity or f"checkpoint:{model_hash}",
         model_file_sha256=model_hash,
         checkpoint_metadata_fingerprint=sha256_fingerprint(dict(metadata)),
         observation_contract_id=OBSERVATION_SCHEMA_ID,
