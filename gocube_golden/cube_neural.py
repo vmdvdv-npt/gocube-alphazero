@@ -7,6 +7,8 @@ import hashlib
 import importlib
 import json
 import math
+import os
+import time
 from typing import Mapping, Sequence
 
 torch = importlib.import_module("torch")
@@ -14,7 +16,8 @@ Tensor = torch.Tensor
 nn = torch.nn
 F = importlib.import_module("torch.nn.functional")
 
-from .rules import legal_actions
+from .diagnostics import increment
+from .rules import LegalActionContext, prepare_legal_actions
 from .search import Evaluation
 from .state import BLACK, PASS, WHITE, GoldenState
 from .cube_topology import (
@@ -53,6 +56,24 @@ CUBE_OBSERVATION_CHANNELS = (
 )
 CUBE_OBSERVATION_CHANNEL_COUNT = len(CUBE_OBSERVATION_CHANNELS)
 CUBE_VALUE_HEAD_SEMANTICS = "side-to-move:[WIN,DRAW,LOSS]"
+
+
+def configure_single_thread_inference() -> dict[str, str | int]:
+    """Pin one inference thread per self-play worker and expose the telemetry."""
+
+    torch.set_num_threads(1)
+    try:
+        torch.set_num_interop_threads(1)
+    except RuntimeError:
+        # PyTorch allows inter-op configuration only before its pool is used.
+        # A worker may already have initialized it while loading a checkpoint.
+        pass
+    return {
+        "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "<unset>"),
+        "MKL_NUM_THREADS": os.environ.get("MKL_NUM_THREADS", "<unset>"),
+        "torch_num_threads": int(torch.get_num_threads()),
+        "torch_num_interop_threads": int(torch.get_num_interop_threads()),
+    }
 
 
 def _fingerprint(value: object) -> str:
@@ -99,25 +120,85 @@ class CubeObservation:
             raise ValueError("Cube observation contains NaN or Inf")
 
 
-def build_cube_action_mask(state: GoldenState) -> tuple[bool, ...]:
+def _provided_legal_context(
+    state: GoldenState,
+    *,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> LegalActionContext:
+    supplied = sum(value is not None for value in (legal_actions, legal_context, legal_action_mask))
+    if supplied > 1:
+        raise ValueError("Supply only one precomputed legality representation")
+    if legal_action_mask is not None:
+        mask = tuple(bool(value) for value in legal_action_mask)
+        if len(mask) != CUBE_ACTION_COUNT:
+            raise ValueError("Precomputed Cube legal action mask must have length 97")
+        actions = tuple(
+            PASS if index == CUBE_PASS_INDEX else index
+            for index, is_legal in enumerate(mask)
+            if is_legal
+        )
+        return LegalActionContext(state.state_key, actions, mask)
+    if isinstance(legal_actions, LegalActionContext):
+        legal_context = legal_actions
+    if legal_context is not None:
+        legal_context.assert_compatible(state)
+        return legal_context
+    if legal_actions is None:
+        return prepare_legal_actions(state)
+    actions = tuple(legal_actions)
+    mask = [False] * CUBE_ACTION_COUNT
+    for action in actions:
+        index = CUBE_PASS_INDEX if action == PASS else action
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < CUBE_ACTION_COUNT:
+            raise ValueError("Precomputed Cube legal actions contain an invalid action")
+        if mask[index]:
+            raise ValueError("Precomputed Cube legal actions contain a duplicate action")
+        mask[index] = True
+    return LegalActionContext(state.state_key, actions, tuple(mask))
+
+
+def build_cube_action_mask(
+    state: GoldenState,
+    *,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> tuple[bool, ...]:
+    increment("action_mask_builds")
     if state.is_terminal:
         raise ValueError("Terminal Golden Cube states must never be passed to the NN")
     if state.topology.fingerprint != CUBE4_TOPOLOGY.fingerprint:
         raise ValueError("Cube observation requires canonical Golden Cube topology")
-    legal = set(legal_actions(state))
-    return tuple(point in legal for point in range(CUBE_POINT_COUNT)) + (PASS in legal,)
+    return _provided_legal_context(
+        state,
+        legal_actions=legal_actions,
+        legal_context=legal_context,
+        legal_action_mask=legal_action_mask,
+    ).action_mask
 
 
 def build_cube_observation_bundle(
     state: GoldenState,
     *,
     topology: CubeGoldenTopology = CUBE4_TOPOLOGY,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
 ) -> CubeObservation:
+    increment("observation_builds")
     if state.is_terminal:
         raise ValueError("Terminal Golden Cube states must never be passed to the NN")
     if topology.fingerprint != CUBE4_TOPOLOGY.fingerprint or state.topology.fingerprint != topology.fingerprint:
         raise ValueError("Cube observation requires canonical Golden Cube topology")
-    mask = build_cube_action_mask(state)
+    context = _provided_legal_context(
+        state,
+        legal_actions=legal_actions,
+        legal_context=legal_context,
+        legal_action_mask=legal_action_mask,
+    )
+    mask = context.action_mask
     own = int(state.side_to_move)
     other = int(WHITE if state.side_to_move == BLACK else BLACK)
     values = torch.zeros((CUBE_OBSERVATION_CHANNEL_COUNT, CUBE_POINT_COUNT), dtype=torch.float32)
@@ -148,8 +229,19 @@ def build_cube_observation_bundle(
     return CubeObservation(values, mask, state.state_key)
 
 
-def build_cube_observation(state: GoldenState) -> Tensor:
-    return build_cube_observation_bundle(state).tensor
+def build_cube_observation(
+    state: GoldenState,
+    *,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> Tensor:
+    return build_cube_observation_bundle(
+        state,
+        legal_actions=legal_actions,
+        legal_context=legal_context,
+        legal_action_mask=legal_action_mask,
+    ).tensor
 
 
 class CubeRelationMessageLayer(nn.Module):
@@ -317,16 +409,38 @@ class GoldenCubeNeuralEvaluator:
         self.checkpoint_path: str | None = None
         self.checkpoint_metadata: Mapping[str, object] | None = None
         self.nn_evaluations = 0
+        self.observation_seconds = 0.0
+        self.forward_seconds = 0.0
+        self.total_seconds = 0.0
 
-    def evaluate(self, state: GoldenState) -> Evaluation:
+    def evaluate(
+        self,
+        state: GoldenState,
+        *,
+        legal_context: LegalActionContext | None = None,
+    ) -> Evaluation:
+        context = legal_context or prepare_legal_actions(state)
+        return self.evaluate_prepared(state, context)
+
+    def evaluate_prepared(
+        self, state: GoldenState, legal_context: LegalActionContext
+    ) -> Evaluation:
         if state.is_terminal:
             raise RuntimeError("GoldenCubeNeuralEvaluator must never evaluate a terminal state")
-        observation = build_cube_observation(state).to(self.device)
+        legal_context.assert_compatible(state)
+        total_start = time.perf_counter()
+        observation_start = time.perf_counter()
+        observation = build_cube_observation(state, legal_context=legal_context).to(self.device)
+        self.observation_seconds += time.perf_counter() - observation_start
+        forward_start = time.perf_counter()
         with torch.inference_mode():
             policy_logits, value_logits = self.model(observation.unsqueeze(0))
+        self.forward_seconds += time.perf_counter() - forward_start
+        with torch.inference_mode():
             policy = torch.softmax(policy_logits[0], dim=0)
             wdl = torch.softmax(value_logits[0], dim=0)
         self.nn_evaluations += 1
+        increment("nn_forwards")
         policy_values = tuple(float(value) for value in policy.detach().cpu())
         wdl_values = tuple(float(value) for value in wdl.detach().cpu())
         if len(policy_values) != CUBE_ACTION_COUNT or len(wdl_values) != 3:
@@ -337,7 +451,16 @@ class GoldenCubeNeuralEvaluator:
             raise RuntimeError("Golden Cube policy probabilities are not normalized")
         if not math.isclose(sum(wdl_values), 1.0, rel_tol=1e-6, abs_tol=1e-6):
             raise RuntimeError("Golden Cube WDL probabilities are not normalized")
+        self.total_seconds += time.perf_counter() - total_start
         return Evaluation(policy=policy_values, wdl=wdl_values)
+
+    def telemetry(self) -> dict[str, float | int]:
+        return {
+            "nn_evaluations": int(self.nn_evaluations),
+            "observation_rules_seconds": float(self.observation_seconds),
+            "pure_model_forward_seconds": float(self.forward_seconds),
+            "total_evaluator_seconds": float(self.total_seconds),
+        }
 
 
 class SelfPlayCubeRootNoiseEvaluator:
@@ -360,10 +483,22 @@ class SelfPlayCubeRootNoiseEvaluator:
         self._generator.manual_seed(int(seed))
 
     def evaluate(self, state: GoldenState) -> Evaluation:
-        base = self.evaluator.evaluate(state)
+        increment("root_noise_legal_scans")
+        return self.evaluate_prepared(state, prepare_legal_actions(state))
+
+    def evaluate_prepared(
+        self, state: GoldenState, legal_context: LegalActionContext
+    ) -> Evaluation:
+        legal_context.assert_compatible(state)
+        prepared_evaluate = getattr(self.evaluator, "evaluate_prepared", None)
+        if callable(prepared_evaluate):
+            base = prepared_evaluate(state, legal_context)
+        else:
+            base = self.evaluator.evaluate(state)
         if state.state_key != self.root_state_key:
             return base
-        legal = legal_actions(state)
+        increment("root_noise_legal_reuses")
+        legal = legal_context.actions
         if not legal:
             raise RuntimeError("Cube self-play root has no legal actions")
         base_policy = [float(value) for value in base.policy]

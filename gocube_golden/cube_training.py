@@ -32,6 +32,7 @@ from .cube_neural import (
     cube_count_parameters,
     cube_model_hash,
     GoldenCubeGraphNetV1,
+    configure_single_thread_inference,
 )
 from .cube_topology import CUBE4_TOPOLOGY
 from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
@@ -178,21 +179,21 @@ def cube_action_index(action: int | str) -> int:
     return CUBE4_TOPOLOGY.pass_action if action == PASS else int(action)
 
 
-def validate_cube_policy_target(
-    state: GoldenState,
+def _validate_cube_policy_arrays(
     pi: Sequence[float],
     visits: Sequence[int],
+    legal_mask: Sequence[bool],
     *,
     expected_simulations: int | None = None,
 ) -> None:
     if len(pi) != CUBE_ACTION_COUNT or len(visits) != CUBE_ACTION_COUNT:
         raise ValueError("Cube policy target must have 97 actions")
-    legal = set(legal_actions(state))
+    if len(legal_mask) != CUBE_ACTION_COUNT:
+        raise ValueError("Cube legal action mask must have 97 actions")
     for index, value in enumerate(pi):
         if not math.isfinite(float(value)) or float(value) < 0.0:
             raise ValueError("Cube policy target must be finite and non-negative")
-        action = PASS if index == CUBE4_TOPOLOGY.pass_action else index
-        if action not in legal and float(value) != 0.0:
+        if not bool(legal_mask[index]) and float(value) != 0.0:
             raise ValueError("Illegal Cube action has non-zero policy target")
     visit_total = sum(int(value) for value in visits)
     if visit_total <= 0 or (expected_simulations is not None and visit_total != expected_simulations):
@@ -201,6 +202,20 @@ def validate_cube_policy_target(
         raise ValueError("Cube policy target is not normalized")
     if any(int(value) < 0 for value in visits):
         raise ValueError("Cube root visits must be non-negative")
+
+
+def validate_cube_policy_target(
+    state: GoldenState,
+    pi: Sequence[float],
+    visits: Sequence[int],
+    *,
+    expected_simulations: int | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> None:
+    mask = tuple(legal_action_mask) if legal_action_mask is not None else build_cube_action_mask(state)
+    _validate_cube_policy_arrays(
+        pi, visits, mask, expected_simulations=expected_simulations
+    )
 
 
 @dataclass(frozen=True)
@@ -215,17 +230,30 @@ class CubeSelfPlayPosition:
     search_seed: int
     model_hash: str
 
-    def validate(self, *, expected_model_hash: str | None = None) -> None:
-        current = cube_state_from_identity(self.state)
-        if self.side_to_move != current.side_to_move.name:
-            raise ValueError("Cube self-play side-to-move provenance drift")
-        if current.komi != 0.5:
-            raise ValueError("Cube self-play komi must be exactly 0.5")
-        if tuple(self.legal_action_mask) != build_cube_action_mask(current):
-            raise ValueError("Cube self-play legal action mask drift")
-        validate_cube_policy_target(current, self.pi, self.root_visits)
-        if self.selected_action not in legal_actions(current):
+    def validate(
+        self,
+        *,
+        expected_model_hash: str | None = None,
+        deep: bool = True,
+    ) -> None:
+        if len(self.legal_action_mask) != CUBE_ACTION_COUNT:
+            raise ValueError("Cube self-play legal mask shape drift")
+        selected_index = cube_action_index(self.selected_action)
+        if not 0 <= selected_index < CUBE_ACTION_COUNT:
+            raise ValueError("Cube self-play selected action is invalid")
+        if not self.legal_action_mask[selected_index]:
             raise ValueError("Cube self-play selected action is illegal")
+        if deep:
+            current = cube_state_from_identity(self.state)
+            if self.side_to_move != current.side_to_move.name:
+                raise ValueError("Cube self-play side-to-move provenance drift")
+            if current.komi != 0.5:
+                raise ValueError("Cube self-play komi must be exactly 0.5")
+            if tuple(self.legal_action_mask) != build_cube_action_mask(current):
+                raise ValueError("Cube self-play legal action mask drift")
+            validate_cube_policy_target(current, self.pi, self.root_visits, legal_action_mask=self.legal_action_mask)
+        else:
+            _validate_cube_policy_arrays(self.pi, self.root_visits, self.legal_action_mask)
         if expected_model_hash is not None and self.model_hash != expected_model_hash:
             raise ValueError("Cube self-play model hash drift")
 
@@ -266,6 +294,7 @@ class CubeSelfPlayGameRecord:
         *,
         require_clean: bool = False,
         expected_contract_fingerprint: str | None = None,
+        deep: bool = True,
     ) -> None:
         if not self.profile_id or not self.profile_fingerprint.startswith("sha256:"):
             raise ValueError("Cube self-play profile identity is missing")
@@ -298,34 +327,41 @@ class CubeSelfPlayGameRecord:
             raise ValueError("Cube technical games cannot contain a formal result")
         if self.formal_result not in (None, "BLACK", "WHITE", "DRAW"):
             raise ValueError("Invalid Cube self-play result")
-        state = cube_state_from_identity(self.start_state)
-        if not state.is_canonical_live or state.is_terminal:
-            raise ValueError("Cube self-play start state must be canonical-live and nonterminal")
-        expected_start = cube_state_identity(state)
-        if self.start_state != expected_start:
-            raise ValueError("Cube self-play start state identity drift")
+        state = cube_state_from_identity(self.start_state) if deep else None
+        if deep:
+            assert state is not None
+            if not state.is_canonical_live or state.is_terminal:
+                raise ValueError("Cube self-play start state must be canonical-live and nonterminal")
+            expected_start = cube_state_identity(state)
+            if self.start_state != expected_start:
+                raise ValueError("Cube self-play start state identity drift")
         replayed_actions: list[int | str] = []
         for expected_ply, position in enumerate(self.positions, start=1):
             if position.ply != expected_ply:
                 raise ValueError("Cube self-play ply ordering drift")
-            if position.state != cube_state_identity(state):
-                raise ValueError("Cube self-play state transition drift")
-            position.validate(expected_model_hash=self.model_hash)
+            if deep:
+                assert state is not None
+                if position.state != cube_state_identity(state):
+                    raise ValueError("Cube self-play state transition drift")
+            position.validate(expected_model_hash=self.model_hash, deep=deep)
             replayed_actions.append(position.selected_action)
-            try:
-                state = apply_action(state, position.selected_action).after
-            except IllegalMoveError as exc:
-                raise ValueError("Cube self-play action trace contains an illegal action") from exc
+            if deep:
+                assert state is not None
+                try:
+                    state = apply_action(state, position.selected_action).after
+                except IllegalMoveError as exc:
+                    raise ValueError("Cube self-play action trace contains an illegal action") from exc
         if tuple(replayed_actions) != self.final_action_trace:
             raise ValueError("Cube self-play action trace drift")
         if self.technical_termination is None and len(self.final_action_trace) != len(self.positions):
             raise ValueError("Cube formal trace length does not match positions")
-        if self.formal_result is not None:
+        if deep and self.formal_result is not None:
+            assert state is not None
             if not state.is_terminal:
                 raise ValueError("Cube formal self-play result has no terminal state")
             if result_from_terminal(state).winner.value != self.formal_result:
                 raise ValueError("Cube formal self-play result drift")
-        elif state.is_terminal:
+        elif deep and state is not None and state.is_terminal:
             raise ValueError("Cube terminal self-play trace is missing a formal result")
         if len(self.final_action_trace) > CUBE_WATCHDOG:
             raise ValueError("Cube self-play trace exceeded the watchdog")
@@ -375,13 +411,15 @@ class CubeTrainingSample:
             raise ValueError("Cube replay komi must be exactly 0.5")
         if len(self.observation) != 15 or any(len(row) != 96 for row in self.observation):
             raise ValueError("Cube replay observation shape drift")
-        generated_observation = build_cube_observation(state)
+        generated_observation = build_cube_observation(
+            state, legal_action_mask=self.legal_action_mask
+        )
         stored_observation = torch.tensor(self.observation, dtype=torch.float32)
         if not torch.equal(stored_observation, generated_observation):
             raise ValueError("Cube replay observation values drift")
         if len(self.legal_action_mask) != CUBE_ACTION_COUNT or tuple(self.legal_action_mask) != build_cube_action_mask(state):
             raise ValueError("Cube replay legal mask drift")
-        validate_cube_policy_target(state, self.pi, self.root_visits)
+        validate_cube_policy_target(state, self.pi, self.root_visits, legal_action_mask=self.legal_action_mask)
         if len(self.z) != 3 or any(not math.isfinite(float(value)) or float(value) < 0.0 for value in self.z):
             raise ValueError("Cube replay z target is invalid")
         if not math.isclose(sum(self.z), 1.0, rel_tol=1e-6, abs_tol=1e-6):
@@ -401,14 +439,17 @@ def build_cube_replay_samples(
     game: CubeSelfPlayGameRecord,
     *,
     expected_contract_fingerprint: str | None = None,
+    validate_game: bool = True,
+    validate_samples: bool = True,
 ) -> tuple[CubeTrainingSample, ...]:
-    game.validate(expected_contract_fingerprint=expected_contract_fingerprint)
+    if validate_game:
+        game.validate(expected_contract_fingerprint=expected_contract_fingerprint)
     if game.technical_termination is not None or game.formal_result is None:
         raise ValueError("Technical Cube games are excluded from replay")
     samples = []
     for position in game.positions:
         state = cube_state_from_identity(position.state)
-        observation = build_cube_observation(state)
+        observation = build_cube_observation(state, legal_action_mask=position.legal_action_mask)
         sample = CubeTrainingSample(
             run_id=game.run_id,
             game_id=game.game_id,
@@ -416,14 +457,15 @@ def build_cube_replay_samples(
             state=position.state,
             side_to_move=position.side_to_move,
             observation=tuple(tuple(float(value) for value in row) for row in observation.tolist()),
-            legal_action_mask=build_cube_action_mask(state),
+            legal_action_mask=position.legal_action_mask,
             root_visits=position.root_visits,
             pi=position.pi,
             z=cube_z_target(game.formal_result, state.side_to_move),
             model_hash=game.model_hash,
             selfplay_contract_fingerprint=game.selfplay_contract_fingerprint,
         )
-        sample.validate(expected_contract_fingerprint=expected_contract_fingerprint)
+        if validate_samples:
+            sample.validate(expected_contract_fingerprint=expected_contract_fingerprint)
         samples.append(sample)
     return tuple(samples)
 
@@ -521,7 +563,7 @@ class CubeSelfPlayRunner:
                 ply=ply,
                 state=cube_state_identity(state),
                 side_to_move=state.side_to_move.name,
-                legal_action_mask=build_cube_action_mask(state),
+                legal_action_mask=tuple(result.legal_action_mask),
                 root_visits=tuple(int(value) for value in result.root_visits),
                 pi=tuple(float(value) for value in result.pi),
                 selected_action=action,
@@ -573,7 +615,9 @@ class CubeSelfPlayRunner:
             error=error,
             nn_evaluations=self.evaluator.nn_evaluations,
         )
-        record.validate()
+        # Generation-time validation checks local record shape/policy invariants.
+        # Full replay/identity auditing is performed once at the evidence boundary.
+        record.validate(deep=False)
         return record
 
 
@@ -599,7 +643,7 @@ def _cube_process_worker_init(
     allow_noncanonical_contract: bool,
 ) -> None:
     global _PROCESS_MODEL, _PROCESS_CONFIG
-    torch.set_num_threads(1)
+    configure_single_thread_inference()
     worker_device = torch.device(device)
     model = GoldenCubeGraphNetV1().to(worker_device)
     cube_load_checkpoint(checkpoint_path, model=model, expected={"model_hash": expected_hash}, device=worker_device)

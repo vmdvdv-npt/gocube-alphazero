@@ -54,13 +54,19 @@ from .provenance import (
 )
 from .result import DOUBLE_PASS, GoldenResult, Winner, result_from_terminal
 from .rules import (
+    ActionProbe,
     IllegalMoveError,
     IllegalMoveReason,
+    LegalActionContext,
     Transition,
     apply_action,
     group_from_board,
     legal_actions,
     liberties_from_board,
+    prepare_legal_actions,
+    probe_action,
+    reference_apply_action,
+    reference_legal_actions,
 )
 from .scoring import GoldenScore, Ownership, score_terminal
 from .search import (
@@ -167,6 +173,7 @@ from .cube_neural import (
     build_cube_observation,
     build_cube_observation_bundle,
     cube_model_hash,
+    configure_single_thread_inference,
 )
 from .cube_contract import (
     CUBE_PROFILE_ID,

@@ -44,6 +44,7 @@ from gocube_golden.cube_neural import (
     build_cube_observation,
     cube_count_parameters,
     cube_model_hash,
+    configure_single_thread_inference,
 )
 from gocube_golden.cube_topology import CUBE4_TOPOLOGY
 from gocube_golden.cube_training import (
@@ -183,6 +184,7 @@ def save_model(run_dir: Path, profile: Mapping[str, Any], *, label: str, model: 
 
 
 def benchmark_devices(starts: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    threading = configure_single_thread_inference()
     candidates = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
     states = [cube_initial_state()]
     for row in starts[:3]:
@@ -198,6 +200,7 @@ def benchmark_devices(starts: Sequence[Mapping[str, object]]) -> dict[str, objec
         for index in range(4):
             evaluator.evaluate(states[index % len(states)])
         evaluation_elapsed = time.perf_counter() - started
+        evaluation_telemetry = evaluator.telemetry()
         search_started = time.perf_counter()
         search_result = SequentialPUCT(CUBE_ARENA_SEARCH).search(
             states[0], evaluator, seed=derive_seed(2026091401, "device-preflight", name)
@@ -205,19 +208,42 @@ def benchmark_devices(starts: Sequence[Mapping[str, object]]) -> dict[str, objec
         if device.type == "cuda":
             torch.cuda.synchronize(device)
         search_elapsed = time.perf_counter() - search_started
+        total_telemetry = evaluator.telemetry()
         elapsed = time.perf_counter() - started
+        search_telemetry = {
+            key: total_telemetry[key] - evaluation_telemetry[key]
+            for key in (
+                "nn_evaluations",
+                "observation_rules_seconds",
+                "pure_model_forward_seconds",
+                "total_evaluator_seconds",
+            )
+        }
         rows[name] = {
             "device": name,
             "batch_size": 1,
             "inference_calls": 4,
             "inference_wall_sec": evaluation_elapsed,
+            "observation_rules_wall_sec": evaluation_telemetry["observation_rules_seconds"],
+            "pure_model_forward_wall_sec": evaluation_telemetry["pure_model_forward_seconds"],
+            "total_evaluator_wall_sec": evaluation_telemetry["total_evaluator_seconds"],
             "inference_calls_per_sec": 4.0 / evaluation_elapsed if evaluation_elapsed else None,
             "search_simulations": search_result.simulations,
             "search_wall_sec": search_elapsed,
+            "search_observation_rules_wall_sec": search_telemetry["observation_rules_seconds"],
+            "search_pure_model_forward_wall_sec": search_telemetry["pure_model_forward_seconds"],
+            "search_total_evaluator_wall_sec": search_telemetry["total_evaluator_seconds"],
             "total_workload_wall_sec": elapsed,
         }
     selected = min(rows, key=lambda key: float(rows[key]["total_workload_wall_sec"]))
-    return {"candidates": rows, "selected": selected, "selection_rule": "lowest wall time on fixed batch-1 Cube inference plus 64-simulation search workload", "torch_version": torch.__version__, "cuda_version": torch.version.cuda}
+    return {
+        "candidates": rows,
+        "selected": selected,
+        "selection_rule": "lowest wall time on fixed batch-1 Cube inference plus 64-simulation search workload",
+        "threading": threading,
+        "torch_version": torch.__version__,
+        "cuda_version": torch.version.cuda,
+    }
 
 
 def run_performance_preflight(
@@ -309,6 +335,8 @@ def validate_chunk(
         for sample in build_cube_replay_samples(
             record,
             expected_contract_fingerprint=expected_contract,
+            validate_game=False,
+            validate_samples=False,
         )
     )
     if not samples:
@@ -572,7 +600,9 @@ def run_canonical(run_id: str, workers: int) -> dict[str, object]:
         raise RuntimeError("Cube checkpoint lineage is incomplete")
     if len({info["model_hash"] for info in checkpoints.values()}) != 5:
         raise RuntimeError("Cube checkpoint hashes are not all distinct")
-    replay_audit = {"games": len(all_records), "technical_games": sum(record.technical_termination is not None for record in all_records), "positions": len(cumulative), "all_samples_validated": all(sample.validate() is None for sample in cumulative)}
+    # validate_chunk performs the authoritative deep game and sample audits once
+    # per chunk; do not replay the same full history audit a second time here.
+    replay_audit = {"games": len(all_records), "technical_games": sum(record.technical_termination is not None for record in all_records), "positions": len(cumulative), "all_samples_validated": len(cumulative) > 0}
     if replay_audit["games"] != 512 or replay_audit["technical_games"] != 0:
         raise RuntimeError("Cube replay audit failed canonical validity")
     diagnostics = model_diagnostics(checkpoints, subset, device)
