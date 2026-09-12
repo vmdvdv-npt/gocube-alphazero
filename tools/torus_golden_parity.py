@@ -696,7 +696,6 @@ def run_stage4(*, run_dir: Path, run_id: str, semantic: Mapping[str, object], st
         _assert(all(record.model_hash == checkpoints[label]["model_hash"] for record in records), f"Chunk {chunk} model identity mismatch")
         samples = tuple(sample for record in records for sample in build_replay_samples(record))
         chunk_records.extend(records)
-        all_samples.extend(samples)
         write_jsonl(run_dir / "selfplay" / f"chunk-{chunk:02d}-games.jsonl", (record.to_dict() for record in records))
         write_jsonl(run_dir / "replay" / f"chunk-{chunk:02d}.jsonl", (sample.to_dict() for sample in samples))
         replay_comparisons.append({"chunk": chunk, **_compare_replay(OLD_RUN / "replay" / f"chunk-{chunk:02d}.jsonl", run_dir / "replay" / f"chunk-{chunk:02d}.jsonl")})
