@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import copy
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -20,8 +21,8 @@ import resource
 import time
 from typing import Any, Iterable, Mapping, Sequence
 
-import torch
-from torch.nn import functional as F
+torch = importlib.import_module("torch")
+F = importlib.import_module("torch.nn.functional")
 
 from .arena import MappedResult, TerminationReason
 from .neural import GoldenGraphNetV1, GoldenNeuralEvaluator, build_observation, count_parameters, model_hash
