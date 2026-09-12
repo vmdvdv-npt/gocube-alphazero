@@ -374,7 +374,7 @@ def optimized_path_audit() -> dict[str, object]:
         "neural_evaluate_prepared": "def evaluate_prepared" in source["neural"],
         "training_prepared_replay": "build_observation(state, legal_context=legal_context)" in source["training"],
         "root_noise_reuses_context": "root_noise_legal_reuses" in source["neural"],
-        "search_no_direct_legal_actions_scan": "legal_actions(" not in source["search"].split("class SequentialPUCT", 1)[1].split("class SolveStatus", 1)[0],
+        "search_no_direct_legal_actions_scan": "self.adapter.legal_actions(" not in source["search"].split("class SequentialPUCT", 1)[1].split("class SolveStatus", 1)[0],
     }
     _assert(all(required.values()), "Optimized path audit failed: " + ", ".join(key for key, value in required.items() if not value))
     return {
