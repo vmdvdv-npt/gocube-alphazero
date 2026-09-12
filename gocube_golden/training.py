@@ -351,6 +351,7 @@ class GoldenSelfPlayRunner:
         model_checkpoint_label: str,
         checkpoint_artifact_hash: str,
         master_seed: int,
+        seed_namespace: str | None = None,
         contract: SelfPlaySearchContract = DEFAULT_SELFPLAY_CONTRACT,
         code_identity: CodeIdentity | None = None,
         device: str | torch.device = "cpu",
@@ -365,6 +366,11 @@ class GoldenSelfPlayRunner:
         self.model_hash = model_hash(model)
         self.checkpoint_artifact_hash = checkpoint_artifact_hash
         self.master_seed = int(master_seed)
+        # The run id identifies the artifact namespace.  A parity run may use
+        # a new run id while deliberately retaining the frozen seed namespace
+        # of an immutable reference run; the default preserves the historical
+        # behavior for all existing callers.
+        self.seed_namespace = str(seed_namespace) if seed_namespace is not None else self.run_id
         self.contract = contract
         self.code_identity = code_identity or capture_code_identity()
         self.device = torch.device(device)
@@ -375,7 +381,7 @@ class GoldenSelfPlayRunner:
         self.evaluator = evaluator or GoldenNeuralEvaluator(model, device=self.device)
 
     def play_game(self, game_id: str) -> SelfPlayGameRecord:
-        game_seed = derive_seed(self.master_seed, self.run_id, game_id, "game")
+        game_seed = derive_seed(self.master_seed, self.seed_namespace, game_id, "game")
         rng = random.Random(game_seed)
         state = initial_state()
         start = state_identity(state)
