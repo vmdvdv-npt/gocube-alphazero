@@ -796,6 +796,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     _assert(not run_dir.exists(), f"Refusing to overwrite existing run: {run_dir}")
     _assert(args.workers == 16, "Canonical parity requires the approved Stage4 worker count of 16")
     _assert(OLD_RUN.is_dir(), f"Immutable old Stage4 run is missing: {OLD_RUN}")
+    # Match the frozen Stage-4 CPU execution order in the parent as well as in
+    # process workers; otherwise parallel reductions can change checkpoints.
+    torch.set_num_threads(1)
     code = capture_code_identity(ROOT)
     _assert(code.working_tree_clean, "Canonical parity requires a clean committed source tree")
     semantic = load_stage3_profile()
