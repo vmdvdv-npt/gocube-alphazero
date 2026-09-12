@@ -381,6 +381,7 @@ class GoldenSelfPlayRunner:
         self.evaluator = evaluator or GoldenNeuralEvaluator(model, device=self.device)
 
     def play_game(self, game_id: str) -> SelfPlayGameRecord:
+        evaluator_count_before = int(getattr(self.evaluator, "nn_evaluations", 0))
         game_seed = derive_seed(self.master_seed, self.seed_namespace, game_id, "game")
         rng = random.Random(game_seed)
         state = initial_state()
@@ -456,7 +457,7 @@ class GoldenSelfPlayRunner:
             formal_result=formal,
             technical_termination=technical,
             error=error,
-            nn_evaluations=int(getattr(self.evaluator, "nn_evaluations", 0)),
+            nn_evaluations=int(getattr(self.evaluator, "nn_evaluations", 0)) - evaluator_count_before,
         )
         record.validate()
         return record
