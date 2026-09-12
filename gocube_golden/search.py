@@ -179,9 +179,11 @@ class SequentialPUCT:
         settings: SearchSettings | None = None,
         *,
         adapter: GoldenSearchAdapter | None = None,
+        trace: list[dict[str, object]] | None = None,
     ) -> None:
         self.settings = settings or SearchSettings()
         self.adapter = adapter or GoldenSearchAdapter()
+        self.trace = trace
         self._evaluator: Evaluator | None = None
         self._evaluator_calls = 0
         self._rng = random.Random(0)
@@ -207,6 +209,12 @@ class SequentialPUCT:
         node.edges = {action: _Edge(prior=priors[action]) for action in legal}
         node.legal_context = context
         node.expanded = True
+        if self.trace is not None:
+            self.trace.append({
+                "event": "expanded",
+                "state": node.state.state_key,
+                "legal_actions": legal,
+            })
         return utility
 
     def _tie_key(self, state: GoldenState, action: int | str) -> int:
@@ -244,6 +252,14 @@ class SequentialPUCT:
         parent_utility = _child_to_parent_utility(child_utility)
         edge.visits += 1
         edge.value_sum += parent_utility
+        if self.trace is not None:
+            self.trace.append({
+                "event": "selected_edge",
+                "state": node.state.state_key,
+                "action": action,
+                "edge_visits": edge.visits,
+                "backup_utility": parent_utility,
+            })
         return parent_utility
 
     def search(
@@ -291,6 +307,12 @@ class SequentialPUCT:
             selected = self._rng.choice(candidates)
         if selected not in legal:
             raise SearchError("Search selected an illegal action")
+        if self.trace is not None:
+            self.trace.append({
+                "event": "final_root",
+                "root_visits": root_visits,
+                "selected_action": selected,
+            })
         return SearchResult(
             action=selected,
             legal_actions=legal,

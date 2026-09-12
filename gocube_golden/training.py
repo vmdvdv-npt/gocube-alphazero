@@ -26,14 +26,18 @@ from .neural import (
     GoldenGraphNetV1,
     GoldenNeuralEvaluator,
     SelfPlayRootNoiseEvaluator,
-    build_action_mask,
     build_observation,
     model_hash,
 )
 from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
 from .result import Winner, result_from_terminal
-from .rules import IllegalMoveError, apply_action, legal_actions
+from .rules import (
+    IllegalMoveError,
+    LegalActionContext,
+    prepare_legal_actions,
+)
 from .search import SearchError, SearchResult, SequentialPUCT
+from .search_adapter import GoldenSearchAdapter
 from .stage3_contract import (
     PROFILE_ID,
     SELFPLAY_CONTRACT_ID,
@@ -149,10 +153,18 @@ def _action_index(action: int | str) -> int:
     return PASS_INDEX if action == PASS else int(action)
 
 
-def _validate_policy_target(state: GoldenState, pi: Sequence[float], visits: Sequence[int]) -> None:
+def _validate_policy_target(
+    state: GoldenState,
+    pi: Sequence[float],
+    visits: Sequence[int],
+    *,
+    legal_context: LegalActionContext | None = None,
+) -> None:
     if len(pi) != ACTION_COUNT or len(visits) != ACTION_COUNT:
         raise ValueError("Golden policy target must have 26 actions")
-    legal = set(legal_actions(state))
+    context = legal_context if legal_context is not None else prepare_legal_actions(state)
+    context.assert_compatible(state)
+    legal = set(context.actions)
     for index, value in enumerate(pi):
         if not math.isfinite(float(value)) or float(value) < 0.0:
             raise ValueError("Golden policy target must be finite and non-negative")
@@ -182,8 +194,11 @@ class SelfPlayPosition:
         current = state_from_identity(self.state)
         if self.side_to_move != current.side_to_move.name:
             raise ValueError("Self-play position side-to-move provenance drift")
-        _validate_policy_target(current, self.pi, self.root_visits)
-        if self.selected_action not in legal_actions(current):
+        legal_context = prepare_legal_actions(current)
+        _validate_policy_target(
+            current, self.pi, self.root_visits, legal_context=legal_context
+        )
+        if self.selected_action not in legal_context.actions:
             raise ValueError("Self-play selected action is illegal")
         if expected_model_hash is not None and self.model_hash != expected_model_hash:
             raise ValueError("Self-play position model hash drift")
@@ -270,7 +285,7 @@ class GoldenTrainingSample:
     target_contract_id: str = TARGET_CONTRACT_ID
     target_fingerprint: str = TARGET_FINGERPRINT
 
-    def validate(self) -> None:
+    def validate(self, *, legal_context: LegalActionContext | None = None) -> None:
         current = state_from_identity(self.state)
         if self.side_to_move != current.side_to_move.name:
             raise ValueError("Replay side-to-move provenance drift")
@@ -278,9 +293,13 @@ class GoldenTrainingSample:
             raise ValueError("Replay observation shape drift")
         if len(self.legal_action_mask) != ACTION_COUNT:
             raise ValueError("Replay action mask shape drift")
-        if tuple(self.legal_action_mask) != build_action_mask(current):
+        context = legal_context if legal_context is not None else prepare_legal_actions(current)
+        context.assert_compatible(current)
+        if tuple(self.legal_action_mask) != context.action_mask:
             raise ValueError("Replay legal action mask does not match Golden rules")
-        _validate_policy_target(current, self.pi, self.root_visits)
+        _validate_policy_target(
+            current, self.pi, self.root_visits, legal_context=context
+        )
         if len(self.z) != 3 or any(not math.isfinite(float(value)) or float(value) < 0 for value in self.z):
             raise ValueError("Replay z target is invalid")
         if not math.isclose(sum(self.z), 1.0, rel_tol=1e-6, abs_tol=1e-6):
@@ -301,7 +320,8 @@ def build_replay_samples(game: SelfPlayGameRecord) -> tuple[GoldenTrainingSample
     samples: list[GoldenTrainingSample] = []
     for position in game.positions:
         state = state_from_identity(position.state)
-        observation = build_observation(state)
+        legal_context = prepare_legal_actions(state)
+        observation = build_observation(state, legal_context=legal_context)
         sample = GoldenTrainingSample(
             run_id=game.run_id,
             game_id=game.game_id,
@@ -309,14 +329,14 @@ def build_replay_samples(game: SelfPlayGameRecord) -> tuple[GoldenTrainingSample
             state=position.state,
             side_to_move=position.side_to_move,
             observation=tuple(tuple(float(value) for value in row) for row in observation.tolist()),
-            legal_action_mask=build_action_mask(state),
+            legal_action_mask=legal_context.action_mask,
             root_visits=position.root_visits,
             pi=position.pi,
             z=z_target(game.formal_result, state.side_to_move),
             model_hash=game.model_hash,
             selfplay_contract_fingerprint=game.selfplay_contract_fingerprint,
         )
-        sample.validate()
+        sample.validate(legal_context=legal_context)
         samples.append(sample)
     return tuple(samples)
 
@@ -331,10 +351,12 @@ class GoldenSelfPlayRunner:
         model_checkpoint_label: str,
         checkpoint_artifact_hash: str,
         master_seed: int,
+        seed_namespace: str | None = None,
         contract: SelfPlaySearchContract = DEFAULT_SELFPLAY_CONTRACT,
         code_identity: CodeIdentity | None = None,
         device: str | torch.device = "cpu",
         evaluator: GoldenNeuralEvaluator | None = None,
+        search_adapter: GoldenSearchAdapter | None = None,
     ) -> None:
         contract.validate()
         self.model = model
@@ -344,16 +366,23 @@ class GoldenSelfPlayRunner:
         self.model_hash = model_hash(model)
         self.checkpoint_artifact_hash = checkpoint_artifact_hash
         self.master_seed = int(master_seed)
+        # The run id identifies the artifact namespace.  A parity run may use
+        # a new run id while deliberately retaining the frozen seed namespace
+        # of an immutable reference run; the default preserves the historical
+        # behavior for all existing callers.
+        self.seed_namespace = str(seed_namespace) if seed_namespace is not None else self.run_id
         self.contract = contract
         self.code_identity = code_identity or capture_code_identity()
         self.device = torch.device(device)
+        self.search_adapter = search_adapter or GoldenSearchAdapter()
         # The coordinator owns the one immutable model placement.  Parallel
         # game workers receive this evaluator rather than concurrently calling
         # model.to(device), which is not a safe operation.
         self.evaluator = evaluator or GoldenNeuralEvaluator(model, device=self.device)
 
     def play_game(self, game_id: str) -> SelfPlayGameRecord:
-        game_seed = derive_seed(self.master_seed, self.run_id, game_id, "game")
+        evaluator_count_before = int(getattr(self.evaluator, "nn_evaluations", 0))
+        game_seed = derive_seed(self.master_seed, self.seed_namespace, game_id, "game")
         rng = random.Random(game_seed)
         state = initial_state()
         start = state_identity(state)
@@ -370,7 +399,9 @@ class GoldenSelfPlayRunner:
                     epsilon=self.contract.dirichlet_epsilon,
                     alpha=self.contract.dirichlet_alpha,
                 )
-                result = SequentialPUCT(self.contract.puct_settings).search(
+                result = SequentialPUCT(
+                    self.contract.puct_settings, adapter=self.search_adapter
+                ).search(
                     state, wrapped, seed=search_seed
                 )
                 action = sample_action_from_visits(
@@ -396,7 +427,7 @@ class GoldenSelfPlayRunner:
             ))
             trace.append(action)
             try:
-                state = apply_action(state, action).after
+                state = self.search_adapter.apply_action(state, action)
             except IllegalMoveError as exc:
                 technical, error = "ERROR_ILLEGAL_PLAYER_ACTION", f"{type(exc).__name__}: {exc}"
                 break
@@ -426,7 +457,7 @@ class GoldenSelfPlayRunner:
             formal_result=formal,
             technical_termination=technical,
             error=error,
-            nn_evaluations=self.evaluator.nn_evaluations,
+            nn_evaluations=int(getattr(self.evaluator, "nn_evaluations", 0)) - evaluator_count_before,
         )
         record.validate()
         return record

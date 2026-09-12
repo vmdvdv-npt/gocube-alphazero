@@ -224,7 +224,7 @@ def _runner_factory(model: torch.nn.Module, *, run_id: str, label: str, artifact
     return factory, evaluator
 
 
-def _process_worker_init(checkpoint_path: str, expected_model_hash: str, run_id: str, label: str, artifact: str, seed: int, profile_fingerprint: str, code_commit: str, code_tree: str, code_clean: bool, device_name: str) -> None:
+def _process_worker_init(checkpoint_path: str, expected_model_hash: str, run_id: str, seed_namespace: str | None, label: str, artifact: str, seed: int, profile_fingerprint: str, code_commit: str, code_tree: str, code_clean: bool, device_name: str) -> None:
     """Load one immutable checkpoint per worker; PUCT remains sequential per game."""
     global _PROCESS_MODEL, _PROCESS_CONFIG
     torch.set_num_threads(1)
@@ -236,6 +236,7 @@ def _process_worker_init(checkpoint_path: str, expected_model_hash: str, run_id:
     _PROCESS_MODEL = model
     _PROCESS_CONFIG = {
         "run_id": run_id,
+        "seed_namespace": seed_namespace,
         "label": label,
         "artifact": artifact,
         "seed": seed,
@@ -256,6 +257,7 @@ def _process_play_game(game_id: str) -> SelfPlayGameRecord:
         model_checkpoint_label=str(_PROCESS_CONFIG["label"]),
         checkpoint_artifact_hash=str(_PROCESS_CONFIG["artifact"]),
         master_seed=int(_PROCESS_CONFIG["seed"]),
+        seed_namespace=_PROCESS_CONFIG["seed_namespace"],
         code_identity=_PROCESS_CONFIG["code"],
         device=_PROCESS_CONFIG["device"],
         evaluator=evaluator,
@@ -263,7 +265,7 @@ def _process_play_game(game_id: str) -> SelfPlayGameRecord:
     return runner.play_game(game_id)
 
 
-def run_games(model: torch.nn.Module, *, run_id: str, label: str, artifact: str, checkpoint_path: str | None, seed: int, semantic_profile: Mapping[str, Any], code, device: torch.device, game_ids: Sequence[str], workers: int) -> tuple[tuple[SelfPlayGameRecord, ...], int]:
+def run_games(model: torch.nn.Module, *, run_id: str, label: str, artifact: str, checkpoint_path: str | None, seed: int, semantic_profile: Mapping[str, Any], code, device: torch.device, game_ids: Sequence[str], workers: int, seed_namespace: str | None = None) -> tuple[tuple[SelfPlayGameRecord, ...], int]:
     if workers > 1:
         if checkpoint_path is None:
             raise ValueError("Process self-play requires an immutable checkpoint path")
@@ -273,12 +275,28 @@ def run_games(model: torch.nn.Module, *, run_id: str, label: str, artifact: str,
             max_workers=int(workers),
             mp_context=get_context(context_name),
             initializer=_process_worker_init,
-            initargs=(checkpoint_path, model_hash(model), run_id, label, artifact, seed, str(semantic_profile["profile_fingerprint"]), code.git_commit_sha, code.git_tree_sha, code.working_tree_clean, str(device)),
+            initargs=(checkpoint_path, model_hash(model), run_id, seed_namespace, label, artifact, seed, str(semantic_profile["profile_fingerprint"]), code.git_commit_sha, code.git_tree_sha, code.working_tree_clean, str(device)),
         ) as pool:
             records = tuple(pool.map(_process_play_game, ordered_ids))
         return records, sum(record.nn_evaluations for record in records)
     factory, evaluator = _runner_factory(model, run_id=run_id, label=label, artifact=artifact, seed=seed, semantic_profile=semantic_profile, code=code, device=device)
     before = evaluator.nn_evaluations
+    if seed_namespace is not None:
+        evaluator = GoldenNeuralEvaluator(model, device=device)
+        def namespace_factory(game_id: str) -> GoldenSelfPlayRunner:
+            return GoldenSelfPlayRunner(
+                model,
+                run_id=run_id,
+                seed_namespace=seed_namespace,
+                profile_fingerprint=str(semantic_profile["profile_fingerprint"]),
+                model_checkpoint_label=label,
+                checkpoint_artifact_hash=artifact,
+                master_seed=seed,
+                code_identity=code,
+                device=device,
+                evaluator=evaluator,
+            )
+        factory = namespace_factory
     records = run_selfplay_games(factory, game_ids, workers=workers)
     return records, evaluator.nn_evaluations - before
 
