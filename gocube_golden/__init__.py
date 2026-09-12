@@ -22,6 +22,15 @@ from .arena import (
     write_records_jsonl,
     write_run_evidence,
 )
+from .arena_process import (
+    ArenaPairTask,
+    ArenaWorkerError,
+    CheckpointPlayerSpec,
+    GameTask,
+    PairTask,
+    PlayerSpec,
+    ProcessParallelGoldenArena,
+)
 from .arena_contract import (
     ARENA_CONTRACT_ID,
     DEFAULT_ARENA_CONTRACT,
