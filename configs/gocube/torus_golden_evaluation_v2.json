@@ -1,0 +1,40 @@
+{
+  "contract_id": "golden-evaluation-startset-v2",
+  "schema_version": 1,
+  "fingerprint_algorithm": "sha256-canonical-json-v1",
+  "topology": "torus-5x5",
+  "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
+  "komi": 0.5,
+  "generator": "independent-legal-nonpass-prefix-v2",
+  "master_seed": 2026091301,
+  "prefix_lengths": [2, 4, 6, 8, 10, 12, 14, 16],
+  "accepted_per_stratum": 8,
+  "accepted_total": 64,
+  "candidate_seed_derivation": "sha256(master_seed:prefix_length:candidate_index)[:8]-big-endian",
+  "candidate_policy": "random.Random(candidate_seed), uniformly choose among legal non-pass placements",
+  "dedupe": {
+    "exact": "full Golden state identity: board, side_to_move, consecutive_passes, full positional-superko history, topology, rules, komi, provenance",
+    "symmetry": "full-history canonicalization under all 200 Torus 5x5 translations composed with the 8 D4 square automorphisms",
+    "board_only_dedupe": false
+  },
+  "empty_board_control": {
+    "included_in_inferential_sample": false,
+    "paired_games": 2
+  },
+  "pair_unit": "one fixed start with candidate Black and candidate White games",
+  "primary_interval": {
+    "method": "95% Hoeffding bounded-mean interval",
+    "alpha": 0.05,
+    "formula": "epsilon=sqrt(log(2/alpha)/(2*n)); clamp(mean +/- epsilon, 0, 1)"
+  },
+  "arena": {
+    "simulations": 64,
+    "cpuct": 1.25,
+    "fpu": 0.0,
+    "noise": false,
+    "temperature": 0.0,
+    "fast": false,
+    "resign": false,
+    "move_limit": 500
+  }
+}

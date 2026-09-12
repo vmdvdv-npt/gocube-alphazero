@@ -1,0 +1,44 @@
+{
+  "profile_id": "gocube-torus-golden-training-v2-data-rich",
+  "schema_version": 1,
+  "fingerprint_algorithm": "sha256-canonical-json-v1",
+  "base_semantic_profile_id": "gocube-torus-golden-training-v1",
+  "base_semantic_profile_fingerprint": "sha256:e7ba86167f549d07ff05cb010c0e52fcf898a66f3daea77e74c46eac872bf758",
+  "model_init_seed": 2026091302,
+  "selfplay_master_seed": 2026091303,
+  "arena_master_seed": 2026091304,
+  "evaluation_master_seed": 2026091301,
+  "selfplay": {
+    "chunks": 4,
+    "games_per_chunk": 128,
+    "workers": 16,
+    "inference_batch_size": 1,
+    "inference_coalescing": false
+  },
+  "training": {
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0,
+    "batch_size": 64,
+    "sample_ratio_to_new_positions": 1.0,
+    "replay": "cumulative",
+    "sampling": "deterministic uniform without replacement within each phase",
+    "scheduler": "none"
+  },
+  "ablation": {
+    "chunk1_games": 128,
+    "training_games": 96,
+    "holdout_games": 32,
+    "high_reuse_sample_budget": 25600,
+    "arm_a_games": 16,
+    "arm_c_sampling": "one epoch over all 96 training-game positions; final batch may be smaller"
+  },
+  "frozen_semantics": {
+    "topology": "Torus 5x5",
+    "komi": 0.5,
+    "architecture": "GoldenGraphNetV1 hidden=64 blocks=4",
+    "selfplay_search": "base semantic profile self-play contract",
+    "arena_search": "base semantic profile Golden Arena contract"
+  },
+  "checkpoint_namespace": "stage4-prime-M0-through-M4"
+}
