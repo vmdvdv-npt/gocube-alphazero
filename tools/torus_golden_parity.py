@@ -100,6 +100,7 @@ from gocube_golden.stage4 import (
     STAGE4_PROFILE_ID,
     STAGE4_SELFPLAY_MASTER_SEED,
     audit_selfplay_records,
+    diagnostic_subset,
     evaluation_start_fingerprint,
     load_frozen_starts,
     state_from_start_row,
@@ -743,7 +744,7 @@ def run_stage4(*, run_dir: Path, run_id: str, semantic: Mapping[str, object], st
 
 def arena_matrix(*, run_dir: Path, run_id: str, stage4_result: Mapping[str, object], starts: Sequence[Mapping[str, object]], code, device: torch.device) -> dict[str, object]:
     checkpoints = stage4_result["checkpoints"]
-    subset = tuple(starts[index] for index in range(0, len(starts), 4))
+    subset = diagnostic_subset(starts)
     _assert(len(subset) == 16, "Arena diagnostic subset must contain 16 starts")
     result: dict[str, object] = {}
     specs = (
