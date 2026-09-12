@@ -20,9 +20,10 @@ Tensor = torch.Tensor
 nn = torch.nn
 F = importlib.import_module("torch.nn.functional")
 
+from .diagnostics import increment
+from .rules import LegalActionContext, prepare_legal_actions
 from .search import Evaluation
 from .state import BLACK, PASS, WHITE, GoldenState
-from .rules import legal_actions
 from .topology import TORUS_5X5
 
 
@@ -72,24 +73,87 @@ class GoldenObservation:
             raise ValueError("Golden observation contains NaN or Inf")
 
 
-def build_action_mask(state: GoldenState) -> tuple[bool, ...]:
+def _provided_legal_context(
+    state: GoldenState,
+    *,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> LegalActionContext:
+    supplied = sum(value is not None for value in (legal_actions, legal_context, legal_action_mask))
+    if supplied > 1:
+        raise ValueError("Supply only one precomputed legality representation")
+    if legal_action_mask is not None:
+        mask = tuple(bool(value) for value in legal_action_mask)
+        if len(mask) != ACTION_COUNT:
+            raise ValueError("Precomputed Golden legal action mask must have length 26")
+        actions = tuple(
+            PASS if index == PASS_INDEX else index
+            for index, is_legal in enumerate(mask)
+            if is_legal
+        )
+        return LegalActionContext(state.state_key, actions, mask)
+    if isinstance(legal_actions, LegalActionContext):
+        legal_context = legal_actions
+    if legal_context is not None:
+        legal_context.assert_compatible(state)
+        if len(legal_context.action_mask) != ACTION_COUNT:
+            raise ValueError("Precomputed Golden legal action mask must have length 26")
+        return legal_context
+    if legal_actions is None:
+        return prepare_legal_actions(state)
+    actions = tuple(legal_actions)
+    mask = [False] * ACTION_COUNT
+    for action in actions:
+        index = PASS_INDEX if action == PASS else action
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < ACTION_COUNT:
+            raise ValueError("Precomputed Golden legal actions contain an invalid action")
+        if mask[index]:
+            raise ValueError("Precomputed Golden legal actions contain a duplicate action")
+        mask[index] = True
+    return LegalActionContext(state.state_key, actions, tuple(mask))
+
+
+def build_action_mask(
+    state: GoldenState,
+    *,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> tuple[bool, ...]:
     """Return the 25-point legality mask plus PASS at index 25."""
+    increment("action_mask_builds")
     if state.is_terminal:
         raise ValueError("Terminal Golden states must never be passed to the NN")
-    legal = set(legal_actions(state))
-    mask = tuple(point in legal for point in range(state.topology.point_count))
-    if state.topology.point_count != 25:
+    if state.topology.fingerprint != TORUS_5X5.fingerprint or state.topology.point_count != 25:
         raise ValueError("Stage-3 observation is fixed to the 25-point Golden Torus")
-    return mask + (PASS in legal,)
+    return _provided_legal_context(
+        state,
+        legal_actions=legal_actions,
+        legal_context=legal_context,
+        legal_action_mask=legal_action_mask,
+    ).action_mask
 
 
-def build_observation_bundle(state: GoldenState) -> GoldenObservation:
+def build_observation_bundle(
+    state: GoldenState,
+    *,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> GoldenObservation:
     """Build the canonical [6,25] float32 observation for a live state."""
+    increment("observation_builds")
     if state.is_terminal:
         raise ValueError("Terminal Golden states must never be passed to the NN")
     if state.topology.fingerprint != TORUS_5X5.fingerprint:
         raise ValueError("Stage-3 observation requires canonical Golden Torus 5x5")
-    mask = build_action_mask(state)
+    mask = _provided_legal_context(
+        state,
+        legal_actions=legal_actions,
+        legal_context=legal_context,
+        legal_action_mask=legal_action_mask,
+    ).action_mask
     own = int(state.side_to_move)
     other = int(WHITE if state.side_to_move == BLACK else BLACK)
     values = torch.zeros((6, 25), dtype=torch.float32)
@@ -103,9 +167,20 @@ def build_observation_bundle(state: GoldenState) -> GoldenObservation:
     return GoldenObservation(values, mask, state.state_key)
 
 
-def build_observation(state: GoldenState) -> Tensor:
+def build_observation(
+    state: GoldenState,
+    *,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> Tensor:
     """Convenience API returning only the canonical tensor."""
-    return build_observation_bundle(state).tensor
+    return build_observation_bundle(
+        state,
+        legal_actions=legal_actions,
+        legal_context=legal_context,
+        legal_action_mask=legal_action_mask,
+    ).tensor
 
 
 class GoldenGraphMessageLayer(nn.Module):
@@ -226,15 +301,28 @@ class GoldenNeuralEvaluator:
         self.checkpoint_metadata: Mapping[str, object] | None = None
         self.nn_evaluations = 0
 
-    def evaluate(self, state: GoldenState) -> Evaluation:
+    def evaluate(
+        self,
+        state: GoldenState,
+        *,
+        legal_context: LegalActionContext | None = None,
+    ) -> Evaluation:
+        context = legal_context if legal_context is not None else prepare_legal_actions(state)
+        return self.evaluate_prepared(state, context)
+
+    def evaluate_prepared(
+        self, state: GoldenState, legal_context: LegalActionContext
+    ) -> Evaluation:
         if state.is_terminal:
             raise RuntimeError("GoldenNeuralEvaluator must never evaluate a terminal state")
-        observation = build_observation(state).to(self.device)
+        legal_context.assert_compatible(state)
+        observation = build_observation(state, legal_context=legal_context).to(self.device)
         with torch.inference_mode():
             policy_logits, value_logits = self.model(observation.unsqueeze(0))
             policy = torch.softmax(policy_logits[0], dim=0)
             wdl = torch.softmax(value_logits[0], dim=0)
         self.nn_evaluations += 1
+        increment("nn_forwards")
         policy_values = tuple(float(value) for value in policy.detach().cpu())
         wdl_values = tuple(float(value) for value in wdl.detach().cpu())
         if len(policy_values) != ACTION_COUNT or len(wdl_values) != 3:
@@ -271,10 +359,22 @@ class SelfPlayRootNoiseEvaluator:
         self._generator.manual_seed(self.seed)
 
     def evaluate(self, state: GoldenState) -> Evaluation:
-        base = self.evaluator.evaluate(state)
+        increment("root_noise_legal_scans")
+        return self.evaluate_prepared(state, prepare_legal_actions(state))
+
+    def evaluate_prepared(
+        self, state: GoldenState, legal_context: LegalActionContext
+    ) -> Evaluation:
+        legal_context.assert_compatible(state)
+        prepared_evaluate = getattr(self.evaluator, "evaluate_prepared", None)
+        if callable(prepared_evaluate):
+            base = prepared_evaluate(state, legal_context)
+        else:
+            base = self.evaluator.evaluate(state)
         if state.state_key != self.root_state_key:
             return base
-        legal = legal_actions(state)
+        increment("root_noise_legal_reuses")
+        legal = legal_context.actions
         if not legal:
             raise RuntimeError("Self-play root has no legal actions")
         base_policy = [float(value) for value in base.policy]
