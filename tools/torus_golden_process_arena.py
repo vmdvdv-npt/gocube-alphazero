@@ -276,9 +276,19 @@ def _one_comparison(
         reference_label=reference_label,
         starts=starts,
     )
-    if require_expected_result and sequential_summary["W/L/D"] != EXPECTED[slug]:
+    if require_expected_result and tuple(sequential_summary["W/L/D"]) != EXPECTED[slug]:
+        _write_json(run_dir / f"{slug.lower()}-aggregate-drift.json", {
+            "sequential": sequential_summary,
+            "parallel": parallel_summary,
+        })
         raise RuntimeError(f"Arena {slug} aggregate result drift: {parallel_summary}")
     if parallel_summary != sequential_summary:
+        differing = {
+            key: {"sequential": sequential_summary[key], "parallel": parallel_summary[key]}
+            for key in sequential_summary
+            if sequential_summary[key] != parallel_summary.get(key)
+        }
+        _write_json(run_dir / f"{slug.lower()}-summary-diff.json", differing)
         raise RuntimeError(f"Arena {slug} aggregate result drift: {parallel_summary}")
     if sequential_summary["technical"] != 0:
         raise RuntimeError(f"Arena {slug} contains technical games")
@@ -311,7 +321,13 @@ def _one_comparison(
     }
 
 
-def run(*, workers: int, output_dir: Path, limit_pairs: int | None = None) -> dict[str, object]:
+def run(
+    *,
+    workers: int,
+    output_dir: Path,
+    limit_pairs: int | None = None,
+    only: str | None = None,
+) -> dict[str, object]:
     if workers != 16 and limit_pairs is None:
         raise ValueError("The canonical Golden Arena proof requires workers=16")
     if limit_pairs is not None and limit_pairs <= 0:
@@ -322,7 +338,10 @@ def run(*, workers: int, output_dir: Path, limit_pairs: int | None = None) -> di
     subset = diagnostic_subset(starts)
     full_proof = limit_pairs is None
     rows: list[dict[str, object]] = []
-    for slug, candidate, reference, pair_count in SPECS:
+    selected_specs = tuple(item for item in SPECS if only is None or item[0] == only)
+    if not selected_specs:
+        raise ValueError(f"Unknown comparison slug: {only}")
+    for slug, candidate, reference, pair_count in selected_specs:
         corpus = starts if pair_count == 64 else subset
         if limit_pairs is not None:
             corpus = corpus[:limit_pairs]
@@ -414,13 +433,19 @@ def main() -> int:
         type=int,
         help="development smoke limit per comparison; omitting it runs the 480-game proof",
     )
+    parser.add_argument("--only", choices=tuple(item[0] for item in SPECS))
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=ROOT / "runs" / "golden-arena-process-parallel" / "torus-golden-arena-process-parity-20260913",
     )
     args = parser.parse_args()
-    report = run(workers=args.workers, output_dir=args.output_dir, limit_pairs=args.limit_pairs)
+    report = run(
+        workers=args.workers,
+        output_dir=args.output_dir,
+        limit_pairs=args.limit_pairs,
+        only=args.only,
+    )
     print(json.dumps(_jsonable(report), indent=2, sort_keys=True))
     return 0
 
