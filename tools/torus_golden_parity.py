@@ -596,7 +596,7 @@ def _play_full_game(model: torch.nn.Module, *, seed_namespace: str, game_id: str
             break
     _assert(state.is_terminal, f"Full-game trace did not terminate for {game_id}")
     result = result_from_terminal(state)
-    targets = tuple(z_target(result.winner.value, row["before"][1]) for row in rows)
+    targets = tuple(z_target(result.winner.value, "BLACK" if row["before"][1] == int(BLACK) else "WHITE") for row in rows)
     return {"game_id": game_id, "game_seed": game_seed, "rows": tuple(rows), "game_length": len(rows), "winner": result.winner, "score": result, "z": targets}
 
 
