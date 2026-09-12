@@ -5,6 +5,7 @@ from enum import Enum
 import hashlib
 import json
 import math
+from numbers import Real
 import random
 from typing import Mapping, Protocol, Sequence
 
@@ -30,17 +31,21 @@ SEARCH_IMPLEMENTATION_FINGERPRINT = "sha256:" + hashlib.sha256(
     json.dumps(SEARCH_SEMANTICS, sort_keys=True, separators=(",", ":")).encode("utf-8")
 ).hexdigest()
 
+
 class SearchError(RuntimeError):
     pass
+
 
 @dataclass(frozen=True)
 class Evaluation:
     policy: Mapping[int | str, float] | Sequence[float]
     wdl: tuple[float, float, float]
 
+
 class Evaluator(Protocol):
     def evaluate(self, state: GoldenState) -> Evaluation:
         ...
+
 
 @dataclass
 class _Edge:
@@ -53,11 +58,13 @@ class _Edge:
     def q(self) -> float:
         return self.value_sum / self.visits if self.visits else 0.0
 
+
 @dataclass
 class _Node:
     state: GoldenState
     expanded: bool = False
     edges: dict[int | str, _Edge] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class SearchResult:
@@ -69,6 +76,8 @@ class SearchResult:
     evaluator_calls: int
     implementation_id: str = SEARCH_IMPLEMENTATION_ID
     implementation_fingerprint: str = SEARCH_IMPLEMENTATION_FINGERPRINT
+    root_q: tuple[float | None, ...] = ()
+
 
 def wdl_to_side_to_move_utility(wdl: Sequence[float]) -> float:
     """The one model-value semantic boundary used by Stage-2 search."""
@@ -86,9 +95,62 @@ def wdl_to_side_to_move_utility(wdl: Sequence[float]) -> float:
         raise SearchError("Golden evaluator WDL must have positive total probability")
     return (win - loss) / total
 
+
 def _child_to_parent_utility(child_utility: float) -> float:
     """The only turn-boundary sign conversion in Stage-2 search/solver."""
     return -float(child_utility)
+
+
+def _validated_policy_weight(value: object, *, label: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise SearchError(f"Non-numeric policy weight for action {label!r}")
+    weight = float(value)
+    if not math.isfinite(weight) or weight < 0.0:
+        raise SearchError(f"Invalid policy weight for action {label!r}")
+    return weight
+
+
+def _validated_policy_vector(
+    evaluation: Evaluation,
+    state: GoldenState,
+    adapter: GoldenSearchAdapter,
+) -> dict[int | str, float]:
+    """Validate the entire evaluator policy before any legal masking.
+
+    Both sequence and mapping policies must exactly match the Golden action
+    space. Every value is validated before legal masking, including values in
+    actions that are illegal in the current state.
+    """
+    action_space = adapter.action_space(state)
+    expected = len(action_space)
+    raw = evaluation.policy
+
+    if isinstance(raw, Mapping):
+        if len(raw) != expected:
+            raise SearchError(f"Golden policy length {len(raw)} != action size {expected}")
+        weights: dict[int | str, float] = {}
+        for action, value in raw.items():
+            try:
+                index = adapter.action_index(state, action)
+            except Exception as exc:
+                raise SearchError(f"Invalid policy action key {action!r}") from exc
+            canonical_action = action_space[index]
+            weights[canonical_action] = _validated_policy_weight(value, label=action)
+        if set(weights) != set(action_space):
+            raise SearchError("Golden policy mapping must contain every action exactly once")
+        return weights
+
+    try:
+        seq = tuple(raw)
+    except TypeError as exc:
+        raise SearchError("Golden evaluator policy must be a mapping or sequence") from exc
+    if len(seq) != expected:
+        raise SearchError(f"Golden policy length {len(seq)} != action size {expected}")
+    return {
+        action: _validated_policy_weight(seq[index], label=action)
+        for index, action in enumerate(action_space)
+    }
+
 
 def _policy_for_legal(
     evaluation: Evaluation,
@@ -96,33 +158,14 @@ def _policy_for_legal(
     legal: tuple[int | str, ...],
     adapter: GoldenSearchAdapter,
 ) -> dict[int | str, float]:
-    raw = evaluation.policy
-    weights: dict[int | str, float] = {}
-    if isinstance(raw, Mapping):
-        for action in legal:
-            value = raw.get(action, 0.0)
-            try:
-                weight = float(value)
-            except (TypeError, ValueError) as exc:
-                raise SearchError(f"Non-numeric policy weight for action {action!r}") from exc
-            if not math.isfinite(weight) or weight < 0:
-                raise SearchError(f"Invalid policy weight for action {action!r}")
-            weights[action] = weight
-    else:
-        seq = tuple(raw)
-        expected = state.topology.point_count + 1
-        if len(seq) != expected:
-            raise SearchError(f"Golden policy length {len(seq)} != action size {expected}")
-        for action in legal:
-            weight = float(seq[adapter.action_index(state, action)])
-            if not math.isfinite(weight) or weight < 0:
-                raise SearchError(f"Invalid policy weight for action {action!r}")
-            weights[action] = weight
+    full_weights = _validated_policy_vector(evaluation, state, adapter)
+    weights = {action: full_weights[action] for action in legal}
     total = sum(weights.values())
     if total <= 0.0:
         uniform = 1.0 / len(legal)
         return {action: uniform for action in legal}
     return {action: weight / total for action, weight in weights.items()}
+
 
 class SequentialPUCT:
     """Small single-state Python PUCT used only because legacy pinned search failed qualification."""
@@ -219,6 +262,10 @@ class SequentialPUCT:
         action_space = self.adapter.action_space(state)
         visit_map = {action: root.edges[action].visits for action in legal}
         root_visits = tuple(visit_map.get(action, 0) for action in action_space)
+        root_q = tuple(
+            root.edges[action].q if action in root.edges and root.edges[action].visits else None
+            for action in action_space
+        )
         pi = tuple(count / total for count in root_visits)
 
         max_visits = max(visit_map.values())
@@ -236,11 +283,14 @@ class SequentialPUCT:
             pi=pi,
             simulations=self.settings.simulations,
             evaluator_calls=self._evaluator_calls,
+            root_q=root_q,
         )
+
 
 class SolveStatus(str, Enum):
     EXACT = "EXACT"
     UNKNOWN = "UNKNOWN"
+
 
 @dataclass(frozen=True)
 class ExactSolveResult:
@@ -248,6 +298,7 @@ class ExactSolveResult:
     utility: float | None
     best_actions: tuple[int | str, ...]
     nodes: int
+
 
 def solve_exact(
     state: GoldenState,
