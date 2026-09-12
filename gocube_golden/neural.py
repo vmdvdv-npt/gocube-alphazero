@@ -41,6 +41,12 @@ OBSERVATION_CHANNELS = (
 ACTION_COUNT = 26
 PASS_INDEX = 25
 VALUE_HEAD_SEMANTICS = "side-to-move:[WIN,DRAW,LOSS]"
+AUXILIARY_VARIANTS = (
+    "wdl",
+    "wdl+ownership",
+    "wdl+score",
+    "wdl+ownership+score",
+)
 
 
 def _fingerprint(value: object) -> str:
@@ -256,7 +262,7 @@ class GoldenGraphNetV1(nn.Module):
             "heads": {"policy": [26], "value": [3]},
         }
 
-    def forward(self, observation: Tensor) -> tuple[Tensor, Tensor]:
+    def encode(self, observation: Tensor) -> Tensor:
         if observation.ndim == 2:
             observation = observation.unsqueeze(0)
         if tuple(observation.shape[1:]) != (6, 25):
@@ -265,13 +271,85 @@ class GoldenGraphNetV1(nn.Module):
         nodes = self.input_projection(nodes)
         for block in self.blocks:
             nodes = block(nodes)
-        nodes = F.relu(self.output_norm(nodes))
+        return F.relu(self.output_norm(nodes))
+
+    @staticmethod
+    def policy_value_from_nodes(nodes: Tensor, point_policy: nn.Module, pass_policy: nn.Module, value_head: nn.Module) -> tuple[Tensor, Tensor]:
         policy_logits = torch.cat(
-            (self.point_policy(nodes).squeeze(-1), self.pass_policy(nodes.mean(dim=1))),
+            (point_policy(nodes).squeeze(-1), pass_policy(nodes.mean(dim=1))),
             dim=1,
         )
-        value_logits = self.value_head(nodes.mean(dim=1))
+        value_logits = value_head(nodes.mean(dim=1))
         return policy_logits, value_logits
+
+    def forward(self, observation: Tensor) -> tuple[Tensor, Tensor]:
+        return self.policy_value_from_nodes(
+            self.encode(observation), self.point_policy, self.pass_policy, self.value_head
+        )
+
+
+class AuxiliaryGoldenGraphNet(GoldenGraphNetV1):
+    """The four-arm extension with the proven policy/WDL trunk preserved.
+
+    ``forward`` intentionally keeps the two-output evaluator boundary.  The
+    auxiliary training path calls ``forward_auxiliary`` explicitly, so Arena,
+    PUCT, self-play exploration, and the WDL baseline remain unchanged.
+    """
+
+    def __init__(
+        self,
+        *,
+        variant: str = "wdl+ownership+score",
+        topology=TORUS_5X5,
+        hidden: int = 64,
+        blocks: int = 4,
+    ) -> None:
+        if variant not in AUXILIARY_VARIANTS[1:]:
+            raise ValueError(f"Auxiliary model requires one of {AUXILIARY_VARIANTS[1:]}, got {variant!r}")
+        super().__init__(topology=topology, hidden=hidden, blocks=blocks)
+        self.variant = str(variant)
+        self.ownership_head = nn.Sequential(
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, 3),
+        )
+        self.score_head = nn.Sequential(
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, 1),
+        )
+
+    @property
+    def architecture_config(self) -> dict[str, object]:
+        config = super().architecture_config
+        config["auxiliary_variant"] = self.variant
+        config["heads"] = {
+            "policy": [26],
+            "value": [3],
+            "ownership": [25, 3],
+            "score": [1],
+        }
+        return config
+
+    def forward_auxiliary(self, observation: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        nodes = self.encode(observation)
+        policy_logits, value_logits = self.policy_value_from_nodes(
+            nodes, self.point_policy, self.pass_policy, self.value_head
+        )
+        ownership_logits = self.ownership_head(nodes)
+        score_logits = self.score_head(nodes.mean(dim=1)).squeeze(-1)
+        return policy_logits, value_logits, ownership_logits, score_logits
+
+
+def instantiate_model_from_metadata(metadata: Mapping[str, object]) -> nn.Module:
+    """Construct the checkpoint-compatible model without changing Arena semantics."""
+    variant = str(metadata.get("model_variant", "wdl"))
+    architecture = metadata.get("architecture_config")
+    hidden = int(architecture.get("hidden", 64)) if isinstance(architecture, Mapping) else 64
+    blocks = int(architecture.get("blocks", 4)) if isinstance(architecture, Mapping) else 4
+    if variant == "wdl":
+        return GoldenGraphNetV1(hidden=hidden, blocks=blocks)
+    return AuxiliaryGoldenGraphNet(variant=variant, hidden=hidden, blocks=blocks)
 
 
 def model_hash(model: nn.Module) -> str:

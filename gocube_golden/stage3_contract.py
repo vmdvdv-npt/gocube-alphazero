@@ -182,7 +182,13 @@ def validate_checkpoint_metadata(metadata: Mapping[str, Any], *, profile: Mappin
     _require(metadata.get("target_contract_version") == active["target"]["contract_version"], "Golden checkpoint target version mismatch")
     _require(metadata.get("target_fingerprint") == active["target"]["fingerprint"], "Golden checkpoint target fingerprint mismatch")
     _require(metadata.get("value_head_semantics") == "side-to-move:[WIN,DRAW,LOSS]", "Golden checkpoint value semantics mismatch")
-    _require(metadata.get("network_heads_and_shapes") == {"policy": [26], "value": [3]}, "Golden checkpoint head shapes mismatch")
+    variant = str(metadata.get("model_variant", "wdl"))
+    allowed_variants = {"wdl", "wdl+ownership", "wdl+score", "wdl+ownership+score"}
+    _require(variant in allowed_variants, "Golden checkpoint model variant is invalid")
+    expected_heads = {"policy": [26], "value": [3]}
+    if variant != "wdl":
+        expected_heads.update({"ownership": [25, 3], "score": [1]})
+    _require(metadata.get("network_heads_and_shapes") == expected_heads, "Golden checkpoint head shapes mismatch")
     _require(metadata.get("training_profile_id") == active["profile_id"], "Golden checkpoint training profile mismatch")
     _require(metadata.get("training_profile_fingerprint") == active["profile_fingerprint"], "Golden checkpoint training profile fingerprint mismatch")
     _require(isinstance(metadata.get("parent_or_source_run_identity"), str) and bool(metadata["parent_or_source_run_identity"]), "Golden checkpoint parent identity is missing")

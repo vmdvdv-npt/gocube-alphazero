@@ -21,8 +21,10 @@ F = importlib.import_module("torch.nn.functional")
 from .arena_contract import GOLDEN_MOVE_LIMIT, SearchSettings
 from .neural import (
     ACTION_COUNT,
+    AUXILIARY_VARIANTS,
     OBSERVATION_FINGERPRINT,
     PASS_INDEX,
+    AuxiliaryGoldenGraphNet,
     GoldenGraphNetV1,
     GoldenNeuralEvaluator,
     SelfPlayRootNoiseEvaluator,
@@ -34,6 +36,7 @@ from .result import Winner, result_from_terminal
 from .rules import (
     IllegalMoveError,
     LegalActionContext,
+    apply_action,
     prepare_legal_actions,
 )
 from .search import SearchError, SearchResult, SequentialPUCT
@@ -48,12 +51,18 @@ from .stage3_contract import (
     validate_checkpoint_metadata,
 )
 from .state import BLACK, PASS, WHITE, GoldenState, Stone, initial_state
+from .scoring import Ownership, score_terminal
 
 
 SELFPLAY_SEARCH_IMPLEMENTATION_ID = "golden-sequential-puct-v1"
 SELFPLAY_SCHEMA_VERSION = 1
 REPLAY_SCHEMA_VERSION = 1
 CHECKPOINT_SCHEMA_VERSION = 1
+OWNERSHIP_CLASSES = ("OWN", "OPPONENT", "NEUTRAL")
+OWNERSHIP_TARGET_CONTRACT_ID = "golden-ownership-final-state-side-to-move-v1"
+SCORE_TARGET_CONTRACT_ID = "golden-score-final-margin-side-to-move-v1"
+SCORE_TARGET_NORMALIZATION = 25.5
+GOLDEN_AUXILIARY_TARGET_SOURCE = "golden-referee-final-state-v1"
 
 
 def _jsonable(value: object) -> object:
@@ -267,6 +276,37 @@ def z_target(winner: str | Winner, side_to_move: Stone | str) -> tuple[float, fl
     return (1.0, 0.0, 0.0) if winner_name == side_name else (0.0, 0.0, 1.0)
 
 
+def _side_name(side_to_move: Stone | str) -> str:
+    return side_to_move.name if isinstance(side_to_move, Stone) else str(side_to_move)
+
+
+def ownership_target(final_state: GoldenState, side_to_move: Stone | str) -> tuple[int, ...]:
+    """Return exact final Golden ownership as OWN/OPPONENT/NEUTRAL classes."""
+    if not final_state.is_terminal:
+        raise ValueError("Ownership targets require a formal Golden terminal state")
+    side = _side_name(side_to_move)
+    if side not in ("BLACK", "WHITE"):
+        raise ValueError("Ownership target perspective must be BLACK or WHITE")
+    score = score_terminal(final_state)
+    own = Ownership.BLACK if side == "BLACK" else Ownership.WHITE
+    opponent = Ownership.WHITE if side == "BLACK" else Ownership.BLACK
+    mapping = {own: 0, opponent: 1, Ownership.NEUTRAL: 2}
+    return tuple(mapping[item] for item in score.ownership)
+
+
+def score_target(final_state: GoldenState, side_to_move: Stone | str) -> float:
+    """Return exact final margin from the replay sample's side-to-move view."""
+    if not final_state.is_terminal:
+        raise ValueError("Score targets require a formal Golden terminal state")
+    side = _side_name(side_to_move)
+    if side not in ("BLACK", "WHITE"):
+        raise ValueError("Score target perspective must be BLACK or WHITE")
+    if final_state.komi != 0.5:
+        raise ValueError("Golden auxiliary score target requires komi exactly 0.5")
+    margin = float(score_terminal(final_state).margin_black)
+    return margin if side == "BLACK" else -margin
+
+
 @dataclass(frozen=True)
 class GoldenTrainingSample:
     run_id: str
@@ -284,6 +324,9 @@ class GoldenTrainingSample:
     observation_fingerprint: str = OBSERVATION_FINGERPRINT
     target_contract_id: str = TARGET_CONTRACT_ID
     target_fingerprint: str = TARGET_FINGERPRINT
+    ownership_target: tuple[int, ...] | None = None
+    score_target: float | None = None
+    auxiliary_target_source: str | None = None
 
     def validate(self, *, legal_context: LegalActionContext | None = None) -> None:
         current = state_from_identity(self.state)
@@ -306,9 +349,48 @@ class GoldenTrainingSample:
             raise ValueError("Replay z target is not normalized")
         if self.observation_fingerprint != OBSERVATION_FINGERPRINT or self.target_contract_id != TARGET_CONTRACT_ID or self.target_fingerprint != TARGET_FINGERPRINT:
             raise ValueError("Replay semantic fingerprint drift")
+        if self.ownership_target is not None:
+            if len(self.ownership_target) != 25 or any(int(value) not in range(3) for value in self.ownership_target):
+                raise ValueError("Replay ownership target must contain 25 OWN/OPPONENT/NEUTRAL classes")
+        if self.score_target is not None and not math.isfinite(float(self.score_target)):
+            raise ValueError("Replay score target must be finite")
+        if (self.ownership_target is not None or self.score_target is not None) and self.auxiliary_target_source != GOLDEN_AUXILIARY_TARGET_SOURCE:
+            raise ValueError("Auxiliary targets must be sourced from the Golden final referee state")
+        if self.score_target is not None:
+            score = float(self.score_target)
+            if self.z[1] > 0.5 and abs(score) > 1e-6:
+                raise ValueError("Draw WDL target contradicts non-zero Golden score target")
+            if self.z[0] > 0.5 and score <= 0.0:
+                raise ValueError("Winning WDL target contradicts non-positive Golden score target")
+            if self.z[2] > 0.5 and score >= 0.0:
+                raise ValueError("Losing WDL target contradicts non-negative Golden score target")
 
     def to_dict(self) -> dict[str, object]:
         return _jsonable(asdict(self))  # type: ignore[return-value]
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> "GoldenTrainingSample":
+        """Load a replay row while preserving auxiliary target fields."""
+        return cls(
+            run_id=str(payload["run_id"]),
+            game_id=str(payload["game_id"]),
+            ply=int(payload["ply"]),
+            state=dict(payload["state"]),  # type: ignore[arg-type]
+            side_to_move=str(payload["side_to_move"]),
+            observation=tuple(tuple(float(value) for value in row) for row in payload["observation"]),  # type: ignore[index]
+            legal_action_mask=tuple(bool(value) for value in payload["legal_action_mask"]),  # type: ignore[index]
+            root_visits=tuple(int(value) for value in payload["root_visits"]),  # type: ignore[index]
+            pi=tuple(float(value) for value in payload["pi"]),  # type: ignore[index]
+            z=tuple(float(value) for value in payload["z"]),  # type: ignore[index]
+            model_hash=str(payload["model_hash"]),
+            selfplay_contract_fingerprint=str(payload["selfplay_contract_fingerprint"]),
+            observation_fingerprint=str(payload.get("observation_fingerprint", OBSERVATION_FINGERPRINT)),
+            target_contract_id=str(payload.get("target_contract_id", TARGET_CONTRACT_ID)),
+            target_fingerprint=str(payload.get("target_fingerprint", TARGET_FINGERPRINT)),
+            ownership_target=(tuple(int(value) for value in payload["ownership_target"]) if payload.get("ownership_target") is not None else None),  # type: ignore[index]
+            score_target=(float(payload["score_target"]) if payload.get("score_target") is not None else None),
+            auxiliary_target_source=(str(payload["auxiliary_target_source"]) if payload.get("auxiliary_target_source") is not None else None),
+        )
 
 
 def build_replay_samples(game: SelfPlayGameRecord) -> tuple[GoldenTrainingSample, ...]:
@@ -317,6 +399,13 @@ def build_replay_samples(game: SelfPlayGameRecord) -> tuple[GoldenTrainingSample
         raise ValueError("Technical self-play games are excluded from training replay")
     if game.formal_result is None:
         raise ValueError("Replay requires a formal Golden result")
+    final_state = initial_state(komi=float(game.start_state["komi"]))
+    for action in game.final_action_trace:
+        final_state = apply_action(final_state, action).after
+    if not final_state.is_terminal:
+        raise ValueError("Golden replay trace did not reach a formal terminal state")
+    if final_state.komi != 0.5:
+        raise ValueError("Golden replay auxiliary targets require komi exactly 0.5")
     samples: list[GoldenTrainingSample] = []
     for position in game.positions:
         state = state_from_identity(position.state)
@@ -335,6 +424,9 @@ def build_replay_samples(game: SelfPlayGameRecord) -> tuple[GoldenTrainingSample
             z=z_target(game.formal_result, state.side_to_move),
             model_hash=game.model_hash,
             selfplay_contract_fingerprint=game.selfplay_contract_fingerprint,
+            ownership_target=ownership_target(final_state, state.side_to_move),
+            score_target=score_target(final_state, state.side_to_move),
+            auxiliary_target_source=GOLDEN_AUXILIARY_TARGET_SOURCE,
         )
         sample.validate(legal_context=legal_context)
         samples.append(sample)
@@ -625,6 +717,106 @@ class GoldenTrainer:
         return tuple(metrics)
 
 
+def train_variant_batch_schedule(
+    model: nn.Module,
+    samples: Sequence[GoldenTrainingSample],
+    batch_indices: Sequence[Sequence[int]],
+    *,
+    variant: str,
+    learning_rate: float = 1e-3,
+    weight_decay: float = 0.0,
+    optimizer: torch.optim.Optimizer | None = None,
+    update_offset: int = 0,
+    sample_offset: int = 0,
+) -> tuple[torch.optim.Optimizer, dict[str, object]]:
+    """Train one declared arm with the proven Stage4 sample/update schedule."""
+    if variant == "wdl":
+        raise ValueError("The WDL control must use the proven train_batch_schedule path")
+    if variant not in AUXILIARY_VARIANTS[1:] or not isinstance(model, AuxiliaryGoldenGraphNet):
+        raise ValueError(f"Invalid auxiliary training variant/model: {variant!r}")
+    if model.variant != variant:
+        raise ValueError(f"Model variant {model.variant!r} does not match {variant!r}")
+    if not samples or not batch_indices:
+        raise ValueError("Training schedule requires samples and at least one batch")
+    if any(not batch for batch in batch_indices):
+        raise ValueError("Training schedule cannot contain an empty batch")
+    for sample in samples:
+        sample.validate()
+        if sample.ownership_target is None or sample.score_target is None:
+            raise ValueError("Auxiliary training requires Golden referee ownership and score targets")
+    device = next(model.parameters()).device
+    optimizer = optimizer or torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    observations = torch.tensor([sample.observation for sample in samples], dtype=torch.float32, device=device)
+    policies = torch.tensor([sample.pi for sample in samples], dtype=torch.float32, device=device)
+    values = torch.tensor([sample.z for sample in samples], dtype=torch.float32, device=device)
+    model.train()
+    update_rows: list[dict[str, object]] = []
+    consumed = int(sample_offset)
+    updates = int(update_offset)
+    for batch in batch_indices:
+        indices = torch.tensor(tuple(int(index) for index in batch), dtype=torch.long, device=device)
+        batch_observations = observations[indices]
+        batch_policies = policies[indices]
+        batch_values = values[indices]
+        ownership = torch.tensor([samples[index].ownership_target for index in batch], dtype=torch.long, device=device)
+        scores = torch.tensor(
+            [float(samples[index].score_target) / SCORE_TARGET_NORMALIZATION for index in batch],
+            dtype=torch.float32,
+            device=device,
+        )
+        policy_logits, value_logits, ownership_logits, score_logits = model.forward_auxiliary(batch_observations)
+        policy_loss = -(batch_policies * F.log_softmax(policy_logits, dim=1)).sum(dim=1).mean()
+        value_loss = -(batch_values * F.log_softmax(value_logits, dim=1)).sum(dim=1).mean()
+        ownership_loss = F.cross_entropy(ownership_logits.reshape(-1, 3), ownership.reshape(-1))
+        score_loss = F.mse_loss(score_logits, scores)
+        total_loss = policy_loss + value_loss
+        if "ownership" in variant:
+            total_loss = total_loss + ownership_loss
+        else:
+            ownership_loss = torch.zeros((), dtype=total_loss.dtype, device=device)
+        if "score" in variant:
+            total_loss = total_loss + score_loss
+        else:
+            score_loss = torch.zeros((), dtype=total_loss.dtype, device=device)
+        if not bool(torch.isfinite(total_loss)):
+            raise FloatingPointError("Auxiliary training produced non-finite loss")
+        optimizer.zero_grad(set_to_none=True)
+        total_loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float("inf"))
+        if not bool(torch.isfinite(torch.as_tensor(grad_norm))):
+            raise FloatingPointError("Auxiliary training produced non-finite gradient")
+        optimizer.step()
+        if any(not bool(torch.isfinite(parameter).all()) for parameter in model.parameters()):
+            raise FloatingPointError("Auxiliary training produced non-finite parameter")
+        updates += 1
+        consumed += len(batch)
+        update_rows.append({
+            "update": updates,
+            "batch_size": len(batch),
+            "cumulative_samples": consumed,
+            "policy_loss": float(policy_loss.detach().cpu()),
+            "value_loss": float(value_loss.detach().cpu()),
+            "ownership_loss": float(ownership_loss.detach().cpu()),
+            "score_loss_normalized": float(score_loss.detach().cpu()),
+            "total_loss": float(total_loss.detach().cpu()),
+            "gradient_norm": float(grad_norm),
+            "learning_rate": float(optimizer.param_groups[0]["lr"]),
+        })
+    return optimizer, {
+        "updates": updates,
+        "exact_samples_consumed": consumed,
+        "batch_count": len(batch_indices),
+        "batch_sizes": [len(batch) for batch in batch_indices],
+        "final_batch_size": len(batch_indices[-1]),
+        "first_update": update_rows[0],
+        "last_update": update_rows[-1],
+        "updates_detail": update_rows,
+        "variant": variant,
+        "score_target_normalization": SCORE_TARGET_NORMALIZATION,
+        "loss": "policy_ce + wdl_ce + declared_auxiliary_losses",
+    }
+
+
 def save_checkpoint(
     path: str | Path,
     *,
@@ -697,7 +889,14 @@ def load_checkpoint(
 
 
 def model_hash_from_state_dict(model: nn.Module, state_dict: Mapping[str, Tensor]) -> str:
-    clone = type(model)(topology=initial_state().topology, hidden=model.hidden, blocks=model.blocks_count)
+    kwargs: dict[str, object] = {
+        "topology": initial_state().topology,
+        "hidden": model.hidden,
+        "blocks": model.blocks_count,
+    }
+    if hasattr(model, "variant"):
+        kwargs["variant"] = getattr(model, "variant")
+    clone = type(model)(**kwargs)
     clone.load_state_dict(state_dict, strict=True)
     return model_hash(clone)
 
