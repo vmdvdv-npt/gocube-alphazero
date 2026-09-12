@@ -25,7 +25,7 @@ class SearchSettings:
     deterministic_tie_break: bool = True
 
     def __post_init__(self) -> None:
-        if isinstance(self.simulations, bool) or self.simulations <= 0:
+        if isinstance(self.simulations, bool) or not isinstance(self.simulations, int) or self.simulations <= 0:
             raise ValueError("Golden search simulations must be a positive integer")
         if not math.isfinite(float(self.cpuct)) or self.cpuct <= 0:
             raise ValueError("Golden search cpuct must be finite and positive")

@@ -11,12 +11,13 @@ from .arena_contract import (
     ARENA_CONTRACT_ID,
     DEFAULT_ARENA_CONTRACT,
     GOLDEN_MOVE_LIMIT,
+    SEARCH_IMPLEMENTATION_ID,
     GoldenArenaContract,
 )
 from .players import Player, PlayerContext, derive_child_seed
 from .result import DOUBLE_PASS, Winner, result_from_terminal
 from .rules import IllegalMoveError, apply_action
-from .search import SearchError
+from .search import SEARCH_IMPLEMENTATION_FINGERPRINT, SearchError
 from .state import (
     BLACK,
     WHITE,
@@ -76,6 +77,8 @@ class GameRecord:
     seed_A: int
     seed_B: int
     search_contract_id: str
+    search_implementation_id: str
+    search_implementation_fingerprint: str
     search_settings: tuple[tuple[str, object], ...]
     action_trace: tuple[ActionEvidence, ...]
     final_board: tuple[int, ...]
@@ -166,12 +169,20 @@ def validate_game_record(record: GameRecord) -> None:
         raise ValueError("GameRecord topology fingerprint is not canonical Golden Torus 5x5")
     if record.search_contract_id != ARENA_CONTRACT_ID:
         raise ValueError("GameRecord search contract drift")
+    if record.search_implementation_id != SEARCH_IMPLEMENTATION_ID:
+        raise ValueError("GameRecord search implementation id drift")
+    if record.search_implementation_fingerprint != SEARCH_IMPLEMENTATION_FINGERPRINT:
+        raise ValueError("GameRecord search implementation fingerprint drift")
+    if record.search_settings != DEFAULT_ARENA_CONTRACT.search.evidence():
+        raise ValueError("GameRecord search settings drift")
     if record.black_player not in ("A", "B") or record.white_player not in ("A", "B"):
         raise ValueError("GameRecord colors must be assigned to A/B slots")
     if record.black_player == record.white_player:
         raise ValueError("Black and White cannot be assigned to the same Arena slot")
 
     start = _replay_start(record)
+    if record.rules_fingerprint != start.rules_fingerprint:
+        raise ValueError("GameRecord rules fingerprint does not match replayed Golden rules")
     if start.state_key != record.start_state_key:
         raise ValueError("GameRecord start_state_key does not replay exactly")
     if start.superko_history != record.start_history:
@@ -182,7 +193,7 @@ def validate_game_record(record: GameRecord) -> None:
     state = start
     applied_count = 0
     illegal_seen = False
-    for evidence in record.action_trace:
+    for evidence_index, evidence in enumerate(record.action_trace):
         expected_slot = _slot_for_side(state.side_to_move, record.black_player)
         expected_id = _player_id_for_slot(record, expected_slot)
         if evidence.ply != applied_count + 1:
@@ -197,6 +208,8 @@ def validate_game_record(record: GameRecord) -> None:
             if evidence.legal:
                 raise ValueError("ActionEvidence marks an illegal move as legal")
             illegal_seen = True
+            if evidence_index != len(record.action_trace) - 1:
+                raise ValueError("ActionEvidence trace continues after illegal move")
             break
         if not evidence.legal:
             raise ValueError("ActionEvidence marks a legal move as illegal")
@@ -464,6 +477,8 @@ class SequentialGoldenArena:
             seed_A=seed_A,
             seed_B=seed_B,
             search_contract_id=self.contract.contract_id,
+            search_implementation_id=SEARCH_IMPLEMENTATION_ID,
+            search_implementation_fingerprint=SEARCH_IMPLEMENTATION_FINGERPRINT,
             search_settings=self.contract.search.evidence(),
             action_trace=tuple(action_trace),
             final_board=tuple(int(stone) for stone in state.stones),
