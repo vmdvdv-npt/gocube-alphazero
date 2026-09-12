@@ -137,7 +137,8 @@ def test_jsonl_writer_reader_round_trip_preserves_complete_pair(tmp_path):
     g.write_records_jsonl(path, session.records)
     loaded = g.read_records_jsonl(path)
     assert loaded == pair
-    for before, after in zip(pair, loaded, strict=True):
+    assert len(loaded) == len(pair)
+    for before, after in zip(pair, loaded):
         assert g.game_record_to_json(after) == g.game_record_to_json(before)
 
 
