@@ -77,6 +77,15 @@ from .search import (
     wdl_to_side_to_move_utility,
 )
 from .search_adapter import GoldenSearchAdapter, GoldenSearchBoundaryError
+from .serialization import (
+    GoldenSerializationError,
+    game_record_from_dict,
+    game_record_from_json,
+    game_record_to_dict,
+    game_record_to_json,
+    load_and_validate_game_record,
+    read_records_jsonl,
+)
 from .state import (
     BASELINE_KOMI,
     BLACK,

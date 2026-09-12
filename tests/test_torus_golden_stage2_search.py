@@ -16,6 +16,10 @@ def board(*, black=(), white=(), points=25):
     return tuple(stones)
 
 
+def full_policy(state, value=1.0):
+    return tuple(value for _ in g.GoldenSearchAdapter().action_space(state))
+
+
 # ---------------------------------------------------------------------------
 # Search qualification
 # ---------------------------------------------------------------------------
@@ -32,7 +36,7 @@ class UniformEvaluator:
             self.terminal_calls += 1
             raise AssertionError("NN/fake evaluator must never score terminal winner")
         return g.Evaluation(
-            policy={action: 1.0 for action in g.legal_actions(state)},
+            policy=full_policy(state),
             wdl=self.wdl,
         )
 
@@ -86,19 +90,25 @@ class TrapEvaluator:
         self.after_bad = g.apply_action(root, 0).after
         self.after_good = g.apply_action(root, 1).after
 
+    def _policy(self, state, *, bad=None, good=None):
+        policy = [0.1] * len(g.GoldenSearchAdapter().action_space(state))
+        if bad is not None:
+            policy[g.GoldenSearchAdapter().action_index(state, bad)] = 8.0
+        if good is not None:
+            policy[g.GoldenSearchAdapter().action_index(state, good)] = 2.0
+        return tuple(policy)
+
     def evaluate(self, state):
-        legal = g.legal_actions(state)
         if state.state_key == self.root.state_key:
             # Intentionally bias prior toward the trap at 0.
-            policy = {a: (8.0 if a == 0 else 2.0 if a == 1 else 0.1) for a in legal}
-            return g.Evaluation(policy=policy, wdl=(0.5, 0.0, 0.5))
+            return g.Evaluation(policy=self._policy(state, bad=0, good=1), wdl=(0.5, 0.0, 0.5))
         if state.state_key == self.after_bad.state_key:
             # Opponent-to-move is winning: parent must see this as bad.
-            return g.Evaluation(policy={a: 1.0 for a in legal}, wdl=(1.0, 0.0, 0.0))
+            return g.Evaluation(policy=full_policy(state), wdl=(1.0, 0.0, 0.0))
         if state.state_key == self.after_good.state_key:
             # Opponent-to-move is losing: parent must see this as good.
-            return g.Evaluation(policy={a: 1.0 for a in legal}, wdl=(0.0, 0.0, 1.0))
-        return g.Evaluation(policy={a: 1.0 for a in legal}, wdl=(0.5, 0.0, 0.5))
+            return g.Evaluation(policy=full_policy(state), wdl=(0.0, 0.0, 1.0))
+        return g.Evaluation(policy=full_policy(state), wdl=(0.5, 0.0, 0.5))
 
 
 def test_two_ply_player_relative_trap_catches_wrong_sign_backup():
