@@ -774,7 +774,7 @@ def main_run(args: argparse.Namespace) -> dict[str, object]:
             "cumulative_positions": len(cumulative),
             **evaluate_model_samples(m0_model, cumulative),
         }
-        current_chunk_telemetry = runtime_telemetry(run_started, start_cpu, start_rss, completed_games=chunk_index * 128, positions=sum(len(record.positions) for record in chunk_records), nn_evaluations=sum(record.nn_evaluations for record in chunk_records) + nn_evaluations, training_wall_time=None)
+        current_chunk_telemetry = runtime_telemetry(run_started, start_cpu, start_rss, completed_games=chunk_index * 128, positions=sum(len(record.positions) for record in chunk_records), nn_evaluations=sum(record.nn_evaluations for record in chunk_records) + nn_evaluations, training_wall=None)
         report = {
             "chunk": chunk_index,
             "source_checkpoint": current_label,
