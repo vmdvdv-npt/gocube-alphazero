@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 import math
 from typing import Mapping, Any
 
@@ -11,6 +13,7 @@ ARENA_CONTRACT_ID = "golden-arena-search-v1"
 SEARCH_IMPLEMENTATION_ID = "golden-sequential-puct-v1"
 SEARCH_PATH = "B"
 GOLDEN_MOVE_LIMIT = 500
+
 
 @dataclass(frozen=True)
 class SearchSettings:
@@ -25,7 +28,11 @@ class SearchSettings:
     deterministic_tie_break: bool = True
 
     def __post_init__(self) -> None:
-        if isinstance(self.simulations, bool) or not isinstance(self.simulations, int) or self.simulations <= 0:
+        if (
+            isinstance(self.simulations, bool)
+            or not isinstance(self.simulations, int)
+            or self.simulations <= 0
+        ):
             raise ValueError("Golden search simulations must be a positive integer")
         if not math.isfinite(float(self.cpuct)) or self.cpuct <= 0:
             raise ValueError("Golden search cpuct must be finite and positive")
@@ -44,6 +51,43 @@ class SearchSettings:
 
     def evidence(self) -> tuple[tuple[str, object], ...]:
         return tuple(sorted(asdict(self).items()))
+
+
+def search_contract_payload(
+    settings: SearchSettings | None = None,
+) -> dict[str, object]:
+    effective = settings or SearchSettings()
+    return {
+        "arena_contract_id": ARENA_CONTRACT_ID,
+        "search_implementation_id": SEARCH_IMPLEMENTATION_ID,
+        "search_settings": asdict(effective),
+        "move_limit": GOLDEN_MOVE_LIMIT,
+        "execution": {
+            "batching": False,
+            "workers": False,
+            "production_arena_reuse": False,
+        },
+    }
+
+
+def compute_search_contract_fingerprint(
+    settings: SearchSettings | None = None,
+) -> str:
+    payload = json.dumps(
+        search_contract_payload(settings),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+SEARCH_CONTRACT_FINGERPRINT = (
+    "sha256:c13d3159e123865f4f091dc667ce94458ec9e6002e076ab82d78cffe8c46df1c"
+)
+if compute_search_contract_fingerprint() != SEARCH_CONTRACT_FINGERPRINT:
+    raise RuntimeError("Golden Arena search contract fingerprint constant drifted")
+
 
 @dataclass(frozen=True)
 class GoldenArenaContract:
@@ -79,15 +123,30 @@ class GoldenArenaContract:
             ("topology_fingerprint", self.topology_fingerprint),
             ("komi", self.komi),
             ("move_limit", self.move_limit),
+            ("search_contract_fingerprint", compute_search_contract_fingerprint(self.search)),
             ("search", self.search.evidence()),
         )
 
+
 # A checkpoint may describe model semantics, but these settings are Arena-owned.
-_CHECKPOINT_FORBIDDEN_ARENA_KEYS = frozenset({
-    "arena_sims", "arena_simulations", "num" + "M" + "C" + "T" + "S" + "Sims", "cpuct", "fpu",
-    "root_noise", "dirichlet_noise", "fast_search", "probFastSim",
-    "move_temperature", "temperature", "root_policy_temperature", "resign",
-})
+_CHECKPOINT_FORBIDDEN_ARENA_KEYS = frozenset(
+    {
+        "arena_sims",
+        "arena_simulations",
+        "num" + "M" + "C" + "T" + "S" + "Sims",
+        "cpuct",
+        "fpu",
+        "root_noise",
+        "dirichlet_noise",
+        "fast_search",
+        "probFastSim",
+        "move_temperature",
+        "temperature",
+        "root_policy_temperature",
+        "resign",
+    }
+)
+
 
 def reject_checkpoint_arena_overrides(metadata: Mapping[str, Any] | None) -> None:
     if not metadata:
@@ -101,5 +160,6 @@ def reject_checkpoint_arena_overrides(metadata: Mapping[str, Any] | None) -> Non
             "Checkpoint/train metadata is not allowed to override Golden Arena contract: "
             + ", ".join(found)
         )
+
 
 DEFAULT_ARENA_CONTRACT = GoldenArenaContract()
