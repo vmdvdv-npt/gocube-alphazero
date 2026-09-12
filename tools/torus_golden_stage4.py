@@ -735,7 +735,7 @@ def main_run(args: argparse.Namespace) -> dict[str, object]:
     current_chunk_telemetry = runtime_telemetry(run_started, start_cpu, start_rss, completed_games=128, positions=len(chunk1_samples), nn_evaluations=chunk1_nn)
 
     def train_chunk(chunk_index: int, new_samples: Sequence[GoldenTrainingSample], source_records: Sequence[SelfPlayGameRecord], nn_evaluations: int) -> dict[str, object]:
-        nonlocal update_count, sample_count, current_label, current_info, m0_model, current_chunk_telemetry
+        nonlocal update_count, sample_count, current_label, current_info, m0_model, current_chunk_telemetry, main_optimizer
         if not new_samples:
             raise RuntimeError(f"Stage 4 chunk {chunk_index} produced no replay positions")
         before = {name: value.detach().clone() for name, value in m0_model.state_dict().items()}
