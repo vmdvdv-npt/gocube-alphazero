@@ -1,9 +1,9 @@
 # Golden Arena process-parallel parity
 
-Run: `torus-golden-arena-process-parity-20260913-final`  
-Execution date: 2026-09-13 (Asia/Tbilisi)  
-Base branch: `codex/torus-rebuild-v1` at merge commit `6cf0fc7` (PR #82)  
-Feature branch: `codex/golden-arena-process-parallel`  
+Run: `torus-golden-arena-process-parity-20260913-final`
+Execution date: 2026-09-13 (Asia/Tbilisi)
+Base branch: `codex/torus-rebuild-v1` at merge commit `6cf0fc7` (PR #82)
+Feature branch: `codex/golden-arena-process-parallel`
 Source commit: `92f1ab17974642b2b3a60621965f9ac2f598c31c`
 
 ## Verdict
