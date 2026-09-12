@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import hashlib
+import importlib
 import json
 import math
 from pathlib import Path
@@ -11,9 +12,11 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable, Mapping, Sequence
 
-import torch
-from torch import Tensor, nn
-import torch.nn.functional as F
+_torch = importlib.import_module("torch")
+torch = _torch
+Tensor = torch.Tensor
+nn = torch.nn
+F = importlib.import_module("torch.nn.functional")
 
 from .arena_contract import GOLDEN_MOVE_LIMIT, SearchSettings
 from .neural import (

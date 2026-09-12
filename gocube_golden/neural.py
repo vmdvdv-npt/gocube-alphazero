@@ -9,13 +9,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import importlib
 import json
 import math
 from typing import Mapping, Sequence
 
-import torch
-from torch import Tensor, nn
-import torch.nn.functional as F
+_torch = importlib.import_module("torch")
+torch = _torch
+Tensor = torch.Tensor
+nn = torch.nn
+F = importlib.import_module("torch.nn.functional")
 
 from .search import Evaluation
 from .state import BLACK, PASS, WHITE, GoldenState
