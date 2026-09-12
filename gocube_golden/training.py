@@ -331,6 +331,7 @@ class GoldenSelfPlayRunner:
         contract: SelfPlaySearchContract = DEFAULT_SELFPLAY_CONTRACT,
         code_identity: CodeIdentity | None = None,
         device: str | torch.device = "cpu",
+        evaluator: GoldenNeuralEvaluator | None = None,
     ) -> None:
         contract.validate()
         self.model = model
@@ -343,7 +344,10 @@ class GoldenSelfPlayRunner:
         self.contract = contract
         self.code_identity = code_identity or capture_code_identity()
         self.device = torch.device(device)
-        self.evaluator = GoldenNeuralEvaluator(model, device=self.device)
+        # The coordinator owns the one immutable model placement.  Parallel
+        # game workers receive this evaluator rather than concurrently calling
+        # model.to(device), which is not a safe operation.
+        self.evaluator = evaluator or GoldenNeuralEvaluator(model, device=self.device)
 
     def play_game(self, game_id: str) -> SelfPlayGameRecord:
         game_seed = derive_seed(self.master_seed, self.run_id, game_id, "game")

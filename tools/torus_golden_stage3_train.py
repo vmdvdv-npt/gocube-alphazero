@@ -202,6 +202,8 @@ def _runner_factory(
     code,
     device,
 ):
+    shared_evaluator = GoldenNeuralEvaluator(model, device=device)
+
     def factory(_game_id: str) -> GoldenSelfPlayRunner:
         return GoldenSelfPlayRunner(
             model,
@@ -212,6 +214,7 @@ def _runner_factory(
             master_seed=seed,
             code_identity=code,
             device=device,
+            evaluator=shared_evaluator,
         )
     return factory
 
