@@ -118,5 +118,45 @@ from .topology import (
     research_topology,
     torus_5x5,
 )
+from .neural import (
+    ACTION_COUNT,
+    OBSERVATION_CHANNELS,
+    OBSERVATION_FINGERPRINT,
+    OBSERVATION_LAYOUT,
+    OBSERVATION_SCHEMA_ID,
+    OBSERVATION_SCHEMA_VERSION,
+    PASS_INDEX,
+    VALUE_HEAD_SEMANTICS,
+    GoldenGraphNetV1,
+    GoldenNeuralEvaluator,
+    GoldenObservation,
+    SelfPlayRootNoiseEvaluator,
+    build_action_mask,
+    build_observation,
+    build_observation_bundle,
+    count_parameters,
+    model_hash,
+)
+from .stage3_contract import (
+    PROFILE_ID as STAGE3_PROFILE_ID,
+    SELFPLAY_CONTRACT_ID,
+    SELFPLAY_CONTRACT_FINGERPRINT,
+    Stage3ContractError,
+    load_profile as load_stage3_profile,
+    profile_fingerprint as stage3_profile_fingerprint,
+)
+from .training import (
+    DEFAULT_SELFPLAY_CONTRACT,
+    GoldenSelfPlayRunner,
+    GoldenTrainer,
+    GoldenTrainingSample,
+    SelfPlayGameRecord,
+    SelfPlayPosition,
+    SelfPlaySearchContract,
+    build_replay_samples,
+    compare_selfplay_evidence,
+    sample_action_from_visits,
+    z_target,
+)
 
 __all__ = [name for name in globals() if not name.startswith("_")]
