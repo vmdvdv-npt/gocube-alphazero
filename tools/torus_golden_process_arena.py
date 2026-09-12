@@ -321,6 +321,93 @@ def _one_comparison(
     }
 
 
+def _worker_count_invariance(
+    *,
+    starts: Sequence[Mapping[str, object]],
+    code,
+    output_dir: Path,
+) -> dict[str, object]:
+    """Compare several worker counts on the same two frozen start pairs."""
+
+    checkpoint_dir = FROZEN_RUN / "checkpoints"
+    candidate = checkpoint_info(checkpoint_dir / "M1.pt", label="M1", device=torch.device("cpu"))
+    reference = checkpoint_info(checkpoint_dir / "M0.pt", label="M0", device=torch.device("cpu"))
+    pair_tasks = _pairs("M1-M0", tuple(starts[:2]))
+    arena_seed = derive_seed(STAGE4_ARENA_MASTER_SEED, "M1-M0")
+    run_id = "golden-arena-worker-count-invariance-20260913"
+    sequential_A, sequential_B = _make_sequential_players(
+        candidate,
+        reference,
+        candidate_label="M1",
+        reference_label="M0",
+    )
+    sequential = SequentialGoldenArena(
+        master_seed=arena_seed,
+        run_id=run_id,
+        code_identity=code,
+    )
+    sequential_records: list[GameRecord] = []
+    for pair in pair_tasks:
+        sequential_records.extend(
+            sequential.play_pair(
+                pair_id=pair.pair_id,
+                player_A=sequential_A,
+                player_B=sequential_B,
+                start_state=pair.start_state,
+                start_trace=pair.start_trace,
+            )
+        )
+    oracle = tuple(sequential_records)
+    rows: dict[str, object] = {}
+    for worker_count in (1, 2, 4, 8, 16):
+        candidate_spec = CheckpointPlayerSpec.from_checkpoint(
+            candidate["path"],
+            player_id="M1",
+            device="cpu",
+            metadata=candidate["metadata"],
+            artifact_sha256=candidate["artifact_sha256"],
+        )
+        reference_spec = CheckpointPlayerSpec.from_checkpoint(
+            reference["path"],
+            player_id="M0",
+            device="cpu",
+            metadata=reference["metadata"],
+            artifact_sha256=reference["artifact_sha256"],
+        )
+        parallel = ProcessParallelGoldenArena(
+            player_A=candidate_spec,
+            player_B=reference_spec,
+            workers=worker_count,
+            master_seed=arena_seed,
+            run_id=run_id,
+            code_identity=code,
+            mp_context="spawn",
+        )
+        started = time.perf_counter()
+        records = parallel.play_pairs(pair_tasks)
+        elapsed = time.perf_counter() - started
+        parity = _compare_records(oracle, records)
+        if not parity["identical"]:
+            raise RuntimeError(
+                f"Worker-count invariance failed for workers={worker_count}: {parity}"
+            )
+        worker_dir = output_dir / "worker-count-invariance" / f"workers-{worker_count}"
+        write_records_jsonl(worker_dir / "parallel-games.jsonl", records)
+        _write_json(worker_dir / "parity.json", parity)
+        rows[str(worker_count)] = {
+            "games": len(records),
+            "identical_to_sequential": True,
+            "parallel_wall_time_sec": elapsed,
+            "first_trace_divergence": None,
+        }
+    return {
+        "games": len(oracle),
+        "pairs": len(pair_tasks),
+        "worker_counts": rows,
+        "all_identical": True,
+    }
+
+
 def run(
     *,
     workers: int,
@@ -358,6 +445,11 @@ def run(
                 require_expected_result=full_proof,
             )
         )
+    worker_count_report = _worker_count_invariance(
+        starts=starts,
+        code=code,
+        output_dir=output_dir,
+    )
     sequential_wall = sum(float(row["sequential_wall_time_sec"]) for row in rows)
     parallel_wall = sum(float(row["parallel_wall_time_sec"]) for row in rows)
     child_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -388,7 +480,7 @@ def run(
             "divergent_games": 0,
             "first_divergent_ply": None,
             "pair_color_swap_parity": "PASS",
-            "worker_count_invariance": "see targeted tests (1/2/4 and canonical 16)",
+            "worker_count_invariance": worker_count_report,
             "technical_games": 0,
         },
         "comparisons": rows,
