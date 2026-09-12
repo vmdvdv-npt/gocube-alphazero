@@ -13,7 +13,6 @@ import importlib
 import json
 import math
 from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import get_context
 from pathlib import Path
 import random
 from typing import Any, Iterable, Mapping, Sequence
@@ -686,7 +685,9 @@ def run_cube_selfplay_games(
         raise ValueError("Process Cube self-play requires an immutable checkpoint path")
     with ProcessPoolExecutor(
         max_workers=int(workers),
-        mp_context=get_context("fork" if torch.device(device).type == "cpu" else "spawn"),
+        mp_context=importlib.import_module("multiprocessing").get_context(
+            "fork" if torch.device(device).type == "cpu" else "spawn"
+        ),
         initializer=_cube_process_worker_init,
         initargs=(
             str(checkpoint_path), cube_model_hash(model), run_id, profile_id,
