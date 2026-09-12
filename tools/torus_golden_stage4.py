@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 import json
 import math
@@ -14,13 +15,14 @@ import resource
 import sys
 import time
 from typing import Any, Mapping, Sequence
+from multiprocessing import get_context
 
 import torch
 
 from gocube_golden.arena import MappedResult, SequentialGoldenArena, TerminationReason, write_records_jsonl
 from gocube_golden.neural import GoldenGraphNetV1, GoldenNeuralEvaluator, count_parameters, model_hash
 from gocube_golden.players import SearchPlayer
-from gocube_golden.provenance import PlayerIdentity, capture_code_identity, derive_seed, file_sha256, sha256_fingerprint
+from gocube_golden.provenance import CodeIdentity, PlayerIdentity, capture_code_identity, derive_seed, file_sha256, sha256_fingerprint
 from gocube_golden.result import Winner
 from gocube_golden.stage3_contract import load_profile as load_stage3_profile
 from gocube_golden.stage4 import (
@@ -69,6 +71,9 @@ from gocube_golden.training import (
 ROOT = Path(__file__).resolve().parents[1]
 OLD_STAGE3_RUN = ROOT / "runs" / "torus-golden-stage3" / "torus-golden-stage3-seed1-v5"
 OLD_STAGE3_LABELS = ("M0", "M1", "M2", "M3", "M4")
+
+_PROCESS_MODEL = None
+_PROCESS_CONFIG: dict[str, object] = {}
 
 
 def _jsonable(value: object) -> object:
@@ -219,7 +224,59 @@ def _runner_factory(model: torch.nn.Module, *, run_id: str, label: str, artifact
     return factory, evaluator
 
 
-def run_games(model: torch.nn.Module, *, run_id: str, label: str, artifact: str, seed: int, semantic_profile: Mapping[str, Any], code, device: torch.device, game_ids: Sequence[str], workers: int) -> tuple[tuple[SelfPlayGameRecord, ...], int]:
+def _process_worker_init(checkpoint_path: str, expected_model_hash: str, run_id: str, label: str, artifact: str, seed: int, profile_fingerprint: str, code_commit: str, code_tree: str, code_clean: bool, device_name: str) -> None:
+    """Load one immutable checkpoint per worker; PUCT remains sequential per game."""
+    global _PROCESS_MODEL, _PROCESS_CONFIG
+    torch.set_num_threads(1)
+    device = torch.device(device_name)
+    model = GoldenGraphNetV1().to(device)
+    load_checkpoint(checkpoint_path, model=model, expected={"model_hash": expected_model_hash}, device=device)
+    if model_hash(model) != expected_model_hash:
+        raise RuntimeError("Process self-play worker loaded the wrong model hash")
+    _PROCESS_MODEL = model
+    _PROCESS_CONFIG = {
+        "run_id": run_id,
+        "label": label,
+        "artifact": artifact,
+        "seed": seed,
+        "profile_fingerprint": profile_fingerprint,
+        "code": CodeIdentity(code_commit, code_tree, code_clean),
+        "device": device,
+    }
+
+
+def _process_play_game(game_id: str) -> SelfPlayGameRecord:
+    if _PROCESS_MODEL is None:
+        raise RuntimeError("Self-play process worker was not initialized")
+    evaluator = GoldenNeuralEvaluator(_PROCESS_MODEL, device=_PROCESS_CONFIG["device"])
+    runner = GoldenSelfPlayRunner(
+        _PROCESS_MODEL,
+        run_id=str(_PROCESS_CONFIG["run_id"]),
+        profile_fingerprint=str(_PROCESS_CONFIG["profile_fingerprint"]),
+        model_checkpoint_label=str(_PROCESS_CONFIG["label"]),
+        checkpoint_artifact_hash=str(_PROCESS_CONFIG["artifact"]),
+        master_seed=int(_PROCESS_CONFIG["seed"]),
+        code_identity=_PROCESS_CONFIG["code"],
+        device=_PROCESS_CONFIG["device"],
+        evaluator=evaluator,
+    )
+    return runner.play_game(game_id)
+
+
+def run_games(model: torch.nn.Module, *, run_id: str, label: str, artifact: str, checkpoint_path: str | None, seed: int, semantic_profile: Mapping[str, Any], code, device: torch.device, game_ids: Sequence[str], workers: int) -> tuple[tuple[SelfPlayGameRecord, ...], int]:
+    if workers > 1:
+        if checkpoint_path is None:
+            raise ValueError("Process self-play requires an immutable checkpoint path")
+        ordered_ids = tuple(sorted(str(game_id) for game_id in game_ids))
+        context_name = "spawn" if device.type == "cuda" else "fork"
+        with ProcessPoolExecutor(
+            max_workers=int(workers),
+            mp_context=get_context(context_name),
+            initializer=_process_worker_init,
+            initargs=(checkpoint_path, model_hash(model), run_id, label, artifact, seed, str(semantic_profile["profile_fingerprint"]), code.git_commit_sha, code.git_tree_sha, code.working_tree_clean, str(device)),
+        ) as pool:
+            records = tuple(pool.map(_process_play_game, ordered_ids))
+        return records, sum(record.nn_evaluations for record in records)
     factory, evaluator = _runner_factory(model, run_id=run_id, label=label, artifact=artifact, seed=seed, semantic_profile=semantic_profile, code=code, device=device)
     before = evaluator.nn_evaluations
     records = run_selfplay_games(factory, game_ids, workers=workers)
@@ -555,7 +612,7 @@ def run_smoke(*, run_id: str, device_name: str) -> dict[str, object]:
     m0_path = run_dir / "checkpoints" / "M0.pt"
     info_meta = save_checkpoint(m0_path, model=model, optimizer=None, metadata=info_meta)
     m0_info = {"label": "M0'", "path": str(m0_path), "metadata": info_meta, "artifact_sha256": info_meta["artifact_sha256"], "model_hash": info_meta["model_hash"]}
-    records, nn_calls = run_games(model, run_id=run_id, label="M0'", artifact=str(info_meta["artifact_sha256"]), seed=STAGE4_SELFPLAY_MASTER_SEED, semantic_profile=semantic_profile, code=code, device=device, game_ids=tuple(f"smoke-game-{i:02d}" for i in range(4)), workers=1)
+    records, nn_calls = run_games(model, run_id=run_id, label="M0'", artifact=str(info_meta["artifact_sha256"]), checkpoint_path=None, seed=STAGE4_SELFPLAY_MASTER_SEED, semantic_profile=semantic_profile, code=code, device=device, game_ids=tuple(f"smoke-game-{i:02d}" for i in range(4)), workers=1)
     samples = tuple(sample for record in records for sample in build_replay_samples(record))
     optimizer, schedule = train_batch_schedule(model, samples, low_reuse_schedule(len(samples), batch_size=64, seed=19))
     m1_meta = checkpoint_metadata(semantic_profile, run_id=run_id, label="M1'", parent=str(m0_info["model_hash"]), code=code, model=model, device=device, completed_games=4, valid_replay_positions=len(samples), optimizer_updates=int(schedule["updates"]), train_samples_consumed=int(schedule["exact_samples_consumed"]), model_init_seed=STAGE4_MODEL_INIT_SEED, stage4_profile=stage4)
@@ -639,8 +696,8 @@ def main_run(args: argparse.Namespace) -> dict[str, object]:
     # The equivalence gate uses the current committed implementation and fixed
     # game IDs. It must pass before the 512-game run.
     eq_ids = ("equivalence-game-00", "equivalence-game-01")
-    serial, _ = run_games(m0_model, run_id=args.run_id, label="M0'", artifact=str(m0_meta["artifact_sha256"]), seed=STAGE4_SELFPLAY_MASTER_SEED, semantic_profile=semantic_profile, code=code, device=device, game_ids=eq_ids, workers=1)
-    parallel, _ = run_games(m0_model, run_id=args.run_id, label="M0'", artifact=str(m0_meta["artifact_sha256"]), seed=STAGE4_SELFPLAY_MASTER_SEED, semantic_profile=semantic_profile, code=code, device=device, game_ids=eq_ids, workers=args.workers)
+    serial, _ = run_games(m0_model, run_id=args.run_id, label="M0'", artifact=str(m0_meta["artifact_sha256"]), checkpoint_path=None, seed=STAGE4_SELFPLAY_MASTER_SEED, semantic_profile=semantic_profile, code=code, device=device, game_ids=eq_ids, workers=1)
+    parallel, _ = run_games(m0_model, run_id=args.run_id, label="M0'", artifact=str(m0_meta["artifact_sha256"]), checkpoint_path=str(m0_path), seed=STAGE4_SELFPLAY_MASTER_SEED, semantic_profile=semantic_profile, code=code, device=device, game_ids=eq_ids, workers=args.workers)
     from gocube_golden.training import compare_selfplay_evidence
     compare_selfplay_evidence(serial, parallel)
     write_json(run_dir / "equivalence-gate.json", {"passed": True, "game_ids": eq_ids, "workers": args.workers, "trace_root_visits_pi_result_z_exact": True, "inference_batch_size": 1, "inference_coalescing": False})
@@ -654,7 +711,7 @@ def main_run(args: argparse.Namespace) -> dict[str, object]:
     run_started = time.perf_counter()
     start_cpu = resource.getrusage(resource.RUSAGE_SELF).ru_utime
     start_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    chunk1_records, chunk1_nn = run_games(m0_model, run_id=args.run_id, label="M0'", artifact=str(m0_meta["artifact_sha256"]), seed=STAGE4_SELFPLAY_MASTER_SEED, semantic_profile=semantic_profile, code=code, device=device, game_ids=chunk1_ids, workers=args.workers)
+    chunk1_records, chunk1_nn = run_games(m0_model, run_id=args.run_id, label="M0'", artifact=str(m0_meta["artifact_sha256"]), checkpoint_path=str(m0_path), seed=STAGE4_SELFPLAY_MASTER_SEED, semantic_profile=semantic_profile, code=code, device=device, game_ids=chunk1_ids, workers=args.workers)
     for record in chunk1_records:
         if record.technical_termination is not None or record.model_hash != m0_info["model_hash"]:
             raise RuntimeError("Canonical Stage 4 chunk 1 is invalid")
@@ -750,7 +807,7 @@ def main_run(args: argparse.Namespace) -> dict[str, object]:
     train_chunk(1, chunk1_samples, chunk1_records, chunk1_nn)
     for chunk_index in range(2, 5):
         game_ids = tuple(f"chunk-{chunk_index:02d}-game-{index:03d}" for index in range(128))
-        records, nn_calls = run_games(m0_model, run_id=args.run_id, label=current_label, artifact=str(current_info["artifact_sha256"]), seed=derive_seed(STAGE4_SELFPLAY_MASTER_SEED, "chunk", chunk_index), semantic_profile=semantic_profile, code=code, device=device, game_ids=game_ids, workers=args.workers)
+        records, nn_calls = run_games(m0_model, run_id=args.run_id, label=current_label, artifact=str(current_info["artifact_sha256"]), checkpoint_path=str(current_info["path"]), seed=derive_seed(STAGE4_SELFPLAY_MASTER_SEED, "chunk", chunk_index), semantic_profile=semantic_profile, code=code, device=device, game_ids=game_ids, workers=args.workers)
         for record in records:
             if record.technical_termination is not None or record.model_hash != current_info["model_hash"]:
                 raise RuntimeError(f"Canonical Stage 4 chunk {chunk_index} is invalid")
