@@ -368,7 +368,16 @@ def arena_report(records, left_label: str, right_label: str, starts, requested) 
     }
 
 
-def functional_preflight(model, device: torch.device, profile: Mapping[str, Any], run_id: str, code, artifact_hash: str) -> dict[str, object]:
+def functional_preflight(
+    model,
+    device: torch.device,
+    profile: Mapping[str, Any],
+    run_id: str,
+    code,
+    artifact_hash: str,
+    checkpoint_path: Path,
+    checkpoint_metadata: Mapping[str, object],
+) -> dict[str, object]:
     started = time.perf_counter()
     evaluator = GoldenNeuralEvaluator(model, device=device)
     inference_started = time.perf_counter()
@@ -393,6 +402,20 @@ def functional_preflight(model, device: torch.device, profile: Mapping[str, Any]
     if game.technical_termination is not None:
         raise RuntimeError("Preflight self-play game was technical: " + game.technical_termination)
     samples = build_replay_samples(game)
+    arena_evaluator = GoldenNeuralEvaluator(model, device=device)
+    arena_player = _make_checkpoint_player(
+        "M0", checkpoint_path, model, checkpoint_metadata, artifact_hash, arena_evaluator
+    )
+    preflight_arena = SequentialGoldenArena(
+        master_seed=derive_seed(profile["seeds"]["arena_master_seed"], "preflight"),
+        run_id=f"{run_id}-preflight-arena",
+        require_canonical_code=code.working_tree_clean,
+    )
+    preflight_arena.play_pair(
+        pair_id="preflight-pair",
+        player_A=arena_player,
+        player_B=arena_player,
+    )
     trainer = GoldenTrainer(model)
     train_started = time.perf_counter()
     metrics = trainer.train(samples, updates=1, batch_size=min(4, len(samples)), seed=19)
@@ -409,6 +432,8 @@ def functional_preflight(model, device: torch.device, profile: Mapping[str, Any]
         "one_selfplay_game_wall_sec": game_time,
         "one_training_batch_wall_sec": train_time,
         "one_training_total_loss": metrics[-1].total_loss,
+        "one_arena_pair_games": len(preflight_arena.records),
+        "one_arena_pair_technical": preflight_arena.summary().technical_failures,
         "nn_evaluations": evaluator.nn_evaluations + runner.evaluator.nn_evaluations,
         "search_evaluator_calls": search_result.evaluator_calls,
         "elapsed_sec": time.perf_counter() - started,
@@ -452,7 +477,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     )
     m0_metadata = save_checkpoint(m0_path, model=model, optimizer=None, metadata=m0_metadata)
     m0_artifact = str(m0_metadata["artifact_sha256"])
-    preflight = functional_preflight(model, device, profile, args.run_id, code, m0_artifact)
+    preflight = functional_preflight(
+        model,
+        device,
+        profile,
+        args.run_id,
+        code,
+        m0_artifact,
+        m0_path,
+        m0_metadata,
+    )
     _write_json(run_dir / "preflight.json", preflight)
     # The functional preflight deliberately performs one optimizer update.  It
     # is never allowed to mutate canonical M0, so restore the exact artifact

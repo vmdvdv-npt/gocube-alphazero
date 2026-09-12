@@ -2,7 +2,7 @@
   "profile_id": "gocube-torus-golden-training-v1",
   "schema_version": 1,
   "fingerprint_algorithm": "sha256-canonical-json-v1",
-  "profile_fingerprint": "sha256:449647de0b28a3d5820cb5ea27af6164937b11b5c0fd62165da930a859ff31f8",
+  "profile_fingerprint": "sha256:e7ba86167f549d07ff05cb010c0e52fcf898a66f3daea77e74c46eac872bf758",
   "frozen_identities": {
     "golden_v2_profile_id": "gocube-torus-golden-unified-v2",
     "golden_v2_experiment_fingerprint": "sha256:5f2347fdb7d230454030a31d8eb828e25f1bbb20c4fdae829b9742d0de3f0d61",
@@ -12,14 +12,14 @@
   },
   "komi": 0.5,
   "observation": {
-    "schema_id": "gocube-torus-golden-training-observation-v1",
+    "schema_id": "gocube-torus-golden-observation-v1",
     "schema_version": 1,
     "layout": "[channels,points]",
     "channels": ["own_stones", "opponent_stones", "side_to_move_color", "previous_pass", "legal_point_mask", "komi"],
     "shape": [6, 25],
     "action_count": 26,
     "pass_index": 25,
-    "fingerprint": "sha256:49de3c983315fad6fdd7033aec179afaf0fe38314eb19ac1d1f3eacde970141f"
+    "fingerprint": "sha256:d6e3aecc89f7df84f6e758423da4e3fe9269abeca644070db0be9261b30c6361"
   },
   "target": {
     "contract_id": "gocube-wdl-side-to-move-v1",

@@ -23,7 +23,7 @@ from .rules import legal_actions
 from .topology import TORUS_5X5
 
 
-OBSERVATION_SCHEMA_ID = "gocube-torus-golden-training-observation-v1"
+OBSERVATION_SCHEMA_ID = "gocube-torus-golden-observation-v1"
 OBSERVATION_SCHEMA_VERSION = 1
 OBSERVATION_LAYOUT = "[channels,points]"
 OBSERVATION_CHANNELS = (
@@ -44,19 +44,10 @@ def _fingerprint(value: object) -> str:
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-OBSERVATION_FINGERPRINT = _fingerprint(
-    {
-        "schema_id": OBSERVATION_SCHEMA_ID,
-        "schema_version": OBSERVATION_SCHEMA_VERSION,
-        "layout": OBSERVATION_LAYOUT,
-        "channels": OBSERVATION_CHANNELS,
-        "point_count": 25,
-        "action_count": ACTION_COUNT,
-        "pass_index": PASS_INDEX,
-        "komi": 0.5,
-        "legal_mask_source": "full-golden-rules-state",
-    }
-)
+# This is deliberately the frozen Golden v2 observation identity referenced by
+# Stage 3.  The Stage-3 profile adds the canonical tensor layout explicitly,
+# but does not mint a semantically different observation identity.
+OBSERVATION_FINGERPRINT = "sha256:d6e3aecc89f7df84f6e758423da4e3fe9269abeca644070db0be9261b30c6361"
 
 
 @dataclass(frozen=True)
@@ -303,4 +294,3 @@ class SelfPlayRootNoiseEvaluator:
 
 def count_parameters(model: nn.Module) -> int:
     return sum(parameter.numel() for parameter in model.parameters())
-

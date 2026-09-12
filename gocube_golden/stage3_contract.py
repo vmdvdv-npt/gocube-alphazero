@@ -72,7 +72,7 @@ def validate_profile(profile: Mapping[str, Any], *, verify_fingerprint: bool = T
 
     observation = profile.get("observation")
     _require(isinstance(observation, Mapping), "Stage-3 observation contract is missing")
-    _require(observation.get("schema_id") == "gocube-torus-golden-training-observation-v1", "Stage-3 observation schema drift")
+    _require(observation.get("schema_id") == "gocube-torus-golden-observation-v1", "Stage-3 observation schema drift")
     _require(observation.get("layout") == "[channels,points]", "Stage-3 observation layout drift")
     _require(observation.get("channels") == ["own_stones", "opponent_stones", "side_to_move_color", "previous_pass", "legal_point_mask", "komi"], "Stage-3 observation channels drift")
     _require(observation.get("shape") == [6, 25], "Stage-3 observation shape drift")
