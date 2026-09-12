@@ -10,6 +10,8 @@ import random
 from typing import Mapping, Protocol, Sequence
 
 from .arena_contract import SEARCH_IMPLEMENTATION_ID, SearchSettings
+from .diagnostics import increment
+from .rules import LegalActionContext
 from .search_adapter import GoldenSearchAdapter
 from .state import GoldenState
 
@@ -64,6 +66,7 @@ class _Node:
     state: GoldenState
     expanded: bool = False
     edges: dict[int | str, _Edge] = field(default_factory=dict)
+    legal_context: LegalActionContext | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,7 @@ class SearchResult:
     implementation_id: str = SEARCH_IMPLEMENTATION_ID
     implementation_fingerprint: str = SEARCH_IMPLEMENTATION_FINGERPRINT
     root_q: tuple[float | None, ...] = ()
+    legal_action_mask: tuple[bool, ...] = ()
 
 
 def wdl_to_side_to_move_utility(wdl: Sequence[float]) -> float:
@@ -187,14 +191,21 @@ class SequentialPUCT:
             return self.adapter.terminal_utility(node.state)
         if self._evaluator is None:
             raise SearchError("Search evaluator was not installed")
-        evaluation = self._evaluator.evaluate(node.state)
+        context = self.adapter.prepare_legal_actions(node.state)
+        increment("leaf_expansions")
+        prepared_evaluate = getattr(self._evaluator, "evaluate_prepared", None)
+        if callable(prepared_evaluate):
+            evaluation = prepared_evaluate(node.state, context)
+        else:
+            evaluation = self._evaluator.evaluate(node.state)
         self._evaluator_calls += 1
         utility = wdl_to_side_to_move_utility(evaluation.wdl)
-        legal = self.adapter.legal_actions(node.state)
+        legal = context.actions
         if not legal:
             raise SearchError("Nonterminal Golden state exposed no legal actions")
         priors = _policy_for_legal(evaluation, node.state, legal, self.adapter)
         node.edges = {action: _Edge(prior=priors[action]) for action in legal}
+        node.legal_context = context
         node.expanded = True
         return utility
 
@@ -245,12 +256,14 @@ class SequentialPUCT:
         if state.is_terminal:
             raise SearchError("Search cannot be started from a terminal Golden state")
         before = state.state_key
+        increment("searches")
         self._evaluator = evaluator
         self._evaluator_calls = 0
         self._rng = random.Random(int(seed))
         root = _Node(state)
         self._evaluate_and_expand(root)
         for _ in range(self.settings.simulations):
+            increment("simulations")
             self._simulate(root)
         if state.state_key != before:
             raise SearchError("Golden search mutated its parent state")
@@ -258,7 +271,9 @@ class SequentialPUCT:
         if total <= 0:
             raise SearchError("Golden search produced zero root visits")
 
-        legal = self.adapter.legal_actions(state)
+        if root.legal_context is None:
+            raise SearchError("Golden search root has no prepared legal context")
+        legal = root.legal_context.actions
         action_space = self.adapter.action_space(state)
         visit_map = {action: root.edges[action].visits for action in legal}
         root_visits = tuple(visit_map.get(action, 0) for action in action_space)
@@ -284,6 +299,7 @@ class SequentialPUCT:
             simulations=self.settings.simulations,
             evaluator_calls=self._evaluator_calls,
             root_q=root_q,
+            legal_action_mask=root.legal_context.action_mask,
         )
 
 

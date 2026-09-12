@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .result import GoldenResult, Winner, result_from_terminal
-from .rules import apply_action, legal_actions
+from .rules import LegalActionContext, apply_action, legal_actions, prepare_legal_actions
 from .state import PASS, GoldenState
 
 class GoldenSearchBoundaryError(RuntimeError):
@@ -19,6 +19,9 @@ class GoldenSearchAdapter:
 
     def legal_actions(self, state: GoldenState) -> tuple[int | str, ...]:
         return legal_actions(state)
+
+    def prepare_legal_actions(self, state: GoldenState) -> LegalActionContext:
+        return prepare_legal_actions(state)
 
     def apply_action(self, state: GoldenState, action: int | str) -> GoldenState:
         return apply_action(state, action).after

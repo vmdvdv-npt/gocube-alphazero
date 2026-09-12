@@ -7,6 +7,7 @@ import json
 import math
 from typing import Iterable, Sequence
 
+from .diagnostics import increment
 from .topology import GoldenTopology, TORUS_5X5, TORUS_5X5_TOPOLOGY_FINGERPRINT
 
 RULES_PROFILE_ID = "graph-area-v1"
@@ -102,7 +103,10 @@ class GoldenState:
     history_provenance: str = LIVE_HISTORY
 
     def __post_init__(self) -> None:
+        increment("validated_state_constructions")
+        increment("full_history_validations")
         object.__setattr__(self, "stones", _stones(self.stones, self.topology.point_count))
+        object.__setattr__(self, "_board_key", board_key(self.stones))
         try:
             side = Stone(self.side_to_move)
         except (TypeError, ValueError) as exc:
@@ -112,6 +116,7 @@ class GoldenState:
         object.__setattr__(self, "side_to_move", side)
         history = _history(self.superko_history, self.topology.point_count)
         object.__setattr__(self, "superko_history", history)
+        object.__setattr__(self, "_superko_membership", frozenset(history))
         if isinstance(self.consecutive_passes, bool) or not isinstance(self.consecutive_passes, int):
             raise ValueError("consecutive_passes must be an integer")
         if self.consecutive_passes not in (0, 1, 2):
@@ -140,7 +145,55 @@ class GoldenState:
 
     @property
     def board_key(self) -> BoardKey:
-        return board_key(self.stones)
+        return self._board_key
+
+    @property
+    def superko_membership(self) -> frozenset[BoardKey]:
+        """Exact immutable membership index for positional-superko lookups."""
+
+        return self._superko_membership
+
+    @classmethod
+    def _from_trusted_transition(
+        cls,
+        parent: "GoldenState",
+        *,
+        stones: tuple[Stone, ...],
+        side_to_move: Stone,
+        consecutive_passes: int,
+        append_board_key: BoardKey | None,
+    ) -> "GoldenState":
+        """Construct a child after rules.py has completed local transition checks.
+
+        This intentionally bypasses the external-construction audit.  The parent
+        is already validated, and rules.py supplies either the unchanged history
+        (PASS) or exactly one non-repeating resulting board key (a point move).
+        """
+
+        if append_board_key is None:
+            history = parent.superko_history
+            membership = parent.superko_membership
+        else:
+            history = parent.superko_history + (append_board_key,)
+            membership = parent.superko_membership | frozenset((append_board_key,))
+        child = object.__new__(cls)
+        object.__setattr__(child, "stones", stones)
+        object.__setattr__(
+            child,
+            "_board_key",
+            append_board_key if append_board_key is not None else parent.board_key,
+        )
+        object.__setattr__(child, "side_to_move", side_to_move)
+        object.__setattr__(child, "superko_history", history)
+        object.__setattr__(child, "consecutive_passes", consecutive_passes)
+        object.__setattr__(child, "topology", parent.topology)
+        object.__setattr__(child, "rules_id", parent.rules_id)
+        object.__setattr__(child, "rules_fingerprint", parent.rules_fingerprint)
+        object.__setattr__(child, "komi", parent.komi)
+        object.__setattr__(child, "history_provenance", parent.history_provenance)
+        object.__setattr__(child, "_superko_membership", membership)
+        increment("trusted_state_constructions")
+        return child
 
     @property
     def is_terminal(self) -> bool:
