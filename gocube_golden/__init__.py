@@ -118,6 +118,22 @@ from .topology import (
     research_topology,
     torus_5x5,
 )
+from .cube_topology import (
+    CROSS_FACE_SEAM,
+    CUBE4_GEOMETRY_FINGERPRINT,
+    CUBE4_ROTATION_PERMUTATIONS,
+    CUBE4_TOPOLOGY,
+    CUBE4_TOPOLOGY_FINGERPRINT,
+    CUBE4_TOPOLOGY_ID,
+    FACE_CORNER,
+    FACE_EDGE,
+    FACE_INTERIOR,
+    GEOMETRY_SCHEMA_ID,
+    SAME_FACE,
+    CubeGoldenTopology,
+    cube4x4x6,
+    cube_rotation_permutations,
+)
 from .neural import (
     ACTION_COUNT,
     OBSERVATION_CHANNELS,
@@ -136,6 +152,56 @@ from .neural import (
     build_observation_bundle,
     count_parameters,
     model_hash,
+)
+from .cube_neural import (
+    CUBE_ACTION_COUNT,
+    CUBE_OBSERVATION_CHANNELS,
+    CUBE_OBSERVATION_FINGERPRINT,
+    CUBE_OBSERVATION_SCHEMA_ID,
+    CUBE_OBSERVATION_SCHEMA_VERSION,
+    CUBE_PASS_INDEX,
+    GoldenCubeGraphNetV1,
+    GoldenCubeNeuralEvaluator,
+    SelfPlayCubeRootNoiseEvaluator,
+    build_cube_action_mask,
+    build_cube_observation,
+    build_cube_observation_bundle,
+    cube_model_hash,
+)
+from .cube_contract import (
+    CUBE_PROFILE_ID,
+    load_profile as load_cube_profile,
+    profile_fingerprint as cube_profile_fingerprint,
+)
+from .cube_training import (
+    CUBE_WATCHDOG,
+    CUBE_SELFPLAY_CONTRACT_ID,
+    CUBE_TARGET_CONTRACT_ID,
+    CUBE_TARGET_FINGERPRINT,
+    CubeSelfPlayGameRecord,
+    CubeSelfPlayPosition,
+    CubeSelfPlayRunner,
+    CubeSelfPlaySearchContract,
+    CubeTrainingSample,
+    DEFAULT_CUBE_SELFPLAY_CONTRACT,
+    build_cube_replay_samples,
+    cube_initial_state,
+    cube_compare_selfplay_evidence,
+    cube_post_action_termination,
+    cube_state_from_identity,
+    cube_state_identity,
+    cube_z_target,
+    run_cube_selfplay_games,
+)
+from .cube_arena import (
+    CUBE_ARENA_CONTRACT_ID,
+    CUBE_ARENA_FINGERPRINT,
+    CubeArenaRecord,
+    CubeSearchPlayer,
+    SequentialGoldenCubeArena,
+    cube_hoeffding_interval,
+    cube_pair_score,
+    summarize_cube_arena,
 )
 from .stage3_contract import (
     PROFILE_ID as STAGE3_PROFILE_ID,
