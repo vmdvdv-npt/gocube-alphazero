@@ -13,6 +13,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 import hashlib
 import json
+import math
 from pathlib import Path
 import platform
 import random
@@ -648,21 +649,6 @@ def ranking_from_primary(primary: Mapping[str, Mapping[str, object]], variants: 
     return sorted(rows, key=lambda row: (-float(row["mean_pair_score"] or 0.0), str(row["variant"])))
 
 
-def confidence_verdict(rankings: Mapping[str, Sequence[Mapping[str, object]]]) -> str:
-    if any(not rows for rows in rankings.values()):
-        return "INCONCLUSIVE"
-    winners = [str(rows[0]["variant"]) for rows in rankings.values()]
-    if winners[0] == winners[1]:
-        gap = float(rankings["A"][0]["mean_pair_score"] or 0.0) - float(rankings["A"][1]["mean_pair_score"] or 0.0)
-        return "CLEAR WINNER" if gap >= 0.10 else "LIKELY WINNER"
-    combined = ranking_from_primary(
-        {f"{seed}-{index}": summary for seed, summaries in [] for index, summary in enumerate(summaries)},
-        VARIANTS,
-    )
-    del combined
-    return "INCONCLUSIVE"
-
-
 def run_experiment(args: argparse.Namespace) -> dict[str, object]:
     run_dir = Path(args.run_root) / args.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -765,6 +751,7 @@ def run_experiment(args: argparse.Namespace) -> dict[str, object]:
     seed_rankings = {seed: report["ranking"] for seed, report in all_seed_reports.items()}
     winner_consistency = seed_rankings["A"][0]["variant"] == seed_rankings["B"][0]["variant"]
     confidence = "CLEAR WINNER" if winner_consistency and float(seed_rankings["A"][0]["mean_pair_score"] or 0) - float(seed_rankings["A"][1]["mean_pair_score"] or 0) >= 0.10 else "LIKELY WINNER" if winner_consistency else "INCONCLUSIVE"
+    first_move_summary = aggregate_first_move_statistics(control_stats)
     report = {
         "status": "PASS",
         "run_id": args.run_id,
@@ -780,8 +767,11 @@ def run_experiment(args: argparse.Namespace) -> dict[str, object]:
         "combined_ranking": combined_ranking,
         "confidence": confidence,
         "primary_games": 6 * PRIMARY_PAIRS * len(SEED_CONFIG) * 2,
+        "total_arena_games": (6 * PRIMARY_PAIRS * len(SEED_CONFIG) * 2) + (len(VARIANTS) * len(SEED_CONFIG) * DIAGNOSTIC_PAIRS * 2) + (len(VARIANTS) * len(SEED_CONFIG) * 2 * DIAGNOSTIC_PAIRS * 2),
+        "total_selfplay_games": (len(SEED_CONFIG) * SELFPLAY_GAMES) + (len(VARIANTS) * len(SEED_CONFIG) * SELFPLAY_GAMES) + (len(VARIANTS) * len(SEED_CONFIG) * CONTROL_GAMES),
         "first_move_selfplay": first_move_buckets,
         "first_move_controls": control_stats,
+        "first_move_summary": first_move_summary,
         "first_move_conclusion": "INCONCLUSIVE",
         "telemetry": {"wall_time_sec": time.perf_counter() - experiment_started, "peak_rss_mb": float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) / 1024.0, "platform": platform.platform(), "workers": args.workers},
         "technical_games_expected": 0,
@@ -794,17 +784,69 @@ def run_experiment(args: argparse.Namespace) -> dict[str, object]:
 
 
 def derive_first_move_conclusion(control_stats: Mapping[str, Mapping[str, object]]) -> str:
+    if len(control_stats) != 8:
+        return "INCONCLUSIVE"
+    def wilson(wins: int, games: int) -> tuple[float, float] | None:
+        if games <= 0:
+            return None
+        z = 1.959963984540054
+        rate = wins / games
+        denominator = 1.0 + z * z / games
+        centre = (rate + z * z / (2.0 * games)) / denominator
+        radius = z * math.sqrt(rate * (1.0 - rate) / games + z * z / (4.0 * games * games)) / denominator
+        return max(0.0, centre - radius), min(1.0, centre + radius)
+
     rates = [float(item["statistics"]["black_win_rate"]) for item in control_stats.values() if item["statistics"]["black_win_rate"] is not None]
-    intervals = [item["statistics"]["black_win_rate_95_percent_ci"] for item in control_stats.values()]
-    if len(rates) != 8 or any(interval is None for interval in intervals):
+    if len(rates) != 8:
         return "INCONCLUSIVE"
-    if all(float(interval[0]) > 0.5 for interval in intervals):
+    aggregate_wins = sum(int(item["statistics"]["black_wins"]) for item in control_stats.values())
+    aggregate_games = sum(int(item["statistics"]["games"]) for item in control_stats.values())
+    aggregate_ci = wilson(aggregate_wins, aggregate_games)
+    seed_cis = []
+    for seed in ("A", "B"):
+        rows = [item for key, item in control_stats.items() if key.startswith(seed + "/")]
+        seed_cis.append(wilson(sum(int(item["statistics"]["black_wins"]) for item in rows), sum(int(item["statistics"]["games"]) for item in rows)))
+    if aggregate_ci is None or any(interval is None for interval in seed_cis):
+        return "INCONCLUSIVE"
+    if all(float(interval[0]) > 0.5 for interval in seed_cis) and float(aggregate_ci[0]) > 0.5 and all(rate > 0.5 for rate in rates):
         return "FIRST-MOVE ADVANTAGE: DETECTED"
-    if any(float(interval[0]) > 0.5 for interval in intervals) and any(float(interval[1]) < 0.5 for interval in intervals):
+    if any(float(interval[0]) > 0.5 for interval in seed_cis) and any(float(interval[1]) < 0.5 for interval in seed_cis):
         return "INCONCLUSIVE"
-    if all(float(interval[1]) <= 0.5 for interval in intervals):
+    if float(aggregate_ci[1]) <= 0.5:
         return "NO DETECTABLE FIRST-MOVE ADVANTAGE"
-    return "NO DETECTABLE FIRST-MOVE ADVANTAGE"
+    return "INCONCLUSIVE"
+
+
+def aggregate_first_move_statistics(control_stats: Mapping[str, Mapping[str, object]]) -> dict[str, object]:
+    """Combine the eight predeclared controls without discarding model strata."""
+    wins = sum(int(item["statistics"]["black_wins"]) for item in control_stats.values())
+    losses = sum(int(item["statistics"]["white_wins"]) for item in control_stats.values())
+    draws = sum(int(item["statistics"]["draws"]) for item in control_stats.values())
+    games = wins + losses + draws
+    rate = wins / games if games else None
+    z = 1.959963984540054
+    if games:
+        denominator = 1.0 + z * z / games
+        centre = (rate + z * z / (2.0 * games)) / denominator
+        radius = z * math.sqrt(rate * (1.0 - rate) / games + z * z / (4.0 * games * games)) / denominator
+        interval = [max(0.0, centre - radius), min(1.0, centre + radius)]
+    else:
+        interval = None
+    raw_means = [float(item["statistics"]["raw_black_area_minus_white_area"]["mean"]) for item in control_stats.values()]
+    margin_means = [float(item["statistics"]["final_margin_black_after_komi_0_5"]["mean"]) for item in control_stats.values()]
+    return {
+        "games": games,
+        "black_wins": wins,
+        "white_wins": losses,
+        "draws": draws,
+        "black_win_rate": rate,
+        "black_win_rate_95_percent_ci": interval,
+        "raw_black_area_minus_white_area_mean_across_controls": sum(raw_means) / len(raw_means) if raw_means else None,
+        "final_margin_black_after_komi_0_5_mean_across_controls": sum(margin_means) / len(margin_means) if margin_means else None,
+        "technical_games": sum(int(item["technical"]) for item in control_stats.values()),
+        "strata": {key: item["statistics"] for key, item in control_stats.items()},
+        "interpretation": "aggregate across eight independent same-model controls; per-model strata retained",
+    }
 
 
 def write_human_report(path: Path, report: Mapping[str, object]) -> None:
@@ -831,9 +873,14 @@ def write_human_report(path: Path, report: Mapping[str, object]) -> None:
         "",
         f"**{report['first_move_conclusion']}**",
         "",
+        f"Aggregate Black win rate: {report['first_move_summary']['black_win_rate']:.4f} (95% CI {report['first_move_summary']['black_win_rate_95_percent_ci'][0]:.4f}–{report['first_move_summary']['black_win_rate_95_percent_ci'][1]:.4f})",
+        f"Raw Black area advantage mean: {report['first_move_summary']['raw_black_area_minus_white_area_mean_across_controls']:.4f}",
+        f"Final Black margin mean at komi=0.5: {report['first_move_summary']['final_margin_black_after_komi_0_5_mean_across_controls']:.4f}",
+        "",
         "Controls use the frozen Golden self-play protocol as a stochastic same-model estimate; technical games are excluded from WDL/statistics.",
         "",
-        f"Total primary Arena games: {report['primary_games']}",
+        f"Total Arena games: {report['total_arena_games']} (primary: {report['primary_games']})",
+        f"Total self-play games: {report['total_selfplay_games']}",
         f"Total first-move control games: {sum(int(item['games']) for item in report['first_move_controls'].values())}",
         f"Wall time: {report['telemetry']['wall_time_sec']:.1f}s",
         "",

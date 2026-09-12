@@ -52,3 +52,42 @@ machine and human reports are copied to:
 The runner fails closed on non-0.5 komi, technical Arena/self-play games,
 target/source drift, checkpoint identity drift, or incomplete arms. It never
 converts a failed technical arm into a draw.
+
+## Completed run
+
+`torus5-aux-heads-night-ab-20260913` completed **PASS** from compute source
+commit `1643cabe4244f40f849fbc94de2864c586ede871`, using 16 workers and
+`komi=0.5`. All self-play, diagnostic Arena, primary Arena, progression, and
+same-model control technical counts were zero.
+
+### Final M2 primary ranking
+
+| Rank | Variant | Combined mean score | Games | Seed A | Seed B |
+|---:|---|---:|---:|---:|---:|
+| 1 | WDL + ownership | 0.5469 | 768 | 0.5313 | 0.5625 |
+| 2 | WDL + ownership + score | 0.5169 | 768 | 0.5625 | 0.4714 |
+| 3 | WDL | 0.4987 | 768 | 0.4375 | 0.5599 |
+| 4 | WDL + score | 0.4375 | 768 | 0.4688 | 0.4063 |
+
+Training baseline verdict: **INCONCLUSIVE**. Ownership is the combined leader,
+but the joint/score arms show seed reversal and the intervals are not decisive;
+the data does not justify promoting a single configuration as a proven Torus
+9x9 baseline. The practical candidate for a follow-up is WDL + ownership, not
+a scientific CLEAR WINNER.
+
+### FIRST-MOVE ADVANTAGE
+
+**FIRST-MOVE ADVANTAGE: DETECTED** under the declared stochastic same-model
+self-play estimate. Across 8 final M2 controls and 2048 valid games, Black
+won 1178 (57.52%), with Wilson 95% CI **[55.37%, 59.64%]**. Seed A was
+55.96% (CI [52.90%, 58.97%]); Seed B was 59.08% (CI [56.04%, 62.05%]); all
+eight model point estimates were above 50%. Mean raw Black area advantage was
+**+1.3672** points, and mean final Black margin after komi 0.5 was
+**+0.8672**. The result is therefore a detected Black/first-player bias for
+this protocol, not evidence for changing komi.
+
+Canonical Stage4 self-play was 59.18% Black wins; new I1/I2 exploratory
+buckets were retained separately in the machine report. Total scientific
+counts were **3328 self-play games**, **2304 Arena games**, and **2048 final
+control games**; all reported technical counts were zero. Wall time was
+2463.9 seconds, peak parent RSS about 980.7 MB.
