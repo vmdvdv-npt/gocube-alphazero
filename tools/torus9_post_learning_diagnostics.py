@@ -23,9 +23,14 @@ from pathlib import Path
 import random
 import statistics
 import subprocess
+import sys
 from typing import Any, Iterable, Mapping, Sequence
 
 import torch
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from gocube_golden.arena_contract import SearchSettings
 from gocube_golden.provenance import file_sha256
@@ -64,7 +69,7 @@ from gocube_golden.torus9_contract import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = _REPO_ROOT
 DEFAULT_RUN = ROOT / "runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1"
 DEFAULT_OLD_RUN = ROOT / "runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3"
 DEFAULT_REPORT_JSON = ROOT / "docs/TORUS9_POST_LEARNING_DIAGNOSTICS_20260913.json"
