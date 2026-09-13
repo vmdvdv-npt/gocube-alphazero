@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass
 from typing import Mapping
 
+from .komi_policy import validate_gocube_komi
+
 
 GOCUBE_KOMI = 0.5
 
@@ -11,7 +13,10 @@ GOCUBE_KOMI = 0.5
 def require_gocube_komi(value: object, *, context: str = "GoCube") -> float:
     """Validate the single supported GoCube komi and return its canonical value."""
 
-    komi = float(value)
+    # Run the shared validator first so the known stale ordinary-Go sentinel
+    # fails closed with its specific diagnostic before this frozen production
+    # contract applies its stricter komi=0.5 reproducibility pin.
+    komi = validate_gocube_komi(value, context=context)
     if not math.isclose(komi, GOCUBE_KOMI, rel_tol=0.0, abs_tol=1e-12):
         raise ValueError(f"{context} requires komi {GOCUBE_KOMI}, got {value!r}")
     return GOCUBE_KOMI
