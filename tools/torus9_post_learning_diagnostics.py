@@ -57,7 +57,7 @@ from gocube_golden.torus9 import (
     torus9_state_identity,
 )
 from gocube_golden.torus9_contract import (
-    TORUS9_ARENA_CONTRACT_FINGERPRINT,
+    TORUS9_LEGACY_ARENA_CONTRACT_FINGERPRINT,
     TORUS9_ARCHITECTURE_ID,
     TORUS9_KOMI,
     TORUS9_MOVE_LIMIT,
@@ -982,7 +982,7 @@ def best_manifest(run_root: Path, profile: Mapping[str, object]) -> dict[str, ob
         "architecture": {"architecture_id": TORUS9_ARCHITECTURE_ID, "architecture_fingerprint": metadata["architecture_fingerprint"], "hidden": 64, "blocks": 8, "heads": {"policy": [82], "value": [3]}, "ownership": False, "score": False},
         "profile": {"profile_id": TORUS9_PROFILE_ID, "profile_fingerprint": profile_fingerprint(profile), "rules_fingerprint": TORUS9_RULES_FINGERPRINT, "observation_fingerprint": TORUS9_OBSERVATION_FINGERPRINT, "target_fingerprint": TORUS9_TARGET_FINGERPRINT},
         "training_semantics": {"iterations": 8, "games_per_iteration": 64, "total_games": 512, "rolling_replay_generations": 3, "replay_max_positions": 20000, "optimizer": "Adam", "learning_rate": 0.001, "weight_decay": 0.0, "optimizer_steps_per_iteration": 80, "batch_size": 64, "samples_consumed_per_iteration": 5120, "optimizer_continuation": True},
-        "search_semantics": {"selfplay_contract_fingerprint": TORUS9_SELFPLAY_CONTRACT_FINGERPRINT, "arena_contract_fingerprint": TORUS9_ARENA_CONTRACT_FINGERPRINT, "simulations": 64, "cpuct": 1.25, "fpu": 0.0, "komi": TORUS9_KOMI, "selfplay_noise": {"epsilon": 0.25, "alpha": 0.30}, "selfplay_temperature": "1.0 plies 1..8 then 0.0", "arena_noise": False, "arena_temperature": 0.0, "move_limit": TORUS9_MOVE_LIMIT},
+        "search_semantics": {"selfplay_contract_fingerprint": TORUS9_SELFPLAY_CONTRACT_FINGERPRINT, "arena_contract_fingerprint": TORUS9_LEGACY_ARENA_CONTRACT_FINGERPRINT, "simulations": 64, "cpuct": 1.25, "fpu": 0.0, "komi": TORUS9_KOMI, "selfplay_noise": {"epsilon": 0.25, "alpha": 0.30}, "selfplay_temperature": "1.0 plies 1..8 then 0.0", "arena_noise": False, "arena_temperature": 0.0, "move_limit": TORUS9_MOVE_LIMIT},
         "arena_evidence": {"NEW-M8_vs_OLD-M8": {"valid_W_L_D": [59, 3, 0], "technical_games": 2, "technical_reason": "TRUNCATED_MOVE_LIMIT"}, "M8_vs_M1": {"valid_W_L_D": [128, 0, 0], "technical_games": 0}, "M8_vs_M0": {"valid_W_L_D": [119, 7, 0], "technical_games": 2, "technical_reason": "TRUNCATED_MOVE_LIMIT"}, "M8_vs_M4": {"valid_W_L_D": [92, 24, 0], "technical_games": 12, "technical_reason": "TRUNCATED_MOVE_LIMIT"}, "technical_games_are_excluded_from_draw_loss": True},
         "rules": {"komi": TORUS9_KOMI, "rules_fingerprint": TORUS9_RULES_FINGERPRINT, "technical_games_are_not_results": True},
     }

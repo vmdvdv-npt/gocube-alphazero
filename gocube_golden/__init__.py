@@ -33,8 +33,10 @@ from .arena_process import (
 )
 from .arena_contract import (
     ARENA_CONTRACT_ID,
+    ARENA_WATCHDOG_SCALING_ID,
     DEFAULT_ARENA_CONTRACT,
     GOLDEN_MOVE_LIMIT,
+    LEGACY_ARENA_WATCHDOG,
     SEARCH_CONTRACT_FINGERPRINT,
     SEARCH_IMPLEMENTATION_ID,
     SEARCH_PATH,
@@ -42,6 +44,7 @@ from .arena_contract import (
     SearchSettings,
     compute_search_contract_fingerprint,
     reject_checkpoint_arena_overrides,
+    resolve_arena_watchdog,
 )
 from .experiment_profile import (
     EXPERIMENT_FINGERPRINT,
@@ -257,8 +260,12 @@ from .training import (
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
     TORUS9_ARCHITECTURE_ID,
+    TORUS9_ARENA_MOVE_LIMIT,
     TORUS9_BLOCKS,
     TORUS9_KOMI,
+    TORUS9_LEGACY_ARENA_CONTRACT_FINGERPRINT,
+    TORUS9_LEGACY_ARENA_CONTRACT_ID,
+    TORUS9_MOVE_LIMIT,
     TORUS9_MAX_REPLAY_POSITIONS,
     TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
     TORUS9_PASS_INDEX,
@@ -296,6 +303,7 @@ from .torus9 import (
     torus9_state_from_identity,
     torus9_state_identity,
     torus9_z_target,
+    torus9_arena_termination_reason,
     validate_torus9_replay_sample,
 )
 

@@ -39,6 +39,7 @@ from .torus9_contract import (
     TORUS9_ARCHITECTURE_ID,
     TORUS9_ARENA_CONTRACT_FINGERPRINT,
     TORUS9_ARENA_CONTRACT_ID,
+    TORUS9_ARENA_MOVE_LIMIT,
     TORUS9_BATCH_SIZE,
     TORUS9_BLOCKS,
     TORUS9_HIDDEN,
@@ -1031,6 +1032,16 @@ def _arena_process_init(candidate_path: str, reference_path: str, candidate_hash
     _ARENA_REFERENCE_EVALUATOR = Torus9NeuralEvaluator(reference, device=device)
 
 
+def torus9_arena_termination_reason(state: GoldenState, action_count: int) -> str | None:
+    """Return the Arena termination taxonomy without turning the watchdog into WDL."""
+
+    if state.is_terminal:
+        return "DOUBLE_PASS"
+    if action_count >= TORUS9_ARENA_MOVE_LIMIT:
+        return "TRUNCATED_MOVE_LIMIT"
+    return None
+
+
 _ARENA_CANDIDATE_MODEL: Torus9GraphNet | None = None
 _ARENA_REFERENCE_MODEL: Torus9GraphNet | None = None
 _ARENA_CANDIDATE_EVALUATOR: Torus9NeuralEvaluator | None = None
@@ -1048,7 +1059,7 @@ def _arena_process_game(task: Mapping[str, object]) -> dict[str, object]:
     technical: str | None = None
     error: str | None = None
     formal: str | None = None
-    for ply in range(1, TORUS9_MOVE_LIMIT + 1):
+    for ply in range(1, TORUS9_ARENA_MOVE_LIMIT + 1):
         candidate_turn = (state.side_to_move == BLACK and candidate_black) or (state.side_to_move == WHITE and not candidate_black)
         model = _ARENA_CANDIDATE_MODEL if candidate_turn else _ARENA_REFERENCE_MODEL
         evaluator = _ARENA_CANDIDATE_EVALUATOR if candidate_turn else _ARENA_REFERENCE_EVALUATOR
@@ -1065,11 +1076,11 @@ def _arena_process_game(task: Mapping[str, object]) -> dict[str, object]:
             trace.append({"ply": ply, "side_to_move": state.side_to_move.name, "player": "candidate" if candidate_turn else "reference", "action": action, "legal": False, "error": error})
             break
         trace.append({"ply": ply, "side_to_move": (BLACK if state.side_to_move == WHITE else WHITE).name, "player": "candidate" if candidate_turn else "reference", "action": action, "legal": True})
-        if state.is_terminal:
+        if torus9_arena_termination_reason(state, ply) == "DOUBLE_PASS":
             formal = result_from_terminal(state).winner.value
             break
     else:
-        technical, error = "TRUNCATED_MOVE_LIMIT", "Torus 9×9 Arena watchdog reached 500 actions"
+        technical, error = "TRUNCATED_MOVE_LIMIT", f"Torus 9×9 Arena watchdog reached {TORUS9_ARENA_MOVE_LIMIT} actions"
     result_row: dict[str, object] = {
         "run_id": str(task["run_id"]),
         "comparison": str(task["comparison"]),

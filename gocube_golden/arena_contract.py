@@ -12,7 +12,49 @@ from .topology import TORUS_5X5_TOPOLOGY_FINGERPRINT
 ARENA_CONTRACT_ID = "golden-arena-search-v1"
 SEARCH_IMPLEMENTATION_ID = "golden-sequential-puct-v1"
 SEARCH_PATH = "B"
-GOLDEN_MOVE_LIMIT = 500
+LEGACY_ARENA_WATCHDOG = 500
+LEGACY_ARENA_BOARD_SIZE = 5
+ARENA_WATCHDOG_SCALING_ID = "board-size-linear-v1"
+
+
+def resolve_arena_watchdog(
+    board_size: int | tuple[int, int],
+    *,
+    legacy_limit: int = LEGACY_ARENA_WATCHDOG,
+    legacy_board_size: int = LEGACY_ARENA_BOARD_SIZE,
+    extra_row_budget: int = 125,
+) -> int:
+    """Resolve the deterministic Arena technical boundary for a board.
+
+    The frozen 5x5 Golden Arena remains 500 plies.  Larger boards receive
+    125 additional plies per extra board row/column, using the larger
+    dimension for rectangular boards.  This is intentionally a technical
+    fail-closed boundary, not a result or a draw rule.
+    """
+
+    if isinstance(board_size, bool):
+        raise ValueError("Arena board size must be a positive integer or pair")
+    if isinstance(board_size, int):
+        extent = board_size
+    else:
+        if len(board_size) != 2:
+            raise ValueError("Arena board size pair must contain width and height")
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in board_size):
+            raise ValueError("Arena board dimensions must be positive integers")
+        extent = max(board_size)
+    if extent <= 0:
+        raise ValueError("Arena board dimensions must be positive integers")
+    for name, value in (
+        ("legacy_limit", legacy_limit),
+        ("legacy_board_size", legacy_board_size),
+        ("extra_row_budget", extra_row_budget),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    return legacy_limit + max(0, extent - legacy_board_size) * extra_row_budget
+
+
+GOLDEN_MOVE_LIMIT = resolve_arena_watchdog(LEGACY_ARENA_BOARD_SIZE)
 
 
 @dataclass(frozen=True)

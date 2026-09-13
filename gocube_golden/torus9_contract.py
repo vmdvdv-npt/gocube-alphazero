@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from .arena_contract import resolve_arena_watchdog
 from .state import BASELINE_KOMI, RULES_PROFILE_ID, rules_fingerprint_for
 from .topology import TORUS_9X9
 
@@ -23,7 +24,9 @@ TORUS9_OBSERVATION_SCHEMA_VERSION = 1
 TORUS9_TARGET_CONTRACT_ID = "gocube-torus9-wdl-side-to-move-v1"
 TORUS9_TARGET_CONTRACT_VERSION = 1
 TORUS9_SELFPLAY_CONTRACT_ID = "torus9-golden-selfplay-search-v1"
-TORUS9_ARENA_CONTRACT_ID = "torus9-golden-arena-search-v1"
+TORUS9_ARENA_CONTRACT_ID = "torus9-golden-arena-search-v2"
+TORUS9_LEGACY_ARENA_CONTRACT_ID = "torus9-golden-arena-search-v1"
+TORUS9_LEGACY_ARENA_CONTRACT_FINGERPRINT = "sha256:4466460601b5e2e036b67dcadcf29ef3b1c20001dcb4d5e0fec341582f07c04f"
 TORUS9_SEARCH_IMPLEMENTATION_ID = "golden-sequential-puct-v1"
 TORUS9_POINT_COUNT = 81
 TORUS9_ACTION_COUNT = 82
@@ -39,6 +42,7 @@ TORUS9_TRAINING_SAMPLES_PER_ITERATION = TORUS9_BATCH_SIZE * TORUS9_OPTIMIZER_STE
 TORUS9_ROLLING_GENERATIONS = 3
 TORUS9_MAX_REPLAY_POSITIONS = 20_000
 TORUS9_MOVE_LIMIT = 500
+TORUS9_ARENA_MOVE_LIMIT = resolve_arena_watchdog((9, 9))
 TORUS9_RULES_FINGERPRINT = rules_fingerprint_for(TORUS_9X9, TORUS9_KOMI)
 
 
@@ -110,7 +114,7 @@ TORUS9_ARENA_CONTRACT_FINGERPRINT = fingerprint(
         "fast_search": False,
         "resign": False,
         "deterministic_tie_break": True,
-        "watchdog": TORUS9_MOVE_LIMIT,
+        "watchdog": TORUS9_ARENA_MOVE_LIMIT,
         "workers": TORUS9_WORKERS,
         "one_game_per_process": True,
         "technical_fail_closed": True,
@@ -172,7 +176,9 @@ def validate_torus9_profile(profile: Mapping[str, Any], *, verify_fingerprint: b
     require(selfplay.get("workers") == TORUS9_WORKERS and selfplay.get("batch_size") == TORUS9_BATCH_SIZE, "Self-play execution drift")
     require(selfplay.get("komi") == TORUS9_KOMI and selfplay.get("fast_sims") is False, "Self-play komi/fast-sims drift")
     arena = profile.get("arena", {})
+    require(arena.get("contract_id") == TORUS9_ARENA_CONTRACT_ID, "Arena contract id drift")
     require(arena.get("workers") == TORUS9_WORKERS and arena.get("temperature") == 0.0 and arena.get("noise") is False, "Arena execution drift")
+    require(arena.get("watchdog") == TORUS9_ARENA_MOVE_LIMIT, "Arena watchdog scaling drift")
     require(arena.get("fingerprint") == TORUS9_ARENA_CONTRACT_FINGERPRINT, "Arena fingerprint drift")
     require(profile.get("canonical_games_per_iteration") == 64, "Canonical games/iteration must be fixed to 64")
     replay = profile.get("replay", {})

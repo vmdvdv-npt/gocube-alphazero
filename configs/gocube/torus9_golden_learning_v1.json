@@ -83,8 +83,8 @@
     "komi": 0.5
   },
   "arena": {
-    "contract_id": "torus9-golden-arena-search-v1",
-    "fingerprint": "sha256:4466460601b5e2e036b67dcadcf29ef3b1c20001dcb4d5e0fec341582f07c04f",
+    "contract_id": "torus9-golden-arena-search-v2",
+    "fingerprint": "sha256:8fe09d8f51e7e1b44eea1b327a774221d94f6c6920f94426d611d0759d6fdb8c",
     "simulations": 64,
     "cpuct": 1.25,
     "fpu": 0.0,
@@ -92,6 +92,7 @@
     "temperature": 0.0,
     "fast_search": false,
     "resign": false,
+    "watchdog": 1000,
     "workers": 16,
     "one_game_per_process": true,
     "technical_fail_closed": true,
@@ -131,5 +132,5 @@
     "technical": ["TRUNCATED_MOVE_LIMIT", "ERROR_ILLEGAL_PLAYER_ACTION", "ERROR_PLAYER_EXCEPTION", "ERROR_SEARCH"],
     "technical_are_training_targets": false
   },
-  "profile_fingerprint": "sha256:a610bc8f02d54f17929c2210bfb35768538aaef2c872241611d5cba4587b6538"
+  "profile_fingerprint": "sha256:016f32dfdc203e8e4a5a015db56ee02d3401eea62e7af11f9f8bf5e6d5d22c8f"
 }
