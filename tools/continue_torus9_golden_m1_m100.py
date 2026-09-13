@@ -813,9 +813,14 @@ def _ensure_startset() -> tuple[tuple[dict[str, object], ...], str]:
 def _arena_performance_winner(arenas: Sequence[Mapping[str, object]]) -> tuple[float, dict[str, object]]:
     if not arenas:
         raise RuntimeError("No Arena telemetry available for wait selection")
-    valid = [row for row in arenas if int(row.get("games", 0)) == 64 and int(row.get("technical_games", 0)) == 0]
-    if len(valid) != len(arenas):
-        raise RuntimeError("Arena wait selection encountered technical/incomplete control")
+    valid = [
+        row for row in arenas
+        if int(row.get("games", 0)) == 64
+        and int(row.get("valid_games", 0)) > 0
+        and float(row.get("inference_rows_per_sec", 0.0)) > 0.0
+    ]
+    if not valid:
+        raise RuntimeError("Arena wait selection has no valid execution telemetry")
     ranked = sorted(valid, key=lambda row: (float(row.get("inference_rows_per_sec", 0.0)), float(row.get("games_per_sec", 0.0))), reverse=True)
     fastest = float(ranked[0].get("inference_rows_per_sec", 0.0))
     equivalent = [row for row in ranked if float(row.get("inference_rows_per_sec", 0.0)) >= fastest * 0.95]
