@@ -1,4 +1,8 @@
-# Stage 3 — Golden Torus neural training proof
+# Stage 3 — Golden Torus neural training proof (legacy)
+
+> Historical record only. This profile is deprecated and is not the current
+> 5x5 Golden Standard. Use [`TORUS5_GOLDEN_STANDARD.md`](TORUS5_GOLDEN_STANDARD.md)
+> and `tools.torus5_golden` for new runs.
 
 Stage 3 introduces a separate training identity:
 `gocube-torus-golden-training-v1`, defined by
@@ -27,7 +31,8 @@ The canonical runner is:
   --run-id torus-golden-stage3-seed1 \
   --profile proof-standard \
   --device auto \
-  --workers 16
+  --workers 16 \
+  --allow-legacy-config
 ```
 
 Before chunk 1, the runner performs a serial-vs-parallel equivalence gate for
@@ -42,4 +47,3 @@ and are intentionally ignored by Git. The final report records checkpoint
 lineage, parameter/model/artifact hashes, self-play provenance, optimizer
 metrics, pre-generated Arena starts, Arena checkpoint loads, and one of the
 three Stage-3 verdicts.
-

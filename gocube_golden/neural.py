@@ -288,6 +288,21 @@ class GoldenGraphNetV1(nn.Module):
         )
 
 
+class Torus5GoldenGraphNetV2(GoldenGraphNetV1):
+    """Canonical Torus 5x5 v2 network: 48 channels and six graph blocks."""
+
+    architecture_id = "GoldenGraphNetV2-Torus5-6Block"
+
+    def __init__(
+        self,
+        *,
+        topology=TORUS_5X5,
+        hidden: int = 48,
+        blocks: int = 6,
+    ) -> None:
+        super().__init__(topology=topology, hidden=hidden, blocks=blocks)
+
+
 class AuxiliaryGoldenGraphNet(GoldenGraphNetV1):
     """The four-arm extension with the proven policy/WDL trunk preserved.
 
@@ -347,6 +362,9 @@ def instantiate_model_from_metadata(metadata: Mapping[str, object]) -> nn.Module
     architecture = metadata.get("architecture_config")
     hidden = int(architecture.get("hidden", 64)) if isinstance(architecture, Mapping) else 64
     blocks = int(architecture.get("blocks", 4)) if isinstance(architecture, Mapping) else 4
+    architecture_id = architecture.get("architecture_id") if isinstance(architecture, Mapping) else None
+    if variant == "wdl" and architecture_id == Torus5GoldenGraphNetV2.architecture_id:
+        return Torus5GoldenGraphNetV2(hidden=hidden, blocks=blocks)
     if variant == "wdl":
         return GoldenGraphNetV1(hidden=hidden, blocks=blocks)
     return AuxiliaryGoldenGraphNet(variant=variant, hidden=hidden, blocks=blocks)

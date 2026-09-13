@@ -54,6 +54,24 @@ CI runs pinned Cube4 and Torus9 training-accounting smokes and verifies
 non-empty self-play replay, row accounting, optimizer progress, provenance,
 checkpoint contracts, and `komi=0.5`.
 
+## Torus 5x5 Golden Standard
+
+The canonical 5x5 Golden Standard is resolved through the single current alias
+`gocube-torus5-golden-current`, which points to concrete version
+`gocube-torus5-golden-v2`. Its network is 48 channels x 6 graph blocks and its
+komi is 0.5. The resolver writes the complete resolved configuration and git
+identity into each run manifest:
+
+```bash
+python -m tools.torus5_golden --run-name torus5-v2-smoke --smoke
+```
+
+The old standalone Golden Torus Stage-3/Stage-4 runners are retained only for
+historical reproduction and require explicit `--allow-legacy-config`. They do
+not participate in the default/current launch path. See
+[`TORUS5_GOLDEN_STANDARD.md`](TORUS5_GOLDEN_STANDARD.md) for the audit,
+universal/board-specific split, and legacy mapping.
+
 The deterministic value-contract reproduction is in
 `tests/test_gocube_legacy_training_retirement.py`. The pre-existing Cube3
 learning-sanity Arena artifacts are historical diagnostic evidence, not

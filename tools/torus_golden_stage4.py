@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the controlled Stage 3 -> Stage 4 Golden Torus experiment."""
+"""Run the deprecated controlled Stage 3 -> Stage 4 Golden Torus experiment."""
 
 from __future__ import annotations
 
@@ -1015,7 +1015,18 @@ def cli(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument(
+        "--allow-legacy-config",
+        action="store_true",
+        help="Explicitly opt into the preserved pre-v2 Stage-4 profile.",
+    )
     args = parser.parse_args(argv)
+    if not args.allow_legacy_config:
+        raise SystemExit(
+            "This Stage-4 runner is a deprecated Torus 5x5 legacy path. "
+            "Use tools.torus5_golden for the current standard, or pass "
+            "--allow-legacy-config to reproduce historical results."
+        )
     try:
         if args.smoke:
             device = "cpu" if args.device == "auto" else args.device

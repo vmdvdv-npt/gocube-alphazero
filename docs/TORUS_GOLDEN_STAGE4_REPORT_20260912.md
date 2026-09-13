@@ -1,5 +1,9 @@
 # Stage 3→4 Controlled Learning Diagnosis + Independent Confirmation
 
+> Historical report. Its data-rich profile and runner are deprecated legacy
+> artifacts; do not use them as the current 5x5 standard. The canonical
+> current alias is `gocube-torus5-golden-current` -> `gocube-torus5-golden-v2`.
+
 Run: `torus-golden-stage4-seed2-v4`  
 Global verdict: **LEARNING SYSTEM CONFIRMED**  
 Pipeline validity: **PASS**

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Golden Torus Stage-3 neural proof.
+"""Run the deprecated Golden Torus Stage-3 neural proof.
 
 The default canonical path uses independent self-play games in parallel while
 keeping one sequential 64-simulation Golden PUCT inside every game.  Inference
@@ -671,7 +671,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--resume", type=Path)
+    parser.add_argument(
+        "--allow-legacy-config",
+        action="store_true",
+        help="Explicitly opt into the preserved pre-v2 Stage-3 profile.",
+    )
     args = parser.parse_args(argv)
+    if not args.allow_legacy_config:
+        raise SystemExit(
+            "This Stage-3 runner is a deprecated Torus 5x5 legacy path. "
+            "Use tools.torus5_golden for the current standard, or pass "
+            "--allow-legacy-config to reproduce historical results."
+        )
     if args.profile != "proof-standard":
         raise SystemExit("Only immutable profile proof-standard is available")
     if args.resume is not None:
