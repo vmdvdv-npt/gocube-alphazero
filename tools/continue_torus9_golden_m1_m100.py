@@ -9,6 +9,7 @@ the current Golden profile and all semantic contracts remain read-only.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import math
@@ -139,6 +140,54 @@ def _cpu_seconds() -> float:
     return float(usage.ru_utime + usage.ru_stime)
 
 
+_NVML_LIB: Any | None = None
+_NVML_HANDLE: ctypes.c_void_p | None = None
+
+
+def _nvml_sample() -> dict[str, object] | None:
+    """Fallback GPU telemetry for environments without the nvidia-smi CLI."""
+    global _NVML_LIB, _NVML_HANDLE
+    try:
+        if _NVML_LIB is None:
+            class Utilization(ctypes.Structure):
+                _fields_ = [("gpu", ctypes.c_uint), ("memory", ctypes.c_uint)]
+
+            class Memory(ctypes.Structure):
+                _fields_ = [
+                    ("total", ctypes.c_ulonglong),
+                    ("free", ctypes.c_ulonglong),
+                    ("used", ctypes.c_ulonglong),
+                ]
+
+            library = ctypes.CDLL("libnvidia-ml.so.1")
+            library.nvmlInit_v2.restype = ctypes.c_int
+            library.nvmlDeviceGetHandleByIndex_v2.restype = ctypes.c_int
+            library.nvmlDeviceGetUtilizationRates.restype = ctypes.c_int
+            library.nvmlDeviceGetMemoryInfo.restype = ctypes.c_int
+            if library.nvmlInit_v2() != 0:
+                return None
+            _NVML_LIB = (library, Utilization, Memory)
+        library, utilization_type, memory_type = _NVML_LIB
+        if _NVML_HANDLE is None:
+            handle = ctypes.c_void_p()
+            if library.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(handle)) != 0:
+                return None
+            _NVML_HANDLE = handle
+        utilization = utilization_type()
+        memory = memory_type()
+        if library.nvmlDeviceGetUtilizationRates(_NVML_HANDLE, ctypes.byref(utilization)) != 0:
+            return None
+        if library.nvmlDeviceGetMemoryInfo(_NVML_HANDLE, ctypes.byref(memory)) != 0:
+            return None
+        return {
+            "ts": time.time(),
+            "gpu_util_pct": float(utilization.gpu),
+            "vram_used_mb": float(memory.used) / (1024.0 * 1024.0),
+        }
+    except (OSError, AttributeError, TypeError, ValueError):
+        return None
+
+
 class GpuSampler:
     """Low-rate nvidia-smi sampler kept outside the training/search code."""
 
@@ -166,7 +215,9 @@ class GpuSampler:
             utilization, memory = [float(value.strip()) for value in first.split(",", 1)]
             self.rows.append({"ts": time.time(), "gpu_util_pct": utilization, "vram_used_mb": memory})
         except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-            return
+            sample = _nvml_sample()
+            if sample is not None:
+                self.rows.append(sample)
 
     def _serve(self) -> None:
         while not self._stop.is_set():
