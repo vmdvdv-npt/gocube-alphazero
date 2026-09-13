@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -102,6 +103,30 @@ TORUS9_SELFPLAY_CONTRACT_FINGERPRINT = fingerprint(
         "komi": TORUS9_KOMI,
     }
 )
+
+
+def torus9_selfplay_contract_fingerprint(alpha: float) -> str:
+    """Fingerprint the fixed self-play contract with an experimental alpha."""
+    if not math.isfinite(float(alpha)) or float(alpha) <= 0.0:
+        raise ValueError("Torus 9×9 Dirichlet alpha must be positive and finite")
+    return fingerprint(
+        {
+            "contract_id": TORUS9_SELFPLAY_CONTRACT_ID,
+            "search_implementation_id": TORUS9_SEARCH_IMPLEMENTATION_ID,
+            "simulations": 64,
+            "cpuct": 1.25,
+            "fpu": 0.0,
+            "root_noise": True,
+            "dirichlet_epsilon": 0.25,
+            "dirichlet_alpha": float(alpha),
+            "temperature_plies": [1, 8],
+            "temperature_after": 0.0,
+            "fast_search": False,
+            "resign": False,
+            "watchdog": TORUS9_MOVE_LIMIT,
+            "komi": TORUS9_KOMI,
+        }
+    )
 TORUS9_ARENA_CONTRACT_FINGERPRINT = fingerprint(
     {
         "contract_id": TORUS9_ARENA_CONTRACT_ID,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import torch
 
@@ -86,3 +87,48 @@ def test_batched_torus9_puct_matches_sequential_root_visits_and_records_rows():
     assert batched.inference_batch_rows[0] == 2
     assert min(batched.inference_batch_rows) == 2
     assert batched_evaluator.nn_evaluations == sum(batched.inference_batch_rows)
+
+
+def test_torus9_score_target_uses_final_margin_in_side_to_move_perspective():
+    live = g.initial_state(topology=g.TORUS_9X9, komi=0.5)
+    final = g.apply_action(g.apply_action(live, g.PASS).after, g.PASS).after
+    assert g.torus9_score_target(final, g.BLACK) == -0.5
+    assert g.torus9_score_target(final, g.WHITE) == 0.5
+
+
+def test_torus9_score_head_shapes_and_optimizer_continuation(tmp_path: Path):
+    torch.set_num_threads(1)
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(23)
+        source = g.Torus9OwnershipGraphNet(hidden=4, blocks=1)
+    source_optimizer = torch.optim.Adam(source.parameters(), lr=0.001)
+    observation = torch.zeros((1, 6, 81), dtype=torch.float32)
+    policy, value, ownership = source.forward_auxiliary(observation)
+    (policy.square().mean() + value.square().mean() + ownership.square().mean()).backward()
+    source_optimizer.step()
+    source_path = tmp_path / "M12-WINNER.pt"
+    g.torus9_save_checkpoint(source_path, model=source, optimizer=source_optimizer, metadata={"model_hash": g.model_hash(source)})
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(99)
+        score_model = g.Torus9OwnershipScoreGraphNet(hidden=4, blocks=1)
+    score_state = score_model.state_dict()
+    for name, value in source.state_dict().items():
+        score_state[name].copy_(value)
+    score_optimizer = torch.optim.Adam(score_model.parameters(), lr=0.001)
+    inherited = g.torus9_restore_optimizer_state(
+        source_path,
+        model=score_model,
+        optimizer=score_optimizer,
+        source_parameter_count=len(tuple(source.parameters())),
+    )
+    assert inherited == 1
+    assert all(int(state["step"]) == 1 for state in list(score_optimizer.state.values())[:len(tuple(source.parameters()))])
+    score_states = list(score_optimizer.state.values())[len(tuple(source.parameters())):]
+    assert score_states and all(int(state["step"]) == 1 for state in score_states)
+    assert all(torch.count_nonzero(state["exp_avg"]).item() == 0 for state in score_states)
+
+    outputs = score_model(observation)
+    assert [tuple(output.shape) for output in outputs] == [(1, 82), (1, 3)]
+    auxiliary = score_model.forward_auxiliary(observation)
+    assert [tuple(output.shape) for output in auxiliary] == [(1, 82), (1, 3), (1, 81, 3), (1,)]

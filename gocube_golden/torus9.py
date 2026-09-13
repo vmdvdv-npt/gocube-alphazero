@@ -72,6 +72,7 @@ from .torus9_contract import (
     TORUS9_RULES_FINGERPRINT,
     TORUS9_SELFPLAY_CONTRACT_FINGERPRINT,
     TORUS9_SELFPLAY_CONTRACT_ID,
+    torus9_selfplay_contract_fingerprint,
     TORUS9_TARGET_CONTRACT_ID,
     TORUS9_TARGET_FINGERPRINT,
     TORUS9_WORKERS,
@@ -95,6 +96,8 @@ TORUS9_TOPOLOGY_FINGERPRINT = TORUS_9X9.fingerprint
 TORUS9_OWNERSHIP_TARGET_CONTRACT_ID = OWNERSHIP_TARGET_CONTRACT_ID
 TORUS9_AUXILIARY_TARGET_SOURCE = GOLDEN_AUXILIARY_TARGET_SOURCE
 TORUS9_OWNERSHIP_CLASSES = ("OWN", "OPPONENT", "NEUTRAL")
+TORUS9_SCORE_TARGET_CONTRACT_ID = "golden-score-final-margin-side-to-move-v1"
+TORUS9_SCORE_TARGET_NORMALIZATION = 81.5
 
 
 def _canonical(value: object) -> str:
@@ -337,6 +340,39 @@ class Torus9OwnershipGraphNet(Torus9GraphNet):
         return policy, value, self.ownership_head(nodes)
 
 
+class Torus9OwnershipScoreGraphNet(Torus9OwnershipGraphNet):
+    """Torus9 WDL + ownership network with an optional score head.
+
+    The score head is deliberately outside ``forward`` so adding it cannot
+    change PUCT, self-play policy targets, or Arena inference semantics.
+    """
+
+    def __init__(self, *, hidden: int = TORUS9_HIDDEN, blocks: int = TORUS9_BLOCKS) -> None:
+        super().__init__(hidden=hidden, blocks=blocks)
+        self.score_head = nn.Sequential(
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, 1),
+        )
+
+    @property
+    def architecture_config(self) -> dict[str, object]:
+        config = super().architecture_config
+        config["auxiliary_variant"] = "wdl+ownership+score"
+        config["heads"] = {
+            "policy": [TORUS9_ACTION_COUNT],
+            "value": [3],
+            "ownership": [TORUS9_POINT_COUNT, 3],
+            "score": [1],
+        }
+        return config
+
+    def forward_auxiliary(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        policy, value, ownership = super().forward_auxiliary(observation)
+        nodes = self.encode(observation)
+        return policy, value, ownership, self.score_head(nodes.mean(dim=1)).squeeze(-1)
+
+
 class Torus9NeuralEvaluator:
     def __init__(self, model: Torus9GraphNet, *, device: str | torch.device = "cpu") -> None:
         self.model = model
@@ -573,9 +609,12 @@ class Torus9BatchedPUCT:
 
 
 class Torus9RootNoiseEvaluator:
-    def __init__(self, evaluator: Torus9NeuralEvaluator, root_state: GoldenState, *, seed: int) -> None:
+    def __init__(self, evaluator: Torus9NeuralEvaluator, root_state: GoldenState, *, seed: int, alpha: float = 0.30) -> None:
+        if not math.isfinite(float(alpha)) or float(alpha) <= 0.0:
+            raise ValueError("Torus 9×9 Dirichlet alpha must be positive and finite")
         self.evaluator = evaluator
         self.root_state_key = root_state.state_key
+        self.alpha = float(alpha)
         self.generator = torch.Generator(device="cpu")
         self.generator.manual_seed(int(seed))
 
@@ -587,7 +626,7 @@ class Torus9RootNoiseEvaluator:
         prior = torch.tensor([base.policy[index] for index in legal_indices], dtype=torch.float64)
         total = float(prior.sum())
         prior = prior / total if total > 0.0 else torch.full_like(prior, 1.0 / len(prior))
-        noise = torch._standard_gamma(torch.full((len(prior),), 0.30, dtype=torch.float64), generator=self.generator)
+        noise = torch._standard_gamma(torch.full((len(prior),), self.alpha, dtype=torch.float64), generator=self.generator)
         noise /= noise.sum()
         mixed = 0.75 * prior + 0.25 * noise
         policy = list(base.policy)
@@ -615,8 +654,17 @@ class Torus9SelfPlaySearchContract:
         return SearchSettings(simulations=self.simulations, cpuct=self.cpuct, fpu=self.fpu, deterministic_tie_break=True)
 
     def validate(self) -> None:
-        if asdict(self) != asdict(Torus9SelfPlaySearchContract()):
+        expected = Torus9SelfPlaySearchContract()
+        candidate = asdict(self)
+        baseline = asdict(expected)
+        candidate.pop("dirichlet_alpha")
+        baseline.pop("dirichlet_alpha")
+        if candidate != baseline or not math.isfinite(float(self.dirichlet_alpha)) or self.dirichlet_alpha <= 0.0:
             raise ValueError("Torus 9×9 self-play search contract drift")
+
+    @property
+    def fingerprint(self) -> str:
+        return torus9_selfplay_contract_fingerprint(self.dirichlet_alpha)
 
 
 def _action_index(action: int | str) -> int:
@@ -791,7 +839,7 @@ class Torus9SelfPlayRunner:
             search_seed = derive_seed(game_seed, ply, "search")
             try:
                 context = prepare_legal_actions(state)
-                evaluator = Torus9RootNoiseEvaluator(self.evaluator, state, seed=derive_seed(search_seed, "dirichlet"))
+                evaluator = Torus9RootNoiseEvaluator(self.evaluator, state, seed=derive_seed(search_seed, "dirichlet"), alpha=self.contract.dirichlet_alpha)
                 result = SequentialPUCT(self.contract.settings, adapter=self.adapter).search(state, evaluator, seed=search_seed)
                 action = _sample_action(result, temperature=1.0 if ply <= self.contract.temperature_until_ply else self.contract.temperature_after, rng=rng)
             except Exception as exc:
@@ -824,7 +872,7 @@ class Torus9SelfPlayRunner:
             profile_id=TORUS9_PROFILE_ID,
             profile_fingerprint=self.profile_fp,
             selfplay_contract_id=TORUS9_SELFPLAY_CONTRACT_ID,
-            selfplay_contract_fingerprint=TORUS9_SELFPLAY_CONTRACT_FINGERPRINT,
+            selfplay_contract_fingerprint=self.contract.fingerprint,
             model_checkpoint_label=self.model_checkpoint_label,
             model_hash=self.model_hash,
             checkpoint_artifact_hash=self.checkpoint_artifact_hash,
@@ -885,6 +933,17 @@ def torus9_ownership_target(final_state: GoldenState, side_to_move: str | Stone)
     return golden_ownership_target(final_state, side_to_move)
 
 
+def torus9_score_target(final_state: GoldenState, side_to_move: str | Stone) -> float:
+    """Return the exact final graph-area margin in sample perspective."""
+    if not final_state.is_terminal:
+        raise ValueError("Torus 9×9 score target requires a formal terminal state")
+    side = side_to_move.name if isinstance(side_to_move, Stone) else str(side_to_move)
+    if side not in ("BLACK", "WHITE"):
+        raise ValueError("Torus 9×9 score target requires BLACK or WHITE perspective")
+    margin = float(score_terminal(final_state).margin_black)
+    return margin if side == "BLACK" else -margin
+
+
 def torus9_build_ownership_replay_samples(game: Torus9SelfPlayGameRecord) -> tuple[dict[str, object], ...]:
     """Add the existing Golden ownership target to a Torus9 replay corpus."""
     rows = list(torus9_build_replay_samples(game))
@@ -898,6 +957,20 @@ def torus9_build_ownership_replay_samples(game: Torus9SelfPlayGameRecord) -> tup
         row["ownership_target"] = list(torus9_ownership_target(final_state, sample_state.side_to_move))
         row["ownership_target_contract_id"] = TORUS9_OWNERSHIP_TARGET_CONTRACT_ID
         row["auxiliary_target_source"] = TORUS9_AUXILIARY_TARGET_SOURCE
+    return tuple(rows)
+
+
+def torus9_build_ownership_score_replay_samples(game: Torus9SelfPlayGameRecord) -> tuple[dict[str, object], ...]:
+    """Add exact ownership and final-margin targets to Torus9 replay rows."""
+    rows = list(torus9_build_ownership_replay_samples(game))
+    final_state = torus9_state_from_identity(game.start_state)
+    for action in game.final_action_trace:
+        final_state = apply_action(final_state, action).after
+    for row in rows:
+        sample_state = torus9_state_from_identity(row["state"])  # type: ignore[arg-type]
+        row["score_target"] = torus9_score_target(final_state, sample_state.side_to_move)
+        row["score_target_contract_id"] = TORUS9_SCORE_TARGET_CONTRACT_ID
+        row["score_target_normalization"] = TORUS9_SCORE_TARGET_NORMALIZATION
     return tuple(rows)
 
 
@@ -927,9 +1000,15 @@ def validate_torus9_replay_sample(sample: Mapping[str, object]) -> None:
             raise ValueError("Torus 9×9 ownership target shape or class drift")
         if sample.get("ownership_target_contract_id") != TORUS9_OWNERSHIP_TARGET_CONTRACT_ID or sample.get("auxiliary_target_source") != TORUS9_AUXILIARY_TARGET_SOURCE:
             raise ValueError("Torus 9×9 auxiliary target provenance drift")
+    if sample.get("score_target") is not None:
+        score = float(sample["score_target"])
+        if not math.isfinite(score):
+            raise ValueError("Torus 9×9 score target is non-finite")
+        if sample.get("score_target_contract_id") != TORUS9_SCORE_TARGET_CONTRACT_ID or sample.get("score_target_normalization") != TORUS9_SCORE_TARGET_NORMALIZATION or sample.get("auxiliary_target_source") != TORUS9_AUXILIARY_TARGET_SOURCE:
+            raise ValueError("Torus 9×9 score target provenance drift")
 
 
-def _selfplay_process_init(checkpoint_path: str, expected_hash: str, run_id: str, label: str, artifact: str, master_seed: int, profile_fp: str, code_commit: str, code_tree: str, code_clean: bool, device_name: str) -> None:
+def _selfplay_process_init(checkpoint_path: str, expected_hash: str, run_id: str, label: str, artifact: str, master_seed: int, profile_fp: str, code_commit: str, code_tree: str, code_clean: bool, device_name: str, contract: Torus9SelfPlaySearchContract) -> None:
     global _SELFPLAY_PROCESS_MODEL, _SELFPLAY_PROCESS_CONFIG
     torch.set_num_threads(1)
     device = torch.device(device_name)
@@ -939,7 +1018,7 @@ def _selfplay_process_init(checkpoint_path: str, expected_hash: str, run_id: str
     if model_hash(model) != expected_hash:
         raise RuntimeError("Torus 9×9 self-play worker loaded the wrong checkpoint")
     _SELFPLAY_PROCESS_MODEL = model
-    _SELFPLAY_PROCESS_CONFIG = (run_id, label, artifact, master_seed, profile_fp, CodeIdentity(code_commit, code_tree, code_clean), device)
+    _SELFPLAY_PROCESS_CONFIG = (run_id, label, artifact, master_seed, profile_fp, CodeIdentity(code_commit, code_tree, code_clean), device, contract)
 
 
 _SELFPLAY_PROCESS_MODEL: Torus9GraphNet | None = None
@@ -949,7 +1028,7 @@ _SELFPLAY_PROCESS_CONFIG: tuple[object, ...] | None = None
 def _selfplay_process_game(game_id: str) -> Torus9SelfPlayGameRecord:
     if _SELFPLAY_PROCESS_MODEL is None or _SELFPLAY_PROCESS_CONFIG is None:
         raise RuntimeError("Torus 9×9 self-play process was not initialized")
-    run_id, label, artifact, master_seed, profile_fp, code, device = _SELFPLAY_PROCESS_CONFIG
+    run_id, label, artifact, master_seed, profile_fp, code, device, contract = _SELFPLAY_PROCESS_CONFIG
     runner = Torus9SelfPlayRunner(
         _SELFPLAY_PROCESS_MODEL,
         run_id=str(run_id),
@@ -959,6 +1038,7 @@ def _selfplay_process_game(game_id: str) -> Torus9SelfPlayGameRecord:
         profile_fp=str(profile_fp),
         code_identity=code,  # type: ignore[arg-type]
         device=device,  # type: ignore[arg-type]
+        contract=contract,  # type: ignore[arg-type]
     )
     return runner.play_game(str(game_id))
 
@@ -976,20 +1056,22 @@ def run_torus9_selfplay_games(
     workers: int = TORUS9_WORKERS,
     code_identity: CodeIdentity | None = None,
     device: str | torch.device = "cpu",
+    contract: Torus9SelfPlaySearchContract = Torus9SelfPlaySearchContract(),
 ) -> tuple[Torus9SelfPlayGameRecord, ...]:
     if workers <= 0 or len(set(game_ids)) != len(game_ids):
         raise ValueError("Torus 9×9 self-play workers/game IDs are invalid")
     code = code_identity or capture_code_identity()
+    contract.validate()
     ids = tuple(sorted(str(game_id) for game_id in game_ids))
     if workers == 1:
-        runner = Torus9SelfPlayRunner(model, run_id=run_id, model_checkpoint_label=label, checkpoint_artifact_hash=artifact, master_seed=master_seed, profile_fp=profile_fp, code_identity=code, device=device)
+        runner = Torus9SelfPlayRunner(model, run_id=run_id, model_checkpoint_label=label, checkpoint_artifact_hash=artifact, master_seed=master_seed, profile_fp=profile_fp, code_identity=code, device=device, contract=contract)
         return tuple(runner.play_game(game_id) for game_id in ids)
     context_name = "spawn" if torch.device(device).type == "cuda" else "fork"
     with ProcessPoolExecutor(
         max_workers=int(workers),
         mp_context=_process_context(context_name),
         initializer=_selfplay_process_init,
-        initargs=(str(checkpoint_path), model_hash(model), run_id, label, artifact, master_seed, profile_fp, code.git_commit_sha, code.git_tree_sha, code.working_tree_clean, str(device)),
+        initargs=(str(checkpoint_path), model_hash(model), run_id, label, artifact, master_seed, profile_fp, code.git_commit_sha, code.git_tree_sha, code.working_tree_clean, str(device), contract),
     ) as pool:
         records = tuple(pool.map(_selfplay_process_game, ids))
     return tuple(sorted(records, key=lambda record: record.game_id))
@@ -1323,7 +1405,133 @@ class Torus9OwnershipTrainer(Torus9Trainer):
         }
 
 
-def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str, parent: str | None, model_seed: int, code: CodeIdentity, profile_fp: str, completed_games: int, replay_positions: int, optimizer_updates: int, samples_consumed: int, ownership_loss_enabled: bool | None = None) -> dict[str, object]:
+class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
+    """Torus9 port of the proven Torus5 ownership+score trainer.
+
+    The loss is exactly policy CE + WDL CE + ownership CE + normalized score
+    MSE.  Only the model dimensions and the score normalization are adapted
+    for the 9×9 graph; the target remains final referee margin in the sample's
+    side-to-move perspective.
+    """
+
+    def __init__(
+        self,
+        model: Torus9OwnershipScoreGraphNet,
+        *,
+        score_loss_enabled: bool,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 0.0,
+        optimizer_steps_per_iteration: int = TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+    ) -> None:
+        if not isinstance(model, Torus9OwnershipScoreGraphNet):
+            raise TypeError("Torus 9×9 score trainer requires Torus9OwnershipScoreGraphNet")
+        Torus9Trainer.__init__(
+            self,
+            model,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            optimizer_steps_per_iteration=optimizer_steps_per_iteration,
+        )
+        self.ownership_loss_enabled = True
+        self.score_loss_enabled = bool(score_loss_enabled)
+
+    def train_fixed_budget(self, samples: Sequence[Mapping[str, object]], *, seed: int) -> dict[str, object]:
+        self.assert_optimizer_continuity()
+        count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
+        indices = self._sample_indices(len(samples), seed=seed, count=count)
+        for sample in samples:
+            validate_torus9_replay_sample(sample)
+            if sample.get("ownership_target") is None or sample.get("score_target") is None:
+                raise ValueError("Torus 9×9 score training requires ownership and score targets")
+        device = next(self.model.parameters()).device
+        updates: list[dict[str, object]] = []
+        sampled_rows = [str(samples[index].get("replay_row_id", index)) for index in indices]
+        source_counts: dict[str, int] = {}
+        for index in indices:
+            generation = str(samples[index].get("source_generation", "unknown"))
+            source_counts[generation] = source_counts.get(generation, 0) + 1
+        self.model.train()
+        for update_index in range(self.optimizer_steps_per_iteration):
+            batch_indices = indices[update_index * TORUS9_BATCH_SIZE:(update_index + 1) * TORUS9_BATCH_SIZE]
+            observations = torch.tensor([samples[index]["observation"] for index in batch_indices], dtype=torch.float32, device=device)
+            policies = torch.tensor([samples[index]["pi"] for index in batch_indices], dtype=torch.float32, device=device)
+            values = torch.tensor([samples[index]["z"] for index in batch_indices], dtype=torch.float32, device=device)
+            ownership = torch.tensor([samples[index]["ownership_target"] for index in batch_indices], dtype=torch.long, device=device)
+            scores = torch.tensor([float(samples[index]["score_target"]) / TORUS9_SCORE_TARGET_NORMALIZATION for index in batch_indices], dtype=torch.float32, device=device)
+            before_parameters = {name: parameter.detach().clone() for name, parameter in self.model.named_parameters()}
+            step_before = self.assert_optimizer_continuity()
+            policy_logits, value_logits, ownership_logits, score_logits = self.model.forward_auxiliary(observations)
+            policy_loss = -(policies * F.log_softmax(policy_logits, dim=1)).sum(dim=1).mean()
+            value_loss = -(values * F.log_softmax(value_logits, dim=1)).sum(dim=1).mean()
+            ownership_loss = F.cross_entropy(ownership_logits.reshape(-1, 3), ownership.reshape(-1))
+            score_loss = F.mse_loss(score_logits, scores)
+            score_weight = 1.0 if self.score_loss_enabled else 0.0
+            total_loss = policy_loss + value_loss + ownership_loss + score_weight * score_loss
+            if not bool(torch.isfinite(total_loss)):
+                raise FloatingPointError("Torus 9×9 score training produced non-finite loss")
+            self.optimizer.zero_grad(set_to_none=True)
+            total_loss.backward()
+            gradients = [parameter.grad.detach() for parameter in self.model.parameters() if parameter.grad is not None]
+            grad_norm = torch.sqrt(sum(torch.sum(gradient.float() ** 2) for gradient in gradients)) if gradients else torch.tensor(0.0)
+            if not bool(torch.isfinite(torch.as_tensor(grad_norm))):
+                raise FloatingPointError("Torus 9×9 score training produced non-finite gradient")
+            self.optimizer.step()
+            if any(not bool(torch.isfinite(parameter).all()) for parameter in self.model.parameters()):
+                raise FloatingPointError("Torus 9×9 score training produced non-finite parameter")
+            self.update_count += 1
+            step_after = self.assert_optimizer_continuity()
+            if step_after != step_before + 1:
+                raise RuntimeError("Torus 9×9 Adam step did not advance by one")
+            parameter_delta, max_layer_delta = _parameter_delta(before_parameters, self.model)
+            self.samples_consumed += TORUS9_BATCH_SIZE
+            updates.append({
+                "update": self.update_count,
+                "batch_size": TORUS9_BATCH_SIZE,
+                "policy_loss": float(policy_loss.detach().cpu()),
+                "value_loss": float(value_loss.detach().cpu()),
+                "ownership_loss": float(ownership_loss.detach().cpu()),
+                "score_loss_normalized": float(score_loss.detach().cpu()),
+                "score_loss_weight": score_weight,
+                "total_loss": float(total_loss.detach().cpu()),
+                "gradient_norm": float(grad_norm),
+                "parameter_delta": parameter_delta,
+                "max_layer_delta": max_layer_delta,
+                "adam_step_before": step_before,
+                "adam_step_after": step_after,
+                "learning_rate": float(self.optimizer.param_groups[0]["lr"]),
+            })
+        unique_rows = len(set(sampled_rows))
+        return {
+            "updates": len(updates),
+            "optimizer_steps": len(updates),
+            "optimizer_updates_total": self.update_count,
+            "replay_positions": len(samples),
+            "samples": len(samples),
+            "samples_consumed": count,
+            "samples_consumed_total": self.samples_consumed,
+            "unique_sample_rows": unique_rows,
+            "reused_sample_rows": count - unique_rows,
+            "effective_generations": sorted(int(key) for key in source_counts if key.isdigit()),
+            "sampled_positions_by_generation": dict(sorted(source_counts.items(), key=lambda item: item[0])),
+            "adam_step_before": updates[0]["adam_step_before"],
+            "adam_step_after": updates[-1]["adam_step_after"],
+            "batch_size": TORUS9_BATCH_SIZE,
+            "batch_sizes": [int(row["batch_size"]) for row in updates],
+            "mean_policy_loss": sum(float(row["policy_loss"]) for row in updates) / len(updates),
+            "mean_value_loss": sum(float(row["value_loss"]) for row in updates) / len(updates),
+            "mean_ownership_loss": sum(float(row["ownership_loss"]) for row in updates) / len(updates),
+            "mean_score_loss_normalized": sum(float(row["score_loss_normalized"]) for row in updates) / len(updates),
+            "score_loss_enabled": self.score_loss_enabled,
+            "score_target_normalization": TORUS9_SCORE_TARGET_NORMALIZATION,
+            "mean_total_loss": sum(float(row["total_loss"]) for row in updates) / len(updates),
+            "mean_gradient_norm": sum(float(row["gradient_norm"]) for row in updates) / len(updates),
+            "mean_parameter_delta": sum(float(row["parameter_delta"]) for row in updates) / len(updates),
+            "max_layer_delta": max(float(row["max_layer_delta"]) for row in updates),
+            "updates_detail": updates,
+        }
+
+
+def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str, parent: str | None, model_seed: int, code: CodeIdentity, profile_fp: str, completed_games: int, replay_positions: int, optimizer_updates: int, samples_consumed: int, ownership_loss_enabled: bool | None = None, score_loss_enabled: bool | None = None) -> dict[str, object]:
     auxiliary = isinstance(model, Torus9OwnershipGraphNet)
     heads = {
         "policy": [TORUS9_ACTION_COUNT],
@@ -1331,6 +1539,9 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
     }
     if auxiliary:
         heads["ownership"] = [TORUS9_POINT_COUNT, 3]
+    score_auxiliary = isinstance(model, Torus9OwnershipScoreGraphNet)
+    if score_auxiliary:
+        heads["score"] = [1]
     return {
         "checkpoint_schema_version": 1,
         "checkpoint_label": label,
@@ -1377,8 +1588,13 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
             "source": TORUS9_AUXILIARY_TARGET_SOURCE,
             "ownership": TORUS9_OWNERSHIP_TARGET_CONTRACT_ID,
             "ownership_loss_weight": 1.0 if ownership_loss_enabled else 0.0,
+            **({
+                "score": TORUS9_SCORE_TARGET_CONTRACT_ID,
+                "score_target_normalization": TORUS9_SCORE_TARGET_NORMALIZATION,
+            } if score_auxiliary else {}),
         } if auxiliary else None),
         "ownership_loss_enabled": ownership_loss_enabled,
+        "score_loss_enabled": score_loss_enabled,
     }
 
 
@@ -1398,7 +1614,10 @@ def torus9_model_from_metadata(metadata: Mapping[str, object]) -> Torus9GraphNet
         raise ValueError("Torus 9×9 checkpoint architecture metadata is malformed")
     hidden = int(architecture.get("hidden", TORUS9_HIDDEN))
     blocks = int(architecture.get("blocks", TORUS9_BLOCKS))
-    if bool(metadata.get("auxiliary_heads")) or "ownership" in dict(metadata.get("network_heads_and_shapes", {})):
+    heads = dict(metadata.get("network_heads_and_shapes", {}))
+    if "score" in heads:
+        return Torus9OwnershipScoreGraphNet(hidden=hidden, blocks=blocks)
+    if bool(metadata.get("auxiliary_heads")) or "ownership" in heads:
         return Torus9OwnershipGraphNet(hidden=hidden, blocks=blocks)
     return Torus9GraphNet(hidden=hidden, blocks=blocks, architecture_id=str(architecture.get("architecture_id", TORUS9_ARCHITECTURE_ID)))
 
@@ -1413,8 +1632,11 @@ def torus9_load_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torc
         raise ValueError("Torus 9×9 checkpoint topology/komi mismatch")
     expected_heads = {"policy": [82], "value": [3]}
     auxiliary = isinstance(model, Torus9OwnershipGraphNet)
+    score_auxiliary = isinstance(model, Torus9OwnershipScoreGraphNet)
     if auxiliary:
         expected_heads["ownership"] = [TORUS9_POINT_COUNT, 3]
+    if score_auxiliary:
+        expected_heads["score"] = [1]
     if metadata.get("network_heads_and_shapes") != expected_heads or metadata.get("auxiliary_heads") is not auxiliary:
         raise ValueError("Torus 9×9 checkpoint head contract mismatch")
     if metadata.get("architecture_config") != model.architecture_config:
