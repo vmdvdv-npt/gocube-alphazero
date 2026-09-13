@@ -275,6 +275,21 @@ def selfplay_summary(run_root: Path) -> tuple[dict[str, object], dict[str, list[
             "final_margin": pearson(all_outcomes, [float(row["final_margin_black"]) for row in rows]),
         },
     }
+    without_d3 = [row for row in rows if row["generation"] != "D3"]
+    without_d3_outcomes = [1.0 if row["winner"] == "BLACK" else 0.0 for row in without_d3]
+    all_summary["without_d3"] = {
+        "games": len(without_d3),
+        "black_wins": sum(row["winner"] == "BLACK" for row in without_d3),
+        "white_wins": sum(row["winner"] == "WHITE" for row in without_d3),
+        "black_win_rate": round(statistics.mean(without_d3_outcomes), 8),
+        "wilson_95_ci": wilson_interval(int(sum(without_d3_outcomes)), len(without_d3)),
+        "black_rate_vs_generation_index": pearson(
+            [float(int(row["generation"][1:])) for row in without_d3], without_d3_outcomes
+        ),
+    }
+    all_summary["black_rate_vs_generation_index"] = pearson(
+        [float(int(row["generation"][1:])) for row in rows], all_outcomes
+    )
     d3 = [row for row in rows if row["generation"] == "D3"]
     d3_by_outcome = {}
     for outcome in ("BLACK", "WHITE"):
@@ -380,6 +395,9 @@ def d3_forensics(games: Sequence[dict[str, object]], evaluator: Torus9NeuralEval
             "black_games_average_length": mean_or_none(row["plies"] for row in black_rows),
             "interpretation": "D3's three WHITE results are early PASS/DOUBLE_PASS realizations; the 61 BLACK results mostly finish at the minimal komi-adjusted margin, consistent with a one-point first-player edge amplified by a small sample, not a single opening move.",
         },
+        "initial_root_wdl_network": per_game[0]["early_root_wdl"][0]["root_wdl_network"] if per_game else None,
+        "initial_root_utility_network": per_game[0]["early_root_wdl"][0]["root_utility_network"] if per_game else None,
+        "initial_root_pass_probability": per_game[0]["early_root_wdl"][0]["root_pass_probability"] if per_game else None,
     }
 
 
@@ -410,13 +428,14 @@ def fixed_corpus(games_by_generation: Mapping[str, Sequence[dict[str, object]]],
     corpus: list[dict[str, object]] = []
     # Keep the corpus at 64 states while reserving half of it for Arena tail
     # states.  D3 includes both ordinary and short PASS branches.
-    choices = {"D3": [0, 8, 15, 37], "D4": list(range(4)), "D6": list(range(4)), "D7": list(range(4))}
+    choices = {"D3": [0, 1, 8, 15, 37, 43, 58, 63], "D4": list(range(4)), "D6": list(range(4)), "D7": list(range(4))}
     plys = (12, 24)
     for generation, indexes in choices.items():
         for game_index in indexes:
             game = games_by_generation[generation][game_index]
-            for ply in plys:
-                if len(game["positions"]) < ply:
+            for ply in sorted({min(candidate_ply, len(game["positions"])) for candidate_ply in plys}):
+                ply = min(ply, len(game["positions"]))
+                if ply <= 0:
                     continue
                 position = game["positions"][ply - 1]
                 corpus.append({
@@ -492,7 +511,7 @@ def run_search_depth_diagnostic(corpus: Sequence[dict[str, object]], model_cache
     all_rows = [item["by_simulations"]["64_vs_256"] for item in entries]
     return {
         "corpus_size": len(entries),
-        "corpus_definition": "64 fixed states: D3 (16), D4 (16), D6 (16), D7 (16); four Arena states are included when the corpus has room and are represented by the deterministic selection below.",
+        "corpus_definition": "64 fixed states: D3 (16), D4 (8), D6 (8), D7 (8), and eight representative Arena technical games × four tail plys (32).",
         "noise": "OFF",
         "cpuct": 1.25,
         "fpu": 0.0,
@@ -622,7 +641,12 @@ def trace_arena_game(game: Mapping[str, object], model_cache: Mapping[str, tuple
             area_snapshots[str(index)] = {"black_area": score.black_area, "white_area": score.white_area, "diagnostic_margin_black": score.margin_black, "raw_stone_difference": sum(stone == BLACK for stone in state.stones) - sum(stone == WHITE for stone in state.stones), "occupancy": sum(stone != EMPTY for stone in state.stones)}
 
     action_board_repeats = sum(1 for index in range(1, len(board_signatures)) if board_signatures[index] == board_signatures[index - 1] and actions[index - 1] != PASS)
-    point_repeated_signatures = sum(count - 1 for signature, count in board_counts.items() if count > 1 and any(actions[index] != PASS and board_signatures[index + 1] == signature for index in range(len(actions))))
+    seen_before_move: set[str] = set()
+    point_repeated_signatures = 0
+    for index, action in enumerate(actions):
+        if action != PASS and board_signatures[index + 1] in seen_before_move:
+            point_repeated_signatures += 1
+        seen_before_move.add(board_signatures[index])
     last100 = actions[-100:]
     last100_captures = captures[-100:]
     local_windows = [tuple(actions[index:index + 4]) for index in range(max(0, len(actions) - 100), max(0, len(actions) - 3))]
@@ -807,11 +831,14 @@ def board_svg(stones: Sequence[int], x: int, y: int, size: int = 144) -> str:
 
 def make_visual_traces(run_root: Path, arena_games: Sequence[dict[str, object]], output: Path) -> dict[str, object]:
     selfplay: list[tuple[str, dict[str, object], str]] = []
-    for generation, indexes in ((8, (0, 1)), (3, (0, 15, 58))):
+    for generation, indexes in ((3, (0, 15, 58)),):
         games = load_jsonl(run_root / f"canonical/selfplay/iter-{generation:02d}-games.jsonl")
         for index in indexes:
             game = games[index]
-            selfplay.append(("M8 ordinary" if generation == 8 else "D3 BLACK/WHITE", game, f"D{generation}-{index:02d}"))
+            selfplay.append(("D3 BLACK/WHITE", game, f"D{generation}-{index:02d}"))
+    m8_games = [game for game in load_jsonl(run_root / "canonical/selfplay/iter-08-games.jsonl") if len(game["final_action_trace"]) > 30]
+    for index, game in enumerate(m8_games[:2]):
+        selfplay.append(("M8 ordinary", game, f"M8-{index:02d}"))
     selected_arena = [game for game in arena_games if game["game_id"] in {"M8-vs-M0--prefix-04-accepted-03--g1", "M8-vs-M0--prefix-16-accepted-04--g1", "M8-vs-M4--prefix-02-accepted-07--g2", "M8-vs-M4--prefix-12-accepted-05--g2", "M8-vs-M4--prefix-16-accepted-03--g1", "M8-vs-M7--prefix-02-accepted-01--g2", "NEW-M8-vs-OLD-M8--prefix-02-accepted-02--g1"}]
     width, row_height = 1220, 258
     height = row_height * (len(selfplay) + len(selected_arena)) + 36
@@ -851,6 +878,8 @@ def best_manifest(run_root: Path, profile: Mapping[str, object]) -> dict[str, ob
     checkpoint = run_root / "canonical/checkpoints/M8.pt"
     metadata = json.loads(checkpoint.with_suffix(".metadata.json").read_text(encoding="utf-8"))
     artifact_hash = file_sha256(checkpoint)
+    if metadata.get("model_hash") != GOLDEN_MODEL_HASH:
+        raise ValueError(f"Current M8 artifact hash drift: {metadata.get('model_hash')} != {GOLDEN_MODEL_HASH}")
     return {
         "manifest_schema": "torus9-golden-best-v1",
         "status": "CURRENT_BEST",
