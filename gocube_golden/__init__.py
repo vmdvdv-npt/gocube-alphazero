@@ -310,6 +310,7 @@ from .torus9 import (
     Torus9OwnershipTrainer,
     Torus9OwnershipScoreTrainer,
     Torus9NeuralEvaluator,
+    Torus9ExecutionActivity,
     Torus9InferenceCoordinator,
     Torus9UncoalescedInference,
     Torus9Observation,

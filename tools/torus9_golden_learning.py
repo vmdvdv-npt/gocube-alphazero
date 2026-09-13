@@ -78,6 +78,7 @@ def _checkpoint(
     replay_positions: int,
     optimizer_updates: int,
     samples_consumed: int,
+    device: str,
 ) -> dict[str, object]:
     metadata = torus9_checkpoint_metadata(
         model=model,
@@ -101,6 +102,8 @@ def _checkpoint(
     )
     metadata["adam_step"] = optimizer_updates
     metadata["model_init_seed"] = TORUS9_CURRENT_MODEL_INIT_SEED
+    metadata["device"] = device
+    metadata["device_locked"] = True
     metadata["execution_only_parameters"] = {
         "self_play_inference_batch_cap": "not checkpoint semantic",
         "self_play_inference_batch_wait_ms": "not checkpoint semantic",
@@ -293,6 +296,7 @@ def _iteration_record(
     cpu_before: float,
     inference_telemetry: dict[str, object],
     checkpoint: dict[str, object],
+    device: str,
 ) -> dict[str, object]:
     plies = [float(len(record.final_action_trace)) for record in records]
     technical = sum(record.technical_termination is not None for record in records)
@@ -302,6 +306,7 @@ def _iteration_record(
     return {
         "iteration": iteration,
         "label": f"M{iteration}",
+        "device": device,
         "games": len(records),
         "valid_games": len(records) - technical,
         "technical_games": technical,
@@ -413,6 +418,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     profile = load_torus9_current_profile()
     if args.workers != TORUS9_WORKERS:
         raise ValueError("Current Torus 9×9 Golden Standard is fixed to 16 workers")
+    if str(args.device).startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("Current Torus 9×9 run requested CUDA but CUDA is unavailable")
     root = ACTIVE_NAMESPACE / args.run_id
     if root.exists():
         raise FileExistsError(f"Active Torus 9×9 run namespace already exists; refusing automatic resume: {root}")
@@ -423,7 +430,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     code = capture_code_identity(ROOT)
     profile_fp = current_torus9_profile_fingerprint(profile)
     comparison = _profile_comparison(profile)
-    write_json(root / "resolved-config.json", profile)
+    resolved_config = dict(profile)
+    resolved_config["runtime"] = {
+        "device": str(args.device),
+        "device_locked": True,
+        "workers": args.workers,
+    }
+    write_json(root / "resolved-config.json", resolved_config)
     write_json(root / "golden-profile-comparison.json", comparison)
     write_json(root / "replay" / "initial.json", {"positions": 0, "generations": [], "automatic_resume": False})
 
@@ -456,6 +469,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         replay_positions=0,
         optimizer_updates=0,
         samples_consumed=0,
+        device=str(args.device),
     )
     manifest = {
         "manifest_schema": "torus9-golden-current-v3-run-v1",
@@ -465,6 +479,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "source_commit": code.git_commit_sha,
         "source_tree": code.git_tree_sha,
         "source_worktree_clean": code.working_tree_clean,
+        "device": str(args.device),
+        "device_locked": True,
         "profile_id": TORUS9_CURRENT_PROFILE_ID,
         "profile_fingerprint": profile_fp,
         "golden_source": profile["golden_source"],
@@ -511,6 +527,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             inference_batch_cap=int(execution["batch_cap"]),
             inference_batch_wait_ms=float(execution["wait_ms"]),
             inference_telemetry=telemetry,
+            execution_activity=telemetry,
         )
         selfplay_wall = time.perf_counter() - started
         if len(records) != 64 or {record.game_id for record in records} != set(game_ids):
@@ -560,6 +577,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             replay_positions=len(replay.rows),
             optimizer_updates=int(trainer.update_count),
             samples_consumed=int(trainer.samples_consumed),
+            device=str(args.device),
         )
         row = _iteration_record(
             iteration=iteration,
@@ -572,6 +590,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             cpu_before=cpu_before,
             inference_telemetry=telemetry,
             checkpoint={"path": str(checkpoint_path), "model_hash": checkpoint_metadata["model_hash"], "artifact_sha256": file_sha256(checkpoint_path)},
+            device=str(args.device),
         )
         iteration_rows.append(row)
         write_json(root / "training" / f"iter-{iteration:02d}.json", train_metrics)
@@ -586,6 +605,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "base_commit": BASE_COMMIT,
             "source_commit": code.git_commit_sha,
             "profile_id": TORUS9_CURRENT_PROFILE_ID,
+            "device": str(args.device),
             "profile_fingerprint": profile_fp,
             "golden_standard_untouched": True,
             "m0": manifest["m0"],
@@ -627,6 +647,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         inference_batch_cap=int(execution["batch_cap"]),
         inference_batch_wait_ms=float(execution["wait_ms"]),
         inference_telemetry=telemetry,
+        execution_activity=telemetry,
     )
     selfplay_wall = time.perf_counter() - started
     if len(records) != 64 or {record.game_id for record in records} != set(game_ids):
@@ -676,6 +697,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         replay_positions=len(replay.rows),
         optimizer_updates=int(trainer.update_count),
         samples_consumed=int(trainer.samples_consumed),
+        device=str(args.device),
     )
     m8_row = _iteration_record(
         iteration=8,
@@ -688,6 +710,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         cpu_before=cpu_before,
         inference_telemetry=telemetry,
         checkpoint={"path": str(checkpoint_path), "model_hash": checkpoint_metadata["model_hash"], "artifact_sha256": file_sha256(checkpoint_path)},
+        device=str(args.device),
     )
     iteration_rows.append(m8_row)
     confirmation = _confirmation(selection, m8_row)
@@ -700,6 +723,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "source_tree": code.git_tree_sha,
         "source_worktree_clean": code.working_tree_clean,
         "profile_id": TORUS9_CURRENT_PROFILE_ID,
+        "device": str(args.device),
         "profile_fingerprint": profile_fp,
         "golden_source": profile["golden_source"],
         "golden_standard_untouched": True,
@@ -771,7 +795,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", default=DEFAULT_RUN_ID)
     parser.add_argument("--workers", type=int, default=TORUS9_WORKERS)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     report = run(args)
     print(f"TORUS 9×9 CURRENT PROFILE: {report['profile_id']}")
