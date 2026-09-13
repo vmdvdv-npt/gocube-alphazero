@@ -27,9 +27,10 @@ F = importlib.import_module("torch.nn.functional")
 from .arena import MappedResult, TerminationReason
 from .neural import GoldenGraphNetV1, GoldenNeuralEvaluator, build_observation, count_parameters, model_hash
 from .provenance import capture_code_identity, derive_seed, file_sha256, sha256_fingerprint
-from .result import Winner
+from .result import Winner, result_from_terminal
 from .rules import apply_action, legal_actions
 from .state import PASS, GoldenState, initial_state
+from .scoring import score_terminal
 from .topology import TORUS_5X5
 from .training import (
     GoldenSelfPlayRunner,
@@ -728,6 +729,110 @@ def audit_selfplay_records(records: Sequence[SelfPlayGameRecord], *, expected_mo
         "games_under_20_moves": short_20,
         "z_perspective": "PASS: BLACK-to-move WIN / WHITE-to-move LOSS and vice versa; no exceptions",
         "independence_limitation": "Golden replay audit checks artifact consistency against the same Golden rules implementation; it is not an independent rules oracle.",
+    }
+
+
+def first_move_statistics(records: Sequence[Any], *, source: str) -> dict[str, object]:
+    """Summarize Black/White outcomes and exact Golden margins.
+
+    Technical games are counted separately and never enter WDL or score
+    denominators.  The function accepts both immutable self-play records and
+    Arena ``GameRecord`` objects, allowing one report schema for all buckets.
+    """
+    black_wins = white_wins = draws = technical = 0
+    technical_by_reason: dict[str, int] = {}
+    raw_advantages: list[float] = []
+    margins: list[float] = []
+    for record in records:
+        if hasattr(record, "technical_termination"):
+            reason = getattr(record, "technical_termination")
+            if reason is not None:
+                technical += 1
+                technical_by_reason[str(reason)] = technical_by_reason.get(str(reason), 0) + 1
+                continue
+            state = initial_state(komi=float(record.start_state["komi"]))
+            for action in record.final_action_trace:
+                state = apply_action(state, action).after
+            if not state.is_terminal:
+                raise ValueError(f"First-move self-play record is not terminal: {record.game_id}")
+        else:
+            if getattr(record, "is_technical", False):
+                technical += 1
+                reason = str(getattr(record, "termination_reason", "UNKNOWN"))
+                technical_by_reason[reason] = technical_by_reason.get(reason, 0) + 1
+                continue
+            state = GoldenState(
+                stones=tuple(type(initial_state().stones[0])(int(value)) for value in record.final_board),
+                side_to_move=initial_state().side_to_move,
+                superko_history=(tuple(int(value) for value in record.final_board),),
+                consecutive_passes=2,
+                topology=initial_state().topology,
+                rules_id=initial_state().rules_id,
+                rules_fingerprint=initial_state().rules_fingerprint,
+                komi=float(record.komi),
+                history_provenance="canonical-live",
+            )
+        score = score_terminal(state)
+        if score.komi != 0.5:
+            raise ValueError("First-move statistics require Golden komi exactly 0.5")
+        winner = result_from_terminal(state).winner
+        if winner == Winner.BLACK:
+            black_wins += 1
+        elif winner == Winner.WHITE:
+            white_wins += 1
+        else:
+            draws += 1
+        raw_advantages.append(float(score.black_area - score.white_area))
+        margins.append(float(score.margin_black))
+    games = black_wins + white_wins + draws
+    if games:
+        rate = black_wins / games
+        z = 1.959963984540054
+        denominator = 1.0 + z * z / games
+        centre = (rate + z * z / (2.0 * games)) / denominator
+        radius = z * math.sqrt(rate * (1.0 - rate) / games + z * z / (4.0 * games * games)) / denominator
+        ci = [max(0.0, centre - radius), min(1.0, centre + radius)]
+    else:
+        rate = None
+        ci = None
+
+    def quantile(values: Sequence[float], fraction: float) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        return float(ordered[min(len(ordered) - 1, max(0, math.ceil(fraction * len(ordered)) - 1))])
+
+    return {
+        "source": source,
+        "games": games,
+        "black_wins": black_wins,
+        "white_wins": white_wins,
+        "draws": draws,
+        "black_win_rate": rate,
+        "black_win_rate_95_percent_ci": ci,
+        "raw_black_area_minus_white_area": {
+            "mean": sum(raw_advantages) / len(raw_advantages) if raw_advantages else None,
+            "median": quantile(raw_advantages, 0.5),
+            "p05": quantile(raw_advantages, 0.05),
+            "p25": quantile(raw_advantages, 0.25),
+            "p75": quantile(raw_advantages, 0.75),
+            "p95": quantile(raw_advantages, 0.95),
+            "values": raw_advantages,
+        },
+        "final_margin_black_after_komi_0_5": {
+            "mean": sum(margins) / len(margins) if margins else None,
+            "median": quantile(margins, 0.5),
+            "p05": quantile(margins, 0.05),
+            "p25": quantile(margins, 0.25),
+            "p75": quantile(margins, 0.75),
+            "p95": quantile(margins, 0.95),
+            "values": margins,
+        },
+        "technical_games": technical,
+        "technical_by_reason": technical_by_reason,
+        "technical_excluded_from_wdl_and_statistics": True,
+        "komi": 0.5,
+        "confidence_interval_method": "Wilson 95% interval over valid games, black-win indicator",
     }
 
 

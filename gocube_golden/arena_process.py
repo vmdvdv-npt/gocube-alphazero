@@ -35,7 +35,7 @@ from .experiment_profile import (
     RULES_PROFILE_ID,
     SEED_DERIVATION_ID,
 )
-from .neural import GoldenGraphNetV1, GoldenNeuralEvaluator, model_hash
+from .neural import GoldenNeuralEvaluator, instantiate_model_from_metadata, model_hash
 from .players import Player, SearchPlayer
 from .provenance import (
     PROVENANCE_SCHEMA_VERSION,
@@ -186,7 +186,7 @@ class CheckpointPlayerSpec:
     def build(self) -> Player:
         torch = importlib.import_module("torch")
         device = torch.device(self.device)
-        model = GoldenGraphNetV1().to(device)
+        model = instantiate_model_from_metadata(self.metadata).to(device)
         loaded = load_checkpoint(
             self.checkpoint_path,
             model=model,
