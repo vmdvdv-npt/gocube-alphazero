@@ -450,7 +450,7 @@ def fixed_corpus(games_by_generation: Mapping[str, Sequence[dict[str, object]]],
     arena_quota = {"M8-vs-M0": 2, "M8-vs-M4": 3, "M8-vs-M7": 2, "NEW-M8-vs-OLD-M8": 1}
     selected_arena: list[dict[str, object]] = []
     for comparison, quota in arena_quota.items():
-        selected_arena.extend(game for game in arena_games if game["comparison"] == comparison][:quota])
+        selected_arena.extend([game for game in arena_games if game["comparison"] == comparison][:quota])
     for index, game in enumerate(selected_arena):
         actions = [row["action"] for row in game["action_trace"]]
         states = replay_states(game["start_state"], actions)
