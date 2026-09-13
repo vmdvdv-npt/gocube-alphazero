@@ -428,7 +428,7 @@ def fixed_corpus(games_by_generation: Mapping[str, Sequence[dict[str, object]]],
     corpus: list[dict[str, object]] = []
     # Keep the corpus at 64 states while reserving half of it for Arena tail
     # states.  D3 includes both ordinary and short PASS branches.
-    choices = {"D3": [0, 1, 8, 15, 37, 43, 58, 63], "D4": list(range(4)), "D6": list(range(4)), "D7": list(range(4))}
+    choices = {"D3": [0, 8, 15, 37, 43, 58], "D4": list(range(4)), "D6": list(range(4)), "D7": list(range(4))}
     plys = (12, 24)
     for generation, indexes in choices.items():
         for game_index in indexes:
@@ -447,7 +447,11 @@ def fixed_corpus(games_by_generation: Mapping[str, Sequence[dict[str, object]]],
                     "state": position["state"],
                     "state_digest": state_digest(position["state"]),
                 })
-    for index, game in enumerate(arena_games[:8]):
+    arena_quota = {"M8-vs-M0": 2, "M8-vs-M4": 3, "M8-vs-M7": 2, "NEW-M8-vs-OLD-M8": 1}
+    selected_arena: list[dict[str, object]] = []
+    for comparison, quota in arena_quota.items():
+        selected_arena.extend(game for game in arena_games if game["comparison"] == comparison][:quota])
+    for index, game in enumerate(selected_arena):
         actions = [row["action"] for row in game["action_trace"]]
         states = replay_states(game["start_state"], actions)
         for ply in (400, 450, 490, 500):
