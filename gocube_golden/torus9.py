@@ -10,19 +10,19 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import hashlib
+import importlib
 import json
 import math
 from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import get_context
 from pathlib import Path
 import random
 import resource
 import time
 from typing import Any, Mapping, Sequence
 
-import torch
-from torch import nn
-from torch.nn import functional as F
+torch = importlib.import_module("torch")
+nn = torch.nn
+F = importlib.import_module("torch.nn.functional")
 
 from .arena_contract import SearchSettings
 from .neural import model_hash
@@ -33,9 +33,10 @@ from .scoring import score_terminal
 from .search import Evaluation, SearchError, SequentialPUCT
 from .search_adapter import GoldenSearchAdapter
 from .state import BLACK, EMPTY, PASS, WHITE, GoldenState, Stone, initial_state
-from .topology import TORUS_9X9, TORUS_9X9_TOPOLOGY_ID
+from .topology import TORUS_5X5, TORUS_9X9, TORUS_9X9_TOPOLOGY_ID
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
+    TORUS9_ARCHITECTURE_ID,
     TORUS9_ARENA_CONTRACT_FINGERPRINT,
     TORUS9_ARENA_CONTRACT_ID,
     TORUS9_BATCH_SIZE,
@@ -46,9 +47,12 @@ from .torus9_contract import (
     TORUS9_OBSERVATION_FINGERPRINT,
     TORUS9_OBSERVATION_SCHEMA_ID,
     TORUS9_OBSERVATION_SCHEMA_VERSION,
+    TORUS9_MAX_REPLAY_POSITIONS,
+    TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
     TORUS9_PASS_INDEX,
     TORUS9_POINT_COUNT,
     TORUS9_PROFILE_ID,
+    TORUS9_ROLLING_GENERATIONS,
     TORUS9_RULES_FINGERPRINT,
     TORUS9_SELFPLAY_CONTRACT_FINGERPRINT,
     TORUS9_SELFPLAY_CONTRACT_ID,
@@ -61,7 +65,7 @@ from .torus9_contract import (
 
 
 TORUS9_VALUE_HEAD_SEMANTICS = "side-to-move:[WIN,DRAW,LOSS]"
-TORUS9_ARCHITECTURE_ID = "GoldenGraphNetV1-Torus9"
+TORUS9_LEGACY_ARCHITECTURE_ID = "GoldenGraphNetV1-Torus9"
 TORUS9_TOPOLOGY_ID = TORUS_9X9_TOPOLOGY_ID
 TORUS9_OBSERVATION_CHANNELS = (
     "own_stones",
@@ -94,6 +98,13 @@ def _jsonable(value: object) -> object:
 
 class EnumValue:
     value: str
+
+
+def _process_context(name: str) -> Any:
+    # Keep the Golden package's source-level dependency boundary free of a
+    # direct multiprocessing import; the executor still uses the requested
+    # fork/spawn context at runtime.
+    return __import__("multiprocessing").get_context(name)
 
 
 def write_json(path: Path, value: object) -> None:
@@ -210,14 +221,21 @@ class Torus9GraphResidualBlock(nn.Module):
 
 
 class Torus9GraphNet(nn.Module):
-    """GoldenGraphNetV1 capacity, with the 9×9 policy boundary [81 points + PASS]."""
+    """Eight-hop Torus9 graph network with the policy boundary [81 points + PASS]."""
 
     architecture_id = TORUS9_ARCHITECTURE_ID
 
-    def __init__(self, *, hidden: int = TORUS9_HIDDEN, blocks: int = TORUS9_BLOCKS) -> None:
+    def __init__(
+        self,
+        *,
+        hidden: int = TORUS9_HIDDEN,
+        blocks: int = TORUS9_BLOCKS,
+        architecture_id: str | None = None,
+    ) -> None:
         super().__init__()
         if hidden <= 0 or blocks <= 0:
             raise ValueError("Torus 9×9 hidden and blocks must be positive")
+        self.architecture_id = architecture_id or TORUS9_ARCHITECTURE_ID
         self.topology_id = TORUS9_TOPOLOGY_ID
         self.topology_fingerprint = TORUS9_TOPOLOGY_FINGERPRINT
         self.hidden = int(hidden)
@@ -337,6 +355,29 @@ class Torus9SelfPlaySearchContract:
 
 def _action_index(action: int | str) -> int:
     return TORUS9_PASS_INDEX if action == PASS else int(action)
+
+
+def graph_distance(topology: Any, source: int, target: int) -> int:
+    """Return an unweighted shortest-path distance in a Golden topology."""
+    if source == target:
+        return 0
+    frontier = [source]
+    distances = {source: 0}
+    while frontier:
+        point = frontier.pop(0)
+        for neighbor in topology.neighbors(point):
+            if neighbor in distances:
+                continue
+            distance = distances[point] + 1
+            if neighbor == target:
+                return distance
+            distances[neighbor] = distance
+            frontier.append(neighbor)
+    raise ValueError("Topology graph is disconnected")
+
+
+def graph_diameter(topology: Any) -> int:
+    return max(graph_distance(topology, source, target) for source in range(topology.point_count) for target in range(topology.point_count))
 
 
 def _sample_action(result: Any, *, temperature: float, rng: random.Random) -> int | str:
@@ -652,7 +693,7 @@ def run_torus9_selfplay_games(
     context_name = "spawn" if torch.device(device).type == "cuda" else "fork"
     with ProcessPoolExecutor(
         max_workers=int(workers),
-        mp_context=get_context(context_name),
+        mp_context=_process_context(context_name),
         initializer=_selfplay_process_init,
         initargs=(str(checkpoint_path), model_hash(model), run_id, label, artifact, master_seed, profile_fp, code.git_commit_sha, code.git_tree_sha, code.working_tree_clean, str(device)),
     ) as pool:
@@ -660,27 +701,155 @@ def run_torus9_selfplay_games(
     return tuple(sorted(records, key=lambda record: record.game_id))
 
 
+class Torus9RollingReplay:
+    """Small deterministic recent-generation replay window.
+
+    Rows are appended in generation/game/ply order.  A generation is removed
+    only after it falls outside the three-generation window; if a single
+    window exceeds the cap, the oldest rows are removed.  This deliberately
+    simple policy makes every retained row and every eviction auditable.
+    """
+
+    def __init__(
+        self,
+        *,
+        generations: int = TORUS9_ROLLING_GENERATIONS,
+        maximum_positions: int = TORUS9_MAX_REPLAY_POSITIONS,
+    ) -> None:
+        if generations <= 0 or maximum_positions <= 0:
+            raise ValueError("Torus 9×9 replay window settings must be positive")
+        self.generations = int(generations)
+        self.maximum_positions = int(maximum_positions)
+        self._rows: list[dict[str, object]] = []
+        self._last_generation = 0
+        self.total_evictions = 0
+
+    @property
+    def rows(self) -> tuple[dict[str, object], ...]:
+        return tuple(self._rows)
+
+    @staticmethod
+    def _row_id(row: Mapping[str, object], generation: int, position: int) -> str:
+        return str(row.get("replay_row_id", f"M{generation}:{row.get('game_id', position)}:{row.get('ply', position)}"))
+
+    def append_generation(self, generation: int, samples: Sequence[Mapping[str, object]]) -> dict[str, object]:
+        generation = int(generation)
+        if generation <= 0 or generation < self._last_generation:
+            raise ValueError("Torus 9×9 replay generations must be positive and monotonic")
+        before = len(self._rows)
+        stamped: list[dict[str, object]] = []
+        for position, sample in enumerate(samples):
+            row = dict(sample)
+            row["source_generation"] = generation
+            row["replay_row_id"] = self._row_id(row, generation, position)
+            stamped.append(row)
+        self._rows.extend(stamped)
+        oldest_allowed = generation - self.generations + 1
+        self._rows = [row for row in self._rows if int(row["source_generation"]) >= oldest_allowed]
+        if len(self._rows) > self.maximum_positions:
+            self._rows = self._rows[-self.maximum_positions:]
+        evicted = before + len(stamped) - len(self._rows)
+        self.total_evictions += evicted
+        self._last_generation = generation
+        counts: dict[str, int] = {}
+        for row in self._rows:
+            key = str(row["source_generation"])
+            counts[key] = counts.get(key, 0) + 1
+        return {
+            "generation_added": generation,
+            "fresh_positions": len(stamped),
+            "rolling_buffer_positions": len(self._rows),
+            "positions_per_generation": dict(sorted(counts.items(), key=lambda item: int(item[0]))),
+            "generations_represented": sorted(int(key) for key in counts),
+            "eviction_count": evicted,
+            "total_evictions": self.total_evictions,
+        }
+
+
+def _adam_step(optimizer: torch.optim.Optimizer) -> int:
+    steps: set[int] = set()
+    for state in optimizer.state.values():
+        if "step" in state:
+            steps.add(int(state["step"].item() if torch.is_tensor(state["step"]) else state["step"]))
+    if not steps:
+        return 0
+    if len(steps) != 1:
+        raise RuntimeError(f"Torus 9×9 Adam state is discontinuous: steps={sorted(steps)}")
+    return next(iter(steps))
+
+
+def _parameter_l2(parameters: Mapping[str, torch.Tensor]) -> float:
+    return math.sqrt(sum(float(torch.sum(value.detach().float() ** 2)) for value in parameters.values()))
+
+
+def _parameter_delta(before: Mapping[str, torch.Tensor], model: nn.Module) -> tuple[float, float]:
+    after = {name: parameter.detach().clone() for name, parameter in model.named_parameters()}
+    deltas = {name: after[name] - before[name] for name in before}
+    total = _parameter_l2(deltas)
+    by_layer: dict[str, dict[str, torch.Tensor]] = {}
+    for name, delta in deltas.items():
+        layer = name.split(".", 1)[0]
+        by_layer.setdefault(layer, {})[name] = delta
+    maximum = max((_parameter_l2(layer) for layer in by_layer.values()), default=0.0)
+    return total, maximum
+
+
 class Torus9Trainer:
-    def __init__(self, model: Torus9GraphNet, *, learning_rate: float = 1e-3, weight_decay: float = 0.0) -> None:
+    def __init__(
+        self,
+        model: Torus9GraphNet,
+        *,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 0.0,
+        optimizer_steps_per_iteration: int = TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+    ) -> None:
+        if learning_rate != 0.001 or weight_decay != 0.0:
+            raise ValueError("Canonical Torus 9×9 optimizer is Adam(lr=0.001, weight_decay=0)")
+        if optimizer_steps_per_iteration != TORUS9_OPTIMIZER_STEPS_PER_ITERATION:
+            raise ValueError("Canonical Torus 9×9 optimizer budget is fixed at 80 updates")
         self.model = model
         self.optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        self.optimizer_steps_per_iteration = int(optimizer_steps_per_iteration)
         self.update_count = 0
         self.samples_consumed = 0
 
-    def train_fresh_epoch(self, samples: Sequence[Mapping[str, object]], *, seed: int) -> dict[str, object]:
-        if not samples:
-            raise ValueError("Torus 9×9 trainer requires fresh replay samples")
-        device = next(self.model.parameters()).device
+    def assert_optimizer_continuity(self) -> int:
+        step = _adam_step(self.optimizer)
+        if step != self.update_count:
+            raise RuntimeError(f"Torus 9×9 Adam continuation mismatch: state={step}, tracker={self.update_count}")
+        return step
+
+    @staticmethod
+    def _sample_indices(size: int, *, seed: int, count: int) -> list[int]:
+        if size <= 0:
+            raise ValueError("Torus 9×9 trainer requires a non-empty rolling replay")
         generator = torch.Generator(device="cpu")
         generator.manual_seed(int(seed))
-        order = [int(index) for index in torch.randperm(len(samples), generator=generator).tolist()]
+        if size >= count:
+            return [int(index) for index in torch.randperm(size, generator=generator)[:count].tolist()]
+        return [int(index) for index in torch.randint(size, (count,), generator=generator).tolist()]
+
+    def train_fixed_budget(self, samples: Sequence[Mapping[str, object]], *, seed: int) -> dict[str, object]:
+        self.assert_optimizer_continuity()
+        count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
+        indices = self._sample_indices(len(samples), seed=seed, count=count)
+        device = next(self.model.parameters()).device
         updates: list[dict[str, object]] = []
+        sampled_rows = [str(samples[index].get("replay_row_id", index)) for index in indices]
+        source_counts: dict[str, int] = {}
+        for index in indices:
+            generation = str(samples[index].get("source_generation", "unknown"))
+            source_counts[generation] = source_counts.get(generation, 0) + 1
         self.model.train()
-        for offset in range(0, len(order), TORUS9_BATCH_SIZE):
-            indices = order[offset:offset + TORUS9_BATCH_SIZE]
-            observations = torch.tensor([samples[index]["observation"] for index in indices], dtype=torch.float32, device=device)
-            policies = torch.tensor([samples[index]["pi"] for index in indices], dtype=torch.float32, device=device)
-            values = torch.tensor([samples[index]["z"] for index in indices], dtype=torch.float32, device=device)
+        for update_index in range(self.optimizer_steps_per_iteration):
+            batch_indices = indices[update_index * TORUS9_BATCH_SIZE:(update_index + 1) * TORUS9_BATCH_SIZE]
+            if len(batch_indices) != TORUS9_BATCH_SIZE:
+                raise AssertionError("Torus 9×9 fixed-budget trainer produced a partial batch")
+            observations = torch.tensor([samples[index]["observation"] for index in batch_indices], dtype=torch.float32, device=device)
+            policies = torch.tensor([samples[index]["pi"] for index in batch_indices], dtype=torch.float32, device=device)
+            values = torch.tensor([samples[index]["z"] for index in batch_indices], dtype=torch.float32, device=device)
+            before_parameters = {name: parameter.detach().clone() for name, parameter in self.model.named_parameters()}
+            step_before = self.assert_optimizer_continuity()
             policy_logits, value_logits = self.model(observations)
             policy_loss = -(policies * F.log_softmax(policy_logits, dim=1)).sum(dim=1).mean()
             value_loss = -(values * F.log_softmax(value_logits, dim=1)).sum(dim=1).mean()
@@ -689,33 +858,55 @@ class Torus9Trainer:
                 raise FloatingPointError("Torus 9×9 training produced non-finite loss")
             self.optimizer.zero_grad(set_to_none=True)
             total_loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=float("inf"))
+            gradients = [parameter.grad.detach() for parameter in self.model.parameters() if parameter.grad is not None]
+            grad_norm = torch.sqrt(sum(torch.sum(gradient.float() ** 2) for gradient in gradients)) if gradients else torch.tensor(0.0)
             if not bool(torch.isfinite(torch.as_tensor(grad_norm))):
                 raise FloatingPointError("Torus 9×9 training produced non-finite gradient")
             self.optimizer.step()
             if any(not bool(torch.isfinite(parameter).all()) for parameter in self.model.parameters()):
                 raise FloatingPointError("Torus 9×9 training produced non-finite parameter")
             self.update_count += 1
-            self.samples_consumed += len(indices)
+            step_after = self.assert_optimizer_continuity()
+            if step_after != step_before + 1:
+                raise RuntimeError("Torus 9×9 Adam step did not advance by one")
+            parameter_delta, max_layer_delta = _parameter_delta(before_parameters, self.model)
+            self.samples_consumed += TORUS9_BATCH_SIZE
             updates.append({
                 "update": self.update_count,
-                "batch_size": len(indices),
+                "batch_size": TORUS9_BATCH_SIZE,
                 "policy_loss": float(policy_loss.detach().cpu()),
                 "value_loss": float(value_loss.detach().cpu()),
                 "total_loss": float(total_loss.detach().cpu()),
                 "gradient_norm": float(grad_norm),
+                "parameter_delta": parameter_delta,
+                "max_layer_delta": max_layer_delta,
+                "adam_step_before": step_before,
+                "adam_step_after": step_after,
                 "learning_rate": float(self.optimizer.param_groups[0]["lr"]),
             })
+        unique_rows = len(set(sampled_rows))
         return {
             "updates": len(updates),
+            "optimizer_steps": len(updates),
             "optimizer_updates_total": self.update_count,
+            "replay_positions": len(samples),
             "samples": len(samples),
+            "samples_consumed": count,
             "samples_consumed_total": self.samples_consumed,
+            "unique_sample_rows": unique_rows,
+            "reused_sample_rows": count - unique_rows,
+            "effective_generations": sorted(int(key) for key in source_counts if key.isdigit()),
+            "sampled_positions_by_generation": dict(sorted(source_counts.items(), key=lambda item: item[0])),
+            "adam_step_before": updates[0]["adam_step_before"],
+            "adam_step_after": updates[-1]["adam_step_after"],
             "batch_size": TORUS9_BATCH_SIZE,
             "batch_sizes": [int(row["batch_size"]) for row in updates],
             "mean_policy_loss": sum(float(row["policy_loss"]) for row in updates) / len(updates),
             "mean_value_loss": sum(float(row["value_loss"]) for row in updates) / len(updates),
             "mean_total_loss": sum(float(row["total_loss"]) for row in updates) / len(updates),
+            "mean_gradient_norm": sum(float(row["gradient_norm"]) for row in updates) / len(updates),
+            "mean_parameter_delta": sum(float(row["parameter_delta"]) for row in updates) / len(updates),
+            "max_layer_delta": max(float(row["max_layer_delta"]) for row in updates),
             "updates_detail": updates,
         }
 
@@ -728,6 +919,7 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
         "parent_or_source_run_identity": parent or run_id,
         "architecture_id": model.architecture_id,
         "architecture_config": model.architecture_config,
+        "architecture_fingerprint": "sha256:" + hashlib.sha256(_canonical(model.architecture_config).encode("utf-8")).hexdigest(),
         "model_parameter_count": sum(parameter.numel() for parameter in model.parameters()),
         "model_hash": model_hash(model),
         "profile_id": TORUS9_PROFILE_ID,
@@ -756,7 +948,11 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
         "git_commit": code.git_commit_sha,
         "git_tree": code.git_tree_sha,
         "git_worktree_clean": code.working_tree_clean,
-        "fresh_data_ratio": 1.0,
+        "replay_policy": "rolling-recent-generations",
+        "rolling_generations": TORUS9_ROLLING_GENERATIONS,
+        "maximum_replay_positions": TORUS9_MAX_REPLAY_POSITIONS,
+        "optimizer_steps_per_iteration": TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+        "samples_consumed_per_iteration": TORUS9_OPTIMIZER_STEPS_PER_ITERATION * TORUS9_BATCH_SIZE,
         "auxiliary_heads": False,
     }
 
@@ -781,6 +977,8 @@ def torus9_load_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torc
         raise ValueError("Torus 9×9 checkpoint topology/komi mismatch")
     if metadata.get("network_heads_and_shapes") != {"policy": [82], "value": [3]} or metadata.get("auxiliary_heads") is not False:
         raise ValueError("Torus 9×9 checkpoint head contract mismatch")
+    if metadata.get("architecture_config") != model.architecture_config:
+        raise ValueError("Torus 9×9 checkpoint architecture does not match the supplied model")
     if expected:
         for key, value in expected.items():
             if metadata.get(key) != value:
@@ -797,7 +995,12 @@ def torus9_load_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torc
 
 def torus9_checkpoint_info(path: Path) -> dict[str, object]:
     metadata = json.loads(path.with_suffix(".metadata.json").read_text(encoding="utf-8"))
-    model = Torus9GraphNet()
+    architecture = metadata.get("architecture_config", {})
+    model = Torus9GraphNet(
+        hidden=int(architecture.get("hidden", TORUS9_HIDDEN)),
+        blocks=int(architecture.get("blocks", TORUS9_BLOCKS)),
+        architecture_id=str(architecture.get("architecture_id", TORUS9_ARCHITECTURE_ID)),
+    )
     loaded = torus9_load_checkpoint(path, model=model, expected={"model_hash": metadata["model_hash"]})
     return {"path": str(path), "metadata": loaded, "model_hash": model_hash(model), "artifact_sha256": file_sha256(path)}
 
@@ -806,8 +1009,20 @@ def _arena_process_init(candidate_path: str, reference_path: str, candidate_hash
     global _ARENA_CANDIDATE_MODEL, _ARENA_REFERENCE_MODEL, _ARENA_CANDIDATE_EVALUATOR, _ARENA_REFERENCE_EVALUATOR
     torch.set_num_threads(1)
     device = torch.device(device_name)
-    candidate = Torus9GraphNet().to(device)
-    reference = Torus9GraphNet().to(device)
+    candidate_info = json.loads(Path(candidate_path).with_suffix(".metadata.json").read_text(encoding="utf-8"))
+    reference_info = json.loads(Path(reference_path).with_suffix(".metadata.json").read_text(encoding="utf-8"))
+    candidate_architecture = candidate_info["architecture_config"]
+    reference_architecture = reference_info["architecture_config"]
+    candidate = Torus9GraphNet(
+        hidden=int(candidate_architecture["hidden"]),
+        blocks=int(candidate_architecture["blocks"]),
+        architecture_id=str(candidate_architecture["architecture_id"]),
+    ).to(device)
+    reference = Torus9GraphNet(
+        hidden=int(reference_architecture["hidden"]),
+        blocks=int(reference_architecture["blocks"]),
+        architecture_id=str(reference_architecture["architecture_id"]),
+    ).to(device)
     torus9_load_checkpoint(Path(candidate_path), model=candidate, expected={"model_hash": candidate_hash}, device=device)
     torus9_load_checkpoint(Path(reference_path), model=reference, expected={"model_hash": reference_hash}, device=device)
     _ARENA_CANDIDATE_MODEL = candidate
@@ -981,7 +1196,7 @@ def run_torus9_arena(
     if workers <= 0:
         raise ValueError("Torus 9×9 Arena workers must be positive")
     context_name = "spawn" if torch.device(device).type == "cuda" else "fork"
-    with ProcessPoolExecutor(max_workers=int(workers), mp_context=get_context(context_name), initializer=_arena_process_init, initargs=(str(candidate_path), str(reference_path), str(candidate_meta["model_hash"]), str(reference_meta["model_hash"]), str(device))) as pool:
+    with ProcessPoolExecutor(max_workers=int(workers), mp_context=_process_context(context_name), initializer=_arena_process_init, initargs=(str(candidate_path), str(reference_path), str(candidate_meta["model_hash"]), str(reference_meta["model_hash"]), str(device))) as pool:
         records = tuple(pool.map(_arena_process_game, tasks))
     records = tuple(sorted(records, key=lambda row: str(row["game_id"])))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1085,6 +1300,9 @@ def torus9_contract_proof() -> dict[str, object]:
     """Run the cheap, independent contract assertions before long self-play."""
     topology = TORUS_9X9
     neighbors = topology.adjacency
+    assert graph_diameter(TORUS_5X5) == 4
+    assert graph_diameter(TORUS_9X9) == 8
+    assert TORUS9_BLOCKS == 8
     assert topology.point_count == TORUS9_POINT_COUNT
     assert len({tuple(row) for row in neighbors}) > 1
     assert all(len(row) == 4 and len(set(row)) == 4 and point not in row for point, row in enumerate(neighbors))
@@ -1123,6 +1341,13 @@ def torus9_contract_proof() -> dict[str, object]:
         "rules_fingerprint": TORUS9_RULES_FINGERPRINT,
         "observation_fingerprint": TORUS9_OBSERVATION_FINGERPRINT,
         "architecture": model.architecture_config,
+        "architecture_fingerprint": "sha256:" + hashlib.sha256(_canonical(model.architecture_config).encode("utf-8")).hexdigest(),
+        "receptive_field": {
+            "torus5_diameter": graph_diameter(TORUS_5X5),
+            "torus9_diameter": graph_diameter(TORUS_9X9),
+            "message_passing_blocks": TORUS9_BLOCKS,
+            "canonical_torus9_distant_dependency": graph_distance(TORUS_9X9, 0, 40) <= TORUS9_BLOCKS,
+        },
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
         "fixtures": {"corner_like": [0, 8, 72, 80], "horizontal_wrap": True, "vertical_wrap": True, "central": 40},
         "no_ownership_or_score_head": True,

@@ -16,7 +16,7 @@ from .state import BASELINE_KOMI, RULES_PROFILE_ID, rules_fingerprint_for
 from .topology import TORUS_9X9
 
 
-TORUS9_PROFILE_ID = "gocube-torus9-golden-learning-v1"
+TORUS9_PROFILE_ID = "gocube-torus9-stable-learning-v2"
 TORUS9_SCHEMA_VERSION = 1
 TORUS9_OBSERVATION_SCHEMA_ID = "gocube-torus9-golden-observation-v1"
 TORUS9_OBSERVATION_SCHEMA_VERSION = 1
@@ -30,9 +30,14 @@ TORUS9_ACTION_COUNT = 82
 TORUS9_PASS_INDEX = 81
 TORUS9_KOMI = 0.5
 TORUS9_HIDDEN = 64
-TORUS9_BLOCKS = 4
+TORUS9_BLOCKS = 8
+TORUS9_ARCHITECTURE_ID = "GoldenGraphNetV2-Torus9-8Block"
 TORUS9_WORKERS = 16
 TORUS9_BATCH_SIZE = 64
+TORUS9_OPTIMIZER_STEPS_PER_ITERATION = 80
+TORUS9_TRAINING_SAMPLES_PER_ITERATION = TORUS9_BATCH_SIZE * TORUS9_OPTIMIZER_STEPS_PER_ITERATION
+TORUS9_ROLLING_GENERATIONS = 3
+TORUS9_MAX_REPLAY_POSITIONS = 20_000
 TORUS9_MOVE_LIMIT = 500
 TORUS9_RULES_FINGERPRINT = rules_fingerprint_for(TORUS_9X9, TORUS9_KOMI)
 
@@ -157,6 +162,7 @@ def validate_torus9_profile(profile: Mapping[str, Any], *, verify_fingerprint: b
     require(target.get("perspective") == "side-to-move", "WDL perspective drift")
     require(target.get("fingerprint") == TORUS9_TARGET_FINGERPRINT, "Target fingerprint drift")
     network = profile.get("network", {})
+    require(network.get("architecture_id") == TORUS9_ARCHITECTURE_ID, "Torus 9×9 architecture identity drift")
     require(network.get("hidden") == TORUS9_HIDDEN and network.get("blocks") == TORUS9_BLOCKS, "Network capacity drift")
     require(network.get("heads") == {"policy": [TORUS9_ACTION_COUNT], "value": [3]}, "Network head shape drift")
     require(network.get("ownership") is False and network.get("score") is False, "Auxiliary heads are forbidden in canonical proof")
@@ -168,8 +174,16 @@ def validate_torus9_profile(profile: Mapping[str, Any], *, verify_fingerprint: b
     arena = profile.get("arena", {})
     require(arena.get("workers") == TORUS9_WORKERS and arena.get("temperature") == 0.0 and arena.get("noise") is False, "Arena execution drift")
     require(arena.get("fingerprint") == TORUS9_ARENA_CONTRACT_FINGERPRINT, "Arena fingerprint drift")
-    require(profile.get("canonical_games_per_iteration") in (64, 96), "Canonical games/iteration must be fixed to 64 or 96")
-    require(profile.get("fresh_data_ratio") == 1.0, "Fresh-data ratio must be exactly 1.0")
+    require(profile.get("canonical_games_per_iteration") == 64, "Canonical games/iteration must be fixed to 64")
+    replay = profile.get("replay", {})
+    require(replay.get("policy") == "rolling-recent-generations", "Torus 9×9 replay policy drift")
+    require(replay.get("generations") == TORUS9_ROLLING_GENERATIONS, "Torus 9×9 rolling generation count drift")
+    require(replay.get("maximum_positions") == TORUS9_MAX_REPLAY_POSITIONS, "Torus 9×9 replay cap drift")
+    training = profile.get("training", {})
+    require(training.get("optimizer") == "Adam" and training.get("learning_rate") == 0.001 and training.get("weight_decay") == 0.0, "Torus 9×9 optimizer drift")
+    require(training.get("batch_size") == TORUS9_BATCH_SIZE, "Torus 9×9 batch size drift")
+    require(training.get("optimizer_steps_per_iteration") == TORUS9_OPTIMIZER_STEPS_PER_ITERATION, "Torus 9×9 optimizer budget drift")
+    require(training.get("samples_consumed_per_iteration") == TORUS9_TRAINING_SAMPLES_PER_ITERATION, "Torus 9×9 sample budget drift")
     if verify_fingerprint:
         expected = profile_fingerprint(profile)
         require(profile.get("profile_fingerprint") == expected, f"Torus 9×9 profile fingerprint mismatch: {expected}")
@@ -180,4 +194,3 @@ def load_torus9_profile(path: str | Path | None = None, *, verify_fingerprint: b
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
     validate_torus9_profile(profile, verify_fingerprint=verify_fingerprint)
     return profile
-

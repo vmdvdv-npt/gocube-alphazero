@@ -5,7 +5,7 @@ import torch
 import gocube_golden as g
 from gocube_golden.arena_contract import SearchSettings
 from gocube_golden.search import SequentialPUCT
-from gocube_golden.torus9 import Torus9NeuralEvaluator
+from gocube_golden.torus9 import Torus9NeuralEvaluator, graph_diameter
 
 
 def test_torus9_topology_is_a_connected_four_regular_wrapped_graph():
@@ -72,7 +72,8 @@ def test_torus9_observation_network_and_search_shapes():
     assert len(bundle.action_mask) == 82 and bundle.action_mask[81]
     assert torch.all(bundle.tensor[5] == 0.5)
     model = g.Torus9GraphNet()
-    assert sum(parameter.numel() for parameter in model.parameters()) == 55493
+    assert sum(parameter.numel() for parameter in model.parameters()) == 105925
+    assert model.blocks_count == 8
     policy, value = model(bundle.tensor.unsqueeze(0))
     assert tuple(policy.shape) == (1, 82)
     assert tuple(value.shape) == (1, 3)

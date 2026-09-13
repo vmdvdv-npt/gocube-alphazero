@@ -256,10 +256,15 @@ from .training import (
 )
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
+    TORUS9_ARCHITECTURE_ID,
+    TORUS9_BLOCKS,
     TORUS9_KOMI,
+    TORUS9_MAX_REPLAY_POSITIONS,
+    TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
     TORUS9_PASS_INDEX,
     TORUS9_POINT_COUNT,
     TORUS9_PROFILE_ID,
+    TORUS9_ROLLING_GENERATIONS,
     TORUS9_RULES_FINGERPRINT,
     TORUS9_OBSERVATION_FINGERPRINT,
     TORUS9_TARGET_FINGERPRINT,
@@ -273,10 +278,13 @@ from .torus9 import (
     Torus9SelfPlayPosition,
     Torus9SelfPlayRunner,
     Torus9SelfPlaySearchContract,
+    Torus9RollingReplay,
     Torus9Trainer,
     build_torus9_observation,
     build_torus9_observation_bundle,
     generate_torus9_evaluation_starts,
+    graph_diameter,
+    graph_distance,
     run_torus9_arena,
     run_torus9_selfplay_games,
     torus9_build_replay_samples,
@@ -287,6 +295,7 @@ from .torus9 import (
     torus9_save_checkpoint,
     torus9_state_from_identity,
     torus9_state_identity,
+    torus9_z_target,
     validate_torus9_replay_sample,
 )
 
