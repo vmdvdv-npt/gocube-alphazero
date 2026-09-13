@@ -1,0 +1,60 @@
+{
+  "status": "PASS",
+  "experiment_id": "torus9-wdl-ownership-ab-v1",
+  "base": "merged PR88 / origin/main",
+  "run_id": "torus9-wdl-ownership-ab-20260913-v1",
+  "profile_id": "gocube-torus9-stable-learning-v2",
+  "komi": 0.5,
+  "m8": {
+    "model_hash": "sha256:0c2beca91354b04b26f7092c94b5c60b217c5db2d5e8cb5403a124bb39738761",
+    "optimizer_updates": 640,
+    "train_samples_consumed": 40960
+  },
+  "corpora": {
+    "D9": {
+      "games": 64,
+      "positions": 6039,
+      "master_seed": 2026091412,
+      "corpus_fingerprint": "sha256:d912ec9f2ac01a0ac40e523528ba72d89bd6d1c02878b5ff0f4f9056ff62f856",
+      "replay_fingerprint": "sha256:fa2b60acdd5e374165226af0692c8cd665da774280ccf2975a1f40f370da6261"
+    },
+    "D10": {
+      "games": 64,
+      "positions": 6669,
+      "master_seed": 2026091413,
+      "corpus_fingerprint": "sha256:3c6ee20c03e5a4c42bb192b46ab5ff7da4ec824f9808eaacd4ec7deb701b5ec9",
+      "replay_fingerprint": "sha256:852734f23a75962b510df0b56dc48937357338c29edef5c3f361dd9380cb417a"
+    },
+    "same_frozen_rows_used_by_A_and_B": true,
+    "technical_games": 0
+  },
+  "checkpoints": {
+    "A": {
+      "M9": {"optimizer_updates": 720, "ownership_loss_weight": 0.0},
+      "M10": {"optimizer_updates": 800, "ownership_loss_weight": 0.0}
+    },
+    "B": {
+      "M9": {"optimizer_updates": 720, "ownership_loss_weight": 1.0},
+      "M10": {"optimizer_updates": 800, "ownership_loss_weight": 1.0}
+    }
+  },
+  "arena": {
+    "comparison": "M10-B vs M10-A",
+    "W/L/D": [44, 20, 0],
+    "games": 64,
+    "paired_starts": 32,
+    "technical_games": 0,
+    "workers": 16,
+    "batched": true,
+    "arena_batch_size": 8,
+    "inference_batch_wait_ms": 6.0,
+    "mean_inference_batch_rows": 17.536422531032095,
+    "max_inference_batch_rows": 32,
+    "performance_guard": "PASS",
+    "frozen_start_fingerprint": "sha256:5d1200e2bf7c0955b07ebe03e997dc110dd0c88df6d25bc986876a1ba3dcfd98"
+  },
+  "verdict": "B HAS USEFUL EVIDENCE",
+  "no_m9_arena": true,
+  "no_adaptive_extension": true,
+  "runtime_evidence": "runs/torus9-ownership-ab/torus9-wdl-ownership-ab-20260913-v1/final-report.json"
+}
