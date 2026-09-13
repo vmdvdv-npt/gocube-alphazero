@@ -1098,7 +1098,7 @@ def markdown_report(report: Mapping[str, object]) -> str:
         "",
         f"Visual trace artifact: `{report['visual_inspection']['path']}`; preview PNG: `{report['visual_inspection']['preview_png']['path']}`. Scope: {report['visual_inspection']['inspection_scope']}",
         "",
-        "The snapshots show normal legal placement/capture dynamics in current M8 and OLD M8 Arena games and in D3; the current M8 panels look more decisive than OLD M8 on the same comparison family. Truncation panels show either single-PASS continuation or high-capture late churn rather than an exact point-state loop.",
+        "The snapshots show normal legal placement/capture dynamics in current M8 and OLD M8 Arena games and in D3. In this selected visual sample, current M8 games terminate at plies 16–17, while the selected OLD M8 games include a 337-ply game. Truncation panels show either single-PASS continuation or high-capture late churn rather than an exact point-state loop.",
         "",
         "## Verification and provenance",
         "",
