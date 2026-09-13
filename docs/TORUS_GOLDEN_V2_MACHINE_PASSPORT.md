@@ -1,5 +1,10 @@
 # Torus Golden v2 machine passport
 
+> Historical Stage-2 passport. It is preserved for reproducibility and is not
+> the current 5x5 Golden Standard. The current canonical alias is
+> `gocube-torus5-golden-current` -> `gocube-torus5-golden-v2`; see
+> [`TORUS5_GOLDEN_STANDARD.md`](TORUS5_GOLDEN_STANDARD.md).
+
 `configs/gocube/torus_golden_v2.json` is the machine-readable Stage-2 passport for the standalone Golden Torus 5×5 reference line. It extends the historical v1 experiment contract without rewriting it.
 
 ## Scope

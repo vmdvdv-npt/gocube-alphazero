@@ -1,5 +1,9 @@
 # Golden Stage 2 — Sequential Arena V1 and search qualification
 
+> Historical reference contract. It is retained for reproducibility; it is not
+> the current 5x5 Golden Standard. New runs must resolve
+> `gocube-torus5-golden-current` through `tools.torus5_golden`.
+
 ## Scope
 
 Stage 2 extends only the independent `gocube_golden` reference line from Stage 1.

@@ -171,6 +171,7 @@ from .neural import (
     GoldenNeuralEvaluator,
     GoldenObservation,
     SelfPlayRootNoiseEvaluator,
+    Torus5GoldenGraphNetV2,
     build_action_mask,
     build_observation,
     build_observation_bundle,
@@ -227,6 +228,18 @@ from .cube_arena import (
     cube_hoeffding_interval,
     cube_pair_score,
     summarize_cube_arena,
+)
+from .standard import (
+    CURRENT_ALIAS as TORUS5_CURRENT_ALIAS,
+    CURRENT_PRESET_ID as TORUS5_CURRENT_PRESET_ID,
+    LegacyGoldenStandardError,
+    ResolvedGoldenPreset,
+    build_run_metadata as build_torus5_run_metadata,
+    build_torus5_model,
+    load_universal_training_config,
+    resolve_torus5_golden,
+    validate_run_metadata as validate_torus5_run_metadata,
+    write_run_manifest as write_torus5_run_manifest,
 )
 from .stage3_contract import (
     PROFILE_ID as STAGE3_PROFILE_ID,

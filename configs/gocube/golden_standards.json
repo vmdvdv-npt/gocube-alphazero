@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "standard": "torus-5x5",
+  "current_alias": "gocube-torus5-golden-current",
+  "aliases": {
+    "current": "gocube-torus5-golden-current",
+    "gocube-torus5-golden-current": "gocube-torus5-golden-v2"
+  },
+  "presets": [
+    {
+      "preset_id": "gocube-torus5-golden-v2",
+      "path": "configs/gocube/torus5_golden_v2.json",
+      "status": "current",
+      "deprecated": false
+    },
+    {
+      "preset_id": "gocube-torus5-golden-v1-legacy",
+      "path": "configs/gocube/torus_golden_training_v1.json",
+      "status": "legacy",
+      "deprecated": true,
+      "legacy_profile_id": "gocube-torus-golden-training-v1"
+    },
+    {
+      "preset_id": "gocube-torus5-golden-stage2-v2-legacy",
+      "path": "configs/gocube/torus_golden_v2.json",
+      "status": "legacy",
+      "deprecated": true,
+      "legacy_profile_id": "gocube-torus-golden-unified-v2"
+    },
+    {
+      "preset_id": "gocube-torus5-golden-stage4-v2-legacy",
+      "path": "configs/gocube/torus_golden_training_v2_data_rich.json",
+      "status": "legacy",
+      "deprecated": true,
+      "legacy_profile_id": "gocube-torus-golden-training-v2-data-rich"
+    }
+  ]
+}
