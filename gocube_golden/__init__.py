@@ -128,9 +128,13 @@ from .topology import (
     TORUS_5X5,
     TORUS_5X5_TOPOLOGY_FINGERPRINT,
     TORUS_5X5_TOPOLOGY_ID,
+    TORUS_9X9,
+    TORUS_9X9_TOPOLOGY_FINGERPRINT,
+    TORUS_9X9_TOPOLOGY_ID,
     GoldenTopology,
     permute_topology,
     research_topology,
+    torus_9x9,
     torus_5x5,
 )
 from .cube_topology import (
@@ -249,6 +253,41 @@ from .training import (
     score_target,
     train_variant_batch_schedule,
     z_target,
+)
+from .torus9_contract import (
+    TORUS9_ACTION_COUNT,
+    TORUS9_KOMI,
+    TORUS9_PASS_INDEX,
+    TORUS9_POINT_COUNT,
+    TORUS9_PROFILE_ID,
+    TORUS9_RULES_FINGERPRINT,
+    TORUS9_OBSERVATION_FINGERPRINT,
+    TORUS9_TARGET_FINGERPRINT,
+    load_torus9_profile,
+)
+from .torus9 import (
+    Torus9GraphNet,
+    Torus9NeuralEvaluator,
+    Torus9Observation,
+    Torus9SelfPlayGameRecord,
+    Torus9SelfPlayPosition,
+    Torus9SelfPlayRunner,
+    Torus9SelfPlaySearchContract,
+    Torus9Trainer,
+    build_torus9_observation,
+    build_torus9_observation_bundle,
+    generate_torus9_evaluation_starts,
+    run_torus9_arena,
+    run_torus9_selfplay_games,
+    torus9_build_replay_samples,
+    torus9_checkpoint_info,
+    torus9_contract_proof,
+    torus9_first_move_statistics,
+    torus9_load_checkpoint,
+    torus9_save_checkpoint,
+    torus9_state_from_identity,
+    torus9_state_identity,
+    validate_torus9_replay_sample,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]
