@@ -1026,20 +1026,21 @@ def torus9_first_move_statistics(records: Sequence[Torus9SelfPlayGameRecord], *,
     raw: list[float] = []
     margins: list[float] = []
     for record in records:
-        if record.technical_termination is not None:
+        get = record.get if isinstance(record, Mapping) else lambda key: getattr(record, key)
+        if get("technical_termination") is not None:
             technical += 1
             continue
-        state = torus9_state_from_identity(record.start_state)
-        for action in record.final_action_trace:
+        state = torus9_state_from_identity(get("start_state"))
+        for action in get("final_action_trace"):
             state = apply_action(state, action).after
         if not state.is_terminal:
             raise ValueError("First-move statistics received nonterminal record")
         score = score_terminal(state)
         if score.komi != TORUS9_KOMI:
             raise ValueError("First-move statistics received non-0.5 komi")
-        if record.formal_result == "BLACK":
+        if get("formal_result") == "BLACK":
             black_wins += 1
-        elif record.formal_result == "WHITE":
+        elif get("formal_result") == "WHITE":
             white_wins += 1
         else:
             draws += 1

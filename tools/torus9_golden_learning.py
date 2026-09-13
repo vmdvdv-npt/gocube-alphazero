@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+import gc
 import json
 from pathlib import Path
 import resource
@@ -152,6 +153,14 @@ def _run_lineage(
                 validate_torus9_replay_sample(row)
             samples.extend(rows)
         write_jsonl(replay_dir / f"iter-{iteration:02d}.jsonl", samples)
+        # Full replay rows contain every superko-history board and are persisted
+        # above.  Training needs only the observation and two WDL/policy
+        # targets; remove the large provenance payload before the next phase.
+        for row in samples:
+            compact = {"observation": row["observation"], "pi": row["pi"], "z": row["z"]}
+            row.clear()
+            row.update(compact)
+        gc.collect()
         train_started = time.perf_counter()
         train_metrics = trainer.train_fresh_epoch(samples, seed=model_seed + iteration)
         train_wall = time.perf_counter() - train_started
@@ -160,11 +169,20 @@ def _run_lineage(
         metadata = _checkpoint(
             checkpoint_path, model, trainer.optimizer, run_id=run_id, label=label,
             parent=previous, model_seed=model_seed, code=code, profile_fp=profile_fp,
-            games=iteration * games_per_iteration, positions=sum(len(torus9_build_replay_samples(record)) for record in records),
+            games=iteration * games_per_iteration, positions=len(samples),
             updates=trainer.update_count, consumed=trainer.samples_consumed,
         )
         checkpoints[label] = checkpoint_path
-        iteration_records[iteration] = list(records)
+        iteration_records[iteration] = [
+            {
+                "game_id": record.game_id,
+                "start_state": record.start_state,
+                "final_action_trace": record.final_action_trace,
+                "formal_result": record.formal_result,
+                "technical_termination": record.technical_termination,
+            }
+            for record in records
+        ]
         positions = len(samples)
         source_samples_total += positions
         total_positions += positions
@@ -195,6 +213,8 @@ def _run_lineage(
             "checkpoint": {"path": str(checkpoint_path), "model_hash": metadata["model_hash"], "artifact_sha256": file_sha256(checkpoint_path)},
             "nan_inf": False,
         })
+        del records
+        gc.collect()
     summary = {
         "lineage": lineage,
         "run_id": run_id,
@@ -301,10 +321,10 @@ def _representative_traces(root: Path, lineage: str, records: dict[int, list], a
     output = root / lineage / "representative-traces"
     output.mkdir(parents=True, exist_ok=True)
     selected: dict[str, object] = {}
-    all_selfplay = [record for rows in records.values() for record in rows if record.technical_termination is None]
+    all_selfplay = [record for rows in records.values() for record in rows if (record.get("technical_termination") if isinstance(record, dict) else record.technical_termination) is None]
     for index, record in enumerate(all_selfplay[:6]):
         path = output / f"selfplay-{index + 1:02d}.json"
-        write_json(path, record.to_dict())
+        write_json(path, record.to_dict() if hasattr(record, "to_dict") else record)
         selected[path.name] = str(path)
     for label in labels:
         path = arena_root / label / "games.jsonl"
