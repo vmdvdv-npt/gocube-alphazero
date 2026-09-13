@@ -22,9 +22,11 @@ import math
 from pathlib import Path
 import random
 import statistics
+import struct
 import subprocess
 import sys
 from typing import Any, Iterable, Mapping, Sequence
+import zlib
 
 import torch
 
@@ -834,6 +836,78 @@ def board_svg(stones: Sequence[int], x: int, y: int, size: int = 144) -> str:
     return "".join(output)
 
 
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+
+
+def _write_rgb_png(path: Path, width: int, height: int, pixels: bytearray) -> None:
+    rows = b"".join(b"\x00" + bytes(pixels[row * width * 3:(row + 1) * width * 3]) for row in range(height))
+    payload = b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + _png_chunk(b"IDAT", zlib.compress(rows, 9)) + _png_chunk(b"IEND", b"")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
+def _draw_board_png(pixels: bytearray, width: int, stones: Sequence[int], left: int, top: int, size: int = 150) -> None:
+    def paint(x: int, y: int, color: tuple[int, int, int]) -> None:
+        if 0 <= x < width and 0 <= y < len(pixels) // (width * 3):
+            offset = (y * width + x) * 3
+            pixels[offset:offset + 3] = bytes(color)
+
+    for y in range(top, top + size):
+        for x in range(left, left + size):
+            paint(x, y, (231, 194, 125) if 2 <= (x - left) < size - 2 and 2 <= (y - top) < size - 2 else (73, 53, 31))
+    cell = size / 9.0
+    for row in range(9):
+        for column in range(9):
+            stone = int(stones[row * 9 + column])
+            if not stone:
+                continue
+            center_x = left + int((column + 0.5) * cell)
+            center_y = top + int((row + 0.5) * cell)
+            radius = max(3, int(cell * 0.35))
+            color = (23, 23, 23) if stone == 1 else (245, 245, 245)
+            outline = (0, 0, 0) if stone == 1 else (100, 100, 100)
+            for dy in range(-radius - 1, radius + 2):
+                for dx in range(-radius - 1, radius + 2):
+                    distance = math.sqrt(dx * dx + dy * dy)
+                    if distance <= radius:
+                        paint(center_x + dx, center_y + dy, color)
+                    elif distance <= radius + 1:
+                        paint(center_x + dx, center_y + dy, outline)
+
+
+def make_visual_png(run_root: Path, arena_games: Sequence[dict[str, object]], output: Path) -> dict[str, object]:
+    """Create a previewable board-only montage used for the required inspection."""
+    entries: list[tuple[str, list[Any], list[int]]] = []
+    d3_games = load_jsonl(run_root / "canonical/selfplay/iter-03-games.jsonl")
+    for index in (0, 15, 58):
+        game = d3_games[index]
+        actions = list(game["final_action_trace"])
+        entries.append((f"D3-{index:02d}", replay_states(game["start_state"], actions), [0, min(len(actions), 32), len(actions)]))
+    current = [game for game in arena_games if game["comparison"] == "M8-vs-M1" and game["technical_termination"] is None][:1]
+    old = [game for game in arena_games if game["comparison"] == "NEW-M8-vs-OLD-M8" and game["technical_termination"] is None][:1]
+    for prefix, group in (("M8", current), ("OLD-M8", old)):
+        for game in group:
+            actions = [item["action"] for item in game["action_trace"]]
+            entries.append((prefix, replay_states(game["start_state"], actions), [0, min(len(actions), 32), len(actions)]))
+    technical_ids = ["M8-vs-M0--prefix-04-accepted-03--g1", "M8-vs-M4--prefix-02-accepted-07--g2", "M8-vs-M7--prefix-02-accepted-01--g2"]
+    for game_id in technical_ids:
+        game = next(game for game in arena_games if game["game_id"] == game_id)
+        actions = [item["action"] for item in game["action_trace"]]
+        entries.append((game["comparison"], replay_states(game["start_state"], actions), [0, 450, 500]))
+    margin = 18
+    board_size = 150
+    width = margin + 3 * (board_size + margin)
+    height = margin + len(entries) * (board_size + 34 + margin)
+    pixels = bytearray((250, 248, 242) * (width * height))
+    for row, (_, states, plys) in enumerate(entries):
+        top = margin + row * (board_size + 34 + margin)
+        for column, ply in enumerate(plys):
+            _draw_board_png(pixels, width, [int(stone) for stone in states[ply].stones], margin + column * (board_size + margin), top, board_size)
+    _write_rgb_png(output, width, height, pixels)
+    return {"path": str(output), "sha256": file_sha256(output), "entries": [entry[0] for entry in entries], "description": "Board-only preview montage; labels and move metadata are in the companion SVG."}
+
+
 def make_visual_traces(run_root: Path, arena_games: Sequence[dict[str, object]], output: Path) -> dict[str, object]:
     entries: list[tuple[str, dict[str, object], str, str]] = []
     for generation, indexes in ((3, (0, 15, 58)),):
@@ -1019,7 +1093,7 @@ def markdown_report(report: Mapping[str, object]) -> str:
         "",
         "## Visual inspection",
         "",
-        f"Visual trace artifact: `{report['visual_inspection']['path']}`. Scope: {report['visual_inspection']['inspection_scope']}",
+        f"Visual trace artifact: `{report['visual_inspection']['path']}`; preview PNG: `{report['visual_inspection']['preview_png']['path']}`. Scope: {report['visual_inspection']['inspection_scope']}",
         "",
         "The snapshots show normal legal placement/capture dynamics in current M8 and OLD M8 Arena games and in D3; the current M8 panels look more decisive than OLD M8 on the same comparison family. Truncation panels show either single-PASS continuation or high-capture late churn rather than an exact point-state loop.",
         "",
@@ -1080,6 +1154,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     traced_by_id = {row["game_id"]: row for row in traced}
     continuations = continuation_diagnostic(traced, arena_by_id, model_paths, workers=args.workers)
     visual = make_visual_traces(run_root, arena_all_games, args.visual_path)
+    visual["preview_png"] = make_visual_png(run_root, arena_all_games, args.visual_png_path)
     manifest = best_manifest(run_root, profile)
     args.best_json.parent.mkdir(parents=True, exist_ok=True)
     args.best_json.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1142,6 +1217,7 @@ def main() -> None:
     parser.add_argument("--best-json", type=Path, default=DEFAULT_BEST_JSON)
     parser.add_argument("--best-md", type=Path, default=DEFAULT_BEST_MD)
     parser.add_argument("--visual-path", type=Path, default=DEFAULT_VISUAL)
+    parser.add_argument("--visual-png-path", type=Path, default=ROOT / "docs/assets/TORUS9_POST_LEARNING_VISUAL_INSPECTION.png")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
