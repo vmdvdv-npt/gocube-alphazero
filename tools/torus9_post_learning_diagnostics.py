@@ -1017,6 +1017,7 @@ def markdown_report(report: Mapping[str, object]) -> str:
         "- PR #86 is represented by merge anchor `88b1803cf179c6fa93f2e9610963eeed931d09b1`; the artifact-producing source commit is recorded separately.",
         "- M2/D3 used one model hash on both sides: " + str(report["d3_forensics"]["causal_sequence"]["model_hashes_used_on_both_sides"]) + ".",
         "- D3 is 61/3/0, with the three WHITE results all early PASS branches; no dominant first action explains the result.",
+        "- M2 empty-board network root WDL is " + f"{report['d3_forensics']['initial_root_wdl_network']}" + f" (utility {report['d3_forensics']['initial_root_utility_network']}, PASS probability {report['d3_forensics']['initial_root_pass_probability']}); the early value bias is finite, not a deterministic forced-win signal.",
         "- Across all 512 self-play games, BLACK is " + f"{selfplay['all_512']['black_win_rate']:.4f}" + f" with Wilson 95% CI {selfplay['all_512']['wilson_95_ci']}; raw area advantage {selfplay['all_512']['average_raw_area_advantage']}, final komi-adjusted margin {selfplay['all_512']['average_final_komi_adjusted_margin'] }.",
         "- Excluding D3, BLACK is " + f"{selfplay['all_512']['without_d3']['black_win_rate']:.4f}" + f" (Wilson 95% CI {selfplay['all_512']['without_d3']['wilson_95_ci']}); generation-index correlation is " + f"{selfplay['all_512']['without_d3']['black_rate_vs_generation_index']:.4f}, so checkpoint strength does not explain a monotonic color drift.",
         "- Canonical Arena technical games remain excluded from W/L/D.",
@@ -1052,6 +1053,8 @@ def markdown_report(report: Mapping[str, object]) -> str:
     for variant, row in noise["summary"].items():
         lines.append(f"| {variant} | {row['states']} | {row['replicates_per_state']} | {row['mean_unique_actions']:.3f} | {row['mean_decision_entropy']:.5f} | {row['mean_pass_decision_rate']:.5f} | {row['mean_search_pass_probability']:.5f} |")
     lines += [
+        "",
+        "Interpretation: A is deterministic; adding either root noise (B) or temperature sampling (C) raises decision entropy to about 2.3, while PASS decision rates remain close to the fixed-state search PASS probability. The measured instability is therefore branch selection, not a standalone PASS-probability explosion.",
         "",
         "### Arena truncations",
         "",
