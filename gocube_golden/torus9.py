@@ -30,9 +30,24 @@ from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_s
 from .result import Winner, result_from_terminal
 from .rules import IllegalMoveError, LegalActionContext, apply_action, legal_actions, prepare_legal_actions
 from .scoring import score_terminal
-from .search import Evaluation, SearchError, SequentialPUCT
+from .search import (
+    Evaluation,
+    SearchError,
+    SearchResult,
+    SequentialPUCT,
+    _Edge,
+    _Node,
+    _child_to_parent_utility,
+    _policy_for_legal,
+    wdl_to_side_to_move_utility,
+)
 from .search_adapter import GoldenSearchAdapter
 from .state import BLACK, EMPTY, PASS, WHITE, GoldenState, Stone, initial_state
+from .training import (
+    GOLDEN_AUXILIARY_TARGET_SOURCE,
+    OWNERSHIP_TARGET_CONTRACT_ID,
+    ownership_target as golden_ownership_target,
+)
 from .topology import TORUS_5X5, TORUS_9X9, TORUS_9X9_TOPOLOGY_ID
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
@@ -77,6 +92,9 @@ TORUS9_OBSERVATION_CHANNELS = (
     "komi",
 )
 TORUS9_TOPOLOGY_FINGERPRINT = TORUS_9X9.fingerprint
+TORUS9_OWNERSHIP_TARGET_CONTRACT_ID = OWNERSHIP_TARGET_CONTRACT_ID
+TORUS9_AUXILIARY_TARGET_SOURCE = GOLDEN_AUXILIARY_TARGET_SOURCE
+TORUS9_OWNERSHIP_CLASSES = ("OWN", "OPPONENT", "NEUTRAL")
 
 
 def _canonical(value: object) -> str:
@@ -271,10 +289,52 @@ class Torus9GraphNet(nn.Module):
             nodes = block(nodes)
         return F.relu(self.output_norm(nodes))
 
-    def forward(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        nodes = self.encode(observation)
+    def policy_value_from_nodes(self, nodes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply the policy/WDL heads to an already encoded node tensor."""
+        if nodes.ndim != 3 or nodes.shape[1:] != (TORUS9_POINT_COUNT, self.hidden):
+            raise ValueError("Torus 9×9 encoded nodes must have shape [batch,81,hidden]")
         policy = torch.cat((self.point_policy(nodes).squeeze(-1), self.pass_policy(nodes.mean(dim=1))), dim=1)
         return policy, self.value_head(nodes.mean(dim=1))
+
+    def forward(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        nodes = self.encode(observation)
+        return self.policy_value_from_nodes(nodes)
+
+
+class Torus9OwnershipGraphNet(Torus9GraphNet):
+    """Torus9 policy/WDL network with the existing referee ownership head.
+
+    The forward boundary intentionally remains the two-output policy/WDL
+    boundary used by PUCT.  The ownership head is only exposed through
+    ``forward_auxiliary`` for the controlled training ablation.  Both A and B
+    therefore carry the same parameter set and optimizer parameter groups;
+    A gives this head a zero loss weight while B gives it the existing unit
+    weight used by the Golden auxiliary experiment.
+    """
+
+    def __init__(self, *, hidden: int = TORUS9_HIDDEN, blocks: int = TORUS9_BLOCKS) -> None:
+        super().__init__(hidden=hidden, blocks=blocks)
+        self.ownership_head = nn.Sequential(
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, 3),
+        )
+
+    @property
+    def architecture_config(self) -> dict[str, object]:
+        config = super().architecture_config
+        config["auxiliary_variant"] = "wdl+ownership"
+        config["heads"] = {
+            "policy": [TORUS9_ACTION_COUNT],
+            "value": [3],
+            "ownership": [TORUS9_POINT_COUNT, 3],
+        }
+        return config
+
+    def forward_auxiliary(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        nodes = self.encode(observation)
+        policy, value = self.policy_value_from_nodes(nodes)
+        return policy, value, self.ownership_head(nodes)
 
 
 class Torus9NeuralEvaluator:
@@ -284,6 +344,7 @@ class Torus9NeuralEvaluator:
         self.model.to(self.device)
         self.model.eval()
         self.nn_evaluations = 0
+        self.inference_batch_rows: list[int] = []
 
     def evaluate(self, state: GoldenState, *, legal_context: LegalActionContext | None = None) -> Evaluation:
         return self.evaluate_prepared(state, legal_context or prepare_legal_actions(state))
@@ -298,6 +359,7 @@ class Torus9NeuralEvaluator:
             policy = torch.softmax(policy_logits[0], dim=0)
             wdl = torch.softmax(value_logits[0], dim=0)
         self.nn_evaluations += 1
+        self.inference_batch_rows.append(1)
         policy_values = tuple(float(value) for value in policy.detach().cpu())
         wdl_values = tuple(float(value) for value in wdl.detach().cpu())
         if len(policy_values) != TORUS9_ACTION_COUNT or len(wdl_values) != 3:
@@ -305,6 +367,209 @@ class Torus9NeuralEvaluator:
         if any(not math.isfinite(value) or value < 0.0 for value in policy_values + wdl_values):
             raise SearchError("Torus 9×9 neural output is non-finite")
         return Evaluation(policy=policy_values, wdl=wdl_values)
+
+    def evaluate_prepared_batch(
+        self,
+        states: Sequence[GoldenState],
+        legal_contexts: Sequence[LegalActionContext],
+    ) -> tuple[Evaluation, ...]:
+        """Evaluate many independent leaves in one neural-network call."""
+        if len(states) != len(legal_contexts) or not states:
+            raise SearchError("Torus 9×9 batched evaluator received mismatched or empty inputs")
+        for state, context in zip(states, legal_contexts):
+            if state.is_terminal:
+                raise SearchError("Torus 9×9 batched evaluator received a terminal state")
+            context.assert_compatible(state)
+        observations = torch.stack(
+            [build_torus9_observation(state, legal_context=context) for state, context in zip(states, legal_contexts)],
+            dim=0,
+        ).to(self.device)
+        with torch.inference_mode():
+            policy_logits, value_logits = self.model(observations)
+            policies = torch.softmax(policy_logits, dim=1)
+            wdls = torch.softmax(value_logits, dim=1)
+        self.nn_evaluations += len(states)
+        self.inference_batch_rows.append(len(states))
+        if tuple(policies.shape) != (len(states), TORUS9_ACTION_COUNT) or tuple(wdls.shape) != (len(states), 3):
+            raise SearchError("Torus 9×9 batched neural head shape drift")
+        evaluations: list[Evaluation] = []
+        for policy, wdl in zip(policies.detach().cpu(), wdls.detach().cpu()):
+            policy_values = tuple(float(value) for value in policy)
+            wdl_values = tuple(float(value) for value in wdl)
+            if any(not math.isfinite(value) or value < 0.0 for value in policy_values + wdl_values):
+                raise SearchError("Torus 9×9 batched neural output is non-finite")
+            evaluations.append(Evaluation(policy=policy_values, wdl=wdl_values))
+        return tuple(evaluations)
+
+
+@dataclass
+class _Torus9BatchedTree:
+    state: GoldenState
+    evaluator: Torus9NeuralEvaluator
+    root: _Node
+    evaluator_calls: int = 0
+
+
+class Torus9BatchedPUCT:
+    """Run independent Torus9 PUCT trees while coalescing leaf evaluations.
+
+    Tree selection and backup are the same deterministic no-transposition PUCT
+    operations as ``SequentialPUCT``.  Only the neural calls are coalesced
+    across independent Arena games, which keeps the Arena protocol's search
+    semantics fixed while making the inference batch observable.
+    """
+
+    def __init__(
+        self,
+        settings: SearchSettings | None = None,
+        *,
+        adapter: GoldenSearchAdapter | None = None,
+        max_batch_rows: int | None = None,
+    ) -> None:
+        self.settings = settings or SearchSettings()
+        self.adapter = adapter or GoldenSearchAdapter()
+        self.max_batch_rows = max_batch_rows
+        self.inference_batch_rows: list[int] = []
+
+    def _tie_key(self, state: GoldenState, action: int | str) -> int:
+        return self.adapter.action_index(state, action)
+
+    def _select(self, node: _Node) -> tuple[int | str, _Edge]:
+        total_visits = sum(edge.visits for edge in node.edges.values())
+        scale = math.sqrt(total_visits + 1.0)
+        best_value = -float("inf")
+        candidates: list[tuple[int | str, _Edge]] = []
+        for action, edge in node.edges.items():
+            q = edge.q if edge.visits else float(self.settings.fpu)
+            score = q + float(self.settings.cpuct) * edge.prior * scale / (1.0 + edge.visits)
+            if score > best_value + 1e-15:
+                best_value = score
+                candidates = [(action, edge)]
+            elif abs(score - best_value) <= 1e-15:
+                candidates.append((action, edge))
+        if not candidates:
+            raise SearchError("Batched Torus 9×9 PUCT could not select a legal edge")
+        return min(candidates, key=lambda item: self._tie_key(node.state, item[0]))
+
+    def _expand(self, node: _Node, evaluation: Evaluation) -> float:
+        if self.adapter.is_terminal(node.state):
+            return self.adapter.terminal_utility(node.state)
+        utility = wdl_to_side_to_move_utility(evaluation.wdl)
+        context = self.adapter.prepare_legal_actions(node.state)
+        legal = context.actions
+        if not legal:
+            raise SearchError("Nonterminal Golden state exposed no legal actions")
+        priors = _policy_for_legal(evaluation, node.state, legal, self.adapter)
+        node.edges = {action: _Edge(prior=priors[action]) for action in legal}
+        node.legal_context = context
+        node.expanded = True
+        return utility
+
+    def _evaluate_entries(
+        self,
+        trees: Sequence[_Torus9BatchedTree],
+        entries: Sequence[tuple[int, _Node]],
+    ) -> dict[int, float]:
+        utilities: dict[int, float] = {}
+        groups: dict[int, list[tuple[int, _Node]]] = {}
+        for tree_index, node in entries:
+            groups.setdefault(id(trees[tree_index].evaluator), []).append((tree_index, node))
+        for group_entries in groups.values():
+            evaluator = trees[group_entries[0][0]].evaluator
+            limit = self.max_batch_rows or len(group_entries)
+            if limit <= 0:
+                raise ValueError("Batched Torus 9×9 PUCT max_batch_rows must be positive")
+            for offset in range(0, len(group_entries), limit):
+                chunk = group_entries[offset:offset + limit]
+                states = [node.state for _, node in chunk]
+                contexts = [self.adapter.prepare_legal_actions(state) for state in states]
+                batch_method = getattr(evaluator, "evaluate_prepared_batch", None)
+                if callable(batch_method):
+                    evaluations = tuple(batch_method(states, contexts))
+                else:
+                    evaluations = tuple(evaluator.evaluate_prepared(state, context) for state, context in zip(states, contexts))
+                if len(evaluations) != len(chunk):
+                    raise SearchError("Batched Torus 9×9 evaluator returned the wrong row count")
+                self.inference_batch_rows.append(len(chunk))
+                for (tree_index, node), evaluation in zip(chunk, evaluations):
+                    trees[tree_index].evaluator_calls += 1
+                    utilities[tree_index] = self._expand(node, evaluation)
+        return utilities
+
+    def search(
+        self,
+        states: Sequence[GoldenState],
+        evaluators: Sequence[Torus9NeuralEvaluator],
+        *,
+        seeds: Sequence[int] | None = None,
+    ) -> tuple[SearchResult, ...]:
+        del seeds  # deterministic tie-breaking is the Arena contract
+        if not states or len(states) != len(evaluators):
+            raise SearchError("Batched Torus 9×9 PUCT requires matching non-empty states/evaluators")
+        trees: list[_Torus9BatchedTree] = []
+        for state, evaluator in zip(states, evaluators):
+            if state.is_terminal:
+                raise SearchError("Batched Torus 9×9 search cannot start from a terminal state")
+            trees.append(_Torus9BatchedTree(state=state, evaluator=evaluator, root=_Node(state)))
+        self._evaluate_entries(trees, [(index, tree.root) for index, tree in enumerate(trees)])
+        for _ in range(self.settings.simulations):
+            pending: list[tuple[int, _Node, list[_Edge]]] = []
+            terminal_backups: list[tuple[int, list[_Edge], float]] = []
+            for index, tree in enumerate(trees):
+                node = tree.root
+                path: list[_Edge] = []
+                while node.expanded:
+                    action, edge = self._select(node)
+                    if edge.child is None:
+                        edge.child = _Node(self.adapter.apply_action(node.state, action))
+                    path.append(edge)
+                    node = edge.child
+                if self.adapter.is_terminal(node.state):
+                    terminal_backups.append((index, path, self.adapter.terminal_utility(node.state)))
+                else:
+                    pending.append((index, node, path))
+            leaf_utilities = self._evaluate_entries(trees, [(index, node) for index, node, _ in pending])
+            for index, path, utility in terminal_backups:
+                for edge in reversed(path):
+                    utility = _child_to_parent_utility(utility)
+                    edge.visits += 1
+                    edge.value_sum += utility
+            for index, node, path in pending:
+                utility = leaf_utilities[index]
+                for edge in reversed(path):
+                    utility = _child_to_parent_utility(utility)
+                    edge.visits += 1
+                    edge.value_sum += utility
+        results: list[SearchResult] = []
+        for tree in trees:
+            if tree.root.legal_context is None:
+                raise SearchError("Batched Torus 9×9 search root lacks legal context")
+            legal = tree.root.legal_context.actions
+            action_space = self.adapter.action_space(tree.state)
+            visit_map = {action: tree.root.edges[action].visits for action in legal}
+            root_visits = tuple(visit_map.get(action, 0) for action in action_space)
+            total = sum(root_visits)
+            if total <= 0:
+                raise SearchError("Batched Torus 9×9 search produced zero root visits")
+            root_q = tuple(
+                tree.root.edges[action].q if action in tree.root.edges and tree.root.edges[action].visits else None
+                for action in action_space
+            )
+            pi = tuple(count / total for count in root_visits)
+            maximum = max(visit_map.values())
+            candidates = [action for action, visits in visit_map.items() if visits == maximum]
+            selected = min(candidates, key=lambda action: self._tie_key(tree.state, action))
+            results.append(SearchResult(
+                action=selected,
+                legal_actions=legal,
+                root_visits=root_visits,
+                pi=pi,
+                simulations=self.settings.simulations,
+                evaluator_calls=tree.evaluator_calls,
+                root_q=root_q,
+                legal_action_mask=tree.root.legal_context.action_mask,
+            ))
+        return tuple(results)
 
 
 class Torus9RootNoiseEvaluator:
@@ -615,6 +880,27 @@ def torus9_build_replay_samples(game: Torus9SelfPlayGameRecord) -> tuple[dict[st
     return tuple(samples)
 
 
+def torus9_ownership_target(final_state: GoldenState, side_to_move: str | Stone) -> tuple[int, ...]:
+    """Return exact graph-area ownership in the sample side's perspective."""
+    return golden_ownership_target(final_state, side_to_move)
+
+
+def torus9_build_ownership_replay_samples(game: Torus9SelfPlayGameRecord) -> tuple[dict[str, object], ...]:
+    """Add the existing Golden ownership target to a Torus9 replay corpus."""
+    rows = list(torus9_build_replay_samples(game))
+    final_state = torus9_state_from_identity(game.start_state)
+    for action in game.final_action_trace:
+        final_state = apply_action(final_state, action).after
+    if not final_state.is_terminal:
+        raise ValueError("Torus 9×9 ownership replay did not reach DOUBLE_PASS")
+    for row in rows:
+        sample_state = torus9_state_from_identity(row["state"])  # type: ignore[arg-type]
+        row["ownership_target"] = list(torus9_ownership_target(final_state, sample_state.side_to_move))
+        row["ownership_target_contract_id"] = TORUS9_OWNERSHIP_TARGET_CONTRACT_ID
+        row["auxiliary_target_source"] = TORUS9_AUXILIARY_TARGET_SOURCE
+    return tuple(rows)
+
+
 def validate_torus9_replay_sample(sample: Mapping[str, object]) -> None:
     """Validate one serialized policy+WDL replay row at the 9×9 boundary."""
     state = torus9_state_from_identity(sample["state"])  # type: ignore[arg-type]
@@ -635,13 +921,20 @@ def validate_torus9_replay_sample(sample: Mapping[str, object]) -> None:
         raise ValueError("Torus 9×9 replay WDL target is invalid")
     if sample.get("observation_fingerprint") != TORUS9_OBSERVATION_FINGERPRINT or sample.get("target_contract_id") != TORUS9_TARGET_CONTRACT_ID or sample.get("target_fingerprint") != TORUS9_TARGET_FINGERPRINT:
         raise ValueError("Torus 9×9 replay semantic fingerprint drift")
+    if sample.get("ownership_target") is not None:
+        ownership = tuple(int(value) for value in sample["ownership_target"])  # type: ignore[arg-type]
+        if len(ownership) != TORUS9_POINT_COUNT or any(value not in range(3) for value in ownership):
+            raise ValueError("Torus 9×9 ownership target shape or class drift")
+        if sample.get("ownership_target_contract_id") != TORUS9_OWNERSHIP_TARGET_CONTRACT_ID or sample.get("auxiliary_target_source") != TORUS9_AUXILIARY_TARGET_SOURCE:
+            raise ValueError("Torus 9×9 auxiliary target provenance drift")
 
 
 def _selfplay_process_init(checkpoint_path: str, expected_hash: str, run_id: str, label: str, artifact: str, master_seed: int, profile_fp: str, code_commit: str, code_tree: str, code_clean: bool, device_name: str) -> None:
     global _SELFPLAY_PROCESS_MODEL, _SELFPLAY_PROCESS_CONFIG
     torch.set_num_threads(1)
     device = torch.device(device_name)
-    model = Torus9GraphNet().to(device)
+    metadata = json.loads(Path(checkpoint_path).with_suffix(".metadata.json").read_text(encoding="utf-8"))
+    model = torus9_model_from_metadata(metadata).to(device)
     torus9_load_checkpoint(Path(checkpoint_path), model=model, expected={"model_hash": expected_hash}, device=device)
     if model_hash(model) != expected_hash:
         raise RuntimeError("Torus 9×9 self-play worker loaded the wrong checkpoint")
@@ -912,7 +1205,132 @@ class Torus9Trainer:
         }
 
 
-def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str, parent: str | None, model_seed: int, code: CodeIdentity, profile_fp: str, completed_games: int, replay_positions: int, optimizer_updates: int, samples_consumed: int) -> dict[str, object]:
+class Torus9OwnershipTrainer(Torus9Trainer):
+    """Fixed-budget Torus9 trainer for the WDL-only/ownership-loss A/B."""
+
+    def __init__(
+        self,
+        model: Torus9OwnershipGraphNet,
+        *,
+        ownership_loss_enabled: bool,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 0.0,
+        optimizer_steps_per_iteration: int = TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+    ) -> None:
+        if not isinstance(model, Torus9OwnershipGraphNet):
+            raise TypeError("Torus 9×9 ownership trainer requires Torus9OwnershipGraphNet")
+        super().__init__(
+            model,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            optimizer_steps_per_iteration=optimizer_steps_per_iteration,
+        )
+        self.ownership_loss_enabled = bool(ownership_loss_enabled)
+
+    def train_fixed_budget(self, samples: Sequence[Mapping[str, object]], *, seed: int) -> dict[str, object]:
+        self.assert_optimizer_continuity()
+        count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
+        indices = self._sample_indices(len(samples), seed=seed, count=count)
+        for sample in samples:
+            validate_torus9_replay_sample(sample)
+            if sample.get("ownership_target") is None:
+                raise ValueError("Torus 9×9 ownership training requires ownership targets")
+        device = next(self.model.parameters()).device
+        updates: list[dict[str, object]] = []
+        sampled_rows = [str(samples[index].get("replay_row_id", index)) for index in indices]
+        source_counts: dict[str, int] = {}
+        for index in indices:
+            generation = str(samples[index].get("source_generation", "unknown"))
+            source_counts[generation] = source_counts.get(generation, 0) + 1
+        self.model.train()
+        for update_index in range(self.optimizer_steps_per_iteration):
+            batch_indices = indices[update_index * TORUS9_BATCH_SIZE:(update_index + 1) * TORUS9_BATCH_SIZE]
+            if len(batch_indices) != TORUS9_BATCH_SIZE:
+                raise AssertionError("Torus 9×9 fixed-budget trainer produced a partial batch")
+            observations = torch.tensor([samples[index]["observation"] for index in batch_indices], dtype=torch.float32, device=device)
+            policies = torch.tensor([samples[index]["pi"] for index in batch_indices], dtype=torch.float32, device=device)
+            values = torch.tensor([samples[index]["z"] for index in batch_indices], dtype=torch.float32, device=device)
+            ownership = torch.tensor([samples[index]["ownership_target"] for index in batch_indices], dtype=torch.long, device=device)
+            before_parameters = {name: parameter.detach().clone() for name, parameter in self.model.named_parameters()}
+            step_before = self.assert_optimizer_continuity()
+            policy_logits, value_logits, ownership_logits = self.model.forward_auxiliary(observations)
+            policy_loss = -(policies * F.log_softmax(policy_logits, dim=1)).sum(dim=1).mean()
+            value_loss = -(values * F.log_softmax(value_logits, dim=1)).sum(dim=1).mean()
+            ownership_loss = F.cross_entropy(ownership_logits.reshape(-1, 3), ownership.reshape(-1))
+            ownership_weight = 1.0 if self.ownership_loss_enabled else 0.0
+            # Keep a differentiable zero path in A so the new head has the
+            # same Adam state/step semantics in both arms.
+            total_loss = policy_loss + value_loss + ownership_weight * ownership_loss
+            if not bool(torch.isfinite(total_loss)):
+                raise FloatingPointError("Torus 9×9 auxiliary training produced non-finite loss")
+            self.optimizer.zero_grad(set_to_none=True)
+            total_loss.backward()
+            gradients = [parameter.grad.detach() for parameter in self.model.parameters() if parameter.grad is not None]
+            grad_norm = torch.sqrt(sum(torch.sum(gradient.float() ** 2) for gradient in gradients)) if gradients else torch.tensor(0.0)
+            if not bool(torch.isfinite(torch.as_tensor(grad_norm))):
+                raise FloatingPointError("Torus 9×9 auxiliary training produced non-finite gradient")
+            self.optimizer.step()
+            if any(not bool(torch.isfinite(parameter).all()) for parameter in self.model.parameters()):
+                raise FloatingPointError("Torus 9×9 auxiliary training produced non-finite parameter")
+            self.update_count += 1
+            step_after = self.assert_optimizer_continuity()
+            if step_after != step_before + 1:
+                raise RuntimeError("Torus 9×9 Adam step did not advance by one")
+            parameter_delta, max_layer_delta = _parameter_delta(before_parameters, self.model)
+            self.samples_consumed += TORUS9_BATCH_SIZE
+            updates.append({
+                "update": self.update_count,
+                "batch_size": TORUS9_BATCH_SIZE,
+                "policy_loss": float(policy_loss.detach().cpu()),
+                "value_loss": float(value_loss.detach().cpu()),
+                "ownership_loss": float(ownership_loss.detach().cpu()),
+                "ownership_loss_weight": ownership_weight,
+                "total_loss": float(total_loss.detach().cpu()),
+                "gradient_norm": float(grad_norm),
+                "parameter_delta": parameter_delta,
+                "max_layer_delta": max_layer_delta,
+                "adam_step_before": step_before,
+                "adam_step_after": step_after,
+                "learning_rate": float(self.optimizer.param_groups[0]["lr"]),
+            })
+        unique_rows = len(set(sampled_rows))
+        return {
+            "updates": len(updates),
+            "optimizer_steps": len(updates),
+            "optimizer_updates_total": self.update_count,
+            "replay_positions": len(samples),
+            "samples": len(samples),
+            "samples_consumed": count,
+            "samples_consumed_total": self.samples_consumed,
+            "unique_sample_rows": unique_rows,
+            "reused_sample_rows": count - unique_rows,
+            "effective_generations": sorted(int(key) for key in source_counts if key.isdigit()),
+            "sampled_positions_by_generation": dict(sorted(source_counts.items(), key=lambda item: item[0])),
+            "adam_step_before": updates[0]["adam_step_before"],
+            "adam_step_after": updates[-1]["adam_step_after"],
+            "batch_size": TORUS9_BATCH_SIZE,
+            "batch_sizes": [int(row["batch_size"]) for row in updates],
+            "mean_policy_loss": sum(float(row["policy_loss"]) for row in updates) / len(updates),
+            "mean_value_loss": sum(float(row["value_loss"]) for row in updates) / len(updates),
+            "mean_ownership_loss": sum(float(row["ownership_loss"]) for row in updates) / len(updates),
+            "ownership_loss_enabled": self.ownership_loss_enabled,
+            "ownership_loss_weight": 1.0 if self.ownership_loss_enabled else 0.0,
+            "mean_total_loss": sum(float(row["total_loss"]) for row in updates) / len(updates),
+            "mean_gradient_norm": sum(float(row["gradient_norm"]) for row in updates) / len(updates),
+            "mean_parameter_delta": sum(float(row["parameter_delta"]) for row in updates) / len(updates),
+            "max_layer_delta": max(float(row["max_layer_delta"]) for row in updates),
+            "updates_detail": updates,
+        }
+
+
+def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str, parent: str | None, model_seed: int, code: CodeIdentity, profile_fp: str, completed_games: int, replay_positions: int, optimizer_updates: int, samples_consumed: int, ownership_loss_enabled: bool | None = None) -> dict[str, object]:
+    auxiliary = isinstance(model, Torus9OwnershipGraphNet)
+    heads = {
+        "policy": [TORUS9_ACTION_COUNT],
+        "value": [3],
+    }
+    if auxiliary:
+        heads["ownership"] = [TORUS9_POINT_COUNT, 3]
     return {
         "checkpoint_schema_version": 1,
         "checkpoint_label": label,
@@ -940,7 +1358,7 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
         "target_contract_version": 1,
         "target_fingerprint": TORUS9_TARGET_FINGERPRINT,
         "value_head_semantics": TORUS9_VALUE_HEAD_SEMANTICS,
-        "network_heads_and_shapes": {"policy": [TORUS9_ACTION_COUNT], "value": [3]},
+        "network_heads_and_shapes": heads,
         "model_initialization_seed": model_seed,
         "completed_games": completed_games,
         "valid_replay_positions": replay_positions,
@@ -954,7 +1372,13 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
         "maximum_replay_positions": TORUS9_MAX_REPLAY_POSITIONS,
         "optimizer_steps_per_iteration": TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
         "samples_consumed_per_iteration": TORUS9_OPTIMIZER_STEPS_PER_ITERATION * TORUS9_BATCH_SIZE,
-        "auxiliary_heads": False,
+        "auxiliary_heads": auxiliary,
+        "auxiliary_target_contracts": ({
+            "source": TORUS9_AUXILIARY_TARGET_SOURCE,
+            "ownership": TORUS9_OWNERSHIP_TARGET_CONTRACT_ID,
+            "ownership_loss_weight": 1.0 if ownership_loss_enabled else 0.0,
+        } if auxiliary else None),
+        "ownership_loss_enabled": ownership_loss_enabled,
     }
 
 
@@ -968,6 +1392,17 @@ def torus9_save_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torc
     return enriched
 
 
+def torus9_model_from_metadata(metadata: Mapping[str, object]) -> Torus9GraphNet:
+    architecture = metadata.get("architecture_config", {})
+    if not isinstance(architecture, Mapping):
+        raise ValueError("Torus 9×9 checkpoint architecture metadata is malformed")
+    hidden = int(architecture.get("hidden", TORUS9_HIDDEN))
+    blocks = int(architecture.get("blocks", TORUS9_BLOCKS))
+    if bool(metadata.get("auxiliary_heads")) or "ownership" in dict(metadata.get("network_heads_and_shapes", {})):
+        return Torus9OwnershipGraphNet(hidden=hidden, blocks=blocks)
+    return Torus9GraphNet(hidden=hidden, blocks=blocks, architecture_id=str(architecture.get("architecture_id", TORUS9_ARCHITECTURE_ID)))
+
+
 def torus9_load_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torch.optim.Optimizer | None = None, expected: Mapping[str, object] | None = None, device: str | torch.device = "cpu") -> dict[str, object]:
     try:
         payload = torch.load(path, map_location=device, weights_only=False)
@@ -976,7 +1411,11 @@ def torus9_load_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torc
     metadata = dict(payload["metadata"])
     if metadata.get("topology_fingerprint") != TORUS9_TOPOLOGY_FINGERPRINT or metadata.get("board_size") != [9, 9] or metadata.get("komi") != TORUS9_KOMI:
         raise ValueError("Torus 9×9 checkpoint topology/komi mismatch")
-    if metadata.get("network_heads_and_shapes") != {"policy": [82], "value": [3]} or metadata.get("auxiliary_heads") is not False:
+    expected_heads = {"policy": [82], "value": [3]}
+    auxiliary = isinstance(model, Torus9OwnershipGraphNet)
+    if auxiliary:
+        expected_heads["ownership"] = [TORUS9_POINT_COUNT, 3]
+    if metadata.get("network_heads_and_shapes") != expected_heads or metadata.get("auxiliary_heads") is not auxiliary:
         raise ValueError("Torus 9×9 checkpoint head contract mismatch")
     if metadata.get("architecture_config") != model.architecture_config:
         raise ValueError("Torus 9×9 checkpoint architecture does not match the supplied model")
@@ -994,14 +1433,71 @@ def torus9_load_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torc
     return metadata
 
 
+def torus9_restore_optimizer_state(
+    path: Path,
+    *,
+    model: Torus9OwnershipGraphNet,
+    optimizer: torch.optim.Optimizer,
+    source_parameter_count: int,
+    device: str | torch.device = "cpu",
+) -> int:
+    """Continue M8 Adam state while initializing only the new head state.
+
+    The M8 checkpoint has one optimizer parameter group for the policy/WDL
+    network.  The ownership experiment uses the same group hyperparameters,
+    copies those states by parameter order, and gives each new ownership
+    parameter zero moments at the inherited Adam step.  This makes the
+    difference between A and B a loss gradient, not a hidden optimizer reset.
+    """
+    if source_parameter_count <= 0 or source_parameter_count >= len(tuple(model.parameters())):
+        raise ValueError("Invalid source parameter count for Torus 9×9 optimizer continuation")
+    try:
+        payload = torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        payload = torch.load(path, map_location=device)
+    saved_optimizer = payload.get("optimizer_state_dict")
+    if not isinstance(saved_optimizer, Mapping):
+        raise ValueError("Torus 9×9 source checkpoint has no optimizer state")
+    groups = saved_optimizer.get("param_groups")
+    state = saved_optimizer.get("state")
+    if not isinstance(groups, list) or len(groups) != 1 or not isinstance(state, Mapping):
+        raise ValueError("Torus 9×9 source optimizer state is malformed")
+    source_ids = list(groups[0].get("params", ()))
+    current_params = list(model.parameters())
+    if len(source_ids) != source_parameter_count or len(current_params) <= source_parameter_count:
+        raise ValueError("Torus 9×9 source/auxiliary optimizer parameter boundary drift")
+    inherited_steps: set[int] = set()
+    for parameter, source_id in zip(current_params[:source_parameter_count], source_ids):
+        saved = state.get(source_id)
+        if not isinstance(saved, Mapping):
+            raise ValueError("Torus 9×9 source optimizer is missing a parameter state")
+        copied: dict[str, object] = {}
+        for key, value in saved.items():
+            copied[str(key)] = value.detach().clone().to(parameter.device) if torch.is_tensor(value) else value
+        optimizer.state[parameter] = copied
+        step = copied.get("step")
+        if step is not None:
+            inherited_steps.add(int(step.item() if torch.is_tensor(step) else step))
+    if len(inherited_steps) != 1:
+        raise ValueError("Torus 9×9 source Adam state has inconsistent steps")
+    inherited_step = next(iter(inherited_steps))
+    for parameter in current_params[source_parameter_count:]:
+        optimizer.state[parameter] = {
+            "step": torch.tensor(float(inherited_step), device=parameter.device),
+            "exp_avg": torch.zeros_like(parameter),
+            "exp_avg_sq": torch.zeros_like(parameter),
+        }
+    saved_group = groups[0]
+    current_group = optimizer.param_groups[0]
+    for key in ("lr", "betas", "eps", "weight_decay", "amsgrad", "maximize", "foreach", "capturable", "differentiable", "fused"):
+        if key in saved_group:
+            current_group[key] = saved_group[key]
+    return inherited_step
+
+
 def torus9_checkpoint_info(path: Path) -> dict[str, object]:
     metadata = json.loads(path.with_suffix(".metadata.json").read_text(encoding="utf-8"))
-    architecture = metadata.get("architecture_config", {})
-    model = Torus9GraphNet(
-        hidden=int(architecture.get("hidden", TORUS9_HIDDEN)),
-        blocks=int(architecture.get("blocks", TORUS9_BLOCKS)),
-        architecture_id=str(architecture.get("architecture_id", TORUS9_ARCHITECTURE_ID)),
-    )
+    model = torus9_model_from_metadata(metadata)
     loaded = torus9_load_checkpoint(path, model=model, expected={"model_hash": metadata["model_hash"]})
     return {"path": str(path), "metadata": loaded, "model_hash": model_hash(model), "artifact_sha256": file_sha256(path)}
 
@@ -1012,18 +1508,8 @@ def _arena_process_init(candidate_path: str, reference_path: str, candidate_hash
     device = torch.device(device_name)
     candidate_info = json.loads(Path(candidate_path).with_suffix(".metadata.json").read_text(encoding="utf-8"))
     reference_info = json.loads(Path(reference_path).with_suffix(".metadata.json").read_text(encoding="utf-8"))
-    candidate_architecture = candidate_info["architecture_config"]
-    reference_architecture = reference_info["architecture_config"]
-    candidate = Torus9GraphNet(
-        hidden=int(candidate_architecture["hidden"]),
-        blocks=int(candidate_architecture["blocks"]),
-        architecture_id=str(candidate_architecture["architecture_id"]),
-    ).to(device)
-    reference = Torus9GraphNet(
-        hidden=int(reference_architecture["hidden"]),
-        blocks=int(reference_architecture["blocks"]),
-        architecture_id=str(reference_architecture["architecture_id"]),
-    ).to(device)
+    candidate = torus9_model_from_metadata(candidate_info).to(device)
+    reference = torus9_model_from_metadata(reference_info).to(device)
     torus9_load_checkpoint(Path(candidate_path), model=candidate, expected={"model_hash": candidate_hash}, device=device)
     torus9_load_checkpoint(Path(reference_path), model=reference, expected={"model_hash": reference_hash}, device=device)
     _ARENA_CANDIDATE_MODEL = candidate
@@ -1215,6 +1701,186 @@ def run_torus9_arena(
     summary = summarize_torus9_arena(records, candidate_label=candidate_label, reference_label=reference_label, pairs=len(starts))
     summary["comparison"] = comparison
     summary["frozen_corpus_fingerprint"] = str(starts[0].get("corpus_fingerprint", "")) if starts else None
+    write_json(output_dir / "summary.json", summary)
+    return summary
+
+
+def run_torus9_batched_arena(
+    *,
+    run_id: str,
+    comparison: str,
+    candidate_path: Path,
+    reference_path: Path,
+    candidate_label: str,
+    reference_label: str,
+    starts: Sequence[Mapping[str, object]],
+    master_seed: int,
+    output_dir: Path,
+    workers: int = TORUS9_WORKERS,
+    arena_batch_size: int = 8,
+    inference_batch_wait_ms: float = 6.0,
+    device: str | torch.device = "cpu",
+) -> dict[str, object]:
+    """Run the fixed Torus9 Arena with coalesced neural inference batches.
+
+    ``workers`` is the number of logical game lanes and ``arena_batch_size``
+    is the maximum contribution per lane to one coalesced model call.  The
+    deterministic PUCT trees are advanced together in the parent process so
+    leaves from all active lanes can reach the same model batch.
+    """
+    if workers <= 0 or arena_batch_size <= 0 or inference_batch_wait_ms < 0.0:
+        raise ValueError("Torus 9×9 batched Arena settings must be positive")
+    candidate_meta = torus9_checkpoint_info(candidate_path)
+    reference_meta = torus9_checkpoint_info(reference_path)
+    candidate_info = json.loads(candidate_path.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+    reference_info = json.loads(reference_path.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+    candidate = torus9_model_from_metadata(candidate_info).to(device)
+    reference = torus9_model_from_metadata(reference_info).to(device)
+    torus9_load_checkpoint(candidate_path, model=candidate, expected={"model_hash": candidate_meta["model_hash"]}, device=device)
+    torus9_load_checkpoint(reference_path, model=reference, expected={"model_hash": reference_meta["model_hash"]}, device=device)
+    candidate.eval()
+    reference.eval()
+    candidate_evaluator = Torus9NeuralEvaluator(candidate, device=device)
+    reference_evaluator = Torus9NeuralEvaluator(reference, device=device)
+    tasks: list[dict[str, object]] = []
+    for row in starts:
+        pair_id = f"{comparison}--{row['start_id']}"
+        for suffix, candidate_black in (("g1", True), ("g2", False)):
+            game_id = f"{pair_id}--{suffix}"
+            tasks.append({
+                "run_id": run_id,
+                "comparison": comparison,
+                "pair_id": pair_id,
+                "game_id": game_id,
+                "start_id": row["start_id"],
+                "state": row["state"],
+                "trace": row["trace"],
+                "candidate_black": candidate_black,
+                "candidate_hash": candidate_meta["model_hash"],
+                "reference_hash": reference_meta["model_hash"],
+                "game_seed": derive_seed(master_seed, pair_id, game_id),
+                "worker_id": len(tasks) % int(workers),
+            })
+    if not tasks:
+        raise ValueError("Torus 9×9 batched Arena requires at least one game")
+    games: list[dict[str, object]] = []
+    for task in tasks:
+        games.append({
+            "task": task,
+            "state": torus9_state_from_identity(task["state"]),
+            "trace": [],
+            "formal": None,
+            "technical": None,
+            "error": None,
+        })
+    old_threads = torch.get_num_threads()
+    torch.set_num_threads(max(1, min(int(workers), 16)))
+    started = time.perf_counter()
+    try:
+        search = Torus9BatchedPUCT(
+            SearchSettings(simulations=64, cpuct=1.25, fpu=0.0, deterministic_tie_break=True),
+            adapter=GoldenSearchAdapter(),
+            max_batch_rows=int(workers) * int(arena_batch_size),
+        )
+        for ply in range(1, TORUS9_ARENA_MOVE_LIMIT + 1):
+            active = [index for index, game in enumerate(games) if game["formal"] is None and game["technical"] is None]
+            if not active:
+                break
+            states = [games[index]["state"] for index in active]
+            evaluators = []
+            for index in active:
+                task = games[index]["task"]
+                state = games[index]["state"]
+                candidate_turn = (state.side_to_move == BLACK and bool(task["candidate_black"])) or (state.side_to_move == WHITE and not bool(task["candidate_black"]))
+                evaluators.append(candidate_evaluator if candidate_turn else reference_evaluator)
+            results = search.search(
+                states,
+                evaluators,
+                seeds=[derive_seed(int(games[index]["task"]["game_seed"]), ply, "arena-search") for index in active],
+            )
+            for index, result in zip(active, results):
+                game = games[index]
+                task = game["task"]
+                state = game["state"]
+                candidate_turn = (state.side_to_move == BLACK and bool(task["candidate_black"])) or (state.side_to_move == WHITE and not bool(task["candidate_black"]))
+                action = result.action
+                try:
+                    next_state = apply_action(state, action).after
+                except IllegalMoveError as exc:
+                    game["technical"] = "ERROR_ILLEGAL_PLAYER_ACTION"
+                    game["error"] = f"{type(exc).__name__}: {exc}"
+                    game["trace"].append({"ply": ply, "side_to_move": state.side_to_move.name, "player": "candidate" if candidate_turn else "reference", "action": action, "legal": False, "error": game["error"]})
+                    continue
+                game["state"] = next_state
+                game["trace"].append({"ply": ply, "side_to_move": (BLACK if next_state.side_to_move == WHITE else WHITE).name, "player": "candidate" if candidate_turn else "reference", "action": action, "legal": True})
+                if torus9_arena_termination_reason(next_state, ply) == "DOUBLE_PASS":
+                    game["formal"] = result_from_terminal(next_state).winner.value
+        else:
+            for game in games:
+                if game["formal"] is None and game["technical"] is None:
+                    game["technical"] = "TRUNCATED_MOVE_LIMIT"
+                    game["error"] = f"Torus 9×9 Arena watchdog reached {TORUS9_ARENA_MOVE_LIMIT} actions"
+    finally:
+        torch.set_num_threads(old_threads)
+    records: list[dict[str, object]] = []
+    for game in games:
+        task = game["task"]
+        state = game["state"]
+        formal = game["formal"]
+        candidate_black = bool(task["candidate_black"])
+        row: dict[str, object] = {
+            "run_id": str(task["run_id"]),
+            "comparison": str(task["comparison"]),
+            "pair_id": str(task["pair_id"]),
+            "game_id": str(task["game_id"]),
+            "start_id": str(task["start_id"]),
+            "worker_id": int(task["worker_id"]),
+            "candidate_black": candidate_black,
+            "candidate_model_hash": str(task["candidate_hash"]),
+            "reference_model_hash": str(task["reference_hash"]),
+            "komi": TORUS9_KOMI,
+            "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
+            "start_state": task["state"],
+            "start_trace": task["trace"],
+            "action_trace": game["trace"],
+            "final_board": [int(stone) for stone in state.stones],
+            "formal_result": formal,
+            "technical_termination": game["technical"],
+            "error": game["error"],
+            "black_area": None,
+            "white_area": None,
+            "margin_black": None,
+            "mapped_result": None,
+            "wall_time_sec": time.perf_counter() - started,
+        }
+        if formal is not None:
+            score = score_terminal(state)
+            row.update({"black_area": score.black_area, "white_area": score.white_area, "margin_black": score.margin_black})
+            if formal == "DRAW":
+                row["mapped_result"] = "DRAW"
+            elif (formal == "BLACK") == candidate_black:
+                row["mapped_result"] = "A_WIN"
+            else:
+                row["mapped_result"] = "B_WIN"
+        records.append(row)
+    records = sorted(records, key=lambda row: str(row["game_id"]))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_jsonl(output_dir / "games.jsonl", records)
+    summary = summarize_torus9_arena(records, candidate_label=candidate_label, reference_label=reference_label, pairs=len(starts))
+    batch_rows = list(search.inference_batch_rows)
+    summary.update({
+        "comparison": comparison,
+        "frozen_corpus_fingerprint": str(starts[0].get("corpus_fingerprint", "")) if starts else None,
+        "batched": True,
+        "arena_batch_size": int(arena_batch_size),
+        "inference_batch_wait_ms": float(inference_batch_wait_ms),
+        "inference_calls": len(batch_rows),
+        "inference_rows": sum(batch_rows),
+        "mean_inference_batch_rows": sum(batch_rows) / len(batch_rows) if batch_rows else 0.0,
+        "max_inference_batch_rows": max(batch_rows, default=0),
+        "workers": int(workers),
+        "logical_worker_lanes": int(workers),
+    })
     write_json(output_dir / "summary.json", summary)
     return summary
 
