@@ -1,0 +1,110 @@
+{
+  "manifest_id": "torus9-golden-learning-proof-20260913-v3",
+  "created": "2026-09-13",
+  "status": "COMPLETE_NOT_CONFIRMED",
+  "profile_id": "gocube-torus9-golden-learning-v1",
+  "profile_fingerprint": "sha256:f16f58288b1e8902ce589d3a62ee04532941440ffbb53cd16282fdf5605950aa",
+  "source": {
+    "experiment_commit": "9723bb5ac8eb28d55d21d607e3673da5bd894315",
+    "config_path": "configs/gocube/torus9_golden_learning_v1.json",
+    "config_sha256": "sha256:59f18a395f814fddbb788cf6caca1b1f7ab5a0f95b62ca91578e7da342ba5f30",
+    "postrun_static_import_compatibility_fix": "gocube_golden/torus9.py uses dynamic loading for torch and multiprocessing to satisfy Golden source-isolation tests; runtime protocol unchanged"
+  },
+  "contract": {
+    "topology_id": "torus-9x9-row-major-v1",
+    "topology_fingerprint": "sha256:a417b6d4e3da67ead03240361976a6f412c89403077bec0ac0c0a68ca9665ed1",
+    "rules_fingerprint": "sha256:e0fd15c82d42a63ca05c3b6fb3ae02deb938543e1e06483ecfeab275dc98a39e",
+    "observation_fingerprint": "sha256:e5792b409199dfe2c25ac6f681e4ca29ed73cdf4b7d53a61df634f70d1fa415f",
+    "target_fingerprint": "sha256:e1a1dd23908c75bc71c5215bfec6b0661606f86642e3406a53710057d37fed92",
+    "points": 81,
+    "actions": 82,
+    "pass_index": 81,
+    "komi": 0.5,
+    "parameter_count": 55493,
+    "network": "GoldenGraphNetV1-Torus9 hidden=64 blocks=4 WDL=[3] policy=[82]",
+    "ownership": false,
+    "score_head": false
+  },
+  "protocol": {
+    "workers": 16,
+    "batch_size": 64,
+    "fresh_data_ratio": 1.0,
+    "self_play_simulations": 64,
+    "arena_simulations": 64,
+    "cpuct": 1.25,
+    "fpu": 0.0,
+    "fast_sims": false,
+    "move_limit": 500,
+    "arena_one_game_per_process": true,
+    "technical_fail_closed": true
+  },
+  "seeds": {
+    "evaluation_master_seed": 2026091401,
+    "bringup_model_seed": 2026091402,
+    "bringup_selfplay_master_seed": 2026091403,
+    "canonical_model_seed": 2026091404,
+    "canonical_selfplay_master_seed": 2026091405,
+    "canonical_arena_master_seed": 2026091406
+  },
+  "evaluation_corpus": {
+    "starts": 64,
+    "strata": "prefix lengths 2,4,6,8,10,12,14,16; 8 accepted each",
+    "fingerprint": "sha256:f7507d4b3f8a810fb0c346348e41ea7912857972da9c51a1abae70b23eed034f",
+    "color_swapped_pair_semantics": true,
+    "exact_state_includes": ["stones", "side_to_move", "full positional-superko history", "consecutive_passes", "komi"]
+  },
+  "lineages": {
+    "bringup": {
+      "games_per_iteration": 32,
+      "iterations": 5,
+      "total_games": 160,
+      "total_positions": 12077,
+      "technical_games": 0,
+      "mean_positions_per_game": 75.48125,
+      "projected_positions_at_64": 4830.8
+    },
+    "canonical": {
+      "games_per_iteration": 64,
+      "iterations": 8,
+      "total_games": 512,
+      "total_positions": 40910,
+      "technical_games": 0,
+      "replay_position_count": 40910
+    }
+  },
+  "checkpoints": {
+    "canonical": {
+      "M0": {"model_hash": "sha256:a84558e1a23212b9881991a5a827964aaf0cd3b1d98174fa4f2af179bab4ef14", "artifact_sha256": "sha256:eca88c8d7c402892b0769052d4b595e9af07984ba8d7fa561e10b50378327d78"},
+      "M1": {"model_hash": "sha256:2f95e8a1877d380194f890da777e343fc80778ccf677b3d2023a8a36083eea8a", "artifact_sha256": "sha256:4f559474e7c65724291b5cb57e678e3f9ea4f4240e6f08797ce6e7a96b268c30"},
+      "M2": {"model_hash": "sha256:1c03181a423b770853d719a925306793e6e0fbefb06441131cc702735dc74d76", "artifact_sha256": "sha256:9dcc1e329907d32b6d064d5a59ce3c121d88af51dfe2d799adb2c796e427fd6b"},
+      "M3": {"model_hash": "sha256:9b3e73c82499496ed54e2be5a632f54c4811841f4b4aaedf584a1e0021a9d343", "artifact_sha256": "sha256:46017071823466d83be206908966150cf871ed053a05c0591fab568b9cd03015"},
+      "M4": {"model_hash": "sha256:9402e69db341df66db4b6a2d59a1357ca3e90ae41dc2772262ed97c7109b85c9", "artifact_sha256": "sha256:1f9715f499e19229720f1ed833a22f2cbcb4af29c77de891d2f883ed869bc8fa"},
+      "M5": {"model_hash": "sha256:2b61d6382ed12768f6e87d29aa933677393c512ebc70f1d6393d1a196c9df437", "artifact_sha256": "sha256:8313d25d4109334d336794f850268f2abc259eab5f112bf338835850fb5eb84b"},
+      "M6": {"model_hash": "sha256:82a6152f0015c74759e20b1959b9e7455e8b99b54c30cc5166a3bcc7526f1a7e", "artifact_sha256": "sha256:75d01912f8f99ba2d66a6c0233e585b242fc7e0ace8915642d9ea0351c82e8b7"},
+      "M7": {"model_hash": "sha256:c339367b3cbbff0ec81676f6727a12848396220c5619b1cd53389adfe8666450", "artifact_sha256": "sha256:de0ee0b59284ab0a188f47496656ed66a052f09ba2f7c850c8df1f0e872e1b91"},
+      "M8": {"model_hash": "sha256:6a3d29316f3733e97f1df03436d5f68c1ca02cf8e8162c11853f6d598dfc695a", "artifact_sha256": "sha256:c5e0336c06f3681b2fe73f5e768c57eeadd69cba1f813a2d9a64c7af47cccbe6"}
+    }
+  },
+  "arena": {
+    "M4-vs-M0": {"pairs": 32, "valid_pairs": 32, "technical_games": 0, "W/L/D": [6, 58, 0]},
+    "M4-vs-M1": {"pairs": 16, "valid_pairs": 16, "technical_games": 0, "W/L/D": [8, 24, 0]},
+    "M8-vs-M0": {"pairs": 64, "valid_pairs": 64, "technical_games": 0, "W/L/D": [75, 53, 0], "mean_pair_score": 0.5859375, "95_percent_hoeffding_interval": [0.41617481053242256, 0.7557001894675774]},
+    "M8-vs-M1": {"pairs": 64, "valid_pairs": 55, "technical_games": 9, "technical_reason": "TRUNCATED_MOVE_LIMIT", "W/L/D": [62, 57, 0], "ci": null},
+    "M8-vs-M4": {"pairs": 64, "valid_pairs": 64, "technical_games": 0, "W/L/D": [80, 48, 0], "mean_pair_score": 0.625, "95_percent_hoeffding_interval": [0.45523731053242256, 0.7947626894675774]},
+    "M8-vs-M7": {"pairs": 16, "valid_pairs": 6, "technical_games": 13, "technical_reason": "TRUNCATED_MOVE_LIMIT", "W/L/D": [10, 9, 0], "ci": null}
+  },
+  "verdict": {
+    "learning": "NOT CONFIRMED",
+    "reason": "M8-vs-M0 is above 0.5 in mean score but its 95% Hoeffding interval includes 0.5; M4-vs-M0 is not positive; M8-vs-M4 is non-regressive; technical Arena pairs are excluded fail-closed.",
+    "first_move": "INCONCLUSIVE",
+    "black_win_rate": 0.46484375,
+    "black_win_rate_95_percent_ci": [0.4220636212637802, 0.508147494216735]
+  },
+  "verification": {
+    "targeted": "5 passed in 1.44s",
+    "full": "1217 passed, 1 failed, 57 warnings in 359.99s",
+    "full_failure": "tests/test_gocube_s1_replay_audit.py::test_persisted_replay_audit_is_read_only_and_reports_all_current_records; existing data contains 8208 fork records while the test asserts zero",
+    "independent_artifact_audit": "PASS: 64 evaluation starts; all self-play/replay counts match; all M1-M8 checkpoints load; Arena game counts and fail-closed flags match"
+  },
+  "run_root": "runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3"
+}
