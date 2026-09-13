@@ -10,19 +10,20 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import hashlib
+import importlib
 import json
 import math
 from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import get_context
 from pathlib import Path
 import random
 import resource
 import time
 from typing import Any, Mapping, Sequence
 
-import torch
-from torch import nn
-from torch.nn import functional as F
+torch = importlib.import_module("torch")
+nn = importlib.import_module("torch.nn")
+F = importlib.import_module("torch.nn.functional")
+get_context = importlib.import_module("multiprocessing").get_context
 
 from .arena_contract import SearchSettings
 from .neural import model_hash
