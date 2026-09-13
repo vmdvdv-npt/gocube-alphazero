@@ -737,10 +737,14 @@ class Torus9BatchedPUCT:
         *,
         adapter: GoldenSearchAdapter | None = None,
         max_batch_rows: int | None = None,
+        inference_batch_wait_ms: float = 0.0,
     ) -> None:
         self.settings = settings or SearchSettings()
         self.adapter = adapter or GoldenSearchAdapter()
         self.max_batch_rows = max_batch_rows
+        if inference_batch_wait_ms < 0.0 or not math.isfinite(float(inference_batch_wait_ms)):
+            raise ValueError("Torus 9×9 Arena inference batch wait must be finite and non-negative")
+        self.inference_batch_wait_ms = float(inference_batch_wait_ms)
         self.inference_batch_rows: list[int] = []
 
     def _tie_key(self, state: GoldenState, action: int | str) -> int:
@@ -795,6 +799,11 @@ class Torus9BatchedPUCT:
                 chunk = group_entries[offset:offset + limit]
                 states = [node.state for _, node in chunk]
                 contexts = [self.adapter.prepare_legal_actions(state) for state in states]
+                # This is an execution-only scheduler wait.  It deliberately
+                # occurs outside the model call and therefore cannot alter
+                # search semantics, targets, or deterministic tie-breaking.
+                if self.inference_batch_wait_ms > 0.0:
+                    time.sleep(self.inference_batch_wait_ms / 1000.0)
                 batch_method = getattr(evaluator, "evaluate_prepared_batch", None)
                 if callable(batch_method):
                     evaluations = tuple(batch_method(states, contexts))
@@ -2361,6 +2370,7 @@ def run_torus9_batched_arena(
             SearchSettings(simulations=64, cpuct=1.25, fpu=0.0, deterministic_tie_break=True),
             adapter=GoldenSearchAdapter(),
             max_batch_rows=int(workers) * int(arena_batch_size),
+            inference_batch_wait_ms=float(inference_batch_wait_ms),
         )
         for ply in range(1, TORUS9_ARENA_MOVE_LIMIT + 1):
             active = [index for index, game in enumerate(games) if game["formal"] is None and game["technical"] is None]
@@ -2448,6 +2458,9 @@ def run_torus9_batched_arena(
     write_jsonl(output_dir / "games.jsonl", records)
     summary = summarize_torus9_arena(records, candidate_label=candidate_label, reference_label=reference_label, pairs=len(starts))
     batch_rows = list(search.inference_batch_rows)
+    ordered_batch_rows = sorted(batch_rows)
+    p50_index = min(len(ordered_batch_rows) - 1, max(0, math.ceil(0.50 * len(ordered_batch_rows)) - 1)) if ordered_batch_rows else 0
+    p95_index = min(len(ordered_batch_rows) - 1, max(0, math.ceil(0.95 * len(ordered_batch_rows)) - 1)) if ordered_batch_rows else 0
     summary.update({
         "comparison": comparison,
         "frozen_corpus_fingerprint": str(starts[0].get("corpus_fingerprint", "")) if starts else None,
@@ -2457,6 +2470,8 @@ def run_torus9_batched_arena(
         "inference_calls": len(batch_rows),
         "inference_rows": sum(batch_rows),
         "mean_inference_batch_rows": sum(batch_rows) / len(batch_rows) if batch_rows else 0.0,
+        "p50_inference_batch_rows": ordered_batch_rows[p50_index] if ordered_batch_rows else 0,
+        "p95_inference_batch_rows": ordered_batch_rows[p95_index] if ordered_batch_rows else 0,
         "max_inference_batch_rows": max(batch_rows, default=0),
         "workers": int(workers),
         "logical_worker_lanes": int(workers),
