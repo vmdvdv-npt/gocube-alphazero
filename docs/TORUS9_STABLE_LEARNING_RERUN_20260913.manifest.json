@@ -1,0 +1,52 @@
+{
+  "architecture_fingerprint": "sha256:0d744308071dcdafc574159c09d0112f61fcf2823bd7d43aba8da4bd50eaddac",
+  "architecture_id": "GoldenGraphNetV2-Torus9-8Block",
+  "artifacts": {
+    "docs_json": "/home/codex/projects/gocube-alphazero/docs/TORUS9_STABLE_LEARNING_RERUN_20260913.json",
+    "docs_markdown": "/home/codex/projects/gocube-alphazero/docs/TORUS9_STABLE_LEARNING_RERUN_20260913.md",
+    "run_report": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/final-report.json",
+    "run_report_sha256": "sha256:0df8ff8874ca6b110fbb9e4f5d0dc248d802518a066c907fec83443c96f9730a"
+  },
+  "manifest_schema": "torus9-stable-learning-rerun-v1",
+  "new_m0_fresh_initialization": true,
+  "old_run": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3",
+  "profile_fingerprint": "sha256:a610bc8f02d54f17929c2210bfb35768538aaef2c872241611d5cba4587b6538",
+  "profile_id": "gocube-torus9-stable-learning-v2",
+  "replay": {
+    "eviction": "oldest generation then oldest rows at cap",
+    "generations": 3,
+    "maximum_positions": 20000,
+    "sampling": "deterministic permutation when enough rows, deterministic replacement otherwise"
+  },
+  "run_id": "torus9-stable-learning-20260913-v1",
+  "scientific_parameters": {
+    "arena_noise": false,
+    "arena_simulations": 64,
+    "cpuct": 1.25,
+    "fpu": 0.0,
+    "games_per_iteration": 64,
+    "iterations": 8,
+    "komi": 0.5,
+    "move_limit": 500,
+    "ownership": false,
+    "root_noise": true,
+    "score_head": false,
+    "selfplay_simulations": 64,
+    "temperature": "1.0 plies 1..8, then 0",
+    "total_games": 512,
+    "workers": 16
+  },
+  "source_commit": "25dc804cced364c4289e4b0580e3799c4437e288",
+  "source_tree": "0ba8da6a64f41aafc955c7d90ec09e6cfad77ee6",
+  "source_worktree_clean": true,
+  "status": "RUN_COMPLETED; FULL_PYTEST_HAS_ONE_PRE_EXISTING_IGNORED_DATA_FIXTURE_FAILURE",
+  "training": {
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "optimizer": "Adam",
+    "optimizer_continuation": true,
+    "samples_per_iteration": 5120,
+    "steps_per_iteration": 80,
+    "weight_decay": 0.0
+  }
+}
