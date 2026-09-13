@@ -1,0 +1,127 @@
+{
+  "profile_id": "gocube-torus9-golden-learning-v1",
+  "schema_version": 1,
+  "fingerprint_algorithm": "sha256-canonical-json-v1",
+  "topology": {
+    "topology_id": "torus-9x9-row-major-v1",
+    "kind": "standalone-research-torus",
+    "width": 9,
+    "height": 9,
+    "point_count": 81,
+    "point_order": "row-major-yx:point_id=y*width+x",
+    "neighbor_order": ["N", "E", "S", "W"],
+    "wrap_x": true,
+    "wrap_y": true,
+    "fingerprint": "sha256:a417b6d4e3da67ead03240361976a6f412c89403077bec0ac0c0a68ca9665ed1"
+  },
+  "rules": {
+    "profile_id": "graph-area-v1",
+    "fingerprint": "sha256:e0fd15c82d42a63ca05c3b6fb3ae02deb938543e1e06483ecfeab275dc98a39e",
+    "komi": 0.5,
+    "ko": "positional-superko",
+    "suicide": "forbidden",
+    "placement_order": ["place", "capture-opponent-zero-liberties", "reject-own-zero-liberties"],
+    "pass": {
+      "legal_while_nonterminal": true,
+      "terminal_after_consecutive_passes": 2,
+      "ordinary_move_resets_count": true
+    },
+    "scoring": {
+      "method": "exact-graph-area",
+      "heuristic_dead_stone_cleanup": false
+    },
+    "technical_are_not_results": true,
+    "legacy_komi_7_5_rejected": true
+  },
+  "observation": {
+    "schema_id": "gocube-torus9-golden-observation-v1",
+    "schema_version": 1,
+    "layout": "[channels,points]",
+    "channels": ["own_stones", "opponent_stones", "side_to_move_color", "previous_pass", "legal_point_mask", "komi"],
+    "shape": [6, 81],
+    "action_count": 82,
+    "pass_index": 81,
+    "fingerprint": "sha256:e5792b409199dfe2c25ac6f681e4ca29ed73cdf4b7d53a61df634f70d1fa415f"
+  },
+  "target": {
+    "contract_id": "gocube-torus9-wdl-side-to-move-v1",
+    "contract_version": 1,
+    "fingerprint": "sha256:e1a1dd23908c75bc71c5215bfec6b0661606f86642e3406a53710057d37fed92",
+    "value_vector": ["WIN", "DRAW", "LOSS"],
+    "perspective": "side-to-move",
+    "utility": "P(WIN)-P(LOSS)",
+    "policy_source": "root-visits-before-action",
+    "technical_games": "excluded"
+  },
+  "network": {
+    "architecture_id": "GoldenGraphNetV1-Torus9",
+    "hidden": 64,
+    "blocks": 4,
+    "input_channels": 6,
+    "point_count": 81,
+    "heads": {"policy": [82], "value": [3]},
+    "ownership": false,
+    "score": false
+  },
+  "self_play": {
+    "contract_id": "torus9-golden-selfplay-search-v1",
+    "fingerprint": "sha256:1286f7182c1ebb060c9a279c5590f1e59ce2f0d2794535ffe0cf2714de005f49",
+    "simulations": 64,
+    "cpuct": 1.25,
+    "fpu": 0.0,
+    "root_noise": true,
+    "dirichlet_epsilon": 0.25,
+    "dirichlet_alpha": 0.3,
+    "temperature_plies": [1, 8],
+    "temperature_after": 0.0,
+    "fast_search": false,
+    "fast_sims": false,
+    "resign": false,
+    "watchdog": 500,
+    "workers": 16,
+    "batch_size": 64,
+    "fresh_data_ratio": 1.0,
+    "komi": 0.5
+  },
+  "arena": {
+    "contract_id": "torus9-golden-arena-search-v1",
+    "fingerprint": "sha256:4466460601b5e2e036b67dcadcf29ef3b1c20001dcb4d5e0fec341582f07c04f",
+    "simulations": 64,
+    "cpuct": 1.25,
+    "fpu": 0.0,
+    "noise": false,
+    "temperature": 0.0,
+    "fast_search": false,
+    "resign": false,
+    "workers": 16,
+    "one_game_per_process": true,
+    "technical_fail_closed": true,
+    "komi": 0.5
+  },
+  "training": {
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0,
+    "batch_size": 64,
+    "sample_exposure": "one fresh sample per new position",
+    "replay": "fresh-data-only-per-iteration",
+    "scheduler": "none",
+    "gating": false
+  },
+  "canonical_games_per_iteration": 64,
+  "fresh_data_ratio": 1.0,
+  "seeds": {
+    "evaluation_master_seed": 2026091401,
+    "bringup_model_seed": 2026091402,
+    "bringup_selfplay_master_seed": 2026091403,
+    "canonical_model_seed": 2026091404,
+    "canonical_selfplay_master_seed": 2026091405,
+    "canonical_arena_master_seed": 2026091406
+  },
+  "results": {
+    "formal_termination": ["DOUBLE_PASS"],
+    "technical": ["TRUNCATED_MOVE_LIMIT", "ERROR_ILLEGAL_PLAYER_ACTION", "ERROR_PLAYER_EXCEPTION", "ERROR_SEARCH"],
+    "technical_are_training_targets": false
+  },
+  "profile_fingerprint": "sha256:f16f58288b1e8902ce589d3a62ee04532941440ffbb53cd16282fdf5605950aa"
+}
