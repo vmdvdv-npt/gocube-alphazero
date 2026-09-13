@@ -904,12 +904,19 @@ def summarize_torus9_arena(records: Sequence[Mapping[str, object]], *, candidate
     technical = [row for row in records if row.get("technical_termination") is not None]
     counts = {"W": sum(row.get("mapped_result") == "A_WIN" for row in valid), "L": sum(row.get("mapped_result") == "B_WIN" for row in valid), "D": sum(row.get("mapped_result") == "DRAW" for row in valid)}
     grouped: dict[str, list[Mapping[str, object]]] = {}
+    all_grouped: dict[str, list[Mapping[str, object]]] = {}
+    for row in records:
+        all_grouped.setdefault(str(row["pair_id"]), []).append(row)
     for row in valid:
         grouped.setdefault(str(row["pair_id"]), []).append(row)
     pair_scores = []
-    for pair_id, pair in sorted(grouped.items()):
+    technical_pairs: list[str] = []
+    for pair_id, pair in sorted(all_grouped.items()):
+        if any(row.get("technical_termination") is not None for row in pair):
+            technical_pairs.append(pair_id)
+            continue
         if len(pair) != 2:
-            raise ValueError(f"Torus 9×9 Arena pair {pair_id} is incomplete")
+            raise ValueError(f"Nontechnical Torus 9×9 Arena pair {pair_id} is incomplete")
         scores = [1.0 if row["mapped_result"] == "A_WIN" else 0.5 if row["mapped_result"] == "DRAW" else 0.0 for row in pair]
         pair_scores.append(sum(scores) / 2.0)
     if technical:
@@ -921,6 +928,7 @@ def summarize_torus9_arena(records: Sequence[Mapping[str, object]], *, candidate
         "reference": reference_label,
         "pairs_declared": pairs,
         "pairs_valid": len(pair_scores),
+        "technical_pairs": technical_pairs,
         "games": len(records),
         "valid_games": len(valid),
         "technical_games": len(technical),
