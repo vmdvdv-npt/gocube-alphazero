@@ -2267,10 +2267,10 @@
     "arena_root": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/arena",
     "calibration_tool": "tools/torus9_komi_calibration.py",
     "calibration_tool_sha256": "sha256:724337fd6dfbaeb75c8425cff8320d47bdcda38a8151a9f757e71504d41ca569",
-    "git_commit": "fb7b32f878a9e342eb5d77bdf6a74521f09b80e6",
-    "git_tree": "7c4aed385289d36636ed916cb3fba37f38e5abf6",
+    "git_commit": "d1fd6210f6a3b7755341c0c4c832ed22cf5289d4",
+    "git_tree": "a8e193a0bef2ba2b52f562eae528e5b7dfc4f33b",
     "run_root": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1",
-    "worktree_clean": false
+    "worktree_clean": true
   },
   "winner_flips_at_all_512_candidate": {
     "by_generation": {

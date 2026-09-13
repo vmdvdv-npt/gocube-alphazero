@@ -74,4 +74,4 @@ The komi estimate is trajectory-conditioned: a model trained and searched with a
 
 Would this justify changing training komi in the next separate scientific run? **INCONCLUSIVE**. The calibration supports a diagnostic range, but a future change needs a separately specified training experiment and must not reinterpret the frozen M8 Golden result.
 
-Source commit: `fb7b32f878a9e342eb5d77bdf6a74521f09b80e6`; source tree: `7c4aed385289d36636ed916cb3fba37f38e5abf6`; report schema: `torus9-komi-calibration-v1`.
+Source commit: `d1fd6210f6a3b7755341c0c4c832ed22cf5289d4`; source tree: `a8e193a0bef2ba2b52f562eae528e5b7dfc4f33b`; report schema: `torus9-komi-calibration-v1`.
