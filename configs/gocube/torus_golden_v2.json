@@ -1,0 +1,129 @@
+{
+  "profile_id": "gocube-torus-golden-unified-v2",
+  "schema_version": 2,
+  "fingerprint_algorithm": "sha256-canonical-json-v1",
+  "historical_parent": {
+    "profile_id": "gocube-torus-golden-graph-area-v1",
+    "experiment_fingerprint": "sha256:1f5a1f821fc2e3dc52c957da9ffe1fc9313fb5b02bd81fd2f452233b57bd576e"
+  },
+  "topology": {
+    "topology_id": "torus-5x5-row-major-v1",
+    "kind": "standalone-research-torus",
+    "width": 5,
+    "height": 5,
+    "point_count": 25,
+    "point_order": "row-major-yx:point_id=y*width+x",
+    "neighbor_order": ["N", "E", "S", "W"],
+    "wrap_x": true,
+    "wrap_y": true,
+    "production_torus_factory": false,
+    "fingerprint": "sha256:b4097c32d4ab5034b84300fa41f951b353a5fcf0d8226e83922889b5552289ef"
+  },
+  "rules": {
+    "profile_id": "graph-area-v1",
+    "fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
+    "komi": 0.5,
+    "ko": "positional-superko",
+    "suicide": "forbidden",
+    "placement_order": ["place", "capture-opponent-zero-liberties", "reject-own-zero-liberties"],
+    "pass": {
+      "legal_while_nonterminal": true,
+      "terminal_after_consecutive_passes": 2,
+      "ordinary_move_resets_count": true
+    },
+    "scoring": {
+      "method": "exact-graph-area",
+      "heuristic_dead_stone_cleanup": false
+    }
+  },
+  "observation": {
+    "schema_id": "gocube-torus-golden-observation-v1",
+    "schema_version": 1,
+    "fingerprint": "sha256:d6e3aecc89f7df84f6e758423da4e3fe9269abeca644070db0be9261b30c6361",
+    "point_channels": ["own_stones", "opponent_stones", "side_to_move_color", "previous_pass", "legal_point_mask", "komi"],
+    "legal_action_mask_length": 26
+  },
+  "targets": {
+    "contract_id": "gocube-wdl-side-to-move-v1",
+    "contract_version": 1,
+    "fingerprint": "sha256:6dffad74c4f832741f9cd522aa407f3e88d6f6159ebe56c3dc226a52b4145e41",
+    "value": {
+      "vector": ["WIN", "DRAW", "LOSS"],
+      "perspective": "side-to-move",
+      "utility": "P(WIN)-P(LOSS)",
+      "child_to_parent_sign_flips": 1
+    },
+    "policy": {
+      "source": "root-mcts-visit-counts",
+      "fast_search": false
+    }
+  },
+  "results": {
+    "formal_termination": ["DOUBLE_PASS"],
+    "rule_level": ["BLACK", "WHITE", "DRAW"],
+    "technical": ["TRUNCATED_MOVE_LIMIT", "ERROR_ILLEGAL_PLAYER_ACTION", "ERROR_PLAYER_EXCEPTION", "ERROR_SEARCH"],
+    "technical_are_training_targets": false
+  },
+  "golden_arena": {
+    "arena_contract_id": "golden-arena-search-v1",
+    "search_implementation_id": "golden-sequential-puct-v1",
+    "search_implementation_fingerprint": "sha256:2f226a0d4ae69c08a7e07ec74bd4cfb560c730a59da8bb3d3b6824a0fa0c6760",
+    "search_contract_fingerprint": "sha256:c13d3159e123865f4f091dc667ce94458ec9e6002e076ab82d78cffe8c46df1c",
+    "search_settings": {
+      "simulations": 64,
+      "cpuct": 1.25,
+      "fpu": 0.0,
+      "root_noise": false,
+      "fast_search": false,
+      "resign": false,
+      "root_policy_temperature": false,
+      "move_temperature": 0.0,
+      "deterministic_tie_break": true
+    },
+    "move_limit": 500,
+    "execution": {
+      "sequential": true,
+      "batching": false,
+      "workers": false,
+      "production_arena_reuse": false
+    }
+  },
+  "checkpoint_identity": {
+    "mismatch_policy": "fail-closed-no-fallback-default-or-coercion",
+    "required_metadata": [
+      "rules_profile_id",
+      "rules_fingerprint",
+      "topology_fingerprint",
+      "board_size",
+      "point_id_order_identity",
+      "komi",
+      "observation_schema_id",
+      "observation_schema_version",
+      "observation_fingerprint",
+      "target_contract_id",
+      "target_contract_version",
+      "target_fingerprint",
+      "value_head_semantics",
+      "network_heads_and_shapes",
+      "parent_or_source_run_identity",
+      "model_hash"
+    ],
+    "board_size": [5, 5],
+    "point_id_order_identity": "row-major-yx:point_id=y*width+x",
+    "observation_schema_version": 1,
+    "target_contract_version": 1,
+    "value_head_semantics": "side-to-move:[WIN,DRAW,LOSS]",
+    "network_heads_and_shapes": {
+      "policy": [26],
+      "value": [3]
+    }
+  },
+  "reproducibility": {
+    "seed_derivation_id": "golden-arena-seed-v1",
+    "master_seed_persisted": true,
+    "derived_seeds_recomputed_by_validator": true,
+    "pair_schedule_persisted_and_recomputed": true,
+    "canonical_evidence_requires_clean_git_tree": true
+  },
+  "experiment_fingerprint": "sha256:5f2347fdb7d230454030a31d8eb828e25f1bbb20c4fdae829b9742d0de3f0d61"
+}

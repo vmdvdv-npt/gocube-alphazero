@@ -1,0 +1,75 @@
+{
+  "status": "PASS",
+  "run_id": "torus-golden-arena-process-parity-20260913-final",
+  "architecture": {
+    "executor": "ProcessParallelGoldenArena",
+    "max_workers": 16,
+    "worker_model": "one OS process / one active Arena game",
+    "single_game_path": "SequentialGoldenArena.play_game",
+    "canonical_order": "pair input order -> A-black -> B-black",
+    "completion_order_persisted": false,
+    "inference_batching": false,
+    "inference_batch_size": 1,
+    "search_changes": false
+  },
+  "source": {
+    "branch": "codex/golden-arena-process-parallel",
+    "base_branch": "codex/torus-rebuild-v1",
+    "base_merge_commit": "6cf0fc7f87c4858439759e47b4fca4e16f1bd7c4",
+    "git_commit": "92f1ab17974642b2b3a60621965f9ac2f598c31c",
+    "git_tree": "0fe36fdbfad2be4b75f7e77f542ddf8e27defe57",
+    "git_worktree_clean": true,
+    "checkpoint_identity": "torus-golden-stage4-seed2-parity-v8",
+    "frozen_run": "runs/torus-golden-stage4/torus-golden-stage4-seed2-parity-v8",
+    "training_run": false
+  },
+  "checkpoint_artifacts": {
+    "M0": "sha256:d3003d15bd4606f9851a1df93462d66a71c7b431ae9f9656d87a123cb15e4b7b",
+    "M1": "sha256:0616ec2953ed75efd1394aaa5410ab76be31da3a1d15f029bb2dc3d4748b46a4",
+    "M2": "sha256:13a587474d45a21a639faf0a45acfd0a9246d3bb165482e313cd116b04c90e07",
+    "M3": "sha256:3e3cbd8b1b156c209651cc51ad3b990bcbfc5a2b46d66b14d4be0f4b114f8801",
+    "M4": "sha256:55c5b4e9bc4067f8f801f064b0509bbdd94af2ce6124460564754b0a3770db7a"
+  },
+  "parity": {
+    "sequential_vs_parallel_games": 480,
+    "identical_games": 480,
+    "divergent_games": 0,
+    "first_trace_divergence": null,
+    "pair_color_swap_parity": "PASS",
+    "technical_games": 0,
+    "worker_count_invariance": {
+      "games": 4,
+      "pairs": 2,
+      "all_identical": true,
+      "worker_counts": {
+        "1": {"games": 4, "identical_to_sequential": true},
+        "2": {"games": 4, "identical_to_sequential": true},
+        "4": {"games": 4, "identical_to_sequential": true},
+        "8": {"games": 4, "identical_to_sequential": true},
+        "16": {"games": 4, "identical_to_sequential": true}
+      }
+    }
+  },
+  "comparisons": [
+    {"slug": "M1-M0", "candidate": "M1", "reference": "M0", "pairs": 64, "games": 128, "W": 91, "L": 37, "D": 0, "technical_games": 0, "identical": true, "speedup": 4.335335703008805, "sequential_wall_time_sec": 198.33892229500634, "parallel_wall_time_sec": 45.74938041299902, "effective_parallelism": 12.036932282552437, "worker_utilization_percent": 75.23082676595273},
+    {"slug": "M4-M0", "candidate": "M4", "reference": "M0", "pairs": 64, "games": 128, "W": 124, "L": 4, "D": 0, "technical_games": 0, "identical": true, "speedup": 4.420975993394549, "sequential_wall_time_sec": 194.11374563400022, "parallel_wall_time_sec": 43.90744168799574, "effective_parallelism": 14.182807789738614, "worker_utilization_percent": 88.64254868586634},
+    {"slug": "M4-M1", "candidate": "M4", "reference": "M1", "pairs": 64, "games": 128, "W": 113, "L": 15, "D": 0, "technical_games": 0, "identical": true, "speedup": 4.985192548303424, "sequential_wall_time_sec": 231.8398359720013, "parallel_wall_time_sec": 46.50569335599721, "effective_parallelism": 14.634990877138076, "worker_utilization_percent": 91.46869298211297},
+    {"slug": "M2-M1", "candidate": "M2", "reference": "M1", "pairs": 16, "games": 32, "W": 25, "L": 7, "D": 0, "technical_games": 0, "identical": true, "speedup": 3.414378085759178, "sequential_wall_time_sec": 48.64701582900307, "parallel_wall_time_sec": 14.247694486999535, "effective_parallelism": 12.295589097579843, "worker_utilization_percent": 76.847431859874},
+    {"slug": "M3-M2", "candidate": "M3", "reference": "M2", "pairs": 16, "games": 32, "W": 19, "L": 13, "D": 0, "technical_games": 0, "identical": true, "speedup": 3.7031342414921755, "sequential_wall_time_sec": 58.64115330299683, "parallel_wall_time_sec": 15.835546182999678, "effective_parallelism": 13.329026075942865, "worker_utilization_percent": 83.30641297464291},
+    {"slug": "M4-M3", "candidate": "M4", "reference": "M3", "pairs": 16, "games": 32, "W": 18, "L": 14, "D": 0, "technical_games": 0, "identical": true, "speedup": 4.070308354194773, "sequential_wall_time_sec": 63.52682563399867, "parallel_wall_time_sec": 15.607374209997943, "effective_parallelism": 13.6694845096578, "worker_utilization_percent": 85.43427818536125}
+  ],
+  "timing": {
+    "sequential_wall_time_sec": 795.1074986670064,
+    "parallel_16_wall_time_sec": 181.85313033698912,
+    "speedup": 4.372250822373007,
+    "parallel_child_cpu_time_sec": 2453.6243629999994,
+    "effective_parallelism": 13.492340541255613,
+    "worker_utilization_percent": 84.32712838284758,
+    "process_startup_load_overhead": "included in parallel wall time; persistent pool loads each checkpoint once per worker per comparison"
+  },
+  "memory": {
+    "measurement": "POSIX getrusage; child value is peak of child processes",
+    "peak_parent_rss_mb": 614.375,
+    "peak_child_rss_mb": 413.73046875
+  }
+}

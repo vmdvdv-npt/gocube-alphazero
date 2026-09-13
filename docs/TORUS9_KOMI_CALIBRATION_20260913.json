@@ -1,0 +1,2357 @@
+{
+  "arena_watchdog": {
+    "board_size": [
+      9,
+      9
+    ],
+    "contract_fingerprint": "sha256:8fe09d8f51e7e1b44eea1b327a774221d94f6c6920f94426d611d0759d6fdb8c",
+    "contract_id": "torus9-golden-arena-search-v2",
+    "legacy_universal_limit": 500,
+    "new_board_size_scaled_limit": 1000,
+    "normal_double_pass_before_watchdog_is_formal": true,
+    "technical_fail_closed": true,
+    "technical_outcomes_are_wdl": false
+  },
+  "created_on": "2026-09-13",
+  "datasets": {
+    "M8_related_terminal_games": {
+      "bootstrap": {
+        "crossing_point_95_percent_ci": [
+          0.5,
+          0.7367381
+        ],
+        "mean_raw_advantage_95_percent_ci": [
+          -0.41125541,
+          1.4913961
+        ],
+        "median_raw_advantage_95_percent_ci": [
+          -1.0,
+          0.0
+        ],
+        "pairwise": false,
+        "resamples": 10000,
+        "sampling_unit_count": 462,
+        "seed": 20260916,
+        "valid_crossing_resamples": 124
+      },
+      "counterfactual_only": true,
+      "games": 462,
+      "implied_fair_komi": {
+        "mean_based": 0.51948052,
+        "median_based": 0.0,
+        "win_rate_crossing_interval": null,
+        "win_rate_crossing_point": null
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.44805195,
+          "black_wins": 207,
+          "games": 462,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 0.01948052,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 255,
+          "wilson_95_ci": [
+            0.4033195,
+            0.49364115
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.33333333,
+          "black_wins": 154,
+          "games": 462,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": -0.98051948,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 308,
+          "wilson_95_ci": [
+            0.29187787,
+            0.37753756
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.29437229,
+          "black_wins": 136,
+          "games": 462,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": -1.98051948,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 326,
+          "wilson_95_ci": [
+            0.25464611,
+            0.33748981
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.24242424,
+          "black_wins": 112,
+          "games": 462,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -2.98051948,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 350,
+          "wilson_95_ci": [
+            0.20557419,
+            0.28352237
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.21861472,
+          "black_wins": 101,
+          "games": 462,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -3.98051948,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 361,
+          "wilson_95_ci": [
+            0.18333147,
+            0.25853873
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.18614719,
+          "black_wins": 86,
+          "games": 462,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -4.98051948,
+          "median_counterfactual_margin_black": -5.5,
+          "ties": 0,
+          "white_wins": 376,
+          "wilson_95_ci": [
+            0.15329549,
+            0.22417511
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 462,
+        "histogram": {
+          "-1.0": 33,
+          "-10.0": 11,
+          "-11.0": 12,
+          "-12.0": 3,
+          "-13.0": 10,
+          "-14.0": 2,
+          "-15.0": 6,
+          "-16.0": 5,
+          "-17.0": 3,
+          "-18.0": 2,
+          "-2.0": 25,
+          "-20.0": 2,
+          "-22.0": 3,
+          "-24.0": 2,
+          "-25.0": 1,
+          "-26.0": 1,
+          "-28.0": 2,
+          "-29.0": 1,
+          "-3.0": 43,
+          "-30.0": 1,
+          "-4.0": 9,
+          "-5.0": 10,
+          "-6.0": 7,
+          "-7.0": 9,
+          "-8.0": 5,
+          "-9.0": 10,
+          "0.0": 37,
+          "1.0": 53,
+          "10.0": 4,
+          "11.0": 7,
+          "12.0": 2,
+          "13.0": 5,
+          "14.0": 3,
+          "15.0": 5,
+          "16.0": 3,
+          "17.0": 6,
+          "18.0": 7,
+          "19.0": 4,
+          "2.0": 18,
+          "20.0": 1,
+          "21.0": 5,
+          "22.0": 3,
+          "23.0": 2,
+          "24.0": 2,
+          "25.0": 4,
+          "26.0": 1,
+          "27.0": 1,
+          "28.0": 1,
+          "29.0": 4,
+          "3.0": 24,
+          "30.0": 2,
+          "31.0": 1,
+          "33.0": 2,
+          "4.0": 11,
+          "5.0": 15,
+          "7.0": 3,
+          "8.0": 1,
+          "9.0": 7
+        },
+        "max": 33.0,
+        "mean": 0.51948052,
+        "median": 0.0,
+        "min": -30.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 53,
+        "p25": -4.0,
+        "p50": 0.0,
+        "p75": 3.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "M8_vs_M8_paired": {
+      "bootstrap": {
+        "crossing_point_95_percent_ci": [
+          0.5,
+          0.75738636
+        ],
+        "mean_raw_advantage_95_percent_ci": [
+          -1.984375,
+          0.015625
+        ],
+        "median_raw_advantage_95_percent_ci": [
+          -2.0,
+          0.0
+        ],
+        "pairwise": true,
+        "resamples": 10000,
+        "sampling_unit_count": 64,
+        "seed": 20260917,
+        "valid_crossing_resamples": 148
+      },
+      "counterfactual_only": true,
+      "games": 128,
+      "implied_fair_komi": {
+        "mean_based": -0.953125,
+        "median_based": -1.0,
+        "win_rate_crossing_interval": null,
+        "win_rate_crossing_point": null
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.359375,
+          "black_wins": 46,
+          "games": 128,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": -1.453125,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 82,
+          "wilson_95_ci": [
+            0.28146731,
+            0.44547746
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.234375,
+          "black_wins": 30,
+          "games": 128,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": -2.453125,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 98,
+          "wilson_95_ci": [
+            0.16939358,
+            0.31483543
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.21875,
+          "black_wins": 28,
+          "games": 128,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": -3.453125,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 100,
+          "wilson_95_ci": [
+            0.15590524,
+            0.2979843
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.0625,
+          "black_wins": 8,
+          "games": 128,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -4.453125,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 120,
+          "wilson_95_ci": [
+            0.03200693,
+            0.11848791
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.0625,
+          "black_wins": 8,
+          "games": 128,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -5.453125,
+          "median_counterfactual_margin_black": -5.5,
+          "ties": 0,
+          "white_wins": 120,
+          "wilson_95_ci": [
+            0.03200693,
+            0.11848791
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.046875,
+          "black_wins": 6,
+          "games": 128,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -6.453125,
+          "median_counterfactual_margin_black": -6.5,
+          "ties": 0,
+          "white_wins": 122,
+          "wilson_95_ci": [
+            0.02165784,
+            0.09849752
+          ]
+        }
+      },
+      "paired_analysis": {
+        "crossing_interval": null,
+        "crossing_point": null,
+        "komi_sweep": {
+          "0.5": {
+            "black_win_rate": 0.359375,
+            "black_wins": 46,
+            "mean_black_win_fraction": 0.359375,
+            "pair_count": 64,
+            "ties": 0,
+            "white_wins": 82
+          },
+          "1.5": {
+            "black_win_rate": 0.234375,
+            "black_wins": 30,
+            "mean_black_win_fraction": 0.234375,
+            "pair_count": 64,
+            "ties": 0,
+            "white_wins": 98
+          },
+          "2.5": {
+            "black_win_rate": 0.21875,
+            "black_wins": 28,
+            "mean_black_win_fraction": 0.21875,
+            "pair_count": 64,
+            "ties": 0,
+            "white_wins": 100
+          },
+          "3.5": {
+            "black_win_rate": 0.0625,
+            "black_wins": 8,
+            "mean_black_win_fraction": 0.0625,
+            "pair_count": 64,
+            "ties": 0,
+            "white_wins": 120
+          },
+          "4.5": {
+            "black_win_rate": 0.0625,
+            "black_wins": 8,
+            "mean_black_win_fraction": 0.0625,
+            "pair_count": 64,
+            "ties": 0,
+            "white_wins": 120
+          },
+          "5.5": {
+            "black_win_rate": 0.046875,
+            "black_wins": 6,
+            "mean_black_win_fraction": 0.046875,
+            "pair_count": 64,
+            "ties": 0,
+            "white_wins": 122
+          }
+        },
+        "pairs": 64,
+        "unit": "independent_color-swapped start pair"
+      },
+      "raw_area_advantage_distribution": {
+        "count": 128,
+        "histogram": {
+          "-1.0": 18,
+          "-11.0": 2,
+          "-15.0": 2,
+          "-2.0": 6,
+          "-3.0": 26,
+          "-4.0": 4,
+          "-5.0": 4,
+          "-6.0": 2,
+          "-7.0": 2,
+          "-9.0": 4,
+          "0.0": 12,
+          "1.0": 16,
+          "2.0": 2,
+          "3.0": 20,
+          "5.0": 2,
+          "7.0": 4,
+          "9.0": 2
+        },
+        "max": 9.0,
+        "mean": -0.953125,
+        "median": -1.0,
+        "min": -15.0,
+        "mode": [
+          -3.0
+        ],
+        "mode_frequency": 26,
+        "p25": -3.0,
+        "p50": -1.0,
+        "p75": 1.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "all_512_selfplay": {
+      "bootstrap": {
+        "crossing_point_95_percent_ci": [
+          0.72857143,
+          1.01968504
+        ],
+        "mean_raw_advantage_95_percent_ci": [
+          1.74604492,
+          4.43759766
+        ],
+        "median_raw_advantage_95_percent_ci": [
+          1.0,
+          1.0
+        ],
+        "pairwise": false,
+        "resamples": 10000,
+        "sampling_unit_count": 512,
+        "seed": 20260913,
+        "valid_crossing_resamples": 10000
+      },
+      "counterfactual_only": true,
+      "games": 512,
+      "implied_fair_komi": {
+        "mean_based": 3.0546875,
+        "median_based": 1.0,
+        "win_rate_crossing_interval": [
+          0.5,
+          1.5
+        ],
+        "win_rate_crossing_point": 0.88059702
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.59960938,
+          "black_wins": 307,
+          "games": 512,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 2.5546875,
+          "median_counterfactual_margin_black": 0.5,
+          "ties": 0,
+          "white_wins": 205,
+          "wilson_95_ci": [
+            0.55657805,
+            0.64115713
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.33789062,
+          "black_wins": 173,
+          "games": 512,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": 1.5546875,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 339,
+          "wilson_95_ci": [
+            0.29826283,
+            0.37993287
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.28125,
+          "black_wins": 144,
+          "games": 512,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": 0.5546875,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 368,
+          "wilson_95_ci": [
+            0.24404543,
+            0.32171262
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.21875,
+          "black_wins": 112,
+          "games": 512,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -0.4453125,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 400,
+          "wilson_95_ci": [
+            0.18510844,
+            0.25658048
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.19335938,
+          "black_wins": 99,
+          "games": 512,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -1.4453125,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 413,
+          "wilson_95_ci": [
+            0.16148548,
+            0.22980036
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.16796875,
+          "black_wins": 86,
+          "games": 512,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -2.4453125,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 426,
+          "wilson_95_ci": [
+            0.13808604,
+            0.20279672
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 512,
+        "histogram": {
+          "-1.0": 28,
+          "-10.0": 3,
+          "-11.0": 2,
+          "-12.0": 1,
+          "-13.0": 5,
+          "-14.0": 2,
+          "-15.0": 1,
+          "-16.0": 1,
+          "-17.0": 1,
+          "-19.0": 2,
+          "-2.0": 11,
+          "-20.0": 1,
+          "-22.0": 1,
+          "-23.0": 1,
+          "-26.0": 1,
+          "-27.0": 4,
+          "-3.0": 16,
+          "-37.0": 1,
+          "-4.0": 11,
+          "-42.0": 1,
+          "-43.0": 1,
+          "-44.0": 2,
+          "-45.0": 1,
+          "-47.0": 1,
+          "-5.0": 16,
+          "-6.0": 4,
+          "-7.0": 10,
+          "-8.0": 6,
+          "-9.0": 6,
+          "0.0": 64,
+          "1.0": 134,
+          "10.0": 4,
+          "11.0": 1,
+          "12.0": 3,
+          "13.0": 3,
+          "14.0": 2,
+          "15.0": 3,
+          "16.0": 2,
+          "18.0": 1,
+          "2.0": 29,
+          "20.0": 1,
+          "21.0": 1,
+          "23.0": 1,
+          "24.0": 1,
+          "25.0": 3,
+          "26.0": 1,
+          "29.0": 1,
+          "3.0": 32,
+          "30.0": 2,
+          "31.0": 1,
+          "33.0": 2,
+          "34.0": 2,
+          "35.0": 2,
+          "36.0": 1,
+          "38.0": 1,
+          "39.0": 3,
+          "4.0": 13,
+          "41.0": 3,
+          "42.0": 1,
+          "43.0": 1,
+          "45.0": 1,
+          "48.0": 2,
+          "5.0": 13,
+          "51.0": 1,
+          "53.0": 1,
+          "6.0": 4,
+          "7.0": 9,
+          "8.0": 9,
+          "81.0": 9,
+          "9.0": 3
+        },
+        "max": 81.0,
+        "mean": 3.0546875,
+        "median": 1.0,
+        "min": -47.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 134,
+        "p25": -1.0,
+        "p50": 1.0,
+        "p75": 3.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "late_D6_D8": {
+      "bootstrap": {
+        "crossing_point_95_percent_ci": [
+          0.5,
+          0.91704545
+        ],
+        "mean_raw_advantage_95_percent_ci": [
+          -2.04700521,
+          2.52604167
+        ],
+        "median_raw_advantage_95_percent_ci": [
+          -1.0,
+          1.0
+        ],
+        "pairwise": false,
+        "resamples": 10000,
+        "sampling_unit_count": 192,
+        "seed": 20260915,
+        "valid_crossing_resamples": 6391
+      },
+      "counterfactual_only": true,
+      "games": 192,
+      "implied_fair_komi": {
+        "mean_based": 0.19270833,
+        "median_based": 1.0,
+        "win_rate_crossing_interval": [
+          0.5,
+          1.5
+        ],
+        "win_rate_crossing_point": 0.55555557
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.51041667,
+          "black_wins": 98,
+          "games": 192,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": -0.30729167,
+          "median_counterfactual_margin_black": 0.5,
+          "ties": 0,
+          "white_wins": 94,
+          "wilson_95_ci": [
+            0.4402002,
+            0.58022448
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.32291667,
+          "black_wins": 62,
+          "games": 192,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": -1.30729167,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 130,
+          "wilson_95_ci": [
+            0.26081008,
+            0.39197029
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.28645833,
+          "black_wins": 55,
+          "games": 192,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": -2.30729167,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 137,
+          "wilson_95_ci": [
+            0.22718928,
+            0.35410469
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.23958333,
+          "black_wins": 46,
+          "games": 192,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -3.30729167,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 146,
+          "wilson_95_ci": [
+            0.18469443,
+            0.30468846
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.234375,
+          "black_wins": 45,
+          "games": 192,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -4.30729167,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 147,
+          "wilson_95_ci": [
+            0.18002896,
+            0.29914159
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.21354167,
+          "black_wins": 41,
+          "games": 192,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -5.30729167,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 151,
+          "wilson_95_ci": [
+            0.16149108,
+            0.27683009
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 192,
+        "histogram": {
+          "-1.0": 8,
+          "-10.0": 2,
+          "-11.0": 2,
+          "-12.0": 1,
+          "-13.0": 3,
+          "-14.0": 2,
+          "-15.0": 1,
+          "-16.0": 1,
+          "-17.0": 1,
+          "-19.0": 2,
+          "-2.0": 7,
+          "-22.0": 1,
+          "-23.0": 1,
+          "-26.0": 1,
+          "-27.0": 3,
+          "-3.0": 13,
+          "-37.0": 1,
+          "-4.0": 3,
+          "-42.0": 1,
+          "-43.0": 1,
+          "-44.0": 2,
+          "-45.0": 1,
+          "-47.0": 1,
+          "-5.0": 9,
+          "-6.0": 1,
+          "-7.0": 6,
+          "-8.0": 3,
+          "-9.0": 5,
+          "0.0": 11,
+          "1.0": 36,
+          "10.0": 3,
+          "11.0": 1,
+          "12.0": 1,
+          "13.0": 1,
+          "14.0": 2,
+          "15.0": 2,
+          "16.0": 2,
+          "18.0": 1,
+          "2.0": 7,
+          "20.0": 1,
+          "23.0": 1,
+          "25.0": 3,
+          "29.0": 1,
+          "3.0": 9,
+          "30.0": 2,
+          "33.0": 1,
+          "35.0": 1,
+          "38.0": 1,
+          "4.0": 1,
+          "41.0": 1,
+          "43.0": 1,
+          "5.0": 4,
+          "6.0": 2,
+          "7.0": 4,
+          "8.0": 4,
+          "81.0": 2,
+          "9.0": 3
+        },
+        "max": 81.0,
+        "mean": 0.19270833,
+        "median": 1.0,
+        "min": -47.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 36,
+        "p25": -5.0,
+        "p50": 1.0,
+        "p75": 3.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "without_D3": {
+      "bootstrap": {
+        "crossing_point_95_percent_ci": [
+          0.54705882,
+          0.96325417
+        ],
+        "mean_raw_advantage_95_percent_ci": [
+          1.60485491,
+          4.64520089
+        ],
+        "median_raw_advantage_95_percent_ci": [
+          1.0,
+          1.0
+        ],
+        "pairwise": false,
+        "resamples": 10000,
+        "sampling_unit_count": 448,
+        "seed": 20260914,
+        "valid_crossing_resamples": 9826
+      },
+      "counterfactual_only": true,
+      "games": 448,
+      "implied_fair_komi": {
+        "mean_based": 3.09598214,
+        "median_based": 1.0,
+        "win_rate_crossing_interval": [
+          0.5,
+          1.5
+        ],
+        "win_rate_crossing_point": 0.75287355
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.54910714,
+          "black_wins": 246,
+          "games": 448,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 2.59598214,
+          "median_counterfactual_margin_black": 0.5,
+          "ties": 0,
+          "white_wins": 202,
+          "wilson_95_ci": [
+            0.50280808,
+            0.59457121
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.35491071,
+          "black_wins": 159,
+          "games": 448,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": 1.59598214,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 289,
+          "wilson_95_ci": [
+            0.31200811,
+            0.40028036
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.29910714,
+          "black_wins": 134,
+          "games": 448,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": 0.59598214,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 314,
+          "wilson_95_ci": [
+            0.25856289,
+            0.34306729
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.23883929,
+          "black_wins": 107,
+          "games": 448,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -0.40401786,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 341,
+          "wilson_95_ci": [
+            0.20168307,
+            0.28043617
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.21428571,
+          "black_wins": 96,
+          "games": 448,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -1.40401786,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 352,
+          "wilson_95_ci": [
+            0.17880275,
+            0.25462684
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.18526786,
+          "black_wins": 83,
+          "games": 448,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -2.40401786,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 365,
+          "wilson_95_ci": [
+            0.1520208,
+            0.22386648
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 448,
+        "histogram": {
+          "-1.0": 28,
+          "-10.0": 3,
+          "-11.0": 2,
+          "-12.0": 1,
+          "-13.0": 5,
+          "-14.0": 2,
+          "-15.0": 1,
+          "-16.0": 1,
+          "-17.0": 1,
+          "-19.0": 2,
+          "-2.0": 11,
+          "-20.0": 1,
+          "-22.0": 1,
+          "-23.0": 1,
+          "-26.0": 1,
+          "-27.0": 4,
+          "-3.0": 16,
+          "-37.0": 1,
+          "-4.0": 11,
+          "-42.0": 1,
+          "-43.0": 1,
+          "-44.0": 2,
+          "-45.0": 1,
+          "-47.0": 1,
+          "-5.0": 16,
+          "-6.0": 4,
+          "-7.0": 10,
+          "-8.0": 6,
+          "-9.0": 6,
+          "0.0": 61,
+          "1.0": 87,
+          "10.0": 3,
+          "11.0": 1,
+          "12.0": 3,
+          "13.0": 3,
+          "14.0": 2,
+          "15.0": 3,
+          "16.0": 2,
+          "18.0": 1,
+          "2.0": 25,
+          "20.0": 1,
+          "21.0": 1,
+          "23.0": 1,
+          "24.0": 1,
+          "25.0": 3,
+          "26.0": 1,
+          "29.0": 1,
+          "3.0": 27,
+          "30.0": 2,
+          "31.0": 1,
+          "33.0": 2,
+          "34.0": 2,
+          "35.0": 2,
+          "36.0": 1,
+          "38.0": 1,
+          "39.0": 3,
+          "4.0": 11,
+          "41.0": 3,
+          "42.0": 1,
+          "43.0": 1,
+          "45.0": 1,
+          "48.0": 2,
+          "5.0": 13,
+          "51.0": 1,
+          "53.0": 1,
+          "6.0": 4,
+          "7.0": 9,
+          "8.0": 8,
+          "81.0": 8,
+          "9.0": 3
+        },
+        "max": 81.0,
+        "mean": 3.09598214,
+        "median": 1.0,
+        "min": -47.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 87,
+        "p25": -2.0,
+        "p50": 1.0,
+        "p75": 3.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    }
+  },
+  "final_conclusion": {
+    "best_point_estimate": 0.88059702,
+    "confidence": "INCONCLUSIVE",
+    "do_not_extend_sample_automatically": true,
+    "future_training_komi_change_justified": "INCONCLUSIVE",
+    "paired_confirmation": false,
+    "paired_interpretation": "The 128-game paired result contradicts the 512 self-play crossing: BLACK is below 50% even at K=0.5, so no confirmation of the old range is claimed. This is INCONCLUSIVE and requires a separately designed follow-up before any more compute.",
+    "paired_result_contradicts_512": true,
+    "recommended_fair_komi_range": [
+      0.5,
+      1.5
+    ]
+  },
+  "golden_baseline": {
+    "checkpoint": "M8",
+    "historical_artifacts_rewritten": false,
+    "run_id": "torus9-stable-learning-20260913-v1",
+    "status": "CURRENT TORUS9 GOLDEN BEST",
+    "training_komi_unchanged": true
+  },
+  "golden_historical_komi": 0.5,
+  "interpretation": {
+    "candidate_best_point_estimate": 0.88059702,
+    "confidence_criteria_applied": [
+      "mean",
+      "median",
+      "win-rate crossing",
+      "without D3",
+      "D6-D8",
+      "frozen M8-vs-M8 paired",
+      "10,000-resample bootstrap"
+    ],
+    "current_komi_black_win_rate": 0.59960938,
+    "current_komi_shift_description": "At K=0.5, BLACK wins more than half of terminal self-play trajectories; the amount is trajectory-conditioned and not a game-theoretic proof.",
+    "fair_komi_semantics": "Effective/trajectory-conditioned counterfactual komi only; not a game-theoretic fair komi and not a training-semantic change.",
+    "late_generation_agreement": "See D6-D8 and paired datasets; disagreement lowers confidence rather than changing the Golden baseline.",
+    "paired_discrepancy_analysis": {
+      "128_paired_population": "Deterministic Arena from fixed non-empty starts stratified by prefix lengths 2,4,6,8,10,12,14,16, with the same frozen M8 on both sides and colors swapped.",
+      "512_selfplay_population": "Empty-board self-play across D1-D8 with root noise and early temperature sampling.",
+      "next_action": "INCONCLUSIVE; do not automatically add another sample or change training komi.",
+      "why_not_equivalent": "The paired run controls model identity and start state but samples a different state distribution and search regime from the 512 self-play corpus; its contradiction is evidence of population/semantics sensitivity, not proof that either historical corpus is invalid."
+    }
+  },
+  "paired_diagnostic": {
+    "fixed_plan": {
+      "adaptive_extension": false,
+      "candidate_crossing_interval": [
+        0.5,
+        1.5
+      ],
+      "candidate_point_estimate": 0.88059702,
+      "canonical_komi": 0.5,
+      "games": 128,
+      "independent_pairs": 64,
+      "search_contract": {
+        "fast": false,
+        "noise": false,
+        "simulations": 64,
+        "temperature": 0.0,
+        "watchdog": 1000,
+        "workers": 16
+      },
+      "status": "FIXED_BEFORE_RUN"
+    },
+    "games_declared": 128,
+    "games_path": "/home/codex/projects/gocube-alphazero/runs/torus9-komi-calibration-20260913/m8-vs-m8-paired/games.jsonl",
+    "games_sha256": "sha256:1fa3588fcfc4ca0b0812115a860a4923211feb398bf444a70ee7443793971e5d",
+    "independent_pairs": 64,
+    "master_seed": 2026091311,
+    "model_artifact_sha256": "sha256:a0e54de1e4370979d8447867113c9594817638dab3816634ef3722e6103529d0",
+    "model_hash": "sha256:0c2beca91354b04b26f7092c94b5c60b217c5db2d5e8cb5403a124bb39738761",
+    "model_label": "M8",
+    "run_id": "torus9-komi-calibration-20260913-m8-paired",
+    "search_contract": {
+      "adaptive_extension": false,
+      "arena_contract_fingerprint": "sha256:8fe09d8f51e7e1b44eea1b327a774221d94f6c6920f94426d611d0759d6fdb8c",
+      "arena_contract_id": "torus9-golden-arena-search-v2",
+      "cpuct": 1.25,
+      "fast": false,
+      "fpu": 0.0,
+      "noise": false,
+      "simulations": 64,
+      "technical_fail_closed": true,
+      "temperature": 0.0,
+      "watchdog": 1000,
+      "workers": 16
+    },
+    "start_prefix_length_histogram": {
+      "2": 8,
+      "4": 8,
+      "6": 8,
+      "8": 8,
+      "10": 8,
+      "12": 8,
+      "14": 8,
+      "16": 8
+    },
+    "starts_path": "/home/codex/projects/gocube-alphazero/runs/torus9-komi-calibration-20260913/m8-vs-m8-paired/starts.jsonl",
+    "starts_sha256": "sha256:1b6abdec9a8e3d3bcbd62e98135ea30a0b2417fed2216770a42f778f4e8d1ee8",
+    "summary": {
+      "95_percent_hoeffding_interval": [
+        0.33023731053242256,
+        0.6697626894675774
+      ],
+      "W/L/D": [
+        64,
+        64,
+        0
+      ],
+      "arena_contract_fingerprint": "sha256:8fe09d8f51e7e1b44eea1b327a774221d94f6c6920f94426d611d0759d6fdb8c",
+      "candidate": "M8",
+      "comparison": "M8-vs-M8-PAIRED",
+      "draws": 0,
+      "frozen_corpus_fingerprint": "sha256:30d5212b916cbf1c62247105ca881b56575606974e575e871ca264c47d46f62a",
+      "games": 128,
+      "losses": 64,
+      "mean_pair_score": 0.5,
+      "pairs_declared": 64,
+      "pairs_valid": 64,
+      "reference": "M8",
+      "technical_by_reason": {},
+      "technical_fail_closed": true,
+      "technical_games": 0,
+      "technical_pairs": [],
+      "valid_games": 128,
+      "wins": 64
+    }
+  },
+  "per_generation": {
+    "D1": {
+      "counterfactual_only": true,
+      "games": 64,
+      "implied_fair_komi": {
+        "mean_based": 5.390625,
+        "median_based": 0.5,
+        "win_rate_crossing_interval": [
+          0.5,
+          0.5
+        ],
+        "win_rate_crossing_point": 0.5
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.5,
+          "black_wins": 32,
+          "games": 64,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 4.890625,
+          "median_counterfactual_margin_black": 0.0,
+          "ties": 0,
+          "white_wins": 32,
+          "wilson_95_ci": [
+            0.38102095,
+            0.61897905
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.34375,
+          "black_wins": 22,
+          "games": 64,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": 3.890625,
+          "median_counterfactual_margin_black": -1.0,
+          "ties": 0,
+          "white_wins": 42,
+          "wilson_95_ci": [
+            0.23923142,
+            0.4659636
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.296875,
+          "black_wins": 19,
+          "games": 64,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": 2.890625,
+          "median_counterfactual_margin_black": -2.0,
+          "ties": 0,
+          "white_wins": 45,
+          "wilson_95_ci": [
+            0.19905151,
+            0.41770201
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.25,
+          "black_wins": 16,
+          "games": 64,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": 1.890625,
+          "median_counterfactual_margin_black": -3.0,
+          "ties": 0,
+          "white_wins": 48,
+          "wilson_95_ci": [
+            0.16014927,
+            0.36816276
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.203125,
+          "black_wins": 13,
+          "games": 64,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": 0.890625,
+          "median_counterfactual_margin_black": -4.0,
+          "ties": 0,
+          "white_wins": 51,
+          "wilson_95_ci": [
+            0.12273418,
+            0.31713636
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.140625,
+          "black_wins": 9,
+          "games": 64,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -0.109375,
+          "median_counterfactual_margin_black": -5.0,
+          "ties": 0,
+          "white_wins": 55,
+          "wilson_95_ci": [
+            0.07578573,
+            0.24616282
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 64,
+        "histogram": {
+          "-1.0": 10,
+          "-2.0": 1,
+          "-3.0": 2,
+          "-4.0": 2,
+          "-5.0": 3,
+          "-7.0": 1,
+          "-8.0": 1,
+          "0.0": 12,
+          "1.0": 10,
+          "2.0": 3,
+          "3.0": 3,
+          "34.0": 1,
+          "39.0": 1,
+          "4.0": 3,
+          "5.0": 4,
+          "6.0": 1,
+          "7.0": 2,
+          "8.0": 1,
+          "81.0": 3
+        },
+        "max": 81.0,
+        "mean": 5.390625,
+        "median": 0.5,
+        "min": -8.0,
+        "mode": [
+          0.0
+        ],
+        "mode_frequency": 12,
+        "p25": -1.0,
+        "p50": 0.5,
+        "p75": 3.25
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "D2": {
+      "counterfactual_only": true,
+      "games": 64,
+      "implied_fair_komi": {
+        "mean_based": 0.96875,
+        "median_based": 1.0,
+        "win_rate_crossing_interval": [
+          0.5,
+          1.5
+        ],
+        "win_rate_crossing_point": 0.85714286
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.65625,
+          "black_wins": 42,
+          "games": 64,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 0.46875,
+          "median_counterfactual_margin_black": 0.5,
+          "ties": 0,
+          "white_wins": 22,
+          "wilson_95_ci": [
+            0.5340364,
+            0.76076858
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.21875,
+          "black_wins": 14,
+          "games": 64,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": -0.53125,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 50,
+          "wilson_95_ci": [
+            0.13502319,
+            0.33432784
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.0625,
+          "black_wins": 4,
+          "games": 64,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": -1.53125,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 60,
+          "wilson_95_ci": [
+            0.0245712,
+            0.14997485
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.03125,
+          "black_wins": 2,
+          "games": 64,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -2.53125,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 62,
+          "wilson_95_ci": [
+            0.00861214,
+            0.10697292
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.015625,
+          "black_wins": 1,
+          "games": 64,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -3.53125,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 63,
+          "wilson_95_ci": [
+            0.00276354,
+            0.08334102
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.0,
+          "black_wins": 0,
+          "games": 64,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -4.53125,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 64,
+          "wilson_95_ci": [
+            0.0,
+            0.05662406
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 64,
+        "histogram": {
+          "-1.0": 1,
+          "0.0": 21,
+          "1.0": 28,
+          "2.0": 10,
+          "3.0": 2,
+          "4.0": 1,
+          "5.0": 1
+        },
+        "max": 5.0,
+        "mean": 0.96875,
+        "median": 1.0,
+        "min": -1.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 28,
+        "p25": 0.0,
+        "p50": 1.0,
+        "p75": 1.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "D3": {
+      "counterfactual_only": true,
+      "games": 64,
+      "implied_fair_komi": {
+        "mean_based": 2.765625,
+        "median_based": 1.0,
+        "win_rate_crossing_interval": [
+          0.5,
+          1.5
+        ],
+        "win_rate_crossing_point": 1.11702128
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.953125,
+          "black_wins": 61,
+          "games": 64,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 2.265625,
+          "median_counterfactual_margin_black": 0.5,
+          "ties": 0,
+          "white_wins": 3,
+          "wilson_95_ci": [
+            0.87100346,
+            0.98393098
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.21875,
+          "black_wins": 14,
+          "games": 64,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": 1.265625,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 50,
+          "wilson_95_ci": [
+            0.13502319,
+            0.33432784
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.15625,
+          "black_wins": 10,
+          "games": 64,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": 0.265625,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 54,
+          "wilson_95_ci": [
+            0.08714842,
+            0.26428062
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.078125,
+          "black_wins": 5,
+          "games": 64,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -0.734375,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 59,
+          "wilson_95_ci": [
+            0.03383118,
+            0.17019537
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.046875,
+          "black_wins": 3,
+          "games": 64,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -1.734375,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 61,
+          "wilson_95_ci": [
+            0.01606902,
+            0.12899654
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.046875,
+          "black_wins": 3,
+          "games": 64,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -2.734375,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 61,
+          "wilson_95_ci": [
+            0.01606902,
+            0.12899654
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 64,
+        "histogram": {
+          "0.0": 3,
+          "1.0": 47,
+          "10.0": 1,
+          "2.0": 4,
+          "3.0": 5,
+          "4.0": 2,
+          "8.0": 1,
+          "81.0": 1
+        },
+        "max": 81.0,
+        "mean": 2.765625,
+        "median": 1.0,
+        "min": 0.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 47,
+        "p25": 1.0,
+        "p50": 1.0,
+        "p75": 1.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "D4": {
+      "counterfactual_only": true,
+      "games": 64,
+      "implied_fair_komi": {
+        "mean_based": 6.109375,
+        "median_based": 0.0,
+        "win_rate_crossing_interval": null,
+        "win_rate_crossing_point": null
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.453125,
+          "black_wins": 29,
+          "games": 64,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 5.609375,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 35,
+          "wilson_95_ci": [
+            0.33729448,
+            0.57426403
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.375,
+          "black_wins": 24,
+          "games": 64,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": 4.609375,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 40,
+          "wilson_95_ci": [
+            0.2666598,
+            0.49749621
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.328125,
+          "black_wins": 21,
+          "games": 64,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": 3.609375,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 43,
+          "wilson_95_ci": [
+            0.22570558,
+            0.45000894
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.28125,
+          "black_wins": 18,
+          "games": 64,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": 2.609375,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 46,
+          "wilson_95_ci": [
+            0.18593372,
+            0.4013393
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.234375,
+          "black_wins": 15,
+          "games": 64,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": 1.609375,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 49,
+          "wilson_95_ci": [
+            0.14749896,
+            0.35133258
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.21875,
+          "black_wins": 14,
+          "games": 64,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": 0.609375,
+          "median_counterfactual_margin_black": -5.5,
+          "ties": 0,
+          "white_wins": 50,
+          "wilson_95_ci": [
+            0.13502319,
+            0.33432784
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 64,
+        "histogram": {
+          "-1.0": 6,
+          "-10.0": 1,
+          "-2.0": 3,
+          "-20.0": 1,
+          "-27.0": 1,
+          "-4.0": 2,
+          "-5.0": 1,
+          "-6.0": 2,
+          "-7.0": 2,
+          "-8.0": 2,
+          "0.0": 14,
+          "1.0": 5,
+          "12.0": 1,
+          "13.0": 1,
+          "2.0": 3,
+          "24.0": 1,
+          "3.0": 3,
+          "31.0": 1,
+          "35.0": 1,
+          "36.0": 1,
+          "39.0": 1,
+          "4.0": 3,
+          "5.0": 1,
+          "51.0": 1,
+          "53.0": 1,
+          "7.0": 2,
+          "8.0": 1,
+          "81.0": 2
+        },
+        "max": 81.0,
+        "mean": 6.109375,
+        "median": 0.0,
+        "min": -27.0,
+        "mode": [
+          0.0
+        ],
+        "mode_frequency": 14,
+        "p25": -1.0,
+        "p50": 0.0,
+        "p75": 4.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "D5": {
+      "counterfactual_only": true,
+      "games": 64,
+      "implied_fair_komi": {
+        "mean_based": 8.625,
+        "median_based": 3.0,
+        "win_rate_crossing_interval": [
+          2.5,
+          3.5
+        ],
+        "win_rate_crossing_point": 2.8
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.703125,
+          "black_wins": 45,
+          "games": 64,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 8.125,
+          "median_counterfactual_margin_black": 2.5,
+          "ties": 0,
+          "white_wins": 19,
+          "wilson_95_ci": [
+            0.58229799,
+            0.80094849
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.578125,
+          "black_wins": 37,
+          "games": 64,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": 7.125,
+          "median_counterfactual_margin_black": 1.5,
+          "ties": 0,
+          "white_wins": 27,
+          "wilson_95_ci": [
+            0.45610032,
+            0.69130218
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.546875,
+          "black_wins": 35,
+          "games": 64,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": 6.125,
+          "median_counterfactual_margin_black": 0.5,
+          "ties": 0,
+          "white_wins": 29,
+          "wilson_95_ci": [
+            0.42573597,
+            0.66270552
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.390625,
+          "black_wins": 25,
+          "games": 64,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": 5.125,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 39,
+          "wilson_95_ci": [
+            0.28055569,
+            0.51308082
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.34375,
+          "black_wins": 22,
+          "games": 64,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": 4.125,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 42,
+          "wilson_95_ci": [
+            0.23923142,
+            0.4659636
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.296875,
+          "black_wins": 19,
+          "games": 64,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": 3.125,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 45,
+          "wilson_95_ci": [
+            0.19905151,
+            0.41770201
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 64,
+        "histogram": {
+          "-1.0": 3,
+          "-13.0": 2,
+          "-3.0": 1,
+          "-4.0": 4,
+          "-5.0": 3,
+          "-6.0": 1,
+          "-7.0": 1,
+          "-9.0": 1,
+          "0.0": 3,
+          "1.0": 8,
+          "12.0": 1,
+          "13.0": 1,
+          "15.0": 1,
+          "2.0": 2,
+          "21.0": 1,
+          "26.0": 1,
+          "3.0": 10,
+          "33.0": 1,
+          "34.0": 1,
+          "39.0": 1,
+          "4.0": 3,
+          "41.0": 2,
+          "42.0": 1,
+          "45.0": 1,
+          "48.0": 2,
+          "5.0": 3,
+          "6.0": 1,
+          "7.0": 1,
+          "8.0": 2,
+          "81.0": 1
+        },
+        "max": 81.0,
+        "mean": 8.625,
+        "median": 3.0,
+        "min": -13.0,
+        "mode": [
+          3.0
+        ],
+        "mode_frequency": 10,
+        "p25": -0.25,
+        "p50": 3.0,
+        "p75": 8.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "D6": {
+      "counterfactual_only": true,
+      "games": 64,
+      "implied_fair_komi": {
+        "mean_based": -2.046875,
+        "median_based": -1.0,
+        "win_rate_crossing_interval": null,
+        "win_rate_crossing_point": null
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.453125,
+          "black_wins": 29,
+          "games": 64,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": -2.546875,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 35,
+          "wilson_95_ci": [
+            0.33729448,
+            0.57426403
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.3125,
+          "black_wins": 20,
+          "games": 64,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": -3.546875,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 44,
+          "wilson_95_ci": [
+            0.21231067,
+            0.43392336
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.28125,
+          "black_wins": 18,
+          "games": 64,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": -4.546875,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 46,
+          "wilson_95_ci": [
+            0.18593372,
+            0.4013393
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.234375,
+          "black_wins": 15,
+          "games": 64,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -5.546875,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 49,
+          "wilson_95_ci": [
+            0.14749896,
+            0.35133258
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.21875,
+          "black_wins": 14,
+          "games": 64,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -6.546875,
+          "median_counterfactual_margin_black": -5.5,
+          "ties": 0,
+          "white_wins": 50,
+          "wilson_95_ci": [
+            0.13502319,
+            0.33432784
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.1875,
+          "black_wins": 12,
+          "games": 64,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -7.546875,
+          "median_counterfactual_margin_black": -6.5,
+          "ties": 0,
+          "white_wins": 52,
+          "wilson_95_ci": [
+            0.11064643,
+            0.29974361
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 64,
+        "histogram": {
+          "-1.0": 2,
+          "-11.0": 2,
+          "-14.0": 1,
+          "-17.0": 1,
+          "-2.0": 1,
+          "-27.0": 1,
+          "-3.0": 4,
+          "-37.0": 1,
+          "-4.0": 1,
+          "-42.0": 1,
+          "-43.0": 1,
+          "-44.0": 2,
+          "-45.0": 1,
+          "-47.0": 1,
+          "-5.0": 3,
+          "-7.0": 3,
+          "-8.0": 3,
+          "-9.0": 4,
+          "0.0": 2,
+          "1.0": 9,
+          "16.0": 1,
+          "2.0": 2,
+          "25.0": 2,
+          "29.0": 1,
+          "3.0": 3,
+          "30.0": 1,
+          "33.0": 1,
+          "35.0": 1,
+          "38.0": 1,
+          "4.0": 1,
+          "41.0": 1,
+          "43.0": 1,
+          "5.0": 2,
+          "7.0": 1,
+          "9.0": 1
+        },
+        "max": 43.0,
+        "mean": -2.046875,
+        "median": -1.0,
+        "min": -47.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 9,
+        "p25": -8.25,
+        "p50": -1.0,
+        "p75": 3.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "D7": {
+      "counterfactual_only": true,
+      "games": 64,
+      "implied_fair_komi": {
+        "mean_based": -1.734375,
+        "median_based": -1.0,
+        "win_rate_crossing_interval": null,
+        "win_rate_crossing_point": null
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.421875,
+          "black_wins": 27,
+          "games": 64,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": -2.234375,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 37,
+          "wilson_95_ci": [
+            0.30869782,
+            0.54389968
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.234375,
+          "black_wins": 15,
+          "games": 64,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": -3.234375,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 49,
+          "wilson_95_ci": [
+            0.14749896,
+            0.35133258
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.21875,
+          "black_wins": 14,
+          "games": 64,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": -4.234375,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 50,
+          "wilson_95_ci": [
+            0.13502319,
+            0.33432784
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.15625,
+          "black_wins": 10,
+          "games": 64,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": -5.234375,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 54,
+          "wilson_95_ci": [
+            0.08714842,
+            0.26428062
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.15625,
+          "black_wins": 10,
+          "games": 64,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -6.234375,
+          "median_counterfactual_margin_black": -5.5,
+          "ties": 0,
+          "white_wins": 54,
+          "wilson_95_ci": [
+            0.08714842,
+            0.26428062
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.140625,
+          "black_wins": 9,
+          "games": 64,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -7.234375,
+          "median_counterfactual_margin_black": -6.5,
+          "ties": 0,
+          "white_wins": 55,
+          "wilson_95_ci": [
+            0.07578573,
+            0.24616282
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 64,
+        "histogram": {
+          "-1.0": 6,
+          "-10.0": 1,
+          "-12.0": 1,
+          "-14.0": 1,
+          "-15.0": 1,
+          "-19.0": 2,
+          "-2.0": 3,
+          "-22.0": 1,
+          "-23.0": 1,
+          "-26.0": 1,
+          "-27.0": 2,
+          "-3.0": 7,
+          "-4.0": 1,
+          "-5.0": 4,
+          "-6.0": 1,
+          "-7.0": 2,
+          "0.0": 2,
+          "1.0": 12,
+          "10.0": 1,
+          "12.0": 1,
+          "13.0": 1,
+          "14.0": 1,
+          "15.0": 1,
+          "2.0": 1,
+          "23.0": 1,
+          "25.0": 1,
+          "3.0": 4,
+          "30.0": 1,
+          "5.0": 1,
+          "7.0": 1
+        },
+        "max": 30.0,
+        "mean": -1.734375,
+        "median": -1.0,
+        "min": -27.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 12,
+        "p25": -5.0,
+        "p50": -1.0,
+        "p75": 1.0
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    },
+    "D8": {
+      "counterfactual_only": true,
+      "games": 64,
+      "implied_fair_komi": {
+        "mean_based": 4.359375,
+        "median_based": 1.0,
+        "win_rate_crossing_interval": [
+          0.5,
+          1.5
+        ],
+        "win_rate_crossing_point": 1.16666667
+      },
+      "komi_sweep": {
+        "0.5": {
+          "black_win_rate": 0.65625,
+          "black_wins": 42,
+          "games": 64,
+          "komi": 0.5,
+          "mean_counterfactual_margin_black": 3.859375,
+          "median_counterfactual_margin_black": 0.5,
+          "ties": 0,
+          "white_wins": 22,
+          "wilson_95_ci": [
+            0.5340364,
+            0.76076858
+          ]
+        },
+        "1.5": {
+          "black_win_rate": 0.421875,
+          "black_wins": 27,
+          "games": 64,
+          "komi": 1.5,
+          "mean_counterfactual_margin_black": 2.859375,
+          "median_counterfactual_margin_black": -0.5,
+          "ties": 0,
+          "white_wins": 37,
+          "wilson_95_ci": [
+            0.30869782,
+            0.54389968
+          ]
+        },
+        "2.5": {
+          "black_win_rate": 0.359375,
+          "black_wins": 23,
+          "games": 64,
+          "komi": 2.5,
+          "mean_counterfactual_margin_black": 1.859375,
+          "median_counterfactual_margin_black": -1.5,
+          "ties": 0,
+          "white_wins": 41,
+          "wilson_95_ci": [
+            0.25288402,
+            0.48179149
+          ]
+        },
+        "3.5": {
+          "black_win_rate": 0.328125,
+          "black_wins": 21,
+          "games": 64,
+          "komi": 3.5,
+          "mean_counterfactual_margin_black": 0.859375,
+          "median_counterfactual_margin_black": -2.5,
+          "ties": 0,
+          "white_wins": 43,
+          "wilson_95_ci": [
+            0.22570558,
+            0.45000894
+          ]
+        },
+        "4.5": {
+          "black_win_rate": 0.328125,
+          "black_wins": 21,
+          "games": 64,
+          "komi": 4.5,
+          "mean_counterfactual_margin_black": -0.140625,
+          "median_counterfactual_margin_black": -3.5,
+          "ties": 0,
+          "white_wins": 43,
+          "wilson_95_ci": [
+            0.22570558,
+            0.45000894
+          ]
+        },
+        "5.5": {
+          "black_win_rate": 0.3125,
+          "black_wins": 20,
+          "games": 64,
+          "komi": 5.5,
+          "mean_counterfactual_margin_black": -1.140625,
+          "median_counterfactual_margin_black": -4.5,
+          "ties": 0,
+          "white_wins": 44,
+          "wilson_95_ci": [
+            0.21231067,
+            0.43392336
+          ]
+        }
+      },
+      "raw_area_advantage_distribution": {
+        "count": 64,
+        "histogram": {
+          "-10.0": 1,
+          "-13.0": 3,
+          "-16.0": 1,
+          "-2.0": 3,
+          "-3.0": 2,
+          "-4.0": 1,
+          "-5.0": 2,
+          "-7.0": 1,
+          "-9.0": 1,
+          "0.0": 7,
+          "1.0": 15,
+          "10.0": 2,
+          "11.0": 1,
+          "14.0": 1,
+          "15.0": 1,
+          "16.0": 1,
+          "18.0": 1,
+          "2.0": 4,
+          "20.0": 1,
+          "3.0": 2,
+          "5.0": 1,
+          "6.0": 2,
+          "7.0": 2,
+          "8.0": 4,
+          "81.0": 2,
+          "9.0": 2
+        },
+        "max": 81.0,
+        "mean": 4.359375,
+        "median": 1.0,
+        "min": -16.0,
+        "mode": [
+          1.0
+        ],
+        "mode_frequency": 15,
+        "p25": 0.0,
+        "p50": 1.0,
+        "p75": 7.25
+      },
+      "technical_games_excluded": 0,
+      "training_komi": 0.5
+    }
+  },
+  "profile": {
+    "arena_watchdog": 1000,
+    "profile_fingerprint": "sha256:016f32dfdc203e8e4a5a015db56ee02d3401eea62e7af11f9f8bf5e6d5d22c8f",
+    "profile_id": "gocube-torus9-stable-learning-v2"
+  },
+  "report_schema": "torus9-komi-calibration-v1",
+  "source": {
+    "arena_root": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/arena",
+    "calibration_tool": "tools/torus9_komi_calibration.py",
+    "calibration_tool_sha256": "sha256:724337fd6dfbaeb75c8425cff8320d47bdcda38a8151a9f757e71504d41ca569",
+    "git_commit": "d1fd6210f6a3b7755341c0c4c832ed22cf5289d4",
+    "git_tree": "a8e193a0bef2ba2b52f562eae528e5b7dfc4f33b",
+    "run_root": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1",
+    "worktree_clean": true
+  },
+  "winner_flips_at_all_512_candidate": {
+    "by_generation": {
+      "D1": {
+        "games": 64,
+        "winner_flips": 0
+      },
+      "D2": {
+        "games": 64,
+        "winner_flips": 0
+      },
+      "D3": {
+        "games": 64,
+        "winner_flips": 0
+      },
+      "D4": {
+        "games": 64,
+        "winner_flips": 0
+      },
+      "D5": {
+        "games": 64,
+        "winner_flips": 0
+      },
+      "D6": {
+        "games": 64,
+        "winner_flips": 0
+      },
+      "D7": {
+        "games": 64,
+        "winner_flips": 0
+      },
+      "D8": {
+        "games": 64,
+        "winner_flips": 0
+      }
+    },
+    "counterfactual_only": true,
+    "from_komi": 0.5,
+    "games": 512,
+    "to_komi": 0.88059702,
+    "winner_flips": 0
+  },
+  "winner_flips_at_all_512_upper_crossing": {
+    "by_generation": {
+      "D1": {
+        "games": 64,
+        "winner_flips": 10
+      },
+      "D2": {
+        "games": 64,
+        "winner_flips": 28
+      },
+      "D3": {
+        "games": 64,
+        "winner_flips": 47
+      },
+      "D4": {
+        "games": 64,
+        "winner_flips": 5
+      },
+      "D5": {
+        "games": 64,
+        "winner_flips": 8
+      },
+      "D6": {
+        "games": 64,
+        "winner_flips": 9
+      },
+      "D7": {
+        "games": 64,
+        "winner_flips": 12
+      },
+      "D8": {
+        "games": 64,
+        "winner_flips": 15
+      }
+    },
+    "counterfactual_only": true,
+    "from_komi": 0.5,
+    "games": 512,
+    "to_komi": 1.5,
+    "winner_flips": 134
+  }
+}

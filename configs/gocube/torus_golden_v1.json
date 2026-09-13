@@ -1,0 +1,298 @@
+{
+  "profile_id": "gocube-torus-golden-graph-area-v1",
+  "schema_version": 1,
+  "contract_doc": "docs/TORUS_GOLDEN_V1_EXPERIMENT_CONTRACT.md",
+  "fingerprint_algorithm": "sha256-canonical-json-v1",
+  "experiment_fingerprint": "sha256:1f5a1f821fc2e3dc52c957da9ffe1fc9313fb5b02bd81fd2f452233b57bd576e",
+  "base": {
+    "branch": "codex/torus-rebuild-v1",
+    "git_sha": "c7a0fab2c708cbc9785f914ec6004fffeb7bb2a7"
+  },
+  "topology": {
+    "topology_id": "torus-5x5-row-major-v1",
+    "kind": "torus",
+    "width": 5,
+    "height": 5,
+    "number_of_points": 25,
+    "degree": 4,
+    "wrap_x": true,
+    "wrap_y": true,
+    "undirected": true,
+    "self_loops": false,
+    "duplicate_neighbors": false,
+    "point_order": "row-major-yx:point_id=y*width+x",
+    "neighbor_order": [
+      "N",
+      "E",
+      "S",
+      "W"
+    ],
+    "fingerprint": "sha256:b4097c32d4ab5034b84300fa41f951b353a5fcf0d8226e83922889b5552289ef"
+  },
+  "rules": {
+    "profile_id": "graph-area-v1",
+    "version": 1,
+    "placement": {
+      "sequence": [
+        "place-own-stone-on-empty-point",
+        "remove-adjacent-opponent-groups-with-zero-liberties",
+        "reject-if-new-own-group-has-zero-liberties-after-captures"
+      ]
+    },
+    "suicide": "forbidden",
+    "ko": "positional-superko",
+    "initial_position_in_superko_history": true,
+    "full_state_includes_superko_history": true,
+    "same_board_different_superko_history_may_be_different_state": true,
+    "pass": {
+      "action": "PASS",
+      "always_legal_while_nonterminal": true,
+      "first_pass_is_nonterminal": true,
+      "increments_consecutive_pass_count": true,
+      "ordinary_move_resets_count": true,
+      "terminal_after_consecutive_passes": 2
+    },
+    "terminal": {
+      "rule_terminal_condition": "two-consecutive-passes",
+      "score_only_after_rule_terminal": true
+    },
+    "scoring": {
+      "method": "graph-area",
+      "area_formula": "stones+owned_empty_points",
+      "empty_component_black_owned_if": "boundary_has_BLACK_and_no_WHITE",
+      "empty_component_white_owned_if": "boundary_has_WHITE_and_no_BLACK",
+      "otherwise": "neutral",
+      "heuristic_dead_stone_removal": false,
+      "margin_black": "black_area-white_area-komi",
+      "positive_margin_result": "BLACK",
+      "negative_margin_result": "WHITE",
+      "zero_margin_result": "DRAW"
+    },
+    "excluded_features": [
+      "resign",
+      "japanese-cleanup-phases",
+      "encore",
+      "agreement-removal",
+      "whiteBonusScore",
+      "benson-terminal-shortcut",
+      "heuristic-dead-stone-removal",
+      "nn-forced-termination"
+    ],
+    "komi": 0.5,
+    "komi_policy": {
+      "first_proof_baseline": 0.5,
+      "explicit_future_finite_values_may_be_owner_approved": true,
+      "forbidden_legacy_sentinel": 7.5,
+      "sentinel_meaning": "legacy-contamination-or-stale-artifact",
+      "sentinel_handling": "fail-closed-and-contact-owner",
+      "automatic_coercion_to_baseline": false,
+      "must_be_explicit_in_runtime_identity_manifests_and_checkpoints": true,
+      "included_in_rules_and_experiment_fingerprints": true
+    },
+    "fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842"
+  },
+  "results": {
+    "rule_level": [
+      "BLACK",
+      "WHITE",
+      "DRAW"
+    ],
+    "technical": [
+      "TRUNCATED_MOVE_LIMIT",
+      "ERROR"
+    ],
+    "technical_are_training_targets": false,
+    "technical_are_draws": false,
+    "rule_level_no_result_exists_in_v1": false,
+    "training_replay_accepts_only_rule_level_terminal": true
+  },
+  "watchdog": {
+    "is_game_rule": false,
+    "formula": "20*number_of_points",
+    "actions_per_point": 20,
+    "action_cap": 500,
+    "pass_counts_as_action": true,
+    "second_pass_terminal_precedes_truncation": true,
+    "cap_status": "TRUNCATED_MOVE_LIMIT",
+    "self_play_truncation_warning_fraction": 0.05,
+    "long_training_blocked_above_warning_until_investigated": true
+  },
+  "targets": {
+    "contract_id": "gocube-wdl-side-to-move-v1",
+    "version": 1,
+    "value": {
+      "vector": [
+        "WIN",
+        "DRAW",
+        "LOSS"
+      ],
+      "perspective": "side-to-move-replay-position",
+      "utility": "P(WIN)-P(LOSS)",
+      "source": "rule-level-terminal-outcome-only",
+      "black_or_white_winner_is_reencoded_for_each_replay_position_side_to_move": true,
+      "draw_target": [
+        0,
+        1,
+        0
+      ],
+      "technical_termination_target": null,
+      "legacy_vector": [
+        "WIN",
+        "LOSS",
+        "NO_RESULT"
+      ],
+      "legacy_wlnr_compatible": false,
+      "true_rule_level_NO_RESULT_requires_new_version": true
+    },
+    "policy": {
+      "formula": "N(a)/sum(N(legal_actions))",
+      "source": "root-mcts-visit-counts",
+      "illegal_action_mass": 0,
+      "legal_action_mass_sum": 1,
+      "requires_positive_visit_sum": true,
+      "fast_search": false,
+      "forced_playout_pruning": false,
+      "lcb_transform": false
+    },
+    "fingerprint": "sha256:6dffad74c4f832741f9cd522aa407f3e88d6f6159ebe56c3dc226a52b4145e41"
+  },
+  "observation": {
+    "schema_id": "gocube-torus-golden-observation-v1",
+    "version": 1,
+    "point_axis_length": 25,
+    "point_channels": [
+      {
+        "index": 0,
+        "name": "own_stones",
+        "semantics": "1 on points occupied by side-to-move stones, else 0"
+      },
+      {
+        "index": 1,
+        "name": "opponent_stones",
+        "semantics": "1 on points occupied by opponent stones, else 0"
+      },
+      {
+        "index": 2,
+        "name": "side_to_move_color",
+        "semantics": "constant point plane: +1 for BLACK to move, -1 for WHITE to move"
+      },
+      {
+        "index": 3,
+        "name": "previous_pass",
+        "semantics": "constant point plane: 1 iff immediately previous action was PASS, else 0"
+      },
+      {
+        "index": 4,
+        "name": "legal_point_mask",
+        "semantics": "1 iff placement at PointId is legal under full rules state, else 0; PASS is represented separately"
+      },
+      {
+        "index": 5,
+        "name": "komi",
+        "semantics": "constant point plane containing explicit game komi"
+      }
+    ],
+    "legal_action_mask": {
+      "semantics": "full action mask over PointId 0..24 followed by PASS",
+      "length": 26,
+      "pass_action_index": 25
+    },
+    "nn_observation_contains_full_superko_history": false,
+    "rules_search_state_contains_full_superko_history": true,
+    "history_omission_is_model_approximation_not_rules_approximation": true,
+    "fingerprint": "sha256:d6e3aecc89f7df84f6e758423da4e3fe9269abeca644070db0be9261b30c6361"
+  },
+  "search_contracts": {
+    "self_play": {
+      "contract_id": "gocube-torus-golden-self-play-search-v1-placeholder",
+      "status": "stage0-placeholder",
+      "may_define_dirichlet_root_noise": true,
+      "may_define_move_temperature": true,
+      "may_define_exploration": true,
+      "simulation_budget": null,
+      "inherits_golden_arena_config": false
+    },
+    "golden_arena": {
+      "contract_id": "gocube-torus-golden-arena-search-v1-placeholder",
+      "status": "stage0-placeholder",
+      "root_noise": false,
+      "fast_search": false,
+      "move_temperature": 0,
+      "root_policy_temperature": false,
+      "resign": false,
+      "same_search_budget_for_both_models": true,
+      "simulation_budget": null,
+      "cpuct": null,
+      "fpu": null,
+      "search_settings_source": "arena-contract-not-checkpoint",
+      "inherits_self_play_config": false
+    }
+  },
+  "network_contract": {
+    "contract_id": "gocube-torus-golden-network-v1-placeholder",
+    "status": "stage0-placeholder-no-redesign",
+    "input_point_channels": 6,
+    "input_points": 25,
+    "required_heads": {
+      "policy": {
+        "shape": [
+          26
+        ],
+        "semantics": "25 PointId actions plus PASS"
+      },
+      "value": {
+        "shape": [
+          3
+        ],
+        "semantics": "WIN,DRAW,LOSS relative to side-to-move"
+      }
+    },
+    "trunk_architecture": null
+  },
+  "checkpoint_identity": {
+    "mismatch_policy": "fail-closed-no-fallback-default-or-coercion",
+    "required_metadata": [
+      "rules_profile_id",
+      "rules_fingerprint",
+      "topology_fingerprint",
+      "board_size",
+      "point_id_order_identity",
+      "komi",
+      "observation_schema_id",
+      "observation_schema_version",
+      "observation_fingerprint",
+      "target_contract_id",
+      "target_contract_version",
+      "target_fingerprint",
+      "value_head_semantics",
+      "network_heads_and_shapes",
+      "parent_or_source_run_identity",
+      "model_hash"
+    ]
+  },
+  "reproducibility": {
+    "rng_seed_policy": "persist-explicit-master-seed-and-deterministically-derived-stream-seeds",
+    "artifact_layout": {
+      "experiment_profile": "configs/gocube/torus_golden_v1.json",
+      "experiment_contract": "docs/TORUS_GOLDEN_V1_EXPERIMENT_CONTRACT.md",
+      "future_run_root": "runs/<run_id>/",
+      "future_manifest": "runs/<run_id>/manifest.json",
+      "future_checkpoints": "runs/<run_id>/checkpoints/"
+    },
+    "progress_counters": [
+      "completed_games",
+      "valid_replay_positions",
+      "train_samples",
+      "optimizer_updates",
+      "nn_evaluations"
+    ],
+    "iteration_number_alone_is_not_progress_measure": true
+  },
+  "legacy_inheritance": {
+    "japanese_v3_defaults": false,
+    "implicit_defaults": false,
+    "legacy_torus_factory_9_13_19_size_restriction": false,
+    "legacy_value_vector_WIN_LOSS_NO_RESULT": false,
+    "legacy_checkpoint_search_settings": false
+  }
+}

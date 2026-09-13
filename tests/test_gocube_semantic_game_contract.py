@@ -140,12 +140,12 @@ def test_plain_checkpoint_cannot_be_reinterpreted_as_diversified():
         resolve_game_class_from_contract(ResolvedGoCubeContract.from_dict(broken))
 
 
-def test_komi_is_strictly_zero_point_five_in_contract():
+def test_model_contract_rejects_forbidden_legacy_komi():
     contract = resolve_model_contract(Cube3JapaneseGame)
     broken = deepcopy(contract.to_dict())
     broken["komi"] = 7.5
 
-    with pytest.raises(ContractError, match="komi 0.5"):
+    with pytest.raises(ContractError, match=r"forbidden legacy komi 7\.5"):
         ResolvedGoCubeContract.from_dict(broken)
 
 
