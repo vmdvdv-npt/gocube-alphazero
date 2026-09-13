@@ -1872,6 +1872,7 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
             "mean_policy_loss": sum(float(row["policy_loss"]) for row in updates) / len(updates),
             "mean_value_loss": sum(float(row["value_loss"]) for row in updates) / len(updates),
             "mean_ownership_loss": sum(float(row["ownership_loss"]) for row in updates) / len(updates),
+            "ownership_loss_enabled": self.ownership_loss_enabled,
             "mean_score_loss_normalized": sum(float(row["score_loss_normalized"]) for row in updates) / len(updates),
             "score_loss_enabled": self.score_loss_enabled,
             "score_target_normalization": TORUS9_SCORE_TARGET_NORMALIZATION,
