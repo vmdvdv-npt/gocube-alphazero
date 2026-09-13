@@ -517,7 +517,7 @@ def run_search_depth_diagnostic(corpus: Sequence[dict[str, object]], model_cache
     all_rows = [item["by_simulations"]["64_vs_256"] for item in entries]
     return {
         "corpus_size": len(entries),
-        "corpus_definition": "64 fixed states: D3 (16), D4 (8), D6 (8), D7 (8), and eight representative Arena technical games × four tail plys (32).",
+        "corpus_definition": "64 fixed states: D3 (8), D4 (8), D6 (8), D7 (8), and eight representative Arena technical games × four tail plys (32).",
         "noise": "OFF",
         "cpuct": 1.25,
         "fpu": 0.0,
