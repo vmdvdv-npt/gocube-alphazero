@@ -597,22 +597,28 @@ def _run_iteration(
 
 
 def _selfplay_cap_winner(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    def row_cap(row: Mapping[str, object]) -> int:
+        execution = row.get("execution", {})
+        if not isinstance(execution, Mapping):
+            return -1
+        return int(execution.get("cap", execution.get("batch_cap", -1)))
+
     observed = [row for row in rows if row.get("iteration") in {2, 3, 4, 5} and row.get("execution", {}).get("phase") == "cap_sweep"]  # type: ignore[union-attr]
     if len(observed) != 4 or any(int(row["games"]) != 64 or int(row["technical_games"]) != 0 for row in observed):
         raise RuntimeError("Self-play cap sweep is incomplete or technically invalid")
     ranked = sorted(observed, key=lambda row: (float(row["moves_per_sec"]), float(row["inference"]["inference_rows_per_sec"])), reverse=True)  # type: ignore[index]
     fastest = float(ranked[0]["moves_per_sec"])
     equivalent = [row for row in ranked if float(row["moves_per_sec"]) >= fastest * 0.95]
-    winner_row = min(equivalent, key=lambda row: (int(row["execution"]["cap"]), -float(row["inference"]["inference_rows_per_sec"])))  # type: ignore[index]
+    winner_row = min(equivalent, key=lambda row: (row_cap(row), -float(row["inference"]["inference_rows_per_sec"])))  # type: ignore[index]
     return {
         "status": "CONFIRMED",
-        "winner_cap": int(winner_row["execution"]["cap"]),  # type: ignore[index]
+        "winner_cap": row_cap(winner_row),
         "winner_iteration": int(winner_row["iteration"]),
         "criterion": "same wait=6 ms; normalized by real moves/sec, rows/sec and batch telemetry; within 5% prefer smaller cap",
         "candidates": [
             {
                 "iteration": int(row["iteration"]),
-                "cap": int(row["execution"]["cap"]),  # type: ignore[index]
+                "cap": row_cap(row),
                 "wait_ms": float(row["execution"]["wait_ms"]),  # type: ignore[index]
                 "moves_per_sec": float(row["moves_per_sec"]),
                 "rows_per_sec": float(row["inference"]["inference_rows_per_sec"]),  # type: ignore[index]
@@ -623,15 +629,21 @@ def _selfplay_cap_winner(rows: Sequence[Mapping[str, object]]) -> dict[str, obje
                 "gpu_avg_pct": row["inference"].get("gpu_utilization_avg_pct"),  # type: ignore[union-attr]
                 "gpu_peak_pct": row["inference"].get("gpu_utilization_peak_pct"),  # type: ignore[union-attr]
             }
-            for row in sorted(observed, key=lambda item: int(item["execution"]["cap"]))  # type: ignore[index]
+            for row in sorted(observed, key=row_cap)
         ],
     }
 
 
 def _wait_winner(rows: Sequence[Mapping[str, object]], cap: int) -> dict[str, object]:
+    def row_cap(row: Mapping[str, object]) -> int:
+        execution = row.get("execution", {})
+        if not isinstance(execution, Mapping):
+            return -1
+        return int(execution.get("cap", execution.get("batch_cap", -1)))
+
     observed = [
         row for row in rows
-        if int(row.get("execution", {}).get("cap", -1)) == int(cap)  # type: ignore[union-attr]
+        if row_cap(row) == int(cap)
         and float(row.get("execution", {}).get("wait_ms", -1)) in {1.0, 2.0, 4.0, 6.0}  # type: ignore[union-attr]
         and row.get("iteration") in {2, 3, 4, 5, 6, 7, 8}
     ]
@@ -866,7 +878,7 @@ def _write_execution_report(history: Sequence[Mapping[str, object]], arenas: Seq
             "rows": [
                 {
                     "transition": f"M{int(row['iteration']) - 1}→M{row['iteration']}",
-                    "cap": row["execution"].get("cap"),
+                    "cap": row["execution"].get("cap", row["execution"].get("batch_cap")),
                     "wait_ms": row["execution"].get("wait_ms"),
                     "time_sec": row["self_play_wall_time_sec"],
                     "moves_per_sec": row["moves_per_sec"],
