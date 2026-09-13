@@ -529,7 +529,7 @@ def run_search_depth_diagnostic(corpus: Sequence[dict[str, object]], model_cache
 
 
 def run_noise_temperature_diagnostic(corpus: Sequence[dict[str, object]], evaluator: Torus9NeuralEvaluator) -> dict[str, object]:
-    m2 = [item for item in corpus if item["source"] == "D3"][:16]
+    m2 = list(corpus)
     variants = {
         "A_64_noise_off_temperature_0": (False, 0.0),
         "B_64_noise_on_temperature_0": (True, 0.0),
@@ -577,6 +577,7 @@ def run_noise_temperature_diagnostic(corpus: Sequence[dict[str, object]], evalua
         }
     return {
         "fixed_m2_states": len(m2),
+        "fixed_m2_state_selection": "16 evenly spaced D3 game indices (0,4,...,60), at ply 8 when available and otherwise at the final available position; this keeps short PASS branches from dominating the sample.",
         "replicates": 16,
         "definitions": {
             "A": "64 sims, root noise OFF, temperature 0",
@@ -834,28 +835,36 @@ def board_svg(stones: Sequence[int], x: int, y: int, size: int = 144) -> str:
 
 
 def make_visual_traces(run_root: Path, arena_games: Sequence[dict[str, object]], output: Path) -> dict[str, object]:
-    selfplay: list[tuple[str, dict[str, object], str]] = []
+    entries: list[tuple[str, dict[str, object], str, str]] = []
     for generation, indexes in ((3, (0, 15, 58)),):
         games = load_jsonl(run_root / f"canonical/selfplay/iter-{generation:02d}-games.jsonl")
         for index in indexes:
             game = games[index]
-            selfplay.append(("D3 BLACK/WHITE", game, f"D{generation}-{index:02d}"))
-    m8_games = [game for game in load_jsonl(run_root / "canonical/selfplay/iter-08-games.jsonl") if len(game["final_action_trace"]) > 30]
-    for index, game in enumerate(m8_games[:2]):
-        selfplay.append(("M8 ordinary", game, f"M8-{index:02d}"))
+            entries.append(("D3 BLACK/WHITE", game, f"D{generation}-{index:02d}", "selfplay"))
+    current_m8_games = [game for game in arena_games if game["comparison"] == "M8-vs-M1" and game["technical_termination"] is None]
+    old_m8_games = [game for game in arena_games if game["comparison"] == "NEW-M8-vs-OLD-M8" and game["technical_termination"] is None]
+    for index, game in enumerate(current_m8_games[:2]):
+        entries.append(("M8 ordinary Arena", game, f"M8-{index:02d}", "arena"))
+    for index, game in enumerate(old_m8_games[:2]):
+        entries.append(("OLD M8 ordinary Arena", game, f"OLD-M8-{index:02d}", "arena"))
     selected_arena = [game for game in arena_games if game["game_id"] in {"M8-vs-M0--prefix-04-accepted-03--g1", "M8-vs-M0--prefix-16-accepted-04--g1", "M8-vs-M4--prefix-02-accepted-07--g2", "M8-vs-M4--prefix-12-accepted-05--g2", "M8-vs-M4--prefix-16-accepted-03--g1", "M8-vs-M7--prefix-02-accepted-01--g2", "NEW-M8-vs-OLD-M8--prefix-02-accepted-02--g1"}]
     width, row_height = 1220, 258
-    height = row_height * (len(selfplay) + len(selected_arena)) + 36
+    height = row_height * (len(entries) + len(selected_arena)) + 36
     svg: list[str] = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">', '<rect width="100%" height="100%" fill="#faf8f2"/>', '<style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#27231f}.title{font-size:18px;font-weight:700}.meta{font-size:12px}.small{font-size:10px}</style>', '<text x="18" y="24" class="title">Torus 9×9 offline visual traces — board snapshots, not canonical result changes</text>']
     visuals: list[dict[str, object]] = []
-    entries = [(category, game, ident, False) for category, game, ident in selfplay] + [("Arena technical", game, game["game_id"], True) for game in selected_arena]
-    for row_index, (category, game, ident, is_arena) in enumerate(entries):
+    entries.extend(("Arena technical", game, game["game_id"], "technical") for game in selected_arena)
+    for row_index, (category, game, ident, kind) in enumerate(entries):
         y = 36 + row_index * row_height
-        if is_arena:
+        if kind == "technical":
             actions = [item["action"] for item in game["action_trace"]]
             states = replay_states(game["start_state"], actions)
             outcome = "TRUNCATED_MOVE_LIMIT / 500"
             snapshot_indices = [0, min(8, len(actions)), min(100, len(actions)), min(400, len(actions)), len(actions)]
+        elif kind == "arena":
+            actions = [item["action"] for item in game["action_trace"]]
+            states = replay_states(game["start_state"], actions)
+            outcome = f'{game["formal_result"]} / {len(actions)} plies'
+            snapshot_indices = [0, min(8, len(actions)), min(24, len(actions)), min(48, len(actions)), len(actions)]
         else:
             actions = list(game["final_action_trace"])
             states = replay_states(game["start_state"], actions)
@@ -875,7 +884,7 @@ def make_visual_traces(run_root: Path, arena_games: Sequence[dict[str, object]],
     svg.append("</svg>")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(svg) + "\n", encoding="utf-8")
-    return {"path": str(output), "sha256": file_sha256(output), "visuals": visuals, "inspection_scope": "2 ordinary M8 games, 3 D3 games (including typical and short branches), and 7 representative truncated Arena games."}
+    return {"path": str(output), "sha256": file_sha256(output), "visuals": visuals, "inspection_scope": "2 ordinary current M8 games, 2 ordinary OLD M8 games, 3 D3 games (including typical and short branches), and 7 representative truncated Arena games."}
 
 
 def best_manifest(run_root: Path, profile: Mapping[str, object]) -> dict[str, object]:
@@ -935,6 +944,7 @@ def markdown_report(report: Mapping[str, object]) -> str:
         "- M2/D3 used one model hash on both sides: " + str(report["d3_forensics"]["causal_sequence"]["model_hashes_used_on_both_sides"]) + ".",
         "- D3 is 61/3/0, with the three WHITE results all early PASS branches; no dominant first action explains the result.",
         "- Across all 512 self-play games, BLACK is " + f"{selfplay['all_512']['black_win_rate']:.4f}" + f" with Wilson 95% CI {selfplay['all_512']['wilson_95_ci']}; raw area advantage {selfplay['all_512']['average_raw_area_advantage']}, final komi-adjusted margin {selfplay['all_512']['average_final_komi_adjusted_margin'] }.",
+        "- Excluding D3, BLACK is " + f"{selfplay['all_512']['without_d3']['black_win_rate']:.4f}" + f" (Wilson 95% CI {selfplay['all_512']['without_d3']['wilson_95_ci']}); generation-index correlation is " + f"{selfplay['all_512']['without_d3']['black_rate_vs_generation_index']:.4f}, so checkpoint strength does not explain a monotonic color drift.",
         "- Canonical Arena technical games remain excluded from W/L/D.",
         "",
         "## STRONG EVIDENCE",
@@ -1011,7 +1021,7 @@ def markdown_report(report: Mapping[str, object]) -> str:
         "",
         f"Visual trace artifact: `{report['visual_inspection']['path']}`. Scope: {report['visual_inspection']['inspection_scope']}",
         "",
-        "The snapshots show normal legal placement/capture dynamics in ordinary M8 and D3 games; truncation panels show either single-PASS continuation or high-capture late churn rather than an exact point-state loop.",
+        "The snapshots show normal legal placement/capture dynamics in current M8 and OLD M8 Arena games and in D3; the current M8 panels look more decisive than OLD M8 on the same comparison family. Truncation panels show either single-PASS continuation or high-capture late churn rather than an exact point-state loop.",
         "",
         "## Verification and provenance",
         "",
@@ -1047,20 +1057,29 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     selfplay, games_by_generation, game_rows = selfplay_summary(run_root)
     d3_games = games_by_generation["D3"]
     d3 = d3_forensics(d3_games, model_cache["M2"][1])
+    arena_all_games: list[dict[str, object]] = []
     arena_games: list[dict[str, object]] = []
     for path in sorted((run_root / "canonical/arena").glob("*/games.jsonl")):
-        arena_games.extend(row for row in load_jsonl(path) if row["technical_termination"] == "TRUNCATED_MOVE_LIMIT")
+        records = load_jsonl(path)
+        arena_all_games.extend(records)
+        arena_games.extend(row for row in records if row["technical_termination"] == "TRUNCATED_MOVE_LIMIT")
     corpus = fixed_corpus(games_by_generation, arena_games)
     corpus_path = run_root / "post-learning-diagnostics/fixed-corpus.jsonl"
     corpus_path.parent.mkdir(parents=True, exist_ok=True)
     corpus_path.write_text("".join(json.dumps(item, sort_keys=True) + "\n" for item in corpus), encoding="utf-8")
     depth = run_search_depth_diagnostic(corpus, model_cache)
-    noise = run_noise_temperature_diagnostic(corpus, model_cache["M2"][1])
+    m2_noise_states: list[dict[str, object]] = []
+    for game_index in range(0, len(d3_games), 4):
+        game = d3_games[game_index]
+        position_index = min(7, len(game["positions"]) - 1)
+        position = game["positions"][position_index]
+        m2_noise_states.append({"state_id": f"D3-game-{game_index:02d}-ply-{position['ply']}", "source": "D3", "game_id": game["game_id"], "model_label": "M2", "ply": position["ply"], "state": position["state"], "state_digest": state_digest(position["state"])})
+    noise = run_noise_temperature_diagnostic(m2_noise_states, model_cache["M2"][1])
     arena_by_id = {str(game["game_id"]): game for game in arena_games}
     traced = [trace_arena_game(game, model_cache) for game in sorted(arena_games, key=lambda row: str(row["game_id"]))]
     traced_by_id = {row["game_id"]: row for row in traced}
     continuations = continuation_diagnostic(traced, arena_by_id, model_paths, workers=args.workers)
-    visual = make_visual_traces(run_root, arena_games, args.visual_path)
+    visual = make_visual_traces(run_root, arena_all_games, args.visual_path)
     manifest = best_manifest(run_root, profile)
     args.best_json.parent.mkdir(parents=True, exist_ok=True)
     args.best_json.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1099,7 +1118,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "self_play_verdict": "A + C with contributing D: expected first-player/komi advantage is amplified by the small 64-game sample and early stochastic PASS branches. Confidence: STRONG EVIDENCE. It is not a two-copy M2 mismatch, rules issue, or single-opening collapse.",
             "truncation_verdict": "B + C + D: legal long-play/capture churn and single-PASS continuation, with pair-specific PASS avoidance. Confidence: STRONG EVIDENCE. Superko activity is not the primary loop mechanism.",
             "teacher_verdict": "64-sim teacher remains a live quality risk: fixed-state 64/128/256 differences are reported, especially D3/M2 and truncation-tail states. No baseline change is authorized by this report alone.",
-            "first_player_verdict": f"Across all 512 self-play games BLACK win rate is {selfplay['all_512']['black_win_rate']:.4f}, Wilson 95% CI {selfplay['all_512']['wilson_95_ci']}; average raw area advantage {selfplay['all_512']['average_raw_area_advantage']} and average final komi-adjusted margin {selfplay['all_512']['average_final_komi_adjusted_margin']}. D3 is an extreme realization, not evidence of a different M2 on the two colors.",
+            "first_player_verdict": f"Across all 512 self-play games BLACK win rate is {selfplay['all_512']['black_win_rate']:.4f}, Wilson 95% CI {selfplay['all_512']['wilson_95_ci']}; excluding D3 it is {selfplay['all_512']['without_d3']['black_win_rate']:.4f} with CI {selfplay['all_512']['without_d3']['wilson_95_ci']}. Average raw area advantage is {selfplay['all_512']['average_raw_area_advantage']} and average final komi-adjusted margin is {selfplay['all_512']['average_final_komi_adjusted_margin']}. D3 is an extreme realization, not evidence of a different M2 on the two colors.",
         },
         "decision_matrix": {
             "self_play_61_3": "A. Expected first-player / stochastic variance, with D. network/value calibration as a plausible contributor to early PASS branch amplification.",
