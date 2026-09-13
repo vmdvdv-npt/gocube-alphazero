@@ -29,7 +29,7 @@ def test_diagnostic_statistics_and_truncation_labels_are_stable():
     assert capture_case["primary"] == "CAPTURE_CYCLE"
 
 
-def test_point_repeat_takes_priority_over_capture_label():
+def test_point_repeat_is_classified_as_superko_driven_loop():
     result = classify_truncation(
         last100_passes=0,
         last100_captures=40,
@@ -37,5 +37,5 @@ def test_point_repeat_takes_priority_over_capture_label():
         point_repeats=1,
         superko_last100=100,
     )
-    assert result["primary"] == "CAPTURE_CYCLE"
-    assert result["labels"] == ["CAPTURE_CYCLE", "SUPERKO_DRIVEN_LOOP"]
+    assert result["primary"] == "SUPERKO_DRIVEN_LOOP"
+    assert result["labels"] == ["SUPERKO_DRIVEN_LOOP"]
