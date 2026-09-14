@@ -84,7 +84,7 @@ def test_production_defaults_encode_real_parallelism_and_batching_contract():
     assert config.workers == 16
     assert config.games_per_worker == 4
     assert config.inference_batch_rows == 64
-    assert config.inference_batch_wait_ms == 4.0
+    assert config.inference_batch_wait_ms == 1.0
     assert config.device == "cuda"
     assert config.strict_production is True
     assert config.min_mean_inference_batch_rows == 16.0

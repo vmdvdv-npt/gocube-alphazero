@@ -86,7 +86,7 @@ Current Legion execution defaults:
 - one parent CUDA inference owner;
 - balanced initial lane fill with a shared global task-replenishment queue;
 - global inference batch cap 64 rows;
-- 4 ms central pre-forward coalescing window;
+- 1 ms central pre-forward coalescing window;
 - zero worker-local batching wait (worker requests enter the broker immediately).
 
 The cap/wait values remain benchmark-tunable execution parameters and are not
