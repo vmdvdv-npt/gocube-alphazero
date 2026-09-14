@@ -80,6 +80,42 @@
       "generations": 3,
       "cap": 20000,
       "sampling": "deterministic / reproducible"
+    },
+    "arena": {
+      "minimum_games": 64,
+      "simulations": 64,
+      "cpuct": 1.25,
+      "fpu": 0.0,
+      "noise": false,
+      "temperature": 0.0,
+      "fast_search": false,
+      "resign": false,
+      "watchdog": 1000,
+      "paired_starts_color_swap": true,
+      "technical_fail_closed": true,
+      "komi": 0.5
+    }
+  },
+  "current_arena_execution": {
+    "canonical_source": [
+      "tools/arena.py",
+      "tools/arena_engine.py"
+    ],
+    "games_minimum": 64,
+    "workers": 16,
+    "games_per_worker": 4,
+    "central_inference_batch_rows": 64,
+    "central_inference_batch_wait_ms": 1.0,
+    "worker_local_wait_ms": 0.0,
+    "min_mean_inference_batch_rows": 16.0,
+    "min_effective_cpu_cores": 8.0,
+    "historical_profile_arena_8_6_is_current_execution_default": false
+  },
+  "known_duplicate_definitions": {
+    "tools/arena_profiles/torus9.py": {
+      "kind": "temporary scientific adapter duplicate",
+      "canonical_source": "configs/gocube/torus9_golden_current_v3.json",
+      "policy": "fail closed on parity drift until direct profile resolution is migrated"
     }
   },
   "component_status": {
@@ -92,7 +128,7 @@
     "gocube_golden/topology.py": "KEEP SHARED",
     "tools/arena.py": "KEEP CURRENT",
     "tools/arena_engine.py": "KEEP CURRENT",
-    "tools/arena_profiles/torus9.py": "KEEP CURRENT",
+    "tools/arena_profiles/torus9.py": "KEEP CURRENT; VALIDATE TEMPORARY DUPLICATE",
     "alphazero/NNetWrapper.py": "KEEP TEMPORARILY FOR MIGRATION",
     "alphazero/GenericPlayers.py": "KEEP TEMPORARILY FOR MIGRATION",
     "alphazero/MCTS.pyx": "KEEP TEMPORARILY FOR MIGRATION",

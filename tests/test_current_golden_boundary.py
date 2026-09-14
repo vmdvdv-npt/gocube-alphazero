@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from gocube_golden.torus9_contract import load_torus9_current_profile
+from tools.arena_engine import ArenaExecutionConfig
+from tools.arena_profiles.torus9 import Torus9ArenaProfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,11 +131,31 @@ def test_retired_torus9_profiles_cannot_be_selected_by_current_launcher():
         assert retired_symbol not in runtime
 
 
-def test_current_arena_adapter_resolves_current_torus9_contract():
+def test_current_arena_scientific_duplicate_is_validated_against_current_profile():
+    profile = load_torus9_current_profile()
+    arena = profile["arena"]
+    adapter = Torus9ArenaProfile()
+    contract = adapter.scientific_contract(
+        ArenaExecutionConfig(device="cpu", strict_production=False)
+    )
+    assert contract["komi"] == arena["komi"] == 0.5
+    assert contract["simulations"] == arena["mcts_simulations"]
+    assert contract["cpuct"] == arena["cpuct"]
+    assert contract["fpu"] == arena["fpu"]
+    assert contract["noise"] == arena["noise"]
+    assert contract["temperature"] == arena["temperature"]
+    assert contract["fast_search"] == arena["fast_search"]
+    assert contract["resign"] == arena["resign"]
+    assert contract["watchdog"] == arena["watchdog"]
+    assert contract["paired_starts_color_swap"] == arena["paired_starts_color_swap"]
+    assert contract["technical_fail_closed"] is True
+
+    # The adapter still duplicates these values internally. Until that adapter
+    # is migrated to direct profile resolution, fail closed on any drift.
     source = (ROOT / "tools/arena_profiles/torus9.py").read_text(encoding="utf-8")
-    assert "load_torus9_current_profile" in source
-    assert "TORUS9_CURRENT_PROFILE_ID" in source
-    assert "TORUS9_CURRENT_SELFPLAY_CONTRACT_ID" in source
+    assert f"simulations={arena['mcts_simulations']}" in source
+    assert f"cpuct={arena['cpuct']}" in source
+    assert f"fpu={arena['fpu']}" in source
 
 
 def test_forbidden_historical_komi_literal_is_absent_from_current_path():
