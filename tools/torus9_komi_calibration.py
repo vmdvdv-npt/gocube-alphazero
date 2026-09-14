@@ -3,7 +3,7 @@
 
 Analysis helpers remain importable for tests and offline reports. The historical
 M8-vs-M8 Arena diagnostic is reachable only by invoking this script with the
-explicit frozen-Arena override.
+explicit ``--allow-frozen-arena`` override.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ def _frozen_module():
     return importlib.import_module(_FROZEN_MODULE)
 
 
-# Deliberately exported read-only/offline analysis surface.
 _frozen = _frozen_module()
 Trajectory = _frozen.Trajectory
 bootstrap_estimates = _frozen.bootstrap_estimates

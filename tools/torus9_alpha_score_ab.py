@@ -3,7 +3,7 @@
 
 The preserved implementation contains the deprecated single-process
 logical-lane Arena. It is available only through an explicit historical
-reproduction command.
+reproduction command using ``--allow-frozen-arena``.
 """
 
 from __future__ import annotations
