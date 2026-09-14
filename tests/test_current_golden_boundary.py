@@ -141,7 +141,8 @@ def test_retired_torus9_profiles_cannot_be_selected_by_current_launcher():
     launcher = (ROOT / "tools/continue_torus9_golden_m1_m100.py").read_text(encoding="utf-8")
     runtime = (ROOT / "tools/_frozen_continue_torus9_golden_m1_m100.py").read_text(encoding="utf-8")
     assert '"tools._frozen_continue_torus9_golden_m1_m100"' in launcher
-    assert "torus9_golden_current_v3.json" in runtime
+    assert "load_torus9_current_profile" in runtime
+    assert "current_torus9_profile_fingerprint" in runtime
     for retired in (
         "torus9_golden_learning_v1.json",
         "torus9_ownership_ab_v1.json",
