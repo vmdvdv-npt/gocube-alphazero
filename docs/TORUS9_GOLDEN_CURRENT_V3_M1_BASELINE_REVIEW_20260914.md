@@ -35,4 +35,3 @@ the M0 checkpoint timestamp to the completed self-play artifact timestamp.
 - Optimizer state: present; Adam step `80`
 - Resume point: `M1.pt` + `replay/rolling-after-01.jsonl`; explicit resume required
 - `M2`/iteration-2/benchmark artifacts: absent
-
