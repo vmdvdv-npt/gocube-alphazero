@@ -145,6 +145,7 @@ def test_frozen_operational_entrypoints_require_explicit_override():
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert "FROZEN_ARENA_OVERRIDE_FLAG" in source
         assert "FROZEN_ARENA_OVERRIDE_ENV" in source
+        assert "tools/torus9_arena.py" not in source
 
 
 def test_frozen_programmatic_entrypoints_stay_blocked():
