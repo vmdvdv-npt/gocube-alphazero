@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """Fail-closed front door for the historical Torus9 ownership A/B experiment.
 
-The original experiment is retained under a frozen module for reproducibility.
-It contains the deprecated logical-lane batched Arena and therefore cannot run
-unless the operator explicitly supplies ``--allow-frozen-arena``.
+Historical reproduction requires ``--allow-frozen-arena``.
 """
 
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from typing import Any
 
-from gocube_golden.arena_policy import ArenaPolicyError, FROZEN_ARENA_OVERRIDE_FLAG
-
+from gocube_golden.arena_policy import ArenaPolicyError, FROZEN_ARENA_OVERRIDE_ENV, FROZEN_ARENA_OVERRIDE_FLAG
 
 _FROZEN_MODULE = "tools._frozen_torus9_ownership_ab"
 _BLOCKED = frozenset({"run_experiment", "cli"})
@@ -24,11 +22,7 @@ def _frozen_module():
 
 
 def _locked(name: str) -> ArenaPolicyError:
-    return ArenaPolicyError(
-        f"{name} belongs to the frozen Torus9 ownership A/B runner. "
-        f"Run this script with {FROZEN_ARENA_OVERRIDE_FLAG} only for deliberate "
-        "historical reproduction."
-    )
+    return ArenaPolicyError(f"{name} is frozen; use {FROZEN_ARENA_OVERRIDE_FLAG} only for historical reproduction")
 
 
 def run_experiment(*_args: Any, **_kwargs: Any):
@@ -47,12 +41,17 @@ def __getattr__(name: str):
 
 def main() -> int:
     if FROZEN_ARENA_OVERRIDE_FLAG not in sys.argv[1:]:
-        raise SystemExit(
-            "LOCKED: this historical ownership A/B uses the frozen logical-lane "
-            f"Torus9 Arena. Add {FROZEN_ARENA_OVERRIDE_FLAG} only for deliberate reproduction."
-        )
+        raise SystemExit(f"LOCKED: historical ownership A/B. Add {FROZEN_ARENA_OVERRIDE_FLAG} only for deliberate reproduction.")
+    previous = os.environ.get(FROZEN_ARENA_OVERRIDE_ENV)
+    os.environ[FROZEN_ARENA_OVERRIDE_ENV] = "1"
     sys.argv = [arg for arg in sys.argv if arg != FROZEN_ARENA_OVERRIDE_FLAG]
-    return int(_frozen_module().cli())
+    try:
+        return int(_frozen_module().cli())
+    finally:
+        if previous is None:
+            os.environ.pop(FROZEN_ARENA_OVERRIDE_ENV, None)
+        else:
+            os.environ[FROZEN_ARENA_OVERRIDE_ENV] = previous
 
 
 if __name__ == "__main__":

@@ -302,7 +302,6 @@ from .torus9_contract import (
     load_torus9_profile,
 )
 from .torus9 import (
-    Torus9BatchedPUCT,
     Torus9GraphNet,
     Torus9CurrentGraphNet,
     Torus9OwnershipGraphNet,
@@ -325,8 +324,6 @@ from .torus9 import (
     generate_torus9_evaluation_starts,
     graph_diameter,
     graph_distance,
-    run_torus9_arena,
-    run_torus9_batched_arena,
     run_torus9_selfplay_games,
     torus9_build_replay_samples,
     torus9_build_ownership_replay_samples,
@@ -345,6 +342,32 @@ from .torus9 import (
     torus9_z_target,
     torus9_arena_termination_reason,
     validate_torus9_replay_sample,
+)
+
+# Torus9 production Arena has exactly one public entry point: tools.torus9_arena.
+# The historical functions remain in the implementation module for frozen
+# reproduction, but even a direct module import is fail-closed unless the
+# explicit frozen command sets the override environment.
+from . import torus9 as _torus9_module
+from .arena_policy import require_frozen_override as _require_frozen_arena_override
+
+
+def _guard_frozen_arena(engine_name, function):
+    def guarded(*args, **kwargs):
+        _require_frozen_arena_override(engine=engine_name)
+        return function(*args, **kwargs)
+    guarded.__name__ = function.__name__
+    guarded.__doc__ = "Frozen historical Arena entry point; explicit override required."
+    return guarded
+
+
+_torus9_module.run_torus9_arena = _guard_frozen_arena(
+    "gocube_golden.torus9.run_torus9_arena",
+    _torus9_module.run_torus9_arena,
+)
+_torus9_module.run_torus9_batched_arena = _guard_frozen_arena(
+    "gocube_golden.torus9.run_torus9_batched_arena",
+    _torus9_module.run_torus9_batched_arena,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]
