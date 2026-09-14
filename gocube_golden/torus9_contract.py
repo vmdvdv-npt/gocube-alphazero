@@ -59,12 +59,12 @@ TORUS9_CURRENT_BLOCKS = 8
 TORUS9_CURRENT_OWNERSHIP = True
 TORUS9_CURRENT_SCORE = True
 TORUS9_CURRENT_DIRICHLET_ALPHA = 0.11
-TORUS9_LEGACY_KOMI_SENTINEL = 7.5
 TORUS9_CURRENT_MODEL_INIT_SEED = 202609131001
 TORUS9_CURRENT_SELFPLAY_MASTER_SEED = 202609131002
 TORUS9_CURRENT_TRAINING_MASTER_SEED = 202609131003
 TORUS9_CURRENT_ARENA_MASTER_SEED = 202609131004
 TORUS9_CURRENT_EVALUATION_MASTER_SEED = 202609131005
+
 
 def canonical_json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -299,8 +299,6 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(rules.get("profile_id") == RULES_PROFILE_ID, "Current Torus rules profile drift")
     require(rules.get("fingerprint") == TORUS9_RULES_FINGERPRINT, "Current Torus rules fingerprint drift")
     require(rules.get("komi") == TORUS9_KOMI, "Current Torus komi must be exactly 0.5")
-    require(rules.get("legacy_komi_sentinel") == TORUS9_LEGACY_KOMI_SENTINEL, "Legacy komi sentinel drift")
-    require(rules.get("legacy_komi_sentinel_policy") == "reject-fail-closed", "Legacy komi sentinel policy drift")
     require(rules.get("ko") == "positional-superko", "Current Torus superko drift")
     require(rules.get("suicide") == "forbidden", "Current Torus suicide drift")
     require(rules.get("pass", {}).get("terminal_after_consecutive_passes") == 2, "Current Torus two-pass drift")

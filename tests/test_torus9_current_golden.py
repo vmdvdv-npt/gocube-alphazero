@@ -40,14 +40,14 @@ def _assert_evaluations_close(left, right) -> None:
 def test_current_profile_is_golden_source_and_excludes_legacy_defaults():
     profile = load_torus9_current_profile()
     assert profile["profile_id"] == TORUS9_CURRENT_PROFILE_ID
+    assert profile["profile_fingerprint"] == "sha256:d3620fc36600d36753a4bb51a9810b7ea21fe82a43f70a43b6363485dc9684e3"
     assert profile["network"]["hidden"] == 80
     assert profile["network"]["blocks"] == 8
     assert profile["network"]["ownership"] is True
     assert profile["network"]["score"] is True
     assert profile["self_play"]["dirichlet_alpha"] == 0.11
     assert profile["rules"]["komi"] == 0.5
-    assert profile["rules"]["legacy_komi_sentinel"] == 7.5
-    assert profile["rules"]["legacy_komi_sentinel_policy"] == "reject-fail-closed"
+    assert "legacy_komi_sentinel" not in profile["rules"]
     assert profile["training"]["batch_size"] == 64
     assert profile["training"]["optimizer_steps_per_iteration"] == 80
     assert profile["training"]["samples_consumed_per_iteration"] == 5120

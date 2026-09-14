@@ -36,9 +36,7 @@
     "termination": "Two passes",
     "benson_auto_ending": false,
     "pass": {"terminal_after_consecutive_passes": 2},
-    "komi": 0.5,
-    "legacy_komi_sentinel": 7.5,
-    "legacy_komi_sentinel_policy": "reject-fail-closed"
+    "komi": 0.5
   },
   "observation": {
     "tensor": "6×81",
@@ -161,5 +159,5 @@
     "winner_selection": "highest normalized moves_per_sec with inference_rows_per_sec and batch telemetry as tie-breaks; M1 is warm-up, M2 is the uncoalesced baseline, M8 repeats winner as confirmation",
     "benchmark_games": 0
   },
-  "profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775"
+  "profile_fingerprint": "sha256:d3620fc36600d36753a4bb51a9810b7ea21fe82a43f70a43b6363485dc9684e3"
 }

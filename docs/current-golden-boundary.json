@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "generated_for": "current-golden-boundary-20260915",
+  "reference": {
+    "run": "torus9-golden-v3-20260914-run03",
+    "merge_commit": "152be924db12530ff04b37266925838da191e948",
+    "pr93_head": "2e70a3a3e6a64e82fa784d6760df9c51283b2e65",
+    "git_tree": "d4b438ff6b8442aae03ef16cafacbad4ad7ece14",
+    "m1_baseline_git_sha": "d54de530fc4026d22409ca017f329f88a920dec2",
+    "base_commit": "53946d0c84fca5a6f81a387bfd399ea62e34b088",
+    "profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
+    "last_clean_resumable_boundary": 17,
+    "m18_started": false
+  },
+  "canonical_profile": {
+    "path": "configs/gocube/torus9_golden_current_v3.json",
+    "profile_id": "gocube-torus9-golden-v3",
+    "status": "current",
+    "content_fingerprint": "sha256:d3620fc36600d36753a4bb51a9810b7ea21fe82a43f70a43b6363485dc9684e3",
+    "reference_fingerprint_is_provenance_only": true
+  },
+  "production_entrypoints": {
+    "training_resume": "tools/continue_torus9_golden_m1_m100.py",
+    "frozen_runtime": "tools/_frozen_continue_torus9_golden_m1_m100.py",
+    "arena_cli": "tools/arena.py",
+    "arena_engine": "tools/arena_engine.py",
+    "arena_profile": "tools/arena_profiles/torus9.py",
+    "gocube_protocol_v1": "alphazero/envs/gocube/integration/server.py",
+    "checkpoint_library_boundary": "gocube_golden.torus9"
+  },
+  "scientific_contract": {
+    "topology": "torus-9x9-row-major-v1",
+    "point_count": 81,
+    "wrap_x": true,
+    "wrap_y": true,
+    "scoring": "exact-graph-area",
+    "superko": "positional-superko",
+    "suicide": "forbidden",
+    "termination": "two-passes",
+    "komi": 0.5,
+    "observation_fingerprint": "sha256:e5792b409199dfe2c25ac6f681e4ca29ed73cdf4b7d53a61df634f70d1fa415f",
+    "target_fingerprint": "sha256:02ab244688534b271473302ab4edf00516b91d43fb91b8c9e592d2a8de63dfb5",
+    "self_play_fingerprint": "sha256:22a4e4dd37d70bd3d712b909476120b96385802ec874b99358fab256c4e3351f",
+    "network": {
+      "architecture_id": "GoldenGraphNetV2-Torus9",
+      "hidden": 80,
+      "blocks": 8,
+      "input_channels": 6,
+      "policy": 82,
+      "value": 3,
+      "ownership": [81, 3],
+      "score": 1
+    },
+    "self_play": {
+      "games_per_iteration": 64,
+      "simulations": 64,
+      "cpuct": 1.25,
+      "fpu": 0.0,
+      "root_noise": true,
+      "dirichlet_epsilon": 0.25,
+      "dirichlet_alpha": 0.11,
+      "temperature": "1.0 on plies 1-8, then 0",
+      "fast_search": false,
+      "resign": false,
+      "watchdog": 500
+    },
+    "training": {
+      "optimizer": "Adam",
+      "learning_rate": 0.001,
+      "weight_decay": 0.0,
+      "batch_size": 64,
+      "optimizer_steps_per_iteration": 80,
+      "samples_consumed_per_iteration": 5120,
+      "lr_scheduler": null,
+      "model_gating": false,
+      "ownership_loss": true,
+      "score_loss": true
+    },
+    "replay": {
+      "generations": 3,
+      "cap": 20000,
+      "sampling": "deterministic / reproducible"
+    }
+  },
+  "component_status": {
+    "gocube_golden/torus9.py": "KEEP CURRENT",
+    "gocube_golden/torus9_contract.py": "KEEP CURRENT",
+    "gocube_golden/neural.py": "KEEP SHARED",
+    "gocube_golden/rules.py": "KEEP SHARED",
+    "gocube_golden/search.py": "KEEP SHARED",
+    "gocube_golden/state.py": "KEEP SHARED",
+    "gocube_golden/topology.py": "KEEP SHARED",
+    "tools/arena.py": "KEEP CURRENT",
+    "tools/arena_engine.py": "KEEP CURRENT",
+    "tools/arena_profiles/torus9.py": "KEEP CURRENT",
+    "alphazero/NNetWrapper.py": "KEEP TEMPORARILY FOR MIGRATION",
+    "alphazero/GenericPlayers.py": "KEEP TEMPORARILY FOR MIGRATION",
+    "alphazero/MCTS.pyx": "KEEP TEMPORARILY FOR MIGRATION",
+    "alphazero/Coach.py": "LEGACY — REMOVE IN LATER STAGE",
+    "alphazero/SelfPlayAgent.pyx": "LEGACY — REMOVE IN LATER STAGE",
+    "configs/gocube/torus9_golden_learning_v1.json": "LEGACY — REMOVE IN LATER STAGE",
+    "configs/gocube/torus9_ownership_ab_v1.json": "LEGACY — REMOVE IN LATER STAGE"
+  },
+  "external_artifacts": {
+    "reference_run_path": "runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03",
+    "stored_in_git": false,
+    "m17_checkpoint_reloaded_in_github_ci": false,
+    "reason": "Reference run weights and state are preserved on Legion but are not repository contents."
+  },
+  "behavior": {
+    "scientific_semantics_changed": false,
+    "execution_architecture_changed": false,
+    "forbidden_legacy_komi_metadata_removed": true
+  }
+}
