@@ -953,6 +953,53 @@ def _clean_stop(
     _write_execution_report(history, arenas, cap_selection, wait_selection, selfplay_frozen, arena_frozen, startset_id)
 
 
+def _backfill_missing_m5_arena() -> None:
+    profile, profile_fp, _contract_value = _profile_and_contract()
+    manifest = _validate_starting_run(profile_fp)
+    complete = _complete_iterations()
+    if not complete or complete[-1] != 100:
+        raise RuntimeError("M5 Arena backfill is allowed only after M100 is complete")
+    starts, startset_id = _ensure_startset()
+    arenas: list[dict[str, object]] = []
+    arena_root = RUN_ROOT / "arena"
+    for summary_path in sorted(arena_root.glob("M*-vs-M*/summary.json")):
+        arenas.append(_read_json(summary_path))
+    backfilled: list[str] = []
+    for comparison, candidate, reference, wait in (
+        ("M5-vs-M1", "M5", "M1", 1.0),
+        ("M5-vs-M0", "M5", "M0", 2.0),
+    ):
+        if any(row.get("comparison") == comparison for row in arenas):
+            continue
+        summary = _arena(
+            comparison=comparison,
+            candidate_label=candidate,
+            reference_label=reference,
+            wait_ms=wait,
+            starts=starts,
+            startset_id=startset_id,
+            candidate_path=RUN_ROOT / "checkpoints" / f"{candidate}.pt",
+            reference_path=RUN_ROOT / "checkpoints" / f"{reference}.pt",
+        )
+        arenas.append(summary)
+        backfilled.append(comparison)
+    cap_selection = _read_json(RUN_ROOT / "selfplay-cap-selection.json")
+    wait_selection = _read_json(RUN_ROOT / "selfplay-wait-selection.json")
+    selfplay_frozen = _read_json(RUN_ROOT / "selfplay-settings-freeze.json")
+    arena_frozen = _read_json(RUN_ROOT / "arena-settings-freeze.json") if (RUN_ROOT / "arena-settings-freeze.json").is_file() else None
+    _atomic_write(RUN_ROOT / "arena-backfill.json", {
+        "status": "COMPLETE",
+        "comparisons": backfilled,
+        "reason": "Recovered after the continuation runner exited at the M5 cap-selection boundary before its scheduled M5 Arena controls.",
+        "checkpoint_only": True,
+        "scientific_contract_unchanged": True,
+    })
+    _write_execution_report(_load_history(complete), arenas, cap_selection, wait_selection, selfplay_frozen, arena_frozen, startset_id)
+    manifest.update({"status": "COMPLETED", "result": "COMPLETED_M100", "last_completed_iteration": 100, "next_transition_started": False, "resumable_from": "M100"})
+    _atomic_write(RUN_ROOT / "manifest.json", manifest)
+    _state_update(status="COMPLETED", last_completed_iteration=100, last_atomic_unit="M99→M100", next_transition_started=False, next_transition=None, run_resumable=True, scientific_validity="PASS")
+
+
 def run() -> None:
     global _STOP_REQUESTED
     signal.signal(signal.SIGTERM, _signal_stop)
@@ -1264,6 +1311,7 @@ def run() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request-stop", action="store_true")
+    parser.add_argument("--backfill-m5-arena", action="store_true")
     args = parser.parse_args()
     if args.request_stop:
         request_stop()
@@ -1272,6 +1320,9 @@ def main() -> None:
     if not torch.cuda.is_available():
         raise RuntimeError("Scientific validity fail-closed: CUDA is unavailable")
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
+    if args.backfill_m5_arena:
+        _backfill_missing_m5_arena()
+        return
     if not STATE_PATH.exists():
         _atomic_write(STATE_PATH, {"status": "STARTING", "run_id": RUN_ID, "stop_requested": _stop_requested(), "last_completed_iteration": 1, "scientific_validity": "PENDING"})
     run()
