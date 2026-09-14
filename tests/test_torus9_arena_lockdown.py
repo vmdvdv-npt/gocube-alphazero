@@ -133,10 +133,11 @@ def test_worker_has_no_model_loading_and_generic_parent_owns_inference():
 
 def test_inference_wait_collects_before_profile_forward():
     source = inspect.getsource(arena_engine.run_arena)
-    deadline_index = source.index("deadline =")
-    queue_get_index = source.index("extra = request_queue.get", deadline_index)
-    forward_index = source.index("profile.infer_batch", queue_get_index)
-    assert deadline_index < queue_get_index < forward_index
+    assert "_ModelAwareBatchScheduler" in source
+    assert "scheduler.next_deadline()" in source
+    assert "scheduler.next_ready_model" in source
+    assert "dispatch_model_batch" in source
+    assert "profile.infer_batch" in source
 
 
 def test_frozen_operational_entrypoints_require_explicit_override():

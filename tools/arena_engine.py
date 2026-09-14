@@ -10,7 +10,7 @@ Game/topology semantics live in ArenaProfile adapters under tools/arena_profiles
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import math
@@ -93,15 +93,16 @@ class ArenaProfile(Protocol):
     def worker_main(
         self,
         worker_id: int,
-        tasks: Sequence[Mapping[str, object]],
+        task_queue: Any,
         games_per_worker: int,
+        inference_batch_wait_ms: float,
         candidate_hash: str,
         reference_hash: str,
         input_slot: torch.Tensor,
         policy_slot: torch.Tensor,
         wdl_slot: torch.Tensor,
         request_queue: Any,
-        response_queue: Any,
+        response_queues: Any,
         start_event: Any,
     ) -> None: ...
     def infer_batch(
@@ -155,6 +156,137 @@ def _percentile(values: Sequence[int], fraction: float) -> int:
     return ordered[index]
 
 
+def _numeric_summary(values: Sequence[float | int]) -> dict[str, float | int]:
+    """Return stable summary statistics for execution-only telemetry."""
+    if not values:
+        return {"count": 0, "mean": 0.0, "p50": 0.0, "p95": 0.0, "max": 0.0}
+    ordered = sorted(float(value) for value in values)
+    return {
+        "count": len(ordered),
+        "mean": statistics.mean(ordered),
+        "p50": ordered[len(ordered) // 2],
+        "p95": ordered[min(len(ordered) - 1, max(0, math.ceil(0.95 * len(ordered)) - 1))],
+        "max": max(ordered),
+    }
+
+
+def _batch_summary(values: Sequence[int]) -> dict[str, float | int]:
+    """Return the standard batch telemetry shape for one model."""
+    return {
+        "forward_calls": len(values),
+        "rows": sum(values),
+        "mean_batch_rows": statistics.mean(values) if values else 0.0,
+        "p50_batch_rows": _percentile(values, 0.50),
+        "p95_batch_rows": _percentile(values, 0.95),
+        "max_batch_rows": max(values, default=0),
+    }
+
+
+@dataclass
+class _PendingModelQueue:
+    """Pending inference requests for one model hash."""
+
+    requests: deque[Mapping[str, object]] = field(default_factory=deque)
+    rows: int = 0
+    first_enqueued_at: float | None = None
+
+    def append(self, request: Mapping[str, object]) -> None:
+        request_rows = int(request["rows"])
+        if request_rows <= 0:
+            raise ValueError("Arena inference request rows must be positive")
+        if not self.requests:
+            self.first_enqueued_at = float(request["enqueued_at"])
+        self.requests.append(request)
+        self.rows += request_rows
+
+    def ready(self, *, cap: int, deadline: float, now: float) -> bool:
+        return bool(self.requests) and (self.rows >= cap or now >= deadline)
+
+    def pop_batch(self, cap: int) -> tuple[list[Mapping[str, object]], float]:
+        if not self.requests:
+            raise RuntimeError("Cannot dispatch an empty model-aware inference queue")
+        first_enqueued_at = self.first_enqueued_at
+        if first_enqueued_at is None:
+            raise RuntimeError("Model-aware inference queue lost its first enqueue time")
+        batch: list[Mapping[str, object]] = []
+        batch_rows = 0
+        while self.requests:
+            request = self.requests[0]
+            request_rows = int(request["rows"])
+            if batch and batch_rows + request_rows > cap:
+                break
+            if request_rows > cap:
+                raise RuntimeError(
+                    "Arena inference request exceeds the configured batch cap"
+                )
+            batch.append(self.requests.popleft())
+            batch_rows += request_rows
+            self.rows -= request_rows
+            if batch_rows == cap:
+                break
+        if self.requests:
+            self.first_enqueued_at = float(self.requests[0]["enqueued_at"])
+        else:
+            self.first_enqueued_at = None
+        return batch, first_enqueued_at
+
+
+class _ModelAwareBatchScheduler:
+    """Fair row-capped coalescing queues keyed by model hash.
+
+    Each model gets its own cap and deadline.  Ready models are dispatched in
+    round-robin order, so a continuously busy model cannot starve another
+    model whose independent deadline has expired.
+    """
+
+    def __init__(self, model_hashes: Sequence[str], *, cap: int, wait_ms: float) -> None:
+        if not model_hashes or len(set(model_hashes)) != len(model_hashes):
+            raise ValueError("Model-aware scheduler requires distinct model hashes")
+        if cap <= 0 or wait_ms < 0.0 or not math.isfinite(float(wait_ms)):
+            raise ValueError("Model-aware scheduler cap/wait is invalid")
+        self.cap = int(cap)
+        self.wait_seconds = float(wait_ms) / 1000.0
+        self.model_hashes = tuple(str(value) for value in model_hashes)
+        self.queues = {model_hash: _PendingModelQueue() for model_hash in self.model_hashes}
+        self._next_ready_index = 0
+
+    def enqueue(self, request: Mapping[str, object]) -> None:
+        model_hash = str(request["model_hash"])
+        if model_hash not in self.queues:
+            raise RuntimeError(
+                f"Inference request references unknown model hash {model_hash}"
+            )
+        self.queues[model_hash].append(request)
+
+    def pending_rows(self) -> int:
+        return sum(queue.rows for queue in self.queues.values())
+
+    def pending_rows_by_model(self) -> dict[str, int]:
+        return {model_hash: queue.rows for model_hash, queue in self.queues.items()}
+
+    def next_deadline(self) -> float | None:
+        deadlines = [
+            queue.first_enqueued_at + self.wait_seconds
+            for queue in self.queues.values()
+            if queue.first_enqueued_at is not None
+        ]
+        return min(deadlines) if deadlines else None
+
+    def next_ready_model(self, now: float) -> str | None:
+        for offset in range(len(self.model_hashes)):
+            index = (self._next_ready_index + offset) % len(self.model_hashes)
+            model_hash = self.model_hashes[index]
+            queue = self.queues[model_hash]
+            deadline = queue.first_enqueued_at + self.wait_seconds if queue.first_enqueued_at is not None else float("inf")
+            if queue.ready(cap=self.cap, deadline=deadline, now=now):
+                self._next_ready_index = (index + 1) % len(self.model_hashes)
+                return model_hash
+        return None
+
+    def pop_batch(self, model_hash: str) -> tuple[list[Mapping[str, object]], float]:
+        return self.queues[model_hash].pop_batch(self.cap)
+
+
 def _terminate(processes: Sequence[Any]) -> None:
     for process in processes:
         if process.is_alive():
@@ -166,15 +298,16 @@ def _terminate(processes: Sequence[Any]) -> None:
 def _worker_bootstrap(
     profile_id: str,
     worker_id: int,
-    tasks: Sequence[Mapping[str, object]],
+    task_queue: Any,
     games_per_worker: int,
+    inference_batch_wait_ms: float,
     candidate_hash: str,
     reference_hash: str,
     input_slot: torch.Tensor,
     policy_slot: torch.Tensor,
     wdl_slot: torch.Tensor,
     request_queue: Any,
-    response_queue: Any,
+    response_queues: Any,
     start_event: Any,
 ) -> None:
     from tools.arena_profiles import get_profile
@@ -182,15 +315,16 @@ def _worker_bootstrap(
     profile = get_profile(profile_id)
     profile.worker_main(
         worker_id,
-        tasks,
+        task_queue,
         games_per_worker,
+        inference_batch_wait_ms,
         candidate_hash,
         reference_hash,
         input_slot,
         policy_slot,
         wdl_slot,
         request_queue,
-        response_queue,
+        response_queues,
         start_event,
     )
 
@@ -265,10 +399,6 @@ def run_arena(
             f"Arena profile {profile.profile_id!r} produced {len(tasks)} tasks "
             f"for requested games={config.games}"
         )
-    buckets: list[list[dict[str, object]]] = [[] for _ in range(config.workers)]
-    for task in tasks:
-        buckets[int(task["worker_id"])].append(task)
-
     candidate_model = profile.load_parent_model(candidate, device)
     reference_model = (
         candidate_model
@@ -283,7 +413,13 @@ def run_arena(
 
     ctx = __import__("multiprocessing").get_context("spawn")
     request_queue = ctx.Queue()
-    response_queues = [ctx.Queue() for _ in range(config.workers)]
+    task_queue = ctx.Queue()
+    for task in tasks:
+        task_queue.put(task)
+    response_queues = [
+        [ctx.Queue() for _ in range(config.games_per_worker)]
+        for _ in range(config.workers)
+    ]
     start_event = ctx.Event()
 
     shared_inputs = [
@@ -315,8 +451,9 @@ def run_arena(
             args=(
                 profile.profile_id,
                 worker_id,
-                buckets[worker_id],
+                task_queue,
                 config.games_per_worker,
+                config.inference_batch_wait_ms,
                 candidate.model_hash,
                 reference.model_hash,
                 shared_inputs[worker_id],
@@ -368,7 +505,6 @@ def run_arena(
 
         started = time.perf_counter()
         start_event.set()
-        pending: deque[Mapping[str, object]] = deque()
         done: dict[int, Mapping[str, object]] = {}
         records: list[dict[str, object]] = []
         batch_rows: list[int] = []
@@ -376,6 +512,53 @@ def run_arena(
         batch_worker_counts: list[int] = []
         cap_hits = 0
         inference_started = time.perf_counter()
+        model_hashes = tuple(models_by_hash)
+        model_hash_by_role = {
+            "candidate": candidate.model_hash,
+            "reference": reference.model_hash,
+        }
+        scheduler = _ModelAwareBatchScheduler(
+            model_hashes,
+            cap=config.inference_batch_rows,
+            wait_ms=config.inference_batch_wait_ms,
+        )
+        control_pending: deque[Mapping[str, object]] = deque()
+        pending_depth_samples: list[int] = [0]
+        pending_depth_by_model: dict[str, list[int]] = {
+            model_hash: [0] for model_hash in model_hashes
+        }
+        batch_rows_by_model: dict[str, list[int]] = {
+            model_hash: [] for model_hash in model_hashes
+        }
+        batch_worker_counts_by_model: dict[str, list[int]] = {
+            model_hash: [] for model_hash in model_hashes
+        }
+        queue_wait_ms_by_model: dict[str, list[float]] = {
+            model_hash: [] for model_hash in model_hashes
+        }
+        collection_wait_ms_by_model: dict[str, list[float]] = {
+            model_hash: [] for model_hash in model_hashes
+        }
+        model_forward_time_sec: dict[str, list[float]] = {
+            model_hash: [] for model_hash in model_hashes
+        }
+
+        def record_pending_depth() -> None:
+            pending_depth_samples.append(scheduler.pending_rows())
+            for model_hash, rows in scheduler.pending_rows_by_model().items():
+                pending_depth_by_model[model_hash].append(rows)
+
+        def route_message(message: Mapping[str, object]) -> None:
+            if message.get("kind") == "inference":
+                # Worker monotonic clocks are not a safe deadline source across
+                # spawned processes on this platform.  Start the broker-side
+                # coalescing deadline when the broker receives the request.
+                broker_message = dict(message)
+                broker_message["enqueued_at"] = time.perf_counter()
+                scheduler.enqueue(broker_message)
+            else:
+                control_pending.append(message)
+            record_pending_depth()
 
         def handle_non_inference(message: Mapping[str, object]) -> None:
             kind = message.get("kind")
@@ -391,93 +574,97 @@ def run_arena(
             elif kind != "ready":
                 raise RuntimeError(f"Unexpected Arena control message: {message}")
 
-        while len(done) < config.workers:
-            if pending:
-                message = pending.popleft()
-            else:
-                try:
-                    message = request_queue.get(timeout=1.0)
-                except Empty:
-                    dead = [
-                        process.name
-                        for process in processes
-                        if not process.is_alive() and process.exitcode not in (0, None)
+        def dispatch_model_batch(model_hash: str) -> None:
+            nonlocal cap_hits
+            requests, first_enqueued_at = scheduler.pop_batch(model_hash)
+            dispatch_started = time.perf_counter()
+            collection_wait_ms_by_model[model_hash].append(
+                max(0.0, dispatch_started - first_enqueued_at) * 1000.0
+            )
+            model = models_by_hash.get(model_hash)
+            if model is None:
+                raise RuntimeError(
+                    f"Inference request references unknown model hash {model_hash}"
+                )
+            now = time.perf_counter()
+            segments = [
+                segment
+                for request in requests
+                for segment in request.get("segments", (request,))
+            ]
+            for request in requests:
+                wait_ms = max(0.0, now - float(request["enqueued_at"])) * 1000.0
+                queue_wait_ms.append(wait_ms)
+                queue_wait_ms_by_model[model_hash].append(wait_ms)
+            cpu_batch = torch.cat(
+                [
+                    shared_inputs[int(segment["worker_id"])][
+                        int(segment["lane_id"]): int(segment["lane_id"]) + int(segment["rows"])
                     ]
-                    if dead:
-                        raise RuntimeError(
-                            f"Arena worker process died during run: {dead}"
-                        )
-                    continue
+                    for segment in segments
+                ],
+                dim=0,
+            )
+            forward_started = time.perf_counter()
+            policy, wdl = profile.infer_batch(model, cpu_batch, device)
+            model_forward_time_sec[model_hash].append(
+                time.perf_counter() - forward_started
+            )
+            offset = 0
+            for segment in segments:
+                wid = int(segment["worker_id"])
+                rows = int(segment["rows"])
+                lane_id = int(segment["lane_id"])
+                shared_policy[wid][lane_id:lane_id + rows].copy_(
+                    policy[offset : offset + rows]
+                )
+                shared_wdl[wid][lane_id:lane_id + rows].copy_(
+                    wdl[offset : offset + rows]
+                )
+                response_queues[wid][lane_id].put(
+                    {"ticket": int(segment["ticket"]), "error": None}
+                )
+                offset += rows
+            rows_this_call = int(cpu_batch.shape[0])
+            worker_count = len({int(segment["worker_id"]) for segment in segments})
+            batch_rows.append(rows_this_call)
+            batch_rows_by_model[model_hash].append(rows_this_call)
+            batch_worker_counts.append(worker_count)
+            batch_worker_counts_by_model[model_hash].append(worker_count)
+            if rows_this_call >= config.inference_batch_rows:
+                cap_hits += 1
+            record_pending_depth()
 
-            if message.get("kind") != "inference":
-                handle_non_inference(message)
+        while len(done) < config.workers:
+            if control_pending:
+                handle_non_inference(control_pending.popleft())
                 continue
 
-            requests: list[Mapping[str, object]] = [message]
-            collected_rows = int(message["rows"])
-            deadline = (
-                time.perf_counter() + config.inference_batch_wait_ms / 1000.0
-            )
-            while collected_rows < config.inference_batch_rows:
-                remaining = deadline - time.perf_counter()
-                if remaining <= 0.0:
-                    break
-                try:
-                    extra = request_queue.get(timeout=remaining)
-                except Empty:
-                    break
-                if extra.get("kind") != "inference":
-                    pending.append(extra)
-                    continue
-                extra_rows = int(extra["rows"])
-                if collected_rows + extra_rows > config.inference_batch_rows:
-                    pending.append(extra)
-                    break
-                requests.append(extra)
-                collected_rows += extra_rows
+            now = time.perf_counter()
+            ready_model = scheduler.next_ready_model(now)
+            if ready_model is not None:
+                dispatch_model_batch(ready_model)
+                continue
 
-            grouped: dict[str, list[Mapping[str, object]]] = {}
-            for request in requests:
-                grouped.setdefault(str(request["model_hash"]), []).append(request)
-
-            for requested_hash, group in grouped.items():
-                model = models_by_hash.get(requested_hash)
-                if model is None:
+            deadline = scheduler.next_deadline()
+            timeout = 1.0
+            if deadline is not None:
+                timeout = min(timeout, max(0.0, deadline - now))
+            try:
+                message = request_queue.get(timeout=timeout)
+            except Empty:
+                dead = [
+                    process.name
+                    for process in processes
+                    if not process.is_alive() and process.exitcode not in (0, None)
+                ]
+                if dead:
                     raise RuntimeError(
-                        f"Inference request references unknown model hash {requested_hash}"
+                        f"Arena worker process died during run: {dead}"
                     )
-                now = time.perf_counter()
-                for request in group:
-                    queue_wait_ms.append(
-                        max(0.0, now - float(request["enqueued_at"])) * 1000.0
-                    )
-                cpu_batch = torch.cat(
-                    [
-                        shared_inputs[int(request["worker_id"])][
-                            : int(request["rows"])
-                        ]
-                        for request in group
-                    ],
-                    dim=0,
-                )
-                policy, wdl = profile.infer_batch(model, cpu_batch, device)
-                offset = 0
-                for request in group:
-                    wid = int(request["worker_id"])
-                    rows = int(request["rows"])
-                    shared_policy[wid][:rows].copy_(policy[offset : offset + rows])
-                    shared_wdl[wid][:rows].copy_(wdl[offset : offset + rows])
-                    response_queues[wid].put(
-                        {"ticket": int(request["ticket"]), "error": None}
-                    )
-                    offset += rows
-                rows_this_call = int(cpu_batch.shape[0])
-                batch_rows.append(rows_this_call)
-                batch_worker_counts.append(
-                    len({int(request["worker_id"]) for request in group})
-                )
-                if rows_this_call >= config.inference_batch_rows:
-                    cap_hits += 1
+                record_pending_depth()
+                continue
+            route_message(message)
 
         wall_time = time.perf_counter() - started
         inference_wall = time.perf_counter() - inference_started
@@ -509,10 +696,62 @@ def run_arena(
         reference_label=reference_label,
         pairs=pairs,
     )
-    worker_cpu_seconds = [float(done[index]["cpu_seconds"]) for index in sorted(done)]
+    worker_cpu_seconds = [
+        float(done[index].get("cpu_active_seconds", done[index]["cpu_seconds"]))
+        for index in sorted(done)
+    ]
+    worker_wall_seconds = [
+        float(done[index].get("wall_time_seconds", wall_time)) for index in sorted(done)
+    ]
+    worker_blocked_seconds = [
+        float(done[index].get("blocked_inference_seconds", 0.0))
+        for index in sorted(done)
+    ]
+    worker_lane_wall_seconds = [
+        float(
+            done[index].get(
+                "lane_wall_time_seconds",
+                done[index].get("wall_time_seconds", wall_time),
+            )
+        )
+        for index in sorted(done)
+    ]
     effective_cpu_cores = sum(worker_cpu_seconds) / wall_time if wall_time else 0.0
     mean_batch = statistics.mean(batch_rows) if batch_rows else 0.0
     cross_worker_calls = sum(count > 1 for count in batch_worker_counts)
+    inference_by_model: dict[str, dict[str, object]] = {}
+    for role, model_hash in model_hash_by_role.items():
+        model_batches = _batch_summary(batch_rows_by_model[model_hash])
+        inference_by_model[role] = {
+            "model_hash": model_hash,
+            **model_batches,
+            "queue_wait_ms": _numeric_summary(queue_wait_ms_by_model[model_hash]),
+            "collection_wait_ms": _numeric_summary(
+                collection_wait_ms_by_model[model_hash]
+            ),
+            "forward_time_ms": _numeric_summary(
+                [value * 1000.0 for value in model_forward_time_sec[model_hash]]
+            ),
+            "mean_workers_per_forward": (
+                statistics.mean(batch_worker_counts_by_model[model_hash])
+                if batch_worker_counts_by_model[model_hash]
+                else 0.0
+            ),
+        }
+
+    def _model_metric(metric: str, role: str) -> object:
+        return inference_by_model[role][metric]
+
+    all_collection_wait_ms = [
+        value
+        for values in collection_wait_ms_by_model.values()
+        for value in values
+    ]
+    all_forward_time_ms = [
+        value * 1000.0
+        for values in model_forward_time_sec.values()
+        for value in values
+    ]
     telemetry: dict[str, object] = {
         "arena_engine": CANONICAL_ARENA_ENGINE,
         "arena_profile": profile.profile_id,
@@ -528,6 +767,27 @@ def run_arena(
             100.0 * effective_cpu_cores / float(config.workers)
         ),
         "worker_cpu_seconds": worker_cpu_seconds,
+        "worker_cpu_active_seconds": worker_cpu_seconds,
+        "worker_wall_time_seconds": worker_wall_seconds,
+        "worker_blocked_on_inference_seconds": worker_blocked_seconds,
+        "worker_blocked_on_inference_calls": [
+            int(done[index].get("blocked_inference_calls", 0))
+            for index in sorted(done)
+        ],
+        "worker_lane_wall_time_seconds": worker_lane_wall_seconds,
+        "worker_blocked_on_inference_time": _numeric_summary(worker_blocked_seconds),
+        "worker_cpu_active_time": _numeric_summary(worker_cpu_seconds),
+        "worker_inference_wait_fraction_by_worker": [
+            blocked / lane_wall if lane_wall else 0.0
+            for blocked, lane_wall in zip(
+                worker_blocked_seconds, worker_lane_wall_seconds
+            )
+        ],
+        "fraction_wall_time_workers_spent_waiting_for_inference": (
+            sum(worker_blocked_seconds) / sum(worker_lane_wall_seconds)
+            if sum(worker_lane_wall_seconds)
+            else 0.0
+        ),
         "worker_max_rss_kb": [
             int(done[index]["max_rss_kb"]) for index in sorted(done)
         ],
@@ -570,6 +830,53 @@ def run_arena(
             if queue_wait_ms
             else 0.0
         ),
+        "model_aware_batching": True,
+        "inference_by_model": inference_by_model,
+        "candidate_forward_calls": int(_model_metric("forward_calls", "candidate")),
+        "candidate_inference_rows": int(_model_metric("rows", "candidate")),
+        "candidate_mean_inference_batch_rows": float(
+            _model_metric("mean_batch_rows", "candidate")
+        ),
+        "candidate_p50_inference_batch_rows": int(
+            _model_metric("p50_batch_rows", "candidate")
+        ),
+        "candidate_p95_inference_batch_rows": int(
+            _model_metric("p95_batch_rows", "candidate")
+        ),
+        "candidate_max_inference_batch_rows": int(
+            _model_metric("max_batch_rows", "candidate")
+        ),
+        "reference_forward_calls": int(_model_metric("forward_calls", "reference")),
+        "reference_inference_rows": int(_model_metric("rows", "reference")),
+        "reference_mean_inference_batch_rows": float(
+            _model_metric("mean_batch_rows", "reference")
+        ),
+        "reference_p50_inference_batch_rows": int(
+            _model_metric("p50_batch_rows", "reference")
+        ),
+        "reference_p95_inference_batch_rows": int(
+            _model_metric("p95_batch_rows", "reference")
+        ),
+        "reference_max_inference_batch_rows": int(
+            _model_metric("max_batch_rows", "reference")
+        ),
+        "global_pending_queue_depth": _numeric_summary(pending_depth_samples),
+        "pending_queue_depth_by_model": {
+            role: _numeric_summary(pending_depth_by_model[model_hash])
+            for role, model_hash in model_hash_by_role.items()
+        },
+        "broker_collection_wait_ms": _numeric_summary(all_collection_wait_ms),
+        "broker_collection_wait_ms_by_model": {
+            role: _numeric_summary(collection_wait_ms_by_model[model_hash])
+            for role, model_hash in model_hash_by_role.items()
+        },
+        "model_forward_time_ms": _numeric_summary(all_forward_time_ms),
+        "model_forward_time_ms_by_model": {
+            role: _numeric_summary(
+                [value * 1000.0 for value in model_forward_time_sec[model_hash]]
+            )
+            for role, model_hash in model_hash_by_role.items()
+        },
         "wall_time_sec": wall_time,
         "games_per_hour": (
             len(records) * 3600.0 / wall_time if wall_time else 0.0
