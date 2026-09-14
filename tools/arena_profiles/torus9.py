@@ -6,11 +6,12 @@ central inference batching, lifecycle and telemetry live in tools.arena_engine.
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
+from queue import Empty
 import resource
 import time
 import traceback
@@ -52,6 +53,41 @@ PRODUCTION_MIN_GAMES = 64
 PRODUCTION_MIN_BATCH_ROWS = 16
 
 
+class _WorkerInferenceAggregator:
+    """Zero-wait transport shim for thread-safe cross-process request ingress.
+
+    The old implementation had a second, worker-local timed coalescing window.
+    That serialized every lane behind ``inference_batch_wait_ms`` before the
+    central broker could see it.  The production path now forwards every
+    request immediately; all timed coalescing belongs to the central broker.
+    The historical name is retained as a narrow compatibility boundary.
+    """
+
+    def __init__(
+        self,
+        *,
+        worker_id: int,
+        central_queue: Any,
+        local_cap: int,
+        wait_ms: float,
+    ) -> None:
+        if local_cap <= 0 or not math.isfinite(float(wait_ms)) or float(wait_ms) != 0.0:
+            raise ValueError("Worker inference transport requires wait_ms=0")
+        self.worker_id = int(worker_id)
+        self.central_queue = central_queue
+        self.local_cap = int(local_cap)
+        self.wait_ms = 0.0
+        self._closed = False
+
+    def put(self, request: Mapping[str, object]) -> None:
+        if self._closed:
+            raise RuntimeError("Worker inference transport is closed")
+        self.central_queue.put(dict(request))
+
+    def close(self) -> None:
+        self._closed = True
+
+
 class _RemoteEvaluator:
     """Worker-side evaluator proxy; no model or CUDA owner exists in workers."""
 
@@ -61,6 +97,7 @@ class _RemoteEvaluator:
         worker_id: int,
         model_role: str,
         model_hash_value: str,
+        lane_id: int,
         input_slot: torch.Tensor,
         policy_slot: torch.Tensor,
         wdl_slot: torch.Tensor,
@@ -70,12 +107,15 @@ class _RemoteEvaluator:
         self.worker_id = int(worker_id)
         self.model_role = str(model_role)
         self.model_hash = str(model_hash_value)
+        self.lane_id = int(lane_id)
         self.input_slot = input_slot
         self.policy_slot = policy_slot
         self.wdl_slot = wdl_slot
         self.request_queue = request_queue
         self.response_queue = response_queue
         self.ticket = 0
+        self.blocked_inference_seconds = 0.0
+        self.blocked_inference_calls = 0
 
     def evaluate_prepared(self, state: Any, legal_context: Any) -> Evaluation:
         return self.evaluate_prepared_batch((state,), (legal_context,))[0]
@@ -98,33 +138,47 @@ class _RemoteEvaluator:
                 for state, context in zip(states, legal_contexts)
             ]
         )
-        self.input_slot[:rows].copy_(observations)
+        self.input_slot[self.lane_id:self.lane_id + rows].copy_(observations)
         self.ticket += 1
-        ticket = self.ticket
+        # Candidate and reference evaluators share one lane response queue.
+        # Encode the role in the ticket so model-aware dispatch reordering can
+        # never let the two evaluators consume each other's response.
+        ticket = self.ticket * 2 + (1 if self.model_role == "candidate" else 2)
+        worker_enqueued_at = time.perf_counter()
         self.request_queue.put(
             {
                 "kind": "inference",
                 "worker_id": self.worker_id,
+                "lane_id": self.lane_id,
                 "pid": os.getpid(),
                 "ticket": ticket,
                 "model_role": self.model_role,
                 "model_hash": self.model_hash,
                 "rows": rows,
-                "enqueued_at": time.perf_counter(),
+                "worker_enqueued_at": worker_enqueued_at,
             }
         )
-        response = self.response_queue.get()
+        wait_started = time.perf_counter()
+        try:
+            response = self.response_queue.get()
+        finally:
+            self.blocked_inference_seconds += time.perf_counter() - wait_started
+            self.blocked_inference_calls += 1
         if int(response.get("ticket", -1)) != ticket:
             raise RuntimeError("Arena inference response ticket mismatch")
         if response.get("error"):
             raise RuntimeError(str(response["error"]))
-        return tuple(
-            Evaluation(
-                policy=tuple(float(value) for value in self.policy_slot[row].tolist()),
-                wdl=tuple(float(value) for value in self.wdl_slot[row].tolist()),
-            )
-            for row in range(rows)
-        )
+        evaluations: list[Evaluation] = []
+        for row in range(rows):
+            policy = tuple(float(value) for value in self.policy_slot[self.lane_id + row].tolist())
+            wdl = tuple(float(value) for value in self.wdl_slot[self.lane_id + row].tolist())
+            if not all(math.isfinite(value) and value >= 0.0 for value in wdl):
+                raise RuntimeError(
+                    "Remote Arena evaluator received invalid WDL "
+                    f"role={self.model_role} lane={self.lane_id} ticket={ticket} values={wdl}"
+                )
+            evaluations.append(Evaluation(policy=policy, wdl=wdl))
+        return tuple(evaluations)
 
 
 @dataclass
@@ -325,18 +379,18 @@ class Torus9ArenaProfile:
     def worker_main(
         self,
         worker_id: int,
-        tasks: Sequence[Mapping[str, object]],
+        task_queue: Any,
         games_per_worker: int,
+        worker_local_wait_ms: float,
         candidate_hash: str,
         reference_hash: str,
         input_slot: torch.Tensor,
         policy_slot: torch.Tensor,
         wdl_slot: torch.Tensor,
         request_queue: Any,
-        response_queue: Any,
+        response_queues: Any,
         start_event: Any,
     ) -> None:
-        cpu_start = resource.getrusage(resource.RUSAGE_SELF)
         try:
             torch.set_num_threads(1)
             if torch.cuda.is_initialized():
@@ -352,16 +406,35 @@ class Torus9ArenaProfile:
                 }
             )
             start_event.wait()
+            run_started = time.perf_counter()
+            cpu_start = resource.getrusage(resource.RUSAGE_SELF)
+            inference_aggregator = _WorkerInferenceAggregator(
+                worker_id=worker_id,
+                central_queue=request_queue,
+                local_cap=int(games_per_worker),
+                wait_ms=float(worker_local_wait_ms),
+            )
 
+            def take_task(*, block: bool) -> Mapping[str, object] | None:
+                try:
+                    return task_queue.get(timeout=1.0) if block else task_queue.get_nowait()
+                except Empty:
+                    return None
+
+            # The central broker owns both model instances and CUDA.  Inside a
+            # worker, four already-active games are searched together so their
+            # leaves can cross the process boundary in one immediate request.
+            # This is execution batching, not a timed local coalescing window.
             candidate_eval = _RemoteEvaluator(
                 worker_id=worker_id,
                 model_role="candidate",
                 model_hash_value=candidate_hash,
+                lane_id=0,
                 input_slot=input_slot,
                 policy_slot=policy_slot,
                 wdl_slot=wdl_slot,
-                request_queue=request_queue,
-                response_queue=response_queue,
+                request_queue=inference_aggregator,
+                response_queue=response_queues[0],
             )
             reference_eval = (
                 candidate_eval
@@ -370,11 +443,12 @@ class Torus9ArenaProfile:
                     worker_id=worker_id,
                     model_role="reference",
                     model_hash_value=reference_hash,
+                    lane_id=0,
                     input_slot=input_slot,
                     policy_slot=policy_slot,
                     wdl_slot=wdl_slot,
-                    request_queue=request_queue,
-                    response_queue=response_queue,
+                    request_queue=inference_aggregator,
+                    response_queue=response_queues[0],
                 )
             )
             search = Torus9BatchedPUCT(
@@ -389,15 +463,27 @@ class Torus9ArenaProfile:
                 inference_batch_wait_ms=0.0,
             )
 
-            waiting = deque(tasks)
             active: list[_WorkerGame] = []
             records: list[dict[str, object]] = []
-            while waiting or active:
-                while waiting and len(active) < games_per_worker:
-                    active.append(_make_game(waiting.popleft()))
-                if not active:
-                    break
+            lane_wall_time_seconds = 0.0
 
+            def record_game(game: _WorkerGame) -> None:
+                nonlocal lane_wall_time_seconds
+                records.append(_finish_game(game))
+                lane_wall_time_seconds += time.perf_counter() - game.started_at
+
+            while len(active) < int(games_per_worker):
+                # Fill the worker's four independent lanes before starting
+                # search. The shared queue remains the global replenishment
+                # mechanism once a lane completes a game.
+                task = take_task(block=True)
+                if task is None:
+                    break
+                task = dict(task)
+                task["worker_id"] = worker_id
+                active.append(_make_game(task))
+
+            while active:
                 states = [game.state for game in active]
                 evaluators: list[_RemoteEvaluator] = []
                 seeds: list[int] = []
@@ -425,14 +511,13 @@ class Torus9ArenaProfile:
                     for game in active:
                         game.technical = "ERROR_SEARCH"
                         game.error = message
-                        records.append(_finish_game(game))
+                        record_game(game)
                     active.clear()
                     continue
 
                 survivors: list[_WorkerGame] = []
                 for game, result in zip(active, results):
                     task = game.task
-                    game.ply += 1
                     state = game.state
                     candidate_turn = (
                         state.side_to_move == BLACK
@@ -441,6 +526,7 @@ class Torus9ArenaProfile:
                         state.side_to_move == WHITE
                         and not bool(task["candidate_black"])
                     )
+                    game.ply += 1
                     action = result.action
                     try:
                         next_state = apply_action(state, action).after
@@ -451,15 +537,13 @@ class Torus9ArenaProfile:
                             {
                                 "ply": game.ply,
                                 "side_to_move": state.side_to_move.name,
-                                "player": (
-                                    "candidate" if candidate_turn else "reference"
-                                ),
+                                "player": "candidate" if candidate_turn else "reference",
                                 "action": action,
                                 "legal": False,
                                 "error": game.error,
                             }
                         )
-                        records.append(_finish_game(game))
+                        record_game(game)
                         continue
 
                     game.state = next_state
@@ -474,22 +558,28 @@ class Torus9ArenaProfile:
                             "legal": True,
                         }
                     )
-                    if (
-                        torus9_arena_termination_reason(next_state, game.ply)
-                        == "DOUBLE_PASS"
-                    ):
+                    if torus9_arena_termination_reason(next_state, game.ply) == "DOUBLE_PASS":
                         game.formal = result_from_terminal(next_state).winner.value
-                        records.append(_finish_game(game))
+                        record_game(game)
                     elif game.ply >= TORUS9_ARENA_MOVE_LIMIT:
                         game.technical = "TRUNCATED_MOVE_LIMIT"
                         game.error = (
                             "Torus 9x9 Arena watchdog reached "
                             f"{TORUS9_ARENA_MOVE_LIMIT} actions"
                         )
-                        records.append(_finish_game(game))
+                        record_game(game)
                     else:
                         survivors.append(game)
                 active = survivors
+                while len(active) < int(games_per_worker):
+                    task = take_task(block=False)
+                    if task is None:
+                        break
+                    task = dict(task)
+                    task["worker_id"] = worker_id
+                    active.append(_make_game(task))
+
+            inference_aggregator.close()
 
             cpu_end = resource.getrusage(resource.RUSAGE_SELF)
             cpu_seconds = (cpu_end.ru_utime + cpu_end.ru_stime) - (
@@ -502,6 +592,17 @@ class Torus9ArenaProfile:
                     "pid": os.getpid(),
                     "cuda_initialized": torch.cuda.is_initialized(),
                     "cpu_seconds": float(cpu_seconds),
+                    "cpu_active_seconds": float(cpu_seconds),
+                    "wall_time_seconds": time.perf_counter() - run_started,
+                    "blocked_inference_seconds": float(
+                        candidate_eval.blocked_inference_seconds
+                        + (0.0 if reference_eval is candidate_eval else reference_eval.blocked_inference_seconds)
+                    ),
+                    "blocked_inference_calls": int(
+                        candidate_eval.blocked_inference_calls
+                        + (0 if reference_eval is candidate_eval else reference_eval.blocked_inference_calls)
+                    ),
+                    "lane_wall_time_seconds": float(lane_wall_time_seconds),
                     "max_rss_kb": int(cpu_end.ru_maxrss),
                     "records": records,
                 }

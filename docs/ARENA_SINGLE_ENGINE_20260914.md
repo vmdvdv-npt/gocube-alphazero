@@ -32,6 +32,7 @@ When `--reference` is omitted, the candidate plays itself.
 
 - OS worker process lifecycle;
 - central request queue and shared-memory transport;
+- dedicated broker ingress that drains requests while model forward is running;
 - cross-worker inference coalescing;
 - one parent model owner / inference broker;
 - batching cap and pre-forward wait;
@@ -83,8 +84,10 @@ Current Legion execution defaults:
 - 16 real OS CPU search workers;
 - up to 4 active games per worker;
 - one parent CUDA inference owner;
+- balanced initial lane fill with a shared global task-replenishment queue;
 - global inference batch cap 64 rows;
-- 4 ms real pre-forward coalescing window.
+- 1 ms central pre-forward coalescing window;
+- zero worker-local batching wait (worker requests enter the broker immediately).
 
 The cap/wait values remain benchmark-tunable execution parameters and are not
 scientific semantics.

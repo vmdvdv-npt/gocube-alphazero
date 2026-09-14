@@ -88,6 +88,27 @@ Do not collapse unrelated runs into one synthetic baseline.
 
 These baselines serve different purposes. #1 proves central cross-process batching existed. #2 proves Golden process parallelism existed without semantic drift. #3 is the regression floor that the restored path must beat materially.
 
+## Current process-central Arena timestamp semantics
+
+The production Arena now records separate monotonic timestamps on every
+inference request path: `worker_enqueued_at`, `broker_received_at`,
+`dispatch_started_at`, `forward_started_at`, `forward_finished_at`, and
+`response_sent_at`. The worker timestamp is never replaced at broker ingress.
+The central batching deadline starts at `broker_received_at`.
+
+The resulting latency summaries are intentionally separate:
+
+- `worker_to_broker_transport_ms`: worker enqueue to broker ingress receipt;
+- `broker_queue_wait_ms`: per-request broker receipt to dispatch;
+- `broker_collection_wait_ms`: first request receipt to dispatch for each batch;
+- `model_forward_time_ms`: model forward duration;
+- `end_to_end_inference_ms`: worker enqueue to response sent.
+
+The worker transport has no timed coalescing window. A dedicated broker ingress
+thread drains the process queue while the single parent model owner performs a
+forward; candidate and reference requests remain in distinct model-aware
+pending queues.
+
 ## Acceptance semantics
 
 For the M18 gate, a run is performance-degraded if `mean_inference_batch_rows < 16`. Do not repeat a long Arena with the same settings in that state.
