@@ -14,11 +14,14 @@ import importlib
 import json
 import math
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+from queue import Empty, Queue
 from pathlib import Path
 import random
 import resource
+import threading
 import time
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, MutableMapping, Sequence
 
 torch = importlib.import_module("torch")
 nn = torch.nn
@@ -76,6 +79,14 @@ from .torus9_contract import (
     TORUS9_TARGET_CONTRACT_ID,
     TORUS9_TARGET_FINGERPRINT,
     TORUS9_WORKERS,
+    TORUS9_CURRENT_ARCHITECTURE_ID,
+    TORUS9_CURRENT_BLOCKS,
+    TORUS9_CURRENT_DIRICHLET_ALPHA,
+    TORUS9_CURRENT_HIDDEN,
+    TORUS9_CURRENT_PROFILE_ID,
+    TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
+    TORUS9_CURRENT_TARGET_FINGERPRINT,
+    current_torus9_selfplay_contract_fingerprint,
     load_torus9_profile,
     profile_fingerprint,
 )
@@ -373,6 +384,42 @@ class Torus9OwnershipScoreGraphNet(Torus9OwnershipGraphNet):
         return policy, value, ownership, self.score_head(nodes.mean(dim=1)).squeeze(-1)
 
 
+class Torus9CurrentGraphNet(Torus9OwnershipScoreGraphNet):
+    """Current Golden Standard model: 80-wide, 8-block, WDL+auxiliary heads.
+
+    The historical ``Torus9GraphNet`` defaults remain available for replaying
+    the v2 line.  The current launcher must instantiate this class explicitly
+    from the resolved current profile, so a legacy default cannot leak into a
+    new run.
+    """
+
+    def __init__(
+        self,
+        *,
+        hidden: int = TORUS9_CURRENT_HIDDEN,
+        blocks: int = TORUS9_CURRENT_BLOCKS,
+    ) -> None:
+        if int(hidden) != TORUS9_CURRENT_HIDDEN or int(blocks) != TORUS9_CURRENT_BLOCKS:
+            raise ValueError("Current Torus 9×9 model is fixed to GoldenGraphNetV2-Torus9 80×8")
+        super().__init__(hidden=int(hidden), blocks=int(blocks))
+        self.architecture_id = TORUS9_CURRENT_ARCHITECTURE_ID
+
+    @property
+    def architecture_config(self) -> dict[str, object]:
+        config = super().architecture_config
+        config["architecture_id"] = TORUS9_CURRENT_ARCHITECTURE_ID
+        config["auxiliary_variant"] = "wdl+ownership+score"
+        config["explicit_symmetry_augmentation"] = False
+        return config
+
+    def forward_auxiliary(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        nodes = self.encode(observation)
+        policy, value = self.policy_value_from_nodes(nodes)
+        ownership = self.ownership_head(nodes)
+        score = self.score_head(nodes.mean(dim=1)).squeeze(-1)
+        return policy, value, ownership, score
+
+
 class Torus9NeuralEvaluator:
     def __init__(self, model: Torus9GraphNet, *, device: str | torch.device = "cpu") -> None:
         self.model = model
@@ -438,6 +485,235 @@ class Torus9NeuralEvaluator:
         return tuple(evaluations)
 
 
+class Torus9ExecutionActivity:
+    """Thread-safe activity counters for proving lane/forward concurrency."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active_mcts = 0
+        self._active_inference_requests = 0
+        self._max_active_mcts = 0
+        self._max_active_inference_requests = 0
+
+    def enter_mcts(self) -> None:
+        with self._lock:
+            self._active_mcts += 1
+            self._max_active_mcts = max(self._max_active_mcts, self._active_mcts)
+
+    def exit_mcts(self) -> None:
+        with self._lock:
+            self._active_mcts -= 1
+
+    def enter_inference_request(self) -> None:
+        with self._lock:
+            self._active_inference_requests += 1
+            self._max_active_inference_requests = max(
+                self._max_active_inference_requests,
+                self._active_inference_requests,
+            )
+
+    def exit_inference_request(self) -> None:
+        with self._lock:
+            self._active_inference_requests -= 1
+
+    @property
+    def telemetry(self) -> dict[str, object]:
+        with self._lock:
+            return {
+                "max_active_mcts_lanes": self._max_active_mcts,
+                "max_active_inference_requests": self._max_active_inference_requests,
+            }
+
+
+@dataclass
+class _Torus9InferenceRequest:
+    state: GoldenState
+    legal_context: LegalActionContext
+    ticket: int
+    done: threading.Event
+    result: Evaluation | None = None
+    error: BaseException | None = None
+
+
+class Torus9InferenceCoordinator:
+    """Execution-only request coalescer shared by independent self-play lanes.
+
+    A lane blocks on its own request until its row is returned.  The
+    coordinator may combine requests from other lanes into one forward, but
+    it never shares trees, state, RNG, or search results between lanes.
+    """
+
+    def __init__(
+        self,
+        model: Torus9GraphNet,
+        *,
+        device: str | torch.device = "cpu",
+        batch_cap: int,
+        wait_ms: float,
+    ) -> None:
+        if int(batch_cap) <= 0:
+            raise ValueError("self-play inference batch cap must be positive")
+        if float(wait_ms) < 0.0 or not math.isfinite(float(wait_ms)):
+            raise ValueError("self-play inference batch wait ms must be finite and non-negative")
+        self.batch_cap = int(batch_cap)
+        self.wait_ms = float(wait_ms)
+        self._evaluator = Torus9NeuralEvaluator(model, device=device)
+        self._queue: Queue[object] = Queue()
+        self._stop = object()
+        self._ticket = 0
+        self._ticket_lock = threading.Lock()
+        self._closed = False
+        self._batches: list[int] = []
+        self._thread = threading.Thread(target=self._serve, name="torus9-inference-coordinator", daemon=True)
+        self._thread.start()
+
+    def _next_ticket(self) -> int:
+        with self._ticket_lock:
+            ticket = self._ticket
+            self._ticket += 1
+            return ticket
+
+    def evaluate_prepared(self, state: GoldenState, legal_context: LegalActionContext) -> Evaluation:
+        if self._closed:
+            raise SearchError("Torus 9×9 inference coordinator is closed")
+        request = _Torus9InferenceRequest(
+            state=state,
+            legal_context=legal_context,
+            ticket=self._next_ticket(),
+            done=threading.Event(),
+        )
+        self._queue.put(request)
+        request.done.wait()
+        if request.error is not None:
+            raise SearchError(f"Torus 9×9 inference request {request.ticket} failed: {request.error}") from request.error
+        if request.result is None:
+            raise SearchError(f"Torus 9×9 inference request {request.ticket} returned no result")
+        return request.result
+
+    def _serve(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is self._stop:
+                return
+            first = item
+            if not isinstance(first, _Torus9InferenceRequest):
+                continue
+            batch = [first]
+            deadline = time.monotonic() + self.wait_ms / 1000.0
+            while len(batch) < self.batch_cap:
+                timeout = max(0.0, deadline - time.monotonic()) if self.wait_ms > 0.0 else 0.0
+                try:
+                    item = self._queue.get(timeout=timeout)
+                except Empty:
+                    break
+                if item is self._stop:
+                    self._queue.put(self._stop)
+                    break
+                if isinstance(item, _Torus9InferenceRequest):
+                    batch.append(item)
+            self._dispatch(batch)
+
+    def _dispatch(self, batch: Sequence[_Torus9InferenceRequest]) -> None:
+        try:
+            evaluations = self._evaluator.evaluate_prepared_batch(
+                [request.state for request in batch],
+                [request.legal_context for request in batch],
+            )
+            if len(evaluations) != len(batch):
+                raise SearchError("Torus 9×9 coordinator returned the wrong row count")
+            self._batches.append(len(batch))
+            for request, evaluation in zip(batch, evaluations):
+                request.result = evaluation
+        except BaseException as exc:
+            for request in batch:
+                request.error = exc
+        finally:
+            for request in batch:
+                request.done.set()
+
+    @property
+    def telemetry(self) -> dict[str, object]:
+        rows = sum(self._batches)
+        return {
+            "mode": "coalesced",
+            "batch_cap": self.batch_cap,
+            "wait_ms": self.wait_ms,
+            "forward_calls": len(self._batches),
+            "total_rows": rows,
+            "batch_rows": list(self._batches),
+            "mean_batch_rows": rows / len(self._batches) if self._batches else 0.0,
+            "max_batch_rows": max(self._batches, default=0),
+            "max_concurrent_forwards": 1 if self._batches else 0,
+            "lock_scope": "single_batched_model_forward_only",
+        }
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._queue.put(self._stop)
+        self._thread.join()
+
+
+class Torus9UncoalescedInference:
+    """Baseline execution backend: one model forward per request."""
+
+    def __init__(self, model: Torus9GraphNet, *, device: str | torch.device = "cpu") -> None:
+        self._evaluator = Torus9NeuralEvaluator(model, device=device)
+        self._lock = threading.Lock()
+        self._rows = 0
+        self._max_concurrent_forwards = 0
+        self._active_forwards = 0
+
+    def evaluate_prepared(self, state: GoldenState, legal_context: LegalActionContext) -> Evaluation:
+        with self._lock:
+            self._rows += 1
+            self._active_forwards += 1
+            self._max_concurrent_forwards = max(self._max_concurrent_forwards, self._active_forwards)
+            try:
+                return self._evaluator.evaluate_prepared(state, legal_context)
+            finally:
+                self._active_forwards -= 1
+
+    @property
+    def telemetry(self) -> dict[str, object]:
+        return {
+            "mode": "uncoalesced",
+            "batch_cap": 1,
+            "wait_ms": 0.0,
+            "forward_calls": self._rows,
+            "total_rows": self._rows,
+            "batch_rows": [1] * self._rows,
+            "mean_batch_rows": 1.0 if self._rows else 0.0,
+            "max_batch_rows": 1 if self._rows else 0,
+            "max_concurrent_forwards": self._max_concurrent_forwards,
+            "lock_scope": "single_model_forward_only",
+        }
+
+
+class _Torus9LaneEvaluator:
+    """Per-lane accounting wrapper around either execution backend."""
+
+    def __init__(
+        self,
+        backend: Torus9InferenceCoordinator | Torus9UncoalescedInference,
+        activity: Torus9ExecutionActivity | None = None,
+    ) -> None:
+        self.backend = backend
+        self.activity = activity
+        self.nn_evaluations = 0
+
+    def evaluate_prepared(self, state: GoldenState, legal_context: LegalActionContext) -> Evaluation:
+        self.nn_evaluations += 1
+        if self.activity is not None:
+            self.activity.enter_inference_request()
+        try:
+            return self.backend.evaluate_prepared(state, legal_context)
+        finally:
+            if self.activity is not None:
+                self.activity.exit_inference_request()
+
+
 @dataclass
 class _Torus9BatchedTree:
     state: GoldenState
@@ -461,10 +737,14 @@ class Torus9BatchedPUCT:
         *,
         adapter: GoldenSearchAdapter | None = None,
         max_batch_rows: int | None = None,
+        inference_batch_wait_ms: float = 0.0,
     ) -> None:
         self.settings = settings or SearchSettings()
         self.adapter = adapter or GoldenSearchAdapter()
         self.max_batch_rows = max_batch_rows
+        if inference_batch_wait_ms < 0.0 or not math.isfinite(float(inference_batch_wait_ms)):
+            raise ValueError("Torus 9×9 Arena inference batch wait must be finite and non-negative")
+        self.inference_batch_wait_ms = float(inference_batch_wait_ms)
         self.inference_batch_rows: list[int] = []
 
     def _tie_key(self, state: GoldenState, action: int | str) -> int:
@@ -519,6 +799,11 @@ class Torus9BatchedPUCT:
                 chunk = group_entries[offset:offset + limit]
                 states = [node.state for _, node in chunk]
                 contexts = [self.adapter.prepare_legal_actions(state) for state in states]
+                # This is an execution-only scheduler wait.  It deliberately
+                # occurs outside the model call and therefore cannot alter
+                # search semantics, targets, or deterministic tie-breaking.
+                if self.inference_batch_wait_ms > 0.0:
+                    time.sleep(self.inference_batch_wait_ms / 1000.0)
                 batch_method = getattr(evaluator, "evaluate_prepared_batch", None)
                 if callable(batch_method):
                     evaluations = tuple(batch_method(states, contexts))
@@ -640,6 +925,7 @@ class Torus9RootNoiseEvaluator:
 
 @dataclass(frozen=True)
 class Torus9SelfPlaySearchContract:
+    contract_id: str = TORUS9_SELFPLAY_CONTRACT_ID
     simulations: int = 64
     cpuct: float = 1.25
     fpu: float = 0.0
@@ -657,13 +943,19 @@ class Torus9SelfPlaySearchContract:
         expected = Torus9SelfPlaySearchContract()
         candidate = asdict(self)
         baseline = asdict(expected)
+        if self.contract_id not in {TORUS9_SELFPLAY_CONTRACT_ID, TORUS9_CURRENT_SELFPLAY_CONTRACT_ID}:
+            raise ValueError("Unknown Torus 9×9 self-play contract id")
         candidate.pop("dirichlet_alpha")
         baseline.pop("dirichlet_alpha")
+        candidate.pop("contract_id")
+        baseline.pop("contract_id")
         if candidate != baseline or not math.isfinite(float(self.dirichlet_alpha)) or self.dirichlet_alpha <= 0.0:
             raise ValueError("Torus 9×9 self-play search contract drift")
 
     @property
     def fingerprint(self) -> str:
+        if self.contract_id == TORUS9_CURRENT_SELFPLAY_CONTRACT_ID:
+            return current_torus9_selfplay_contract_fingerprint(self.dirichlet_alpha)
         return torus9_selfplay_contract_fingerprint(self.dirichlet_alpha)
 
 
@@ -769,7 +1061,7 @@ class Torus9SelfPlayGameRecord:
     nn_evaluations: int = 0
 
     def validate(self) -> None:
-        if self.profile_id != TORUS9_PROFILE_ID or self.selfplay_contract_id != TORUS9_SELFPLAY_CONTRACT_ID:
+        if self.profile_id not in {TORUS9_PROFILE_ID, TORUS9_CURRENT_PROFILE_ID} or self.selfplay_contract_id not in {TORUS9_SELFPLAY_CONTRACT_ID, TORUS9_CURRENT_SELFPLAY_CONTRACT_ID}:
             raise ValueError("Torus 9×9 self-play contract identity drift")
         if self.technical_termination is None and self.formal_result not in ("BLACK", "WHITE", "DRAW"):
             raise ValueError("Formal Torus 9×9 game lacks a result")
@@ -807,6 +1099,9 @@ class Torus9SelfPlayRunner:
         code_identity: CodeIdentity | None = None,
         device: str | torch.device = "cpu",
         contract: Torus9SelfPlaySearchContract = Torus9SelfPlaySearchContract(),
+        evaluator_override: Any | None = None,
+        profile_id: str = TORUS9_PROFILE_ID,
+        activity_tracker: Torus9ExecutionActivity | None = None,
     ) -> None:
         contract.validate()
         if model.topology_fingerprint != TORUS9_TOPOLOGY_FINGERPRINT:
@@ -822,7 +1117,9 @@ class Torus9SelfPlayRunner:
         self.code_identity = code_identity or capture_code_identity()
         self.device = torch.device(device)
         self.contract = contract
-        self.evaluator = Torus9NeuralEvaluator(model, device=self.device)
+        self.profile_id = str(profile_id)
+        self.evaluator = evaluator_override or Torus9NeuralEvaluator(model, device=self.device)
+        self.activity_tracker = activity_tracker
         self.adapter = GoldenSearchAdapter()
 
     def play_game(self, game_id: str) -> Torus9SelfPlayGameRecord:
@@ -840,7 +1137,13 @@ class Torus9SelfPlayRunner:
             try:
                 context = prepare_legal_actions(state)
                 evaluator = Torus9RootNoiseEvaluator(self.evaluator, state, seed=derive_seed(search_seed, "dirichlet"), alpha=self.contract.dirichlet_alpha)
-                result = SequentialPUCT(self.contract.settings, adapter=self.adapter).search(state, evaluator, seed=search_seed)
+                if self.activity_tracker is not None:
+                    self.activity_tracker.enter_mcts()
+                try:
+                    result = SequentialPUCT(self.contract.settings, adapter=self.adapter).search(state, evaluator, seed=search_seed)
+                finally:
+                    if self.activity_tracker is not None:
+                        self.activity_tracker.exit_mcts()
                 action = _sample_action(result, temperature=1.0 if ply <= self.contract.temperature_until_ply else self.contract.temperature_after, rng=rng)
             except Exception as exc:
                 technical, error = "ERROR_SEARCH", f"{type(exc).__name__}: {exc}"
@@ -869,9 +1172,9 @@ class Torus9SelfPlayRunner:
         record = Torus9SelfPlayGameRecord(
             run_id=self.run_id,
             game_id=str(game_id),
-            profile_id=TORUS9_PROFILE_ID,
+            profile_id=self.profile_id,
             profile_fingerprint=self.profile_fp,
-            selfplay_contract_id=TORUS9_SELFPLAY_CONTRACT_ID,
+            selfplay_contract_id=self.contract.contract_id,
             selfplay_contract_fingerprint=self.contract.fingerprint,
             model_checkpoint_label=self.model_checkpoint_label,
             model_hash=self.model_hash,
@@ -922,7 +1225,7 @@ def torus9_build_replay_samples(game: Torus9SelfPlayGameRecord) -> tuple[dict[st
             "selfplay_contract_fingerprint": game.selfplay_contract_fingerprint,
             "observation_fingerprint": TORUS9_OBSERVATION_FINGERPRINT,
             "target_contract_id": TORUS9_TARGET_CONTRACT_ID,
-            "target_fingerprint": TORUS9_TARGET_FINGERPRINT,
+            "target_fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT if game.profile_id == TORUS9_CURRENT_PROFILE_ID else TORUS9_TARGET_FINGERPRINT,
         }
         samples.append(row)
     return tuple(samples)
@@ -974,7 +1277,7 @@ def torus9_build_ownership_score_replay_samples(game: Torus9SelfPlayGameRecord) 
     return tuple(rows)
 
 
-def validate_torus9_replay_sample(sample: Mapping[str, object]) -> None:
+def validate_torus9_replay_sample(sample: Mapping[str, object], *, expected_target_fingerprint: str | None = None) -> None:
     """Validate one serialized policy+WDL replay row at the 9×9 boundary."""
     state = torus9_state_from_identity(sample["state"])  # type: ignore[arg-type]
     context = prepare_legal_actions(state)
@@ -992,7 +1295,12 @@ def validate_torus9_replay_sample(sample: Mapping[str, object]) -> None:
     z = tuple(float(value) for value in sample["z"])  # type: ignore[arg-type]
     if len(z) != 3 or any(not math.isfinite(value) or value < 0.0 for value in z) or not math.isclose(sum(z), 1.0, abs_tol=1e-6):
         raise ValueError("Torus 9×9 replay WDL target is invalid")
-    if sample.get("observation_fingerprint") != TORUS9_OBSERVATION_FINGERPRINT or sample.get("target_contract_id") != TORUS9_TARGET_CONTRACT_ID or sample.get("target_fingerprint") != TORUS9_TARGET_FINGERPRINT:
+    accepted_target_fingerprints = {
+        expected_target_fingerprint or TORUS9_TARGET_FINGERPRINT
+    }
+    if expected_target_fingerprint is None:
+        accepted_target_fingerprints.add(TORUS9_CURRENT_TARGET_FINGERPRINT)
+    if sample.get("observation_fingerprint") != TORUS9_OBSERVATION_FINGERPRINT or sample.get("target_contract_id") != TORUS9_TARGET_CONTRACT_ID or sample.get("target_fingerprint") not in accepted_target_fingerprints:
         raise ValueError("Torus 9×9 replay semantic fingerprint drift")
     if sample.get("ownership_target") is not None:
         ownership = tuple(int(value) for value in sample["ownership_target"])  # type: ignore[arg-type]
@@ -1057,12 +1365,65 @@ def run_torus9_selfplay_games(
     code_identity: CodeIdentity | None = None,
     device: str | torch.device = "cpu",
     contract: Torus9SelfPlaySearchContract = Torus9SelfPlaySearchContract(),
+    profile_id: str = TORUS9_PROFILE_ID,
+    coalescing: bool = False,
+    inference_batch_cap: int | None = None,
+    inference_batch_wait_ms: float = 0.0,
+    inference_telemetry: MutableMapping[str, object] | None = None,
+    execution_activity: MutableMapping[str, object] | None = None,
 ) -> tuple[Torus9SelfPlayGameRecord, ...]:
     if workers <= 0 or len(set(game_ids)) != len(game_ids):
         raise ValueError("Torus 9×9 self-play workers/game IDs are invalid")
     code = code_identity or capture_code_identity()
     contract.validate()
     ids = tuple(sorted(str(game_id) for game_id in game_ids))
+    if profile_id == TORUS9_CURRENT_PROFILE_ID:
+        if not isinstance(model, Torus9CurrentGraphNet):
+            raise ValueError("Current Torus 9×9 self-play requires the 80×8 auxiliary-head model")
+        cap = 1 if inference_batch_cap is None else int(inference_batch_cap)
+        if coalescing and cap <= 1:
+            raise ValueError("Coalesced current self-play requires batch_cap > 1")
+        backend: Torus9InferenceCoordinator | Torus9UncoalescedInference
+        if coalescing:
+            backend = Torus9InferenceCoordinator(
+                model,
+                device=device,
+                batch_cap=cap,
+                wait_ms=float(inference_batch_wait_ms),
+            )
+        else:
+            backend = Torus9UncoalescedInference(model, device=device)
+        activity = Torus9ExecutionActivity()
+
+        def play_current(game_id: str) -> Torus9SelfPlayGameRecord:
+            lane = _Torus9LaneEvaluator(backend, activity)
+            runner = Torus9SelfPlayRunner(
+                model,
+                run_id=run_id,
+                model_checkpoint_label=label,
+                checkpoint_artifact_hash=artifact,
+                master_seed=master_seed,
+                profile_fp=profile_fp,
+                code_identity=code,
+                device=device,
+                contract=contract,
+                evaluator_override=lane,
+                profile_id=profile_id,
+                activity_tracker=activity,
+            )
+            return runner.play_game(game_id)
+
+        try:
+            with ThreadPoolExecutor(max_workers=min(int(workers), len(ids) or 1)) as pool:
+                records = tuple(pool.map(play_current, ids))
+        finally:
+            if isinstance(backend, Torus9InferenceCoordinator):
+                backend.close()
+        if inference_telemetry is not None:
+            inference_telemetry.update(backend.telemetry)
+        if execution_activity is not None:
+            execution_activity.update(activity.telemetry)
+        return tuple(sorted(records, key=lambda record: record.game_id))
     if workers == 1:
         runner = Torus9SelfPlayRunner(model, run_id=run_id, model_checkpoint_label=label, checkpoint_artifact_hash=artifact, master_seed=master_seed, profile_fp=profile_fp, code_identity=code, device=device, contract=contract)
         return tuple(runner.play_game(game_id) for game_id in ids)
@@ -1520,6 +1881,7 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
             "mean_policy_loss": sum(float(row["policy_loss"]) for row in updates) / len(updates),
             "mean_value_loss": sum(float(row["value_loss"]) for row in updates) / len(updates),
             "mean_ownership_loss": sum(float(row["ownership_loss"]) for row in updates) / len(updates),
+            "ownership_loss_enabled": self.ownership_loss_enabled,
             "mean_score_loss_normalized": sum(float(row["score_loss_normalized"]) for row in updates) / len(updates),
             "score_loss_enabled": self.score_loss_enabled,
             "score_target_normalization": TORUS9_SCORE_TARGET_NORMALIZATION,
@@ -1531,7 +1893,7 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
         }
 
 
-def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str, parent: str | None, model_seed: int, code: CodeIdentity, profile_fp: str, completed_games: int, replay_positions: int, optimizer_updates: int, samples_consumed: int, ownership_loss_enabled: bool | None = None, score_loss_enabled: bool | None = None) -> dict[str, object]:
+def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str, parent: str | None, model_seed: int, code: CodeIdentity, profile_fp: str, completed_games: int, replay_positions: int, optimizer_updates: int, samples_consumed: int, ownership_loss_enabled: bool | None = None, score_loss_enabled: bool | None = None, profile_id: str = TORUS9_PROFILE_ID, target_fingerprint: str = TORUS9_TARGET_FINGERPRINT, selfplay_contract_id: str = TORUS9_SELFPLAY_CONTRACT_ID, selfplay_contract_fingerprint: str | None = None, base_commit: str | None = None) -> dict[str, object]:
     auxiliary = isinstance(model, Torus9OwnershipGraphNet)
     heads = {
         "policy": [TORUS9_ACTION_COUNT],
@@ -1552,8 +1914,9 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
         "architecture_fingerprint": "sha256:" + hashlib.sha256(_canonical(model.architecture_config).encode("utf-8")).hexdigest(),
         "model_parameter_count": sum(parameter.numel() for parameter in model.parameters()),
         "model_hash": model_hash(model),
-        "profile_id": TORUS9_PROFILE_ID,
+        "profile_id": profile_id,
         "profile_fingerprint": profile_fp,
+        "base_commit": base_commit,
         "rules_profile_id": "graph-area-v1",
         "rules_fingerprint": TORUS9_RULES_FINGERPRINT,
         "topology_id": TORUS9_TOPOLOGY_ID,
@@ -1567,7 +1930,7 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
         "observation_shape": [6, TORUS9_POINT_COUNT],
         "target_contract_id": TORUS9_TARGET_CONTRACT_ID,
         "target_contract_version": 1,
-        "target_fingerprint": TORUS9_TARGET_FINGERPRINT,
+        "target_fingerprint": target_fingerprint,
         "value_head_semantics": TORUS9_VALUE_HEAD_SEMANTICS,
         "network_heads_and_shapes": heads,
         "model_initialization_seed": model_seed,
@@ -1583,6 +1946,8 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
         "maximum_replay_positions": TORUS9_MAX_REPLAY_POSITIONS,
         "optimizer_steps_per_iteration": TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
         "samples_consumed_per_iteration": TORUS9_OPTIMIZER_STEPS_PER_ITERATION * TORUS9_BATCH_SIZE,
+        "selfplay_contract_id": selfplay_contract_id,
+        "selfplay_contract_fingerprint": selfplay_contract_fingerprint,
         "auxiliary_heads": auxiliary,
         "auxiliary_target_contracts": ({
             "source": TORUS9_AUXILIARY_TARGET_SOURCE,
@@ -1614,6 +1979,8 @@ def torus9_model_from_metadata(metadata: Mapping[str, object]) -> Torus9GraphNet
         raise ValueError("Torus 9×9 checkpoint architecture metadata is malformed")
     hidden = int(architecture.get("hidden", TORUS9_HIDDEN))
     blocks = int(architecture.get("blocks", TORUS9_BLOCKS))
+    if architecture.get("architecture_id") == TORUS9_CURRENT_ARCHITECTURE_ID:
+        return Torus9CurrentGraphNet(hidden=hidden, blocks=blocks)
     heads = dict(metadata.get("network_heads_and_shapes", {}))
     if "score" in heads:
         return Torus9OwnershipScoreGraphNet(hidden=hidden, blocks=blocks)
@@ -2003,6 +2370,7 @@ def run_torus9_batched_arena(
             SearchSettings(simulations=64, cpuct=1.25, fpu=0.0, deterministic_tie_break=True),
             adapter=GoldenSearchAdapter(),
             max_batch_rows=int(workers) * int(arena_batch_size),
+            inference_batch_wait_ms=float(inference_batch_wait_ms),
         )
         for ply in range(1, TORUS9_ARENA_MOVE_LIMIT + 1):
             active = [index for index, game in enumerate(games) if game["formal"] is None and game["technical"] is None]
@@ -2090,6 +2458,9 @@ def run_torus9_batched_arena(
     write_jsonl(output_dir / "games.jsonl", records)
     summary = summarize_torus9_arena(records, candidate_label=candidate_label, reference_label=reference_label, pairs=len(starts))
     batch_rows = list(search.inference_batch_rows)
+    ordered_batch_rows = sorted(batch_rows)
+    p50_index = min(len(ordered_batch_rows) - 1, max(0, math.ceil(0.50 * len(ordered_batch_rows)) - 1)) if ordered_batch_rows else 0
+    p95_index = min(len(ordered_batch_rows) - 1, max(0, math.ceil(0.95 * len(ordered_batch_rows)) - 1)) if ordered_batch_rows else 0
     summary.update({
         "comparison": comparison,
         "frozen_corpus_fingerprint": str(starts[0].get("corpus_fingerprint", "")) if starts else None,
@@ -2099,6 +2470,8 @@ def run_torus9_batched_arena(
         "inference_calls": len(batch_rows),
         "inference_rows": sum(batch_rows),
         "mean_inference_batch_rows": sum(batch_rows) / len(batch_rows) if batch_rows else 0.0,
+        "p50_inference_batch_rows": ordered_batch_rows[p50_index] if ordered_batch_rows else 0,
+        "p95_inference_batch_rows": ordered_batch_rows[p95_index] if ordered_batch_rows else 0,
         "max_inference_batch_rows": max(batch_rows, default=0),
         "workers": int(workers),
         "logical_worker_lanes": int(workers),
