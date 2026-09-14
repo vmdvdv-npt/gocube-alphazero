@@ -8,6 +8,7 @@ import torch
 import gocube_golden as g
 from gocube_golden.arena_contract import SearchSettings
 from gocube_golden.search import SequentialPUCT
+from gocube_golden.torus9 import Torus9BatchedPUCT
 from gocube_golden.torus9_contract import (
     TORUS9_OBSERVATION_FINGERPRINT,
     TORUS9_SELFPLAY_CONTRACT_FINGERPRINT,
@@ -81,7 +82,7 @@ def test_batched_torus9_puct_matches_sequential_root_visits_and_records_rows():
         for state in (state_a, state_b)
     ]
     batched_evaluator = g.Torus9NeuralEvaluator(model)
-    batched = g.Torus9BatchedPUCT(settings, adapter=g.GoldenSearchAdapter(), max_batch_rows=8)
+    batched = Torus9BatchedPUCT(settings, adapter=g.GoldenSearchAdapter(), max_batch_rows=8)
     parallel = batched.search((state_a, state_b), (batched_evaluator, batched_evaluator), seeds=(3, 3))
     assert [result.root_visits for result in parallel] == [result.root_visits for result in sequential]
     assert batched.inference_batch_rows[0] == 2

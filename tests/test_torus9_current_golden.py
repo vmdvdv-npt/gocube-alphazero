@@ -8,6 +8,7 @@ import gocube_golden as g
 from gocube_golden.arena_contract import SearchSettings
 from gocube_golden.provenance import derive_seed
 from gocube_golden.search import SequentialPUCT
+from gocube_golden.torus9 import Torus9BatchedPUCT
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_DIRICHLET_ALPHA,
     TORUS9_CURRENT_PROFILE_ID,
@@ -108,7 +109,7 @@ def test_batching_does_not_change_mcts_results_or_semantic_seeds():
         )
         for index, state in enumerate(states)
     )
-    grouped = g.Torus9BatchedPUCT(settings, adapter=g.GoldenSearchAdapter(), max_batch_rows=8).search(
+    grouped = Torus9BatchedPUCT(settings, adapter=g.GoldenSearchAdapter(), max_batch_rows=8).search(
         states,
         (g.Torus9NeuralEvaluator(model), g.Torus9NeuralEvaluator(model)),
         seeds=(derive_seed(77, 0), derive_seed(77, 1)),

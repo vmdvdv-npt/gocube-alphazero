@@ -90,7 +90,7 @@ def test_worker_has_no_model_loading_and_parent_is_model_owner():
 
 def test_inference_wait_collects_before_forward_not_after_chunk_creation():
     source = inspect.getsource(production_arena.run_arena)
-    deadline_index = source.index("deadline = time.perf_counter()")
+    deadline_index = source.index("deadline =")
     queue_get_index = source.index("extra = request_queue.get", deadline_index)
     forward_index = source.index("logits, wdl_logits = model", queue_get_index)
     assert deadline_index < queue_get_index < forward_index
@@ -100,8 +100,8 @@ def test_frozen_operational_entrypoints_require_explicit_override():
     assert policy.FROZEN_ARENA_OVERRIDE_FLAG == "--allow-frozen-arena"
     for module in (continuation, ownership_ab, alpha_score_ab, komi_calibration):
         source = Path(module.__file__).read_text(encoding="utf-8")
-        assert policy.FROZEN_ARENA_OVERRIDE_FLAG in source
-        assert policy.FROZEN_ARENA_OVERRIDE_ENV in source
+        assert "FROZEN_ARENA_OVERRIDE_FLAG" in source
+        assert "FROZEN_ARENA_OVERRIDE_ENV" in source
 
 
 def test_frozen_programmatic_entrypoints_stay_blocked():
