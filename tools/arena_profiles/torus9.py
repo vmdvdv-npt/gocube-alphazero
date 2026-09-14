@@ -6,16 +6,13 @@ central inference batching, lifecycle and telemetry live in tools.arena_engine.
 
 from __future__ import annotations
 
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from collections import deque
 from dataclasses import dataclass
 import json
 import math
 import os
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty
 import resource
-import threading
 import time
 import traceback
 from typing import Any, Mapping, Sequence
@@ -57,11 +54,13 @@ PRODUCTION_MIN_BATCH_ROWS = 16
 
 
 class _WorkerInferenceAggregator:
-    """Coalesce independent lane requests before crossing the process boundary.
+    """Zero-wait transport shim for thread-safe cross-process request ingress.
 
-    Search lanes remain independent and wait only on their own response queue.
-    This small worker-local stage avoids turning four one-row lane requests into
-    four broker IPC messages while retaining separate candidate/reference queues.
+    The old implementation had a second, worker-local timed coalescing window.
+    That serialized every lane behind ``inference_batch_wait_ms`` before the
+    central broker could see it.  The production path now forwards every
+    request immediately; all timed coalescing belongs to the central broker.
+    The historical name is retained as a narrow compatibility boundary.
     """
 
     def __init__(
@@ -72,137 +71,21 @@ class _WorkerInferenceAggregator:
         local_cap: int,
         wait_ms: float,
     ) -> None:
-        if local_cap <= 0 or wait_ms < 0.0:
-            raise ValueError("Worker inference coalescing settings are invalid")
+        if local_cap <= 0 or not math.isfinite(float(wait_ms)) or float(wait_ms) != 0.0:
+            raise ValueError("Worker inference transport requires wait_ms=0")
         self.worker_id = int(worker_id)
         self.central_queue = central_queue
         self.local_cap = int(local_cap)
-        self.wait_seconds = float(wait_ms) / 1000.0
-        self._requests: Queue[Any] = Queue()
-        self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run,
-            name=f"arena-inference-coalescer-{worker_id:02d}",
-            daemon=True,
-        )
-        self._next_model_index = 0
-        self._thread.start()
+        self.wait_ms = 0.0
+        self._closed = False
 
     def put(self, request: Mapping[str, object]) -> None:
-        self._requests.put(dict(request))
+        if self._closed:
+            raise RuntimeError("Worker inference transport is closed")
+        self.central_queue.put(dict(request))
 
     def close(self) -> None:
-        self._stop.set()
-        self._requests.put(None)
-        self._thread.join(timeout=10.0)
-        if self._thread.is_alive():
-            raise RuntimeError("Worker inference coalescer did not exit")
-
-    def _run(self) -> None:
-        pending: dict[str, deque[Mapping[str, object]]] = {}
-        first_enqueued: dict[str, float] = {}
-
-        def append(request: Mapping[str, object]) -> None:
-            model_hash = str(request["model_hash"])
-            queue = pending.setdefault(model_hash, deque())
-            if not queue:
-                first_enqueued[model_hash] = float(request["enqueued_at"])
-            queue.append(request)
-
-        def rows(model_hash: str) -> int:
-            return sum(int(request["rows"]) for request in pending[model_hash])
-
-        def ready_model(now: float) -> str | None:
-            model_hashes = tuple(pending)
-            if not model_hashes:
-                return None
-            for offset in range(len(model_hashes)):
-                index = (self._next_model_index + offset) % len(model_hashes)
-                model_hash = model_hashes[index]
-                if rows(model_hash) >= self.local_cap or now >= first_enqueued[model_hash] + self.wait_seconds:
-                    self._next_model_index = (index + 1) % len(model_hashes)
-                    return model_hash
-            return None
-
-        def send(model_hash: str) -> None:
-            requests = pending[model_hash]
-            segments: list[dict[str, object]] = []
-            total_rows = 0
-            while requests:
-                request = requests[0]
-                request_rows = int(request["rows"])
-                if segments and total_rows + request_rows > self.local_cap:
-                    break
-                requests.popleft()
-                segments.append(
-                    {
-                        "worker_id": int(request["worker_id"]),
-                        "lane_id": int(request["lane_id"]),
-                        "ticket": int(request["ticket"]),
-                        "rows": request_rows,
-                        "model_role": str(request["model_role"]),
-                    }
-                )
-                total_rows += request_rows
-                if total_rows == self.local_cap:
-                    break
-            self.central_queue.put(
-                {
-                    "kind": "inference",
-                    "worker_id": self.worker_id,
-                    "model_role": str(segments[0].get("model_role", "")),
-                    "model_hash": model_hash,
-                    "rows": total_rows,
-                    "segments": segments,
-                    "enqueued_at": first_enqueued[model_hash],
-                }
-            )
-            if requests:
-                first_enqueued[model_hash] = float(requests[0]["enqueued_at"])
-            else:
-                del pending[model_hash]
-                del first_enqueued[model_hash]
-
-        while True:
-            now = time.perf_counter()
-            model_hash = ready_model(now)
-            if model_hash is not None:
-                send(model_hash)
-                continue
-
-            if self._stop.is_set():
-                try:
-                    while True:
-                        request = self._requests.get_nowait()
-                        if request is not None:
-                            append(request)
-                except Empty:
-                    pass
-                model_hash = ready_model(float("inf"))
-                if model_hash is not None:
-                    send(model_hash)
-                    continue
-                if not pending:
-                    return
-
-            timeout = 0.05
-            if first_enqueued:
-                timeout = max(
-                    0.0,
-                    min(
-                        timeout,
-                        min(
-                            first_enqueued[model_hash] + self.wait_seconds - now
-                            for model_hash in first_enqueued
-                        ),
-                    ),
-                )
-            try:
-                request = self._requests.get(timeout=timeout)
-            except Empty:
-                continue
-            if request is not None:
-                append(request)
+        self._closed = True
 
 
 class _RemoteEvaluator:
@@ -261,6 +144,7 @@ class _RemoteEvaluator:
         # Encode the role in the ticket so model-aware dispatch reordering can
         # never let the two evaluators consume each other's response.
         ticket = self.ticket * 2 + (1 if self.model_role == "candidate" else 2)
+        worker_enqueued_at = time.perf_counter()
         self.request_queue.put(
             {
                 "kind": "inference",
@@ -271,7 +155,7 @@ class _RemoteEvaluator:
                 "model_role": self.model_role,
                 "model_hash": self.model_hash,
                 "rows": rows,
-                "enqueued_at": time.perf_counter(),
+                "worker_enqueued_at": worker_enqueued_at,
             }
         )
         wait_started = time.perf_counter()
@@ -497,7 +381,7 @@ class Torus9ArenaProfile:
         worker_id: int,
         task_queue: Any,
         games_per_worker: int,
-        inference_batch_wait_ms: float,
+        worker_local_wait_ms: float,
         candidate_hash: str,
         reference_hash: str,
         input_slot: torch.Tensor,
@@ -528,7 +412,7 @@ class Torus9ArenaProfile:
                 worker_id=worker_id,
                 central_queue=request_queue,
                 local_cap=int(games_per_worker),
-                wait_ms=float(inference_batch_wait_ms),
+                wait_ms=float(worker_local_wait_ms),
             )
 
             def take_task(*, block: bool) -> Mapping[str, object] | None:
@@ -537,72 +421,103 @@ class Torus9ArenaProfile:
                 except Empty:
                     return None
 
-            def result_payload(
-                game: _WorkerGame,
-                candidate_eval: _RemoteEvaluator,
-                reference_eval: _RemoteEvaluator,
-            ) -> dict[str, object]:
-                evaluators = (candidate_eval,) if reference_eval is candidate_eval else (
-                    candidate_eval,
-                    reference_eval,
-                )
-                return {
-                    "record": _finish_game(game),
-                    "blocked_inference_seconds": sum(
-                        evaluator.blocked_inference_seconds for evaluator in evaluators
-                    ),
-                    "blocked_inference_calls": sum(
-                        evaluator.blocked_inference_calls for evaluator in evaluators
-                    ),
-                    "lane_wall_time_seconds": time.perf_counter() - game.started_at,
-                }
-
-            def play_task(task: Mapping[str, object], lane_id: int) -> dict[str, object]:
-                # The global queue assigns work dynamically. Keep the record's
-                # execution owner truthful; the original task slot is only an
-                # initial scheduling hint.
-                task = dict(task)
-                task["worker_id"] = worker_id
-                lane_response_queue = response_queues[lane_id]
-                candidate_eval = _RemoteEvaluator(
+            # The central broker owns both model instances and CUDA.  Inside a
+            # worker, four already-active games are searched together so their
+            # leaves can cross the process boundary in one immediate request.
+            # This is execution batching, not a timed local coalescing window.
+            candidate_eval = _RemoteEvaluator(
+                worker_id=worker_id,
+                model_role="candidate",
+                model_hash_value=candidate_hash,
+                lane_id=0,
+                input_slot=input_slot,
+                policy_slot=policy_slot,
+                wdl_slot=wdl_slot,
+                request_queue=inference_aggregator,
+                response_queue=response_queues[0],
+            )
+            reference_eval = (
+                candidate_eval
+                if candidate_hash == reference_hash
+                else _RemoteEvaluator(
                     worker_id=worker_id,
-                    model_role="candidate",
-                    model_hash_value=candidate_hash,
-                    lane_id=lane_id,
+                    model_role="reference",
+                    model_hash_value=reference_hash,
+                    lane_id=0,
                     input_slot=input_slot,
                     policy_slot=policy_slot,
                     wdl_slot=wdl_slot,
                     request_queue=inference_aggregator,
-                    response_queue=lane_response_queue,
+                    response_queue=response_queues[0],
                 )
-                reference_eval = (
-                    candidate_eval
-                    if candidate_hash == reference_hash
-                    else _RemoteEvaluator(
-                        worker_id=worker_id,
-                        model_role="reference",
-                        model_hash_value=reference_hash,
-                        lane_id=lane_id,
-                        input_slot=input_slot,
-                        policy_slot=policy_slot,
-                        wdl_slot=wdl_slot,
-                        request_queue=inference_aggregator,
-                        response_queue=lane_response_queue,
+            )
+            search = Torus9BatchedPUCT(
+                SearchSettings(
+                    simulations=64,
+                    cpuct=1.25,
+                    fpu=0.0,
+                    deterministic_tie_break=True,
+                ),
+                adapter=GoldenSearchAdapter(),
+                max_batch_rows=int(games_per_worker),
+                inference_batch_wait_ms=0.0,
+            )
+
+            active: list[_WorkerGame] = []
+            records: list[dict[str, object]] = []
+            lane_wall_time_seconds = 0.0
+
+            def record_game(game: _WorkerGame) -> None:
+                nonlocal lane_wall_time_seconds
+                records.append(_finish_game(game))
+                lane_wall_time_seconds += time.perf_counter() - game.started_at
+
+            while len(active) < int(games_per_worker):
+                # Fill the worker's four independent lanes before starting
+                # search. The shared queue remains the global replenishment
+                # mechanism once a lane completes a game.
+                task = take_task(block=True)
+                if task is None:
+                    break
+                task = dict(task)
+                task["worker_id"] = worker_id
+                active.append(_make_game(task))
+
+            while active:
+                states = [game.state for game in active]
+                evaluators: list[_RemoteEvaluator] = []
+                seeds: list[int] = []
+                for game in active:
+                    task = game.task
+                    candidate_turn = (
+                        game.state.side_to_move == BLACK
+                        and bool(task["candidate_black"])
+                    ) or (
+                        game.state.side_to_move == WHITE
+                        and not bool(task["candidate_black"])
                     )
-                )
-                search = Torus9BatchedPUCT(
-                    SearchSettings(
-                        simulations=64,
-                        cpuct=1.25,
-                        fpu=0.0,
-                        deterministic_tie_break=True,
-                    ),
-                    adapter=GoldenSearchAdapter(),
-                    max_batch_rows=1,
-                    inference_batch_wait_ms=0.0,
-                )
-                game = _make_game(task)
-                while True:
+                    evaluators.append(candidate_eval if candidate_turn else reference_eval)
+                    seeds.append(
+                        derive_seed(
+                            int(task["game_seed"]),
+                            game.ply + 1,
+                            "arena-search",
+                        )
+                    )
+                try:
+                    results = search.search(states, evaluators, seeds=seeds)
+                except Exception as exc:
+                    message = f"{type(exc).__name__}: {exc}"
+                    for game in active:
+                        game.technical = "ERROR_SEARCH"
+                        game.error = message
+                        record_game(game)
+                    active.clear()
+                    continue
+
+                survivors: list[_WorkerGame] = []
+                for game, result in zip(active, results):
+                    task = game.task
                     state = game.state
                     candidate_turn = (
                         state.side_to_move == BLACK
@@ -611,18 +526,6 @@ class Torus9ArenaProfile:
                         state.side_to_move == WHITE
                         and not bool(task["candidate_black"])
                     )
-                    evaluator = candidate_eval if candidate_turn else reference_eval
-                    try:
-                        result = search.search(
-                            (state,),
-                            (evaluator,),
-                            seeds=(derive_seed(int(task["game_seed"]), game.ply + 1, "arena-search"),),
-                        )[0]
-                    except Exception as exc:
-                        game.technical = "ERROR_SEARCH"
-                        game.error = f"{type(exc).__name__}: {exc}"
-                        return result_payload(game, candidate_eval, reference_eval)
-
                     game.ply += 1
                     action = result.action
                     try:
@@ -640,7 +543,8 @@ class Torus9ArenaProfile:
                                 "error": game.error,
                             }
                         )
-                        return result_payload(game, candidate_eval, reference_eval)
+                        record_game(game)
+                        continue
 
                     game.state = next_state
                     game.trace.append(
@@ -656,40 +560,24 @@ class Torus9ArenaProfile:
                     )
                     if torus9_arena_termination_reason(next_state, game.ply) == "DOUBLE_PASS":
                         game.formal = result_from_terminal(next_state).winner.value
-                        return result_payload(game, candidate_eval, reference_eval)
-                    if game.ply >= TORUS9_ARENA_MOVE_LIMIT:
+                        record_game(game)
+                    elif game.ply >= TORUS9_ARENA_MOVE_LIMIT:
                         game.technical = "TRUNCATED_MOVE_LIMIT"
                         game.error = (
                             "Torus 9x9 Arena watchdog reached "
                             f"{TORUS9_ARENA_MOVE_LIMIT} actions"
                         )
-                        return result_payload(game, candidate_eval, reference_eval)
-
-            records: list[dict[str, object]] = []
-            blocked_inference_seconds = 0.0
-            blocked_inference_calls = 0
-            lane_wall_time_seconds = 0.0
-            with ThreadPoolExecutor(max_workers=int(games_per_worker)) as executor:
-                futures: dict[Any, int] = {}
-                for lane_id in range(int(games_per_worker)):
-                    task = take_task(block=True)
+                        record_game(game)
+                    else:
+                        survivors.append(game)
+                active = survivors
+                while len(active) < int(games_per_worker):
+                    task = take_task(block=False)
                     if task is None:
                         break
-                    futures[executor.submit(play_task, task, lane_id)] = lane_id
-                while futures:
-                    completed, _ = wait(futures, return_when=FIRST_COMPLETED)
-                    for future in completed:
-                        lane_id = futures.pop(future)
-                        result = future.result()
-                        records.append(dict(result["record"]))
-                        blocked_inference_seconds += float(
-                            result["blocked_inference_seconds"]
-                        )
-                        blocked_inference_calls += int(result["blocked_inference_calls"])
-                        lane_wall_time_seconds += float(result["lane_wall_time_seconds"])
-                        task = take_task(block=True)
-                        if task is not None:
-                            futures[executor.submit(play_task, task, lane_id)] = lane_id
+                    task = dict(task)
+                    task["worker_id"] = worker_id
+                    active.append(_make_game(task))
 
             inference_aggregator.close()
 
@@ -706,8 +594,14 @@ class Torus9ArenaProfile:
                     "cpu_seconds": float(cpu_seconds),
                     "cpu_active_seconds": float(cpu_seconds),
                     "wall_time_seconds": time.perf_counter() - run_started,
-                    "blocked_inference_seconds": float(blocked_inference_seconds),
-                    "blocked_inference_calls": int(blocked_inference_calls),
+                    "blocked_inference_seconds": float(
+                        candidate_eval.blocked_inference_seconds
+                        + (0.0 if reference_eval is candidate_eval else reference_eval.blocked_inference_seconds)
+                    ),
+                    "blocked_inference_calls": int(
+                        candidate_eval.blocked_inference_calls
+                        + (0 if reference_eval is candidate_eval else reference_eval.blocked_inference_calls)
+                    ),
                     "lane_wall_time_seconds": float(lane_wall_time_seconds),
                     "max_rss_kb": int(cpu_end.ru_maxrss),
                     "records": records,
