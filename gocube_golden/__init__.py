@@ -344,10 +344,9 @@ from .torus9 import (
     validate_torus9_replay_sample,
 )
 
-# Torus9 production Arena has exactly one public entry point: tools.torus9_arena.
-# The historical functions remain in the implementation module for frozen
-# reproduction, but even a direct module import is fail-closed unless the
-# explicit frozen command sets the override environment.
+# Production Arena execution has one public CLI: tools/arena.py. Torus9 is a
+# game profile of that engine; historical Torus9 executors remain frozen and
+# even direct module calls require the explicit reproduction override.
 from . import torus9 as _torus9_module
 from .arena_policy import require_frozen_override as _require_frozen_arena_override
 
