@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from gocube_golden.torus9_contract import load_torus9_current_profile
+from gocube_golden.torus9_contract import (
+    current_torus9_content_fingerprint,
+    current_torus9_profile_fingerprint,
+    load_torus9_current_profile,
+)
+from tools import _frozen_continue_torus9_golden_m1_m100 as continuation
 from tools.arena_engine import ArenaExecutionConfig
 from tools.arena_profiles.torus9 import Torus9ArenaProfile
 
@@ -13,7 +18,7 @@ from tools.arena_profiles.torus9 import Torus9ArenaProfile
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_PROFILE = ROOT / "configs/gocube/torus9_golden_current_v3.json"
 REFERENCE_PROFILE_FINGERPRINT = "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775"
-CURRENT_PROFILE_FINGERPRINT = "sha256:d3620fc36600d36753a4bb51a9810b7ea21fe82a43f70a43b6363485dc9684e3"
+CURRENT_CONTENT_FINGERPRINT = "sha256:7e97c50e1697641fb8f5b9a3566144f0a58c105e3b688940f42e7b6154fb0831"
 OBSERVATION_FINGERPRINT = "sha256:e5792b409199dfe2c25ac6f681e4ca29ed73cdf4b7d53a61df634f70d1fa415f"
 TARGET_FINGERPRINT = "sha256:02ab244688534b271473302ab4edf00516b91d43fb91b8c9e592d2a8de63dfb5"
 SELFPLAY_FINGERPRINT = "sha256:22a4e4dd37d70bd3d712b909476120b96385802ec874b99358fab256c4e3351f"
@@ -31,7 +36,10 @@ def test_exactly_one_torus9_profile_is_current():
 def test_current_torus9_scientific_contract_is_reference_locked():
     profile = load_torus9_current_profile()
 
-    assert profile["profile_fingerprint"] == CURRENT_PROFILE_FINGERPRINT
+    assert profile["profile_fingerprint"] == REFERENCE_PROFILE_FINGERPRINT
+    assert current_torus9_profile_fingerprint(profile) == REFERENCE_PROFILE_FINGERPRINT
+    assert profile["content_fingerprint"] == CURRENT_CONTENT_FINGERPRINT
+    assert current_torus9_content_fingerprint(profile) == CURRENT_CONTENT_FINGERPRINT
     assert profile["rules"]["komi"] == 0.5
     assert profile["observation"]["shape"] == [6, 81]
     assert profile["observation"]["action_count"] == 82
@@ -113,10 +121,26 @@ def test_current_profile_rejects_noncanonical_komi(tmp_path: Path):
         load_torus9_current_profile(candidate, verify_fingerprint=False)
 
 
+def test_current_profile_content_fingerprint_fails_closed(tmp_path: Path):
+    profile = json.loads(CURRENT_PROFILE.read_text(encoding="utf-8"))
+    profile["content_fingerprint"] = "sha256:" + "0" * 64
+    candidate = tmp_path / "tampered-torus9.json"
+    candidate.write_text(json.dumps(profile), encoding="utf-8")
+    with pytest.raises(ValueError, match="content fingerprint"):
+        load_torus9_current_profile(candidate)
+
+
+def test_m17_resume_keeps_reference_lineage_identity():
+    profile = load_torus9_current_profile()
+    assert current_torus9_profile_fingerprint(profile) == REFERENCE_PROFILE_FINGERPRINT
+    _, runtime_profile_fingerprint, _ = continuation._profile_and_contract()
+    assert runtime_profile_fingerprint == REFERENCE_PROFILE_FINGERPRINT
+
+
 def test_retired_torus9_profiles_cannot_be_selected_by_current_launcher():
     launcher = (ROOT / "tools/continue_torus9_golden_m1_m100.py").read_text(encoding="utf-8")
     runtime = (ROOT / "tools/_frozen_continue_torus9_golden_m1_m100.py").read_text(encoding="utf-8")
-    assert "_frozen_continue_torus9_golden_m1_m100.py" in launcher
+    assert '"tools._frozen_continue_torus9_golden_m1_m100"' in launcher
     assert "torus9_golden_current_v3.json" in runtime
     for retired in (
         "torus9_golden_learning_v1.json",
@@ -172,9 +196,9 @@ def test_forbidden_historical_komi_literal_is_absent_from_current_path():
         assert "7.5" not in text, relative
 
 
-def test_reference_fingerprint_is_provenance_only_not_current_content_hash():
+def test_reference_lineage_and_sanitized_content_fingerprints_are_both_pinned():
     manifest = json.loads((ROOT / "docs/current-golden-boundary.json").read_text(encoding="utf-8"))
     assert manifest["reference"]["profile_fingerprint"] == REFERENCE_PROFILE_FINGERPRINT
-    assert manifest["canonical_profile"]["content_fingerprint"] == CURRENT_PROFILE_FINGERPRINT
-    assert REFERENCE_PROFILE_FINGERPRINT != CURRENT_PROFILE_FINGERPRINT
+    assert manifest["canonical_profile"]["semantic_lineage_fingerprint"] == REFERENCE_PROFILE_FINGERPRINT
+    assert manifest["canonical_profile"]["content_fingerprint"] == CURRENT_CONTENT_FINGERPRINT
     assert manifest["behavior"]["scientific_semantics_changed"] is False
