@@ -159,5 +159,6 @@
     "winner_selection": "highest normalized moves_per_sec with inference_rows_per_sec and batch telemetry as tie-breaks; M1 is warm-up, M2 is the uncoalesced baseline, M8 repeats winner as confirmation",
     "benchmark_games": 0
   },
-  "profile_fingerprint": "sha256:d3620fc36600d36753a4bb51a9810b7ea21fe82a43f70a43b6363485dc9684e3"
+  "profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
+  "content_fingerprint": "sha256:7e97c50e1697641fb8f5b9a3566144f0a58c105e3b688940f42e7b6154fb0831"
 }

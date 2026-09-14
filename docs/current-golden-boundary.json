@@ -16,8 +16,10 @@
     "path": "configs/gocube/torus9_golden_current_v3.json",
     "profile_id": "gocube-torus9-golden-v3",
     "status": "current",
-    "content_fingerprint": "sha256:d3620fc36600d36753a4bb51a9810b7ea21fe82a43f70a43b6363485dc9684e3",
-    "reference_fingerprint_is_provenance_only": true
+    "semantic_lineage_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
+    "content_fingerprint": "sha256:7e97c50e1697641fb8f5b9a3566144f0a58c105e3b688940f42e7b6154fb0831",
+    "reference_fingerprint_role": "immutable M0-M17 and continuation checkpoint/profile identity",
+    "content_fingerprint_role": "sanitized current JSON integrity excluding identity fields"
   },
   "production_entrypoints": {
     "training_resume": "tools/continue_torus9_golden_m1_m100.py",
@@ -146,6 +148,7 @@
   "behavior": {
     "scientific_semantics_changed": false,
     "execution_architecture_changed": false,
-    "forbidden_legacy_komi_metadata_removed": true
+    "forbidden_legacy_komi_metadata_removed": true,
+    "m17_resume_lineage_preserved": true
   }
 }
