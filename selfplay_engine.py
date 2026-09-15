@@ -32,10 +32,11 @@ class SelfPlayEngineConfig:
     process_start_method: str = "spawn"
     inference_request_timeout_s: float = 300.0
     worker_join_timeout_s: float = 15.0
+    lanes_per_worker: int = 1
 
     def validate(self) -> None:
-        if self.workers <= 0 or self.inference_batch_cap <= 0:
-            raise ValueError("self-play workers and inference batch cap must be positive")
+        if self.workers <= 0 or self.inference_batch_cap <= 0 or self.lanes_per_worker <= 0:
+            raise ValueError("self-play workers, lanes per worker and inference batch cap must be positive")
         if self.inference_batch_wait_ms < 0 or not math.isfinite(self.inference_batch_wait_ms):
             raise ValueError("self-play inference batch wait must be finite and non-negative")
         if self.inference_request_timeout_s <= 0 or not math.isfinite(self.inference_request_timeout_s):
@@ -49,6 +50,7 @@ class SelfPlayEngineConfig:
 @dataclass(frozen=True)
 class _Request:
     worker_id: int
+    lane_id: int
     request_id: int
     payload: object
 
@@ -63,8 +65,9 @@ class _Response:
 class InferenceClient:
     """Blocking worker-side RPC client for central inference."""
 
-    def __init__(self, worker_id: int, requests: Any, responses: Any, timeout_s: float) -> None:
+    def __init__(self, worker_id: int, lane_id: int, requests: Any, responses: Any, timeout_s: float) -> None:
         self.worker_id = int(worker_id)
+        self.lane_id = int(lane_id)
         self._requests = requests
         self._responses = responses
         self._timeout_s = float(timeout_s)
@@ -73,7 +76,7 @@ class InferenceClient:
     def request(self, payload: object) -> object:
         request_id = self._next_id
         self._next_id += 1
-        self._requests.put(_Request(self.worker_id, request_id, payload))
+        self._requests.put(_Request(self.worker_id, self.lane_id, request_id, payload))
         try:
             response = self._responses.get(timeout=self._timeout_s)
         except Empty as exc:
@@ -93,8 +96,9 @@ class InferenceClient:
         return response.result
 
 
-def _worker_main(
+def _worker_lane_main(
     worker_id: int,
+    lane_id: int,
     tasks: Any,
     requests: Any,
     responses: Any,
@@ -104,29 +108,64 @@ def _worker_main(
     request_timeout_s: float,
 ) -> None:
     pid = os.getpid()
-    client = InferenceClient(worker_id, requests, responses, request_timeout_s)
-    events.put(("worker_started", worker_id, pid))
+    client = InferenceClient(worker_id, lane_id, requests, responses, request_timeout_s)
     while True:
         task = tasks.get()
         if task == _TASK_STOP:
-            events.put(("worker_stopped", worker_id, pid))
+            events.put(("lane_stopped", worker_id, pid, lane_id))
             return
         game_id = str(task)
-        cpu_started = time.process_time()
-        events.put(("game_started", worker_id, pid, game_id))
+        # ``process_time`` is process-wide and would be double-counted when
+        # multiple lanes overlap inside one OS worker.  Per-lane CPU time is
+        # the only correct additive measure for lane-enabled execution.
+        cpu_clock = time.thread_time
+        cpu_started = cpu_clock()
+        events.put(("game_started", worker_id, pid, lane_id, game_id))
         try:
             record = worker_play(worker_context, game_id, client)
         except BaseException as exc:
             events.put((
-                "game_failed", worker_id, pid, game_id,
+                "game_failed", worker_id, pid, lane_id, game_id,
                 f"{type(exc).__name__}: {exc}",
-                max(0.0, time.process_time() - cpu_started),
+                max(0.0, cpu_clock() - cpu_started),
             ))
             return
         events.put((
-            "game_completed", worker_id, pid, game_id, record,
-            max(0.0, time.process_time() - cpu_started),
+            "game_completed", worker_id, pid, lane_id, game_id, record,
+            max(0.0, cpu_clock() - cpu_started),
         ))
+
+
+def _worker_main(
+    worker_id: int,
+    lanes_per_worker: int,
+    tasks: Any,
+    requests: Any,
+    responses: Sequence[Any],
+    events: Any,
+    worker_play: Callable[[object, str, InferenceClient], object],
+    worker_context: object,
+    request_timeout_s: float,
+) -> None:
+    pid = os.getpid()
+    process_cpu_started = time.process_time()
+    events.put(("worker_started", worker_id, pid))
+    lanes = [
+        threading.Thread(
+            target=_worker_lane_main,
+            name=f"selfplay-lane-{worker_id:02d}-{lane_id:02d}",
+            args=(
+                worker_id, lane_id, tasks, requests, responses[lane_id], events,
+                worker_play, worker_context, request_timeout_s,
+            ),
+        )
+        for lane_id in range(lanes_per_worker)
+    ]
+    for lane in lanes:
+        lane.start()
+    for lane in lanes:
+        lane.join()
+    events.put(("worker_stopped", worker_id, pid, max(0.0, time.process_time() - process_cpu_started)))
 
 
 def _percentile(values: Sequence[int], fraction: float) -> float:
@@ -141,7 +180,7 @@ class _CentralInference:
     def __init__(
         self,
         requests: Any,
-        responses: Sequence[Any],
+        responses: Sequence[Sequence[Any]],
         infer_batch: Callable[[Sequence[object]], Sequence[object]],
         *,
         batch_cap: int,
@@ -177,7 +216,7 @@ class _CentralInference:
         with self._lock:
             self._fatal = message
         for request in batch:
-            self.responses[request.worker_id].put(_Response(request.request_id, error=message))
+            self.responses[request.worker_id][request.lane_id].put(_Response(request.request_id, error=message))
 
     def _serve(self) -> None:
         while True:
@@ -220,7 +259,9 @@ class _CentralInference:
             with self._lock:
                 self._rows.append(len(batch))
             for request, output in zip(batch, outputs):
-                self.responses[request.worker_id].put(_Response(request.request_id, result=output))
+                self.responses[request.worker_id][request.lane_id].put(
+                    _Response(request.request_id, result=output)
+                )
 
     def telemetry(self, wall_s: float) -> dict[str, object]:
         with self._lock:
@@ -274,8 +315,12 @@ class SelfPlayEngine:
 
         ctx = mp.get_context(self.config.process_start_method)
         count = min(self.config.workers, len(ids))
-        tasks, requests, events = ctx.Queue(), ctx.Queue(), ctx.Queue()
-        responses = [ctx.Queue() for _ in range(count)]
+        task_queues = [ctx.Queue() for _ in range(count)]
+        requests, events = ctx.Queue(), ctx.Queue()
+        responses = [
+            [ctx.Queue() for _ in range(self.config.lanes_per_worker)]
+            for _ in range(count)
+        ]
         service = _CentralInference(
             requests, responses, infer_batch,
             batch_cap=self.config.inference_batch_cap,
@@ -287,18 +332,20 @@ class SelfPlayEngine:
                 target=_worker_main,
                 name=f"selfplay-search-{worker_id:02d}",
                 args=(
-                    worker_id, tasks, requests, responses[worker_id], events,
+                    worker_id, self.config.lanes_per_worker, task_queues[worker_id], requests, responses[worker_id], events,
                     worker_play, worker_context, self.config.inference_request_timeout_s,
                 ),
             )
             for worker_id in range(count)
         ]
-        for game_id in ids:
-            tasks.put(game_id)
-        for _ in range(count):
-            tasks.put(_TASK_STOP)
+        for index, game_id in enumerate(ids):
+            task_queues[index % count].put(game_id)
+        for tasks in task_queues:
+            for _ in range(self.config.lanes_per_worker):
+                tasks.put(_TASK_STOP)
 
         wall_started = time.perf_counter()
+        parent_cpu_started = time.process_time()
         pids: set[int] = set()
         service_started = False
         try:
@@ -320,7 +367,11 @@ class SelfPlayEngine:
         completed: dict[str, object] = {}
         failures: list[dict[str, object]] = []
         active = peak = 0
-        cpu_seconds = 0.0
+        active_processes: set[int] = set()
+        active_process_counts: dict[int, int] = {}
+        peak_processes = 0
+        game_cpu_seconds = 0.0
+        worker_process_cpu: dict[int, float] = {}
         moves = technical = 0
         try:
             while len(completed) < len(ids):
@@ -337,18 +388,39 @@ class SelfPlayEngine:
                         raise SelfPlayEngineError(f"self-play workers exited after {len(completed)}/{len(ids)} games")
                     continue
                 kind = event[0]
-                if kind in {"worker_started", "worker_stopped"}:
+                if kind == "worker_stopped":
+                    pids.add(int(event[2]))
+                    if len(event) >= 4:
+                        worker_process_cpu[int(event[2])] = float(event[3])
+                elif kind in {"worker_started", "lane_stopped"}:
                     pids.add(int(event[2]))
                 elif kind == "game_started":
-                    pids.add(int(event[2])); active += 1; peak = max(peak, active)
+                    pid = int(event[2])
+                    pids.add(pid); active += 1; peak = max(peak, active)
+                    active_process_counts[pid] = active_process_counts.get(pid, 0) + 1
+                    active_processes.add(pid); peak_processes = max(peak_processes, len(active_processes))
                 elif kind == "game_failed":
-                    _, worker_id, pid, game_id, message, cpu = event
-                    pids.add(int(pid)); active = max(0, active - 1); cpu_seconds += float(cpu)
+                    _, worker_id, pid, _lane_id, game_id, message, cpu = event
+                    pid = int(pid)
+                    pids.add(pid); active = max(0, active - 1); game_cpu_seconds += float(cpu)
+                    remaining = active_process_counts.get(pid, 1) - 1
+                    if remaining > 0:
+                        active_process_counts[pid] = remaining
+                    else:
+                        active_process_counts.pop(pid, None)
+                        active_processes.discard(pid)
                     failures.append({"worker_id": int(worker_id), "pid": int(pid), "game_id": str(game_id), "error": str(message)})
                     raise SelfPlayEngineError(f"self-play worker failed for {game_id}: {message}")
                 elif kind == "game_completed":
-                    _, _worker_id, pid, game_id, record, cpu = event
-                    pids.add(int(pid)); active = max(0, active - 1); cpu_seconds += float(cpu)
+                    _, _worker_id, pid, _lane_id, game_id, record, cpu = event
+                    pid = int(pid)
+                    pids.add(pid); active = max(0, active - 1); game_cpu_seconds += float(cpu)
+                    remaining = active_process_counts.get(pid, 1) - 1
+                    if remaining > 0:
+                        active_process_counts[pid] = remaining
+                    else:
+                        active_process_counts.pop(pid, None)
+                        active_processes.discard(pid)
                     key = str(game_id)
                     if key in completed:
                         raise SelfPlayEngineError(f"duplicate self-play completion for {key}")
@@ -378,19 +450,42 @@ class SelfPlayEngine:
                 raise SelfPlayEngineError(
                     f"self-play worker {process.pid} failed shutdown: alive={process.is_alive()} exit={process.exitcode}"
                 )
+        while len(worker_process_cpu) < count:
+            try:
+                event = events.get(timeout=1.0)
+            except Empty:
+                break
+            if event[0] == "worker_stopped" and len(event) >= 4:
+                pids.add(int(event[2]))
+                worker_process_cpu[int(event[2])] = float(event[3])
         service.stop()
 
         wall_s = max(0.0, time.perf_counter() - wall_started)
+        parent_cpu_seconds = max(0.0, time.process_time() - parent_cpu_started)
+        worker_cpu_seconds = sum(worker_process_cpu.values())
+        if len(worker_process_cpu) != count:
+            raise SelfPlayEngineError(
+                f"self-play worker CPU telemetry incomplete: {len(worker_process_cpu)}/{count}"
+            )
+        process_tree_cpu_seconds = worker_cpu_seconds + parent_cpu_seconds
         result = tuple(completed[game_id] for game_id in ids)
         data: dict[str, object] = {
             "configured_workers": self.config.workers,
             "worker_processes_started": count,
+            "lanes_per_worker": self.config.lanes_per_worker,
+            "configured_search_lanes": count * self.config.lanes_per_worker,
             "active_worker_count": len(pids),
             "worker_pids": sorted(pids),
             "real_worker_pid_count": len(pids),
             "peak_concurrent_search_workers": peak,
-            "process_cpu_seconds": cpu_seconds,
-            "effective_cpu_cores": cpu_seconds / wall_s if wall_s > 0 else 0.0,
+            "peak_concurrent_search_processes": peak_processes,
+            "process_cpu_seconds": worker_cpu_seconds,
+            "worker_process_cpu_seconds": worker_cpu_seconds,
+            "game_thread_cpu_seconds": game_cpu_seconds,
+            "parent_process_cpu_seconds": parent_cpu_seconds,
+            "process_tree_cpu_seconds": process_tree_cpu_seconds,
+            "effective_cpu_cores": worker_cpu_seconds / wall_s if wall_s > 0 else 0.0,
+            "process_tree_effective_cpu_cores": process_tree_cpu_seconds / wall_s if wall_s > 0 else 0.0,
             "worker_failures": failures,
             "worker_restarts": 0,
             "games_requested": len(ids),
@@ -413,12 +508,20 @@ class SelfPlayEngine:
         return {
             "configured_workers": self.config.workers,
             "worker_processes_started": 0,
+            "lanes_per_worker": self.config.lanes_per_worker,
+            "configured_search_lanes": 0,
             "active_worker_count": 0,
             "worker_pids": [],
             "real_worker_pid_count": 0,
             "peak_concurrent_search_workers": 0,
+            "peak_concurrent_search_processes": 0,
             "process_cpu_seconds": 0.0,
+            "worker_process_cpu_seconds": 0.0,
+            "game_thread_cpu_seconds": 0.0,
+            "parent_process_cpu_seconds": 0.0,
+            "process_tree_cpu_seconds": 0.0,
             "effective_cpu_cores": 0.0,
+            "process_tree_effective_cpu_cores": 0.0,
             "worker_failures": [],
             "worker_restarts": 0,
             "games_requested": 0,

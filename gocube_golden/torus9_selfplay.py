@@ -275,7 +275,12 @@ def run_torus9_selfplay_games(
         contract=contract,
         profile_id=profile_id,
     )
-    batch_cap = int(inference_batch_cap) if inference_batch_cap is not None else (max(16, int(workers)) if coalescing else 1)
+    lanes_per_worker = 4 if coalescing else 1
+    batch_cap = (
+        int(inference_batch_cap)
+        if inference_batch_cap is not None
+        else (max(16, int(workers) * lanes_per_worker) if coalescing else 1)
+    )
     if coalescing and batch_cap <= 1:
         raise ValueError("Coalesced Torus9 self-play requires batch_cap > 1")
     wait_ms = float(inference_batch_wait_ms) if coalescing else 0.0
@@ -287,6 +292,7 @@ def run_torus9_selfplay_games(
             inference_batch_wait_ms=wait_ms,
             device=str(torch.device(device)),
             process_start_method=start_method,
+            lanes_per_worker=lanes_per_worker,
         )
     )
     raw_telemetry: dict[str, object] = {}
