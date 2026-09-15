@@ -136,6 +136,8 @@ Focused guards cover:
   transaction;
 - one universal Arena and canonical Sequential PUCT;
 - self-play determinism, replay, rules, scoring, pass and optimizer behavior.
+- tracked-tree hygiene: no `.pyc`, `.pyo`, `__pycache__` or retired project
+  directories;
 
 Current/runtime/config/test source contains no literal `7.5`; the invalid-komi
 guard uses an equivalent numeric expression so the stale value cannot be
@@ -143,12 +145,12 @@ silently accepted. Canonical current komi remains `0.5`.
 
 ## Size / removal report
 
-Counts are measured against the Stage 6 worktree diff before commit:
+Counts are measured against the final Stage 6 plus cleanup-fixup worktree diff:
 
 ```text
-files deleted:                         308
+files deleted:                         362
 files substantially simplified:        24
-lines removed:                       80,638
+lines removed:                       81,487
 legacy production entrypoints removed: primary generic/legacy families listed above
 legacy tests removed:                  109
 ```
@@ -166,7 +168,8 @@ Arena run is started. CI has two explicit jobs:
 1. `Golden production tests` runs `pytest -m "not katago_reference"` and
    current compile/entrypoint checks.
 2. `Mandatory pinned KataGo rule differential` builds the pinned rule-only
-   oracle and runs only `pytest -m katago_reference`.
+   oracle and runs only the four explicit `katago_reference` test modules:
+   random, rectangular fixtures, topology bridge and topology symmetry.
 
 The Torus9 M17 artifact, current Cube Golden artifacts and historical evidence
 were not mutated; no M18 was created.
