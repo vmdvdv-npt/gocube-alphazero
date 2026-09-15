@@ -90,6 +90,12 @@ The old/new self-play gate compares formal/technical result, action trace, state
 
 Training continues to call the existing `train_cube_batch_schedule(...)` primitive through `CubeTrainingAdapter`; deterministic sampling remains `random.Random(seed).sample(...)`, with one cumulative replay exposure per new position and 64-row batching. Adam state and the model hash survive checkpoint reload/resume.
 
+The root-noise formula has one implementation, `apply_cube_root_dirichlet_noise(...)`, shared by `SelfPlayCubeRootNoiseEvaluator` and the cooperative `_CubeRootNoiseTransform`; a seeded serial/shared policy comparison is exact.
+
+The training parity gate now compares sampled row batches, every per-batch loss/gradient metric, model tensors and hash, complete Adam state, and optimizer/sample counters between the historical direct schedule and `CubeTrainingAdapter`. The resume gate compares `A → save/reload → B` with uninterrupted `A → B`, including B metrics, cumulative replay rows, model tensors/hash, Adam state, and counters.
+
+Legion CUDA smoke (`/tmp/cube-stage5-legion-cuda-smoke.json`) passed on the real shared path with 16 worker processes, one parent central model owner, 16 formal games, zero technical games, mean inference batch `6.857`, and maximum batch `15`. The fixture uses one simulation and a pass-biased model solely to keep the execution smoke short; it is explicitly noncanonical and is not training evidence.
+
 ## Local test policy
 
 Only focused Cube, shared-engine, training-engine and Stage-4 tests are run locally. Full local pytest is **NOT RUN**. Local KataGo differential is **NOT RUN**, because Stage 5 does not change rules semantics.
@@ -104,7 +110,8 @@ The generic engine reports wall time, games/sec, moves/sec, NN rows/sec, forward
 base SHA: 1b775d15659286b8d6de6506a190dc23a1818b28
 branch: codex/stage5-cube-shared-rails
 implementation commit: 1cd7397
-final branch SHA: determined after publication
-PR: pending push
-CI run: pending final push
+fix-up commit: current branch HEAD
+PR: #106 (open)
+CI: required checks green on the latest PR revision
+Legion CUDA smoke: PASS (16 workers, technical=0, mean batch=6.857, max batch=15)
 ```

@@ -35,6 +35,7 @@ from .cube_neural import (
     GoldenCubeGraphNetV1,
     cube_count_parameters,
     cube_model_hash,
+    configure_single_thread_inference,
 )
 from .cube_topology import (
     CUBE4_GEOMETRY_FINGERPRINT,
@@ -205,6 +206,10 @@ class CubeTrainingAdapter:
         from .cube_contract import validate_profile
 
         validate_profile(self.profile)
+        # The Cube update primitive is required to be bit-exact across a
+        # checkpoint boundary. One CPU reduction order also makes old/new
+        # parity independent of the caller's ambient PyTorch thread pool.
+        configure_single_thread_inference()
         self.profile_fingerprint = profile_fingerprint(self.profile)
         self.code_identity = code_identity
         self.model_init_seed = int(model_init_seed)
@@ -434,6 +439,7 @@ class CubeTrainingAdapter:
             "new_positions": new_positions,
             "optimizer_steps": len(batches),
             "samples_consumed": new_positions,
+            "sampled_batches": tuple(tuple(int(index) for index in batch) for batch in batches),
             "sampled_indices": selected_indices,
             "sampled_replay_row_ids": sampled_ids,
             "sampled_row_ids_fingerprint": value_fingerprint(sampled_ids),

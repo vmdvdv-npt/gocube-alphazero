@@ -20,10 +20,9 @@ from .cube_neural import (
     CUBE_ACTION_COUNT,
     CUBE_OBSERVATION_CHANNEL_COUNT,
     CUBE_POINT_COUNT,
-    CUBE_PASS_INDEX,
     CUBE_OBSERVATION_FINGERPRINT,
     GoldenCubeGraphNetV1,
-    build_cube_action_mask,
+    apply_cube_root_dirichlet_noise,
     build_cube_observation_into,
     configure_single_thread_inference,
     cube_model_hash,
@@ -142,23 +141,17 @@ class _CubeRootNoiseTransform:
         legal = legal_context.actions
         if not legal:
             raise SearchError("Cube self-play root has no legal actions")
-        base_policy = [float(value) for value in base.policy]
-        if len(base_policy) != CUBE_ACTION_COUNT:
-            raise SearchError("Cube root-noise evaluator received the wrong policy shape")
-        legal_indices = [CUBE_PASS_INDEX if action == PASS else int(action) for action in legal]
-        prior = torch.tensor([base_policy[index] for index in legal_indices], dtype=torch.float64)
-        prior_total = float(prior.sum())
-        prior = prior / prior_total if prior_total > 0.0 else torch.full_like(prior, 1.0 / len(legal))
-        noise = torch._standard_gamma(
-            torch.full((len(legal),), self.alpha, dtype=torch.float64),
-            generator=self._generator,
-        )
-        noise = noise / noise.sum()
-        mixed = (1.0 - self.epsilon) * prior + self.epsilon * noise
-        output = list(base_policy)
-        for index, value in zip(legal_indices, mixed.tolist()):
-            output[index] = float(value)
-        return Evaluation(policy=tuple(output), wdl=base.wdl)
+        try:
+            policy = apply_cube_root_dirichlet_noise(
+                tuple(float(value) for value in base.policy),
+                legal,
+                epsilon=self.epsilon,
+                alpha=self.alpha,
+                generator=self._generator,
+            )
+        except ValueError as exc:
+            raise SearchError(str(exc)) from exc
+        return Evaluation(policy=policy, wdl=base.wdl)
 
 
 class _CubeCooperativeGame:

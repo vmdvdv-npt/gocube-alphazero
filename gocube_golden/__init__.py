@@ -196,6 +196,7 @@ from .cube_neural import (
     GoldenCubeGraphNetV1,
     GoldenCubeNeuralEvaluator,
     SelfPlayCubeRootNoiseEvaluator,
+    apply_cube_root_dirichlet_noise,
     build_cube_action_mask,
     build_cube_observation,
     build_cube_observation_into,

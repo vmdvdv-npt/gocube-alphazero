@@ -9,7 +9,7 @@ import json
 import math
 import os
 import time
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 torch = importlib.import_module("torch")
 Tensor = torch.Tensor
@@ -56,6 +56,42 @@ CUBE_OBSERVATION_CHANNELS = (
 )
 CUBE_OBSERVATION_CHANNEL_COUNT = len(CUBE_OBSERVATION_CHANNELS)
 CUBE_VALUE_HEAD_SEMANTICS = "side-to-move:[WIN,DRAW,LOSS]"
+
+
+def apply_cube_root_dirichlet_noise(
+    base_policy: Sequence[float],
+    legal_actions: Sequence[int | str],
+    *,
+    epsilon: float,
+    alpha: float,
+    generator: Any,
+) -> tuple[float, ...]:
+    """Apply the frozen Cube root-noise formula to a policy.
+
+    This is the single scientific implementation used by both the serial
+    self-play oracle and the shared cooperative worker path. The generator
+    remains caller-owned so each path preserves its existing deterministic
+    random stream.
+    """
+    if not 0.0 <= epsilon <= 1.0 or alpha <= 0.0:
+        raise ValueError("Invalid Cube self-play Dirichlet parameters")
+    if len(base_policy) != CUBE_ACTION_COUNT:
+        raise ValueError("Cube root-noise policy has the wrong shape")
+    if not legal_actions:
+        raise ValueError("Cube self-play root has no legal actions")
+    legal_indices = [CUBE_PASS_INDEX if action == PASS else int(action) for action in legal_actions]
+    prior = torch.tensor([base_policy[index] for index in legal_indices], dtype=torch.float64)
+    prior = prior / prior.sum() if float(prior.sum()) > 0.0 else torch.full_like(prior, 1.0 / len(legal_actions))
+    noise = torch._standard_gamma(
+        torch.full((len(legal_actions),), alpha, dtype=torch.float64),
+        generator=generator,
+    )
+    noise = noise / noise.sum()
+    mixed = (1.0 - epsilon) * prior + epsilon * noise
+    output = list(base_policy)
+    for index, value in zip(legal_indices, mixed.tolist()):
+        output[index] = float(value)
+    return tuple(output)
 
 
 def configure_single_thread_inference() -> dict[str, str | int]:
@@ -548,19 +584,14 @@ class SelfPlayCubeRootNoiseEvaluator:
         legal = legal_context.actions
         if not legal:
             raise RuntimeError("Cube self-play root has no legal actions")
-        base_policy = [float(value) for value in base.policy]
-        if len(base_policy) != CUBE_ACTION_COUNT:
-            raise RuntimeError("Cube root-noise evaluator received the wrong policy shape")
-        legal_indices = [CUBE_PASS_INDEX if action == PASS else int(action) for action in legal]
-        prior = torch.tensor([base_policy[index] for index in legal_indices], dtype=torch.float64)
-        prior = prior / prior.sum() if float(prior.sum()) > 0.0 else torch.full_like(prior, 1.0 / len(legal))
-        noise = torch._standard_gamma(
-            torch.full((len(legal),), self.alpha, dtype=torch.float64),
-            generator=self._generator,
-        )
-        noise = noise / noise.sum()
-        mixed = (1.0 - self.epsilon) * prior + self.epsilon * noise
-        output = list(base_policy)
-        for index, value in zip(legal_indices, mixed.tolist()):
-            output[index] = float(value)
-        return Evaluation(policy=tuple(output), wdl=base.wdl)
+        try:
+            policy = apply_cube_root_dirichlet_noise(
+                tuple(float(value) for value in base.policy),
+                legal,
+                epsilon=self.epsilon,
+                alpha=self.alpha,
+                generator=self._generator,
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return Evaluation(policy=policy, wdl=base.wdl)
