@@ -59,12 +59,14 @@ TORUS9_CURRENT_BLOCKS = 8
 TORUS9_CURRENT_OWNERSHIP = True
 TORUS9_CURRENT_SCORE = True
 TORUS9_CURRENT_DIRICHLET_ALPHA = 0.11
-TORUS9_LEGACY_KOMI_SENTINEL = 7.5
 TORUS9_CURRENT_MODEL_INIT_SEED = 202609131001
 TORUS9_CURRENT_SELFPLAY_MASTER_SEED = 202609131002
 TORUS9_CURRENT_TRAINING_MASTER_SEED = 202609131003
 TORUS9_CURRENT_ARENA_MASTER_SEED = 202609131004
 TORUS9_CURRENT_EVALUATION_MASTER_SEED = 202609131005
+TORUS9_CURRENT_PROFILE_FINGERPRINT = "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775"
+TORUS9_CURRENT_CONTENT_FINGERPRINT = "sha256:7e97c50e1697641fb8f5b9a3566144f0a58c105e3b688940f42e7b6154fb0831"
+
 
 def canonical_json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -299,8 +301,6 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(rules.get("profile_id") == RULES_PROFILE_ID, "Current Torus rules profile drift")
     require(rules.get("fingerprint") == TORUS9_RULES_FINGERPRINT, "Current Torus rules fingerprint drift")
     require(rules.get("komi") == TORUS9_KOMI, "Current Torus komi must be exactly 0.5")
-    require(rules.get("legacy_komi_sentinel") == TORUS9_LEGACY_KOMI_SENTINEL, "Legacy komi sentinel drift")
-    require(rules.get("legacy_komi_sentinel_policy") == "reject-fail-closed", "Legacy komi sentinel policy drift")
     require(rules.get("ko") == "positional-superko", "Current Torus superko drift")
     require(rules.get("suicide") == "forbidden", "Current Torus suicide drift")
     require(rules.get("pass", {}).get("terminal_after_consecutive_passes") == 2, "Current Torus two-pass drift")
@@ -389,8 +389,19 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(seeds.get("evaluation_master_seed") == TORUS9_CURRENT_EVALUATION_MASTER_SEED, "Current evaluation seed drift")
 
 
+def current_torus9_content_fingerprint(profile: Mapping[str, Any]) -> str:
+    return fingerprint({
+        key: value
+        for key, value in profile.items()
+        if key not in {"profile_fingerprint", "content_fingerprint"}
+    })
+
+
 def current_torus9_profile_fingerprint(profile: Mapping[str, Any]) -> str:
-    return fingerprint({key: value for key, value in profile.items() if key != "profile_fingerprint"})
+    value = profile.get("profile_fingerprint")
+    if value != TORUS9_CURRENT_PROFILE_FINGERPRINT:
+        raise ValueError("Current Torus 9×9 profile lineage fingerprint drift")
+    return TORUS9_CURRENT_PROFILE_FINGERPRINT
 
 
 def load_torus9_current_profile(path: str | Path | None = None, *, verify_fingerprint: bool = True) -> dict[str, Any]:
@@ -405,7 +416,10 @@ def load_torus9_current_profile(path: str | Path | None = None, *, verify_finger
     if source.get("snapshot_sha256") != snapshot_digest:
         raise ValueError("Current Torus 9×9 Golden snapshot fingerprint drift")
     if verify_fingerprint:
-        expected = current_torus9_profile_fingerprint(profile)
-        if profile.get("profile_fingerprint") != expected:
-            raise ValueError(f"Current Torus 9×9 profile fingerprint mismatch: {expected}")
+        current_torus9_profile_fingerprint(profile)
+        expected_content = current_torus9_content_fingerprint(profile)
+        if profile.get("content_fingerprint") != expected_content:
+            raise ValueError(f"Current Torus 9×9 content fingerprint mismatch: {expected_content}")
+        if expected_content != TORUS9_CURRENT_CONTENT_FINGERPRINT:
+            raise ValueError("Current Torus 9×9 canonical content fingerprint drift")
     return profile

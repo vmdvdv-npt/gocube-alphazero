@@ -14,9 +14,15 @@ from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_PROFILE_ID,
     TORUS9_CURRENT_SELFPLAY_MASTER_SEED,
     TORUS9_CURRENT_TARGET_FINGERPRINT,
+    current_torus9_content_fingerprint,
+    current_torus9_profile_fingerprint,
     current_torus9_selfplay_contract_fingerprint,
     load_torus9_current_profile,
 )
+
+
+REFERENCE_PROFILE_FINGERPRINT = "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775"
+CURRENT_CONTENT_FINGERPRINT = "sha256:7e97c50e1697641fb8f5b9a3566144f0a58c105e3b688940f42e7b6154fb0831"
 
 
 def _states() -> tuple[g.GoldenState, ...]:
@@ -40,14 +46,17 @@ def _assert_evaluations_close(left, right) -> None:
 def test_current_profile_is_golden_source_and_excludes_legacy_defaults():
     profile = load_torus9_current_profile()
     assert profile["profile_id"] == TORUS9_CURRENT_PROFILE_ID
+    assert profile["profile_fingerprint"] == REFERENCE_PROFILE_FINGERPRINT
+    assert current_torus9_profile_fingerprint(profile) == REFERENCE_PROFILE_FINGERPRINT
+    assert profile["content_fingerprint"] == CURRENT_CONTENT_FINGERPRINT
+    assert current_torus9_content_fingerprint(profile) == CURRENT_CONTENT_FINGERPRINT
     assert profile["network"]["hidden"] == 80
     assert profile["network"]["blocks"] == 8
     assert profile["network"]["ownership"] is True
     assert profile["network"]["score"] is True
     assert profile["self_play"]["dirichlet_alpha"] == 0.11
     assert profile["rules"]["komi"] == 0.5
-    assert profile["rules"]["legacy_komi_sentinel"] == 7.5
-    assert profile["rules"]["legacy_komi_sentinel_policy"] == "reject-fail-closed"
+    assert "legacy_komi_sentinel" not in profile["rules"]
     assert profile["training"]["batch_size"] == 64
     assert profile["training"]["optimizer_steps_per_iteration"] == 80
     assert profile["training"]["samples_consumed_per_iteration"] == 5120
