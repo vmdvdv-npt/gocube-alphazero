@@ -919,6 +919,7 @@ class SelfPlayEngine:
         for worker_id, capacity in enumerate(per_worker):
             for _ in range(capacity):
                 task_queues[worker_id].put(pending.popleft())
+        pending_started_nonempty = bool(pending)
 
         wall_started = time.perf_counter()
         parent_cpu_started = time.process_time()
@@ -956,8 +957,9 @@ class SelfPlayEngine:
         completed: dict[str, object] = {}
         failures: list[dict[str, object]] = []
         active = peak = 0
-        active_samples: list[int] = [0]
+        active_samples: list[int] = []
         pending_samples: list[int] = [len(pending)]
+        pending_empty_at: float | None = None
         active_processes: set[int] = set()
         active_process_counts: dict[int, int] = {}
         peak_processes = 0
@@ -966,9 +968,19 @@ class SelfPlayEngine:
         moves = technical = 0
 
         def assign_next(worker_id: int) -> None:
+            nonlocal pending_empty_at
             if pending:
                 task_queues[worker_id].put(pending.popleft())
                 pending_samples.append(len(pending))
+                if pending_started_nonempty and not pending and pending_empty_at is None:
+                    pending_empty_at = time.perf_counter()
+
+        def record_active_sample(value: int) -> None:
+            # Exclude the synthetic startup/final-drain zeros. Positive
+            # observations include the replenishment tail, which is part of
+            # the measured active-context lifetime.
+            if value > 0:
+                active_samples.append(value)
 
         try:
             while len(completed) < len(ids):
@@ -999,7 +1011,7 @@ class SelfPlayEngine:
                     pids.add(pid)
                     active += 1
                     peak = max(peak, active)
-                    active_samples.append(active)
+                    record_active_sample(active)
                     active_process_counts[pid] = active_process_counts.get(pid, 0) + 1
                     active_processes.add(pid)
                     peak_processes = max(peak_processes, len(active_processes))
@@ -1008,7 +1020,7 @@ class SelfPlayEngine:
                     pid = int(pid)
                     pids.add(pid)
                     active = max(0, active - 1)
-                    active_samples.append(active)
+                    record_active_sample(active)
                     game_cpu_seconds += float(cpu)
                     remaining = active_process_counts.get(pid, 1) - 1
                     if remaining > 0:
@@ -1023,7 +1035,7 @@ class SelfPlayEngine:
                     pid = int(pid)
                     pids.add(pid)
                     active = max(0, active - 1)
-                    active_samples.append(active)
+                    record_active_sample(active)
                     game_cpu_seconds += float(cpu)
                     remaining = active_process_counts.get(pid, 1) - 1
                     if remaining > 0:
@@ -1080,6 +1092,11 @@ class SelfPlayEngine:
         process_tree_cpu_seconds = worker_cpu_seconds + parent_cpu_seconds
         result = tuple(completed[game_id] for game_id in ids)
         active_summary = _summary(active_samples)
+        tail_duration = (
+            max(0.0, time.perf_counter() - pending_empty_at)
+            if pending_empty_at is not None
+            else 0.0
+        )
         data: dict[str, object] = {
             "configured_workers": self.config.workers,
             "worker_processes_started": count,
@@ -1093,6 +1110,7 @@ class SelfPlayEngine:
             "minimum_active_contexts": min(active_samples, default=0),
             "pending_games_final": len(pending),
             "pending_games_samples": pending_samples,
+            "pending_queue_exhausted": pending_empty_at is not None,
             "completed_games_over_time": len(result),
             "active_worker_count": len(pids),
             "worker_pids": sorted(pids),
@@ -1120,7 +1138,7 @@ class SelfPlayEngine:
             "result_order": list(ids),
             "process_start_method": self.config.process_start_method,
             "global_task_replenishment": bool(any(value != pending_samples[0] for value in pending_samples)),
-            "tail_duration_after_pending_empty_sec": 0.0,
+            "tail_duration_after_pending_empty_sec": tail_duration,
             **service.telemetry(wall_s),
         }
         if telemetry is not None:
@@ -1141,6 +1159,7 @@ class SelfPlayEngine:
             "minimum_active_contexts": 0,
             "pending_games_final": 0,
             "pending_games_samples": [0],
+            "pending_queue_exhausted": False,
             "completed_games_over_time": 0,
             "active_worker_count": 0,
             "worker_pids": [],

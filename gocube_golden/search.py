@@ -7,7 +7,7 @@ import json
 import math
 from numbers import Real
 import random
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Callable, Mapping, Protocol, Sequence
 
 from .arena_contract import SEARCH_IMPLEMENTATION_ID, SearchSettings
 from .diagnostics import increment
@@ -171,8 +171,8 @@ def _policy_for_legal(
     return {action: weight / total for action, weight in weights.items()}
 
 
-class SequentialPUCT:
-    """Small single-state Python PUCT used only because legacy pinned search failed qualification."""
+class _PUCTCore:
+    """Canonical scientific PUCT core shared by sync and cooperative fronts."""
 
     def __init__(
         self,
@@ -188,19 +188,16 @@ class SequentialPUCT:
         self._evaluator_calls = 0
         self._rng = random.Random(0)
 
-    def _evaluate_and_expand(self, node: _Node) -> float:
+    def _prepare_leaf(self, node: _Node) -> LegalActionContext | None:
         if self.adapter.is_terminal(node.state):
-            return self.adapter.terminal_utility(node.state)
-        if self._evaluator is None:
-            raise SearchError("Search evaluator was not installed")
+            return None
         context = self.adapter.prepare_legal_actions(node.state)
         increment("leaf_expansions")
-        prepared_evaluate = getattr(self._evaluator, "evaluate_prepared", None)
-        if callable(prepared_evaluate):
-            evaluation = prepared_evaluate(node.state, context)
-        else:
-            evaluation = self._evaluator.evaluate(node.state)
-        self._evaluator_calls += 1
+        return context
+
+    def _expand(self, node: _Node, evaluation: Evaluation, context: LegalActionContext) -> float:
+        if self.adapter.is_terminal(node.state):
+            return self.adapter.terminal_utility(node.state)
         utility = wdl_to_side_to_move_utility(evaluation.wdl)
         legal = context.actions
         if not legal:
@@ -216,6 +213,20 @@ class SequentialPUCT:
                 "legal_actions": legal,
             })
         return utility
+
+    def _evaluate_and_expand(self, node: _Node) -> float:
+        context = self._prepare_leaf(node)
+        if context is None:
+            return self.adapter.terminal_utility(node.state)
+        if self._evaluator is None:
+            raise SearchError("Search evaluator was not installed")
+        prepared_evaluate = getattr(self._evaluator, "evaluate_prepared", None)
+        if callable(prepared_evaluate):
+            evaluation = prepared_evaluate(node.state, context)
+        else:
+            evaluation = self._evaluator.evaluate(node.state)
+        self._evaluator_calls += 1
+        return self._expand(node, evaluation, context)
 
     def _tie_key(self, state: GoldenState, action: int | str) -> int:
         return self.adapter.action_index(state, action)
@@ -239,28 +250,76 @@ class SequentialPUCT:
             return min(candidates, key=lambda item: self._tie_key(node.state, item[0]))
         return self._rng.choice(candidates)
 
+    def _traverse(self, root: _Node) -> tuple[list[tuple[_Node, int | str, _Edge]], _Node]:
+        node = root
+        path: list[tuple[_Node, int | str, _Edge]] = []
+        while node.expanded:
+            action, edge = self._select(node)
+            if edge.child is None:
+                edge.child = _Node(self.adapter.apply_action(node.state, action))
+            path.append((node, action, edge))
+            node = edge.child
+        return path, node
+
+    def _backup(self, path: Sequence[tuple[_Node, int | str, _Edge]], utility: float) -> float:
+        for parent, action, edge in reversed(path):
+            utility = _child_to_parent_utility(utility)
+            edge.visits += 1
+            edge.value_sum += utility
+            if self.trace is not None:
+                self.trace.append({
+                    "event": "selected_edge",
+                    "state": parent.state.state_key,
+                    "action": action,
+                    "edge_visits": edge.visits,
+                    "backup_utility": utility,
+                })
+        return utility
+
     def _simulate(self, node: _Node) -> float:
-        if self.adapter.is_terminal(node.state):
-            return self.adapter.terminal_utility(node.state)
-        if not node.expanded:
-            return self._evaluate_and_expand(node)
-        action, edge = self._select(node)
-        if edge.child is None:
-            child_state = self.adapter.apply_action(node.state, action)
-            edge.child = _Node(child_state)
-        child_utility = self._simulate(edge.child)
-        parent_utility = _child_to_parent_utility(child_utility)
-        edge.visits += 1
-        edge.value_sum += parent_utility
+        path, leaf = self._traverse(node)
+        utility = self._evaluate_and_expand(leaf)
+        return self._backup(path, utility)
+
+    def _finalize(self, state: GoldenState, root: _Node, evaluator_calls: int) -> SearchResult:
+        if root.legal_context is None:
+            raise SearchError("Golden search root has no prepared legal context")
+        legal = root.legal_context.actions
+        action_space = self.adapter.action_space(state)
+        visit_map = {action: root.edges[action].visits for action in legal}
+        root_visits = tuple(visit_map.get(action, 0) for action in action_space)
+        total = sum(root_visits)
+        if total <= 0:
+            raise SearchError("Golden search produced zero root visits")
+        root_q = tuple(
+            root.edges[action].q if action in root.edges and root.edges[action].visits else None
+            for action in action_space
+        )
+        pi = tuple(count / total for count in root_visits)
+        max_visits = max(visit_map.values())
+        candidates = [action for action, visits in visit_map.items() if visits == max_visits]
+        if self.settings.deterministic_tie_break:
+            selected = min(candidates, key=lambda action: self._tie_key(state, action))
+        else:
+            selected = self._rng.choice(candidates)
+        if selected not in legal:
+            raise SearchError("Search selected an illegal action")
         if self.trace is not None:
             self.trace.append({
-                "event": "selected_edge",
-                "state": node.state.state_key,
-                "action": action,
-                "edge_visits": edge.visits,
-                "backup_utility": parent_utility,
+                "event": "final_root",
+                "root_visits": root_visits,
+                "selected_action": selected,
             })
-        return parent_utility
+        return SearchResult(
+            action=selected,
+            legal_actions=legal,
+            root_visits=root_visits,
+            pi=pi,
+            simulations=self.settings.simulations,
+            evaluator_calls=evaluator_calls,
+            root_q=root_q,
+            legal_action_mask=root.legal_context.action_mask,
+        )
 
     def search(
         self,
@@ -283,46 +342,11 @@ class SequentialPUCT:
             self._simulate(root)
         if state.state_key != before:
             raise SearchError("Golden search mutated its parent state")
-        total = sum(edge.visits for edge in root.edges.values())
-        if total <= 0:
-            raise SearchError("Golden search produced zero root visits")
+        return self._finalize(state, root, self._evaluator_calls)
 
-        if root.legal_context is None:
-            raise SearchError("Golden search root has no prepared legal context")
-        legal = root.legal_context.actions
-        action_space = self.adapter.action_space(state)
-        visit_map = {action: root.edges[action].visits for action in legal}
-        root_visits = tuple(visit_map.get(action, 0) for action in action_space)
-        root_q = tuple(
-            root.edges[action].q if action in root.edges and root.edges[action].visits else None
-            for action in action_space
-        )
-        pi = tuple(count / total for count in root_visits)
 
-        max_visits = max(visit_map.values())
-        candidates = [action for action, visits in visit_map.items() if visits == max_visits]
-        if self.settings.deterministic_tie_break:
-            selected = min(candidates, key=lambda action: self._tie_key(state, action))
-        else:
-            selected = self._rng.choice(candidates)
-        if selected not in legal:
-            raise SearchError("Search selected an illegal action")
-        if self.trace is not None:
-            self.trace.append({
-                "event": "final_root",
-                "root_visits": root_visits,
-                "selected_action": selected,
-            })
-        return SearchResult(
-            action=selected,
-            legal_actions=legal,
-            root_visits=root_visits,
-            pi=pi,
-            simulations=self.settings.simulations,
-            evaluator_calls=self._evaluator_calls,
-            root_q=root_q,
-            legal_action_mask=root.legal_context.action_mask,
-        )
+class SequentialPUCT(_PUCTCore):
+    """Synchronous frontend over the canonical PUCT core."""
 
 
 @dataclass(frozen=True)
@@ -338,8 +362,8 @@ class SearchEvaluationRequest:
     legal_context: LegalActionContext
 
 
-class SequentialPUCTSession:
-    """Cooperative form of :class:`SequentialPUCT` with identical PUCT code.
+class SequentialPUCTSession(_PUCTCore):
+    """Cooperative frontend over the canonical PUCT core.
 
     A session performs ordinary single-tree simulations.  It yields only at
     neural evaluations, allowing a process-local scheduler to interleave
@@ -359,9 +383,7 @@ class SequentialPUCTSession:
     ) -> None:
         if state.is_terminal:
             raise SearchError("Search cannot be started from a terminal Golden state")
-        self.settings = settings or SearchSettings()
-        self.adapter = adapter or GoldenSearchAdapter()
-        self.trace = trace
+        super().__init__(settings, adapter=adapter, trace=trace)
         self._seed = int(seed)
         self._transform = evaluation_transform
         self._pending: SearchEvaluationRequest | None = None
@@ -377,47 +399,15 @@ class SequentialPUCTSession:
     def pending(self) -> SearchEvaluationRequest | None:
         return self._pending
 
-    def _expand(self, node: _Node, evaluation: Evaluation, context: LegalActionContext) -> float:
-        if self.adapter.is_terminal(node.state):
-            return self.adapter.terminal_utility(node.state)
-        utility = wdl_to_side_to_move_utility(evaluation.wdl)
-        legal = context.actions
-        if not legal:
-            raise SearchError("Nonterminal Golden state exposed no legal actions")
-        priors = _policy_for_legal(evaluation, node.state, legal, self.adapter)
-        node.edges = {action: _Edge(prior=priors[action]) for action in legal}
-        node.legal_context = context
-        node.expanded = True
-        if self.trace is not None:
-            self.trace.append({"event": "expanded", "state": node.state.state_key, "legal_actions": legal})
-        return utility
-
-    def _select(self, node: _Node, rng: random.Random) -> tuple[int | str, _Edge]:
-        total_visits = sum(edge.visits for edge in node.edges.values())
-        scale = math.sqrt(total_visits + 1.0)
-        best_value = -float("inf")
-        candidates: list[tuple[int | str, _Edge]] = []
-        for action, edge in node.edges.items():
-            q = edge.q if edge.visits else float(self.settings.fpu)
-            score = q + float(self.settings.cpuct) * edge.prior * scale / (1.0 + edge.visits)
-            if score > best_value + 1e-15:
-                best_value = score
-                candidates = [(action, edge)]
-            elif abs(score - best_value) <= 1e-15:
-                candidates.append((action, edge))
-        if not candidates:
-            raise SearchError("PUCT could not select a legal edge")
-        if self.settings.deterministic_tie_break:
-            return min(candidates, key=lambda item: self.adapter.action_index(node.state, item[0]))
-        return rng.choice(candidates)
-
     def _run(self, state: GoldenState):
         before = state.state_key
         increment("searches")
         rng = random.Random(self._seed)
+        self._rng = rng
         root = _Node(state)
-        root_context = self.adapter.prepare_legal_actions(state)
-        increment("leaf_expansions")
+        root_context = self._prepare_leaf(root)
+        if root_context is None:
+            raise SearchError("Search cannot be started from a terminal Golden state")
         evaluation = yield SearchEvaluationRequest(state, root_context)
         if self._transform is not None:
             evaluation = self._transform(evaluation, state, root_context)
@@ -425,66 +415,20 @@ class SequentialPUCTSession:
         evaluator_calls = 1
         for _ in range(self.settings.simulations):
             increment("simulations")
-            node = root
-            path: list[tuple[_Node, int | str, _Edge]] = []
-            while node.expanded:
-                action, edge = self._select(node, rng)
-                if edge.child is None:
-                    edge.child = _Node(self.adapter.apply_action(node.state, action))
-                path.append((node, action, edge))
-                node = edge.child
-            if self.adapter.is_terminal(node.state):
-                utility = self.adapter.terminal_utility(node.state)
+            path, leaf = self._traverse(root)
+            context = self._prepare_leaf(leaf)
+            if context is None:
+                utility = self.adapter.terminal_utility(leaf.state)
             else:
-                context = self.adapter.prepare_legal_actions(node.state)
-                increment("leaf_expansions")
-                evaluation = yield SearchEvaluationRequest(node.state, context)
+                evaluation = yield SearchEvaluationRequest(leaf.state, context)
                 if self._transform is not None:
-                    evaluation = self._transform(evaluation, node.state, context)
-                utility = self._expand(node, evaluation, context)
+                    evaluation = self._transform(evaluation, leaf.state, context)
+                utility = self._expand(leaf, evaluation, context)
                 evaluator_calls += 1
-            for parent, action, edge in reversed(path):
-                utility = _child_to_parent_utility(utility)
-                edge.visits += 1
-                edge.value_sum += utility
-                if self.trace is not None:
-                    self.trace.append({
-                        "event": "selected_edge",
-                        "state": parent.state.state_key,
-                        "action": action,
-                        "edge_visits": edge.visits,
-                        "backup_utility": utility,
-                    })
+            self._backup(path, utility)
         if state.state_key != before:
             raise SearchError("Golden search mutated its parent state")
-        if root.legal_context is None:
-            raise SearchError("Golden search root has no prepared legal context")
-        legal = root.legal_context.actions
-        action_space = self.adapter.action_space(state)
-        visit_map = {action: root.edges[action].visits for action in legal}
-        root_visits = tuple(visit_map.get(action, 0) for action in action_space)
-        total = sum(root_visits)
-        if total <= 0:
-            raise SearchError("Golden search produced zero root visits")
-        root_q = tuple(root.edges[action].q if action in root.edges and root.edges[action].visits else None for action in action_space)
-        pi = tuple(count / total for count in root_visits)
-        maximum = max(visit_map.values())
-        candidates = [action for action, visits in visit_map.items() if visits == maximum]
-        selected = min(candidates, key=lambda action: self.adapter.action_index(state, action)) if self.settings.deterministic_tie_break else rng.choice(candidates)
-        if selected not in legal:
-            raise SearchError("Search selected an illegal action")
-        if self.trace is not None:
-            self.trace.append({"event": "final_root", "root_visits": root_visits, "selected_action": selected})
-        return SearchResult(
-            action=selected,
-            legal_actions=legal,
-            root_visits=root_visits,
-            pi=pi,
-            simulations=self.settings.simulations,
-            evaluator_calls=evaluator_calls,
-            root_q=root_q,
-            legal_action_mask=root.legal_context.action_mask,
-        )
+        return self._finalize(state, root, evaluator_calls)
 
     def _read_yield(self, value: object) -> None:
         if isinstance(value, SearchEvaluationRequest):

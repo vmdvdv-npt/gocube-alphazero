@@ -104,6 +104,9 @@ def test_shared_memory_cooperative_scheduler_batches_and_replenishes():
     assert telemetry["target_active_contexts"] == 4
     assert telemetry["peak_concurrent_search_contexts"] == 4
     assert telemetry["global_task_replenishment"] is True
+    assert telemetry["pending_queue_exhausted"] is True
+    assert telemetry["minimum_active_contexts"] > 0
+    assert telemetry["tail_duration_after_pending_empty_sec"] >= 0.0
     assert telemetry["inference_rows"] == 24
     assert telemetry["max_inference_batch_rows"] >= 2
     assert telemetry["worker_blocked_inference_calls"] >= telemetry["inference_forwards"]
