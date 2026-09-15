@@ -25,16 +25,14 @@ from gocube_golden.provenance import derive_seed, file_sha256
 from gocube_golden.result import result_from_terminal
 from gocube_golden.rules import IllegalMoveError, apply_action
 from gocube_golden.scoring import score_terminal
-from gocube_golden.search import Evaluation
+from gocube_golden.search import Evaluation, SequentialPUCT
 from gocube_golden.search_adapter import GoldenSearchAdapter
 from gocube_golden.state import BLACK, WHITE
 from gocube_golden.torus9 import (
     TORUS9_TOPOLOGY_FINGERPRINT,
-    Torus9BatchedPUCT,
     build_torus9_observation,
     generate_torus9_evaluation_starts,
     summarize_torus9_arena,
-    torus9_arena_termination_reason,
     torus9_load_checkpoint,
     torus9_model_from_metadata,
     torus9_state_from_identity,
@@ -42,6 +40,8 @@ from gocube_golden.torus9 import (
 from gocube_golden.torus9_contract import (
     TORUS9_ACTION_COUNT,
     TORUS9_ARENA_MOVE_LIMIT,
+    TORUS9_CURRENT_ARCHITECTURE_ID,
+    TORUS9_CURRENT_PROFILE_ID,
     TORUS9_KOMI,
     TORUS9_POINT_COUNT,
 )
@@ -281,9 +281,9 @@ class Torus9ArenaProfile:
 
     def matches_metadata(self, metadata: Mapping[str, object]) -> bool:
         return (
-            metadata.get("topology_fingerprint") == TORUS9_TOPOLOGY_FINGERPRINT
-            or "torus9" in str(metadata.get("profile_id", "")).lower()
-            or "torus9" in str(metadata.get("architecture_id", "")).lower()
+            metadata.get("profile_id") == TORUS9_CURRENT_PROFILE_ID
+            and metadata.get("architecture_id") == TORUS9_CURRENT_ARCHITECTURE_ID
+            and metadata.get("topology_fingerprint") == TORUS9_TOPOLOGY_FINGERPRINT
         )
 
     def validate_execution_config(self, config: ArenaExecutionConfig) -> None:
@@ -421,10 +421,9 @@ class Torus9ArenaProfile:
                 except Empty:
                     return None
 
-            # The central broker owns both model instances and CUDA.  Inside a
-            # worker, four already-active games are searched together so their
-            # leaves can cross the process boundary in one immediate request.
-            # This is execution batching, not a timed local coalescing window.
+            # The central broker owns both model instances and CUDA.  Each
+            # game uses the canonical SequentialPUCT implementation; requests
+            # from the independent OS workers are still coalesced centrally.
             candidate_eval = _RemoteEvaluator(
                 worker_id=worker_id,
                 model_role="candidate",
@@ -451,16 +450,11 @@ class Torus9ArenaProfile:
                     response_queue=response_queues[0],
                 )
             )
-            search = Torus9BatchedPUCT(
-                SearchSettings(
-                    simulations=64,
-                    cpuct=1.25,
-                    fpu=0.0,
-                    deterministic_tie_break=True,
-                ),
-                adapter=GoldenSearchAdapter(),
-                max_batch_rows=int(games_per_worker),
-                inference_batch_wait_ms=0.0,
+            search_settings = SearchSettings(
+                simulations=64,
+                cpuct=1.25,
+                fpu=0.0,
+                deterministic_tie_break=True,
             )
 
             active: list[_WorkerGame] = []
@@ -472,52 +466,14 @@ class Torus9ArenaProfile:
                 records.append(_finish_game(game))
                 lane_wall_time_seconds += time.perf_counter() - game.started_at
 
-            while len(active) < int(games_per_worker):
-                # Fill the worker's four independent lanes before starting
-                # search. The shared queue remains the global replenishment
-                # mechanism once a lane completes a game.
+            while True:
                 task = take_task(block=True)
                 if task is None:
                     break
                 task = dict(task)
                 task["worker_id"] = worker_id
-                active.append(_make_game(task))
-
-            while active:
-                states = [game.state for game in active]
-                evaluators: list[_RemoteEvaluator] = []
-                seeds: list[int] = []
-                for game in active:
-                    task = game.task
-                    candidate_turn = (
-                        game.state.side_to_move == BLACK
-                        and bool(task["candidate_black"])
-                    ) or (
-                        game.state.side_to_move == WHITE
-                        and not bool(task["candidate_black"])
-                    )
-                    evaluators.append(candidate_eval if candidate_turn else reference_eval)
-                    seeds.append(
-                        derive_seed(
-                            int(task["game_seed"]),
-                            game.ply + 1,
-                            "arena-search",
-                        )
-                    )
-                try:
-                    results = search.search(states, evaluators, seeds=seeds)
-                except Exception as exc:
-                    message = f"{type(exc).__name__}: {exc}"
-                    for game in active:
-                        game.technical = "ERROR_SEARCH"
-                        game.error = message
-                        record_game(game)
-                    active.clear()
-                    continue
-
-                survivors: list[_WorkerGame] = []
-                for game, result in zip(active, results):
-                    task = game.task
+                game = _make_game(task)
+                while game.formal is None and game.technical is None:
                     state = game.state
                     candidate_turn = (
                         state.side_to_move == BLACK
@@ -526,6 +482,26 @@ class Torus9ArenaProfile:
                         state.side_to_move == WHITE
                         and not bool(task["candidate_black"])
                     )
+                    try:
+                        evaluator = candidate_eval if candidate_turn else reference_eval
+                        result = SequentialPUCT(
+                            search_settings,
+                            adapter=GoldenSearchAdapter(),
+                        ).search(
+                            state,
+                            evaluator,
+                            seed=derive_seed(
+                                int(task["game_seed"]),
+                                game.ply + 1,
+                                "arena-search",
+                            ),
+                        )
+                    except Exception as exc:
+                        game.technical = "ERROR_SEARCH"
+                        game.error = f"{type(exc).__name__}: {exc}"
+                        record_game(game)
+                        break
+
                     game.ply += 1
                     action = result.action
                     try:
@@ -544,7 +520,7 @@ class Torus9ArenaProfile:
                             }
                         )
                         record_game(game)
-                        continue
+                        break
 
                     game.state = next_state
                     game.trace.append(
@@ -558,7 +534,7 @@ class Torus9ArenaProfile:
                             "legal": True,
                         }
                     )
-                    if torus9_arena_termination_reason(next_state, game.ply) == "DOUBLE_PASS":
+                    if next_state.is_terminal:
                         game.formal = result_from_terminal(next_state).winner.value
                         record_game(game)
                     elif game.ply >= TORUS9_ARENA_MOVE_LIMIT:
@@ -568,16 +544,6 @@ class Torus9ArenaProfile:
                             f"{TORUS9_ARENA_MOVE_LIMIT} actions"
                         )
                         record_game(game)
-                    else:
-                        survivors.append(game)
-                active = survivors
-                while len(active) < int(games_per_worker):
-                    task = take_task(block=False)
-                    if task is None:
-                        break
-                    task = dict(task)
-                    task["worker_id"] = worker_id
-                    active.append(_make_game(task))
 
             inference_aggregator.close()
 

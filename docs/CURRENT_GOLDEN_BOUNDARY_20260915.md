@@ -1,4 +1,8 @@
-# Current Golden boundary — Torus 9×9 M0→M17 + Self-play Stage 2 (2026-09-15)
+# Historical Golden boundary — Torus 9×9 M0→M17 + Self-play Stage 2 (2026-09-15)
+
+> Superseded by `GOLDEN_LEGACY_REMOVAL_STAGE6_20260915.md`. This dated
+> document is retained as scientific lineage evidence; its pre-Stage-6
+> compatibility names and paths are not current launch instructions.
 
 This document preserves the immutable scientific/dependency boundary proven by the successful Torus 9×9 line `M0→M17` and records the later Stage-2 extraction of **current self-play execution**. The extraction changes execution architecture only; it does not redefine rules, search semantics, targets, replay, training, the network, checkpoint identity, Arena semantics or the M0→M17 lineage.
 

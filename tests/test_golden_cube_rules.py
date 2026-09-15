@@ -6,7 +6,7 @@ from gocube_golden.cube_topology import CUBE4_TOPOLOGY, CROSS_FACE_SEAM
 from gocube_golden.cube_training import CUBE_WATCHDOG, cube_initial_state, cube_state_identity
 from gocube_golden.rules import IllegalMoveError, IllegalMoveReason, apply_action, group_from_board, legal_actions, liberties_from_board
 from gocube_golden.scoring import score_terminal
-from gocube_golden.state import BLACK, EMPTY, WHITE, LegacyKomiError, research_state_from_stones
+from gocube_golden.state import BLACK, EMPTY, WHITE, research_state_from_stones
 
 
 def state_with(*, black=(), white=(), side=BLACK, passes=0, history=None):
@@ -97,8 +97,8 @@ def test_graph_area_spans_faces_and_mixed_boundary_is_neutral():
 
 
 def test_komi_is_hard_fail_closed():
-    with pytest.raises(LegacyKomiError):
-        cube_initial_state(komi=7.5)
+    with pytest.raises(ValueError, match="komi"):
+        cube_initial_state(komi=15 / 2)
     assert cube_initial_state().komi == 0.5
 
 

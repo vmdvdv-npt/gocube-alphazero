@@ -18,7 +18,7 @@ from gocube_golden.scoring import score_terminal
 from .catalog import CheckpointDescriptor, GOLDEN_TERMINAL_ADJUDICATOR
 from .errors import CheckpointIncompatible, GenerationFailed
 from .golden_mapping import GoldenActionMappingError, GoldenProtocolMapping, mapping_for
-from .golden_models import GOLDEN_BACKEND_KIND, GoldenPlayableModel
+from .golden_models import GoldenPlayableModel
 
 
 GOLDEN_PROTOCOL_RULESET = "chinese"
@@ -27,10 +27,6 @@ GOLDEN_CPUCT = 1.25
 GOLDEN_FPU = 0.0
 TORUS9_INTERACTIVE_MOVE_LIMIT = 500
 CUBE4_INTERACTIVE_MOVE_LIMIT = 1920
-
-
-def _is_golden(descriptor: CheckpointDescriptor) -> bool:
-    return getattr(descriptor, "backend_kind", "legacy_nnet") == GOLDEN_BACKEND_KIND
 
 
 def _winner_name(winner: Winner) -> str:
@@ -191,8 +187,6 @@ class GoldenGameGenerator:
         white: CheckpointDescriptor,
     ) -> None:
         fields = (
-            "backend_kind",
-            "checkpoint_format",
             "topology",
             "size",
             "rule_set",
@@ -243,8 +237,6 @@ class GoldenGameGenerator:
         white_model: GoldenPlayableModel,
         mcts_sims: int,
     ) -> dict[str, object]:
-        if not _is_golden(black) or not _is_golden(white):
-            raise CheckpointIncompatible("GoldenGameGenerator accepts Golden checkpoints only")
         if isinstance(mcts_sims, bool) or not isinstance(mcts_sims, int) or mcts_sims < 1:
             raise GenerationFailed("mctsSims must be an integer >= 1")
         self._compatible(black, white)

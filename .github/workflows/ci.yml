@@ -11,195 +11,62 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Tests, V3 smoke, hardened production smoke, and Cython MCTS build
+  golden:
+    name: Golden production tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.11'
           cache: pip
 
-      - name: Install dependencies
+      - name: Install current runtime test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'torch<2.5' --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install -r requirements.txt pytest
+          python -m pip install 'torch<2.5' 'numpy<2' pytest
 
-      - name: Build and import Cython MCTS
+      - name: Compile current production modules
         run: |
-          python - <<'PY'
-          import alphazero.MCTS
-          import alphazero.SelfPlayAgent
-          print('Cython MCTS and SelfPlayAgent import OK')
-          PY
+          python -m compileall -q \
+            alphazero/envs/gocube/integration \
+            gocube_golden \
+            selfplay_engine.py \
+            training_engine.py \
+            tools/arena.py \
+            tools/arena_engine.py \
+            tools/arena_profiles
 
-      - name: Run pytest excluding KataGo reference tests
+      - name: Run Golden regression suite
         run: python -m pytest -q -m "not katago_reference"
 
-      - name: Run Cube 4 and Torus 9 V3 validation smoke
-        run: python -m alphazero.envs.gocube.v3_smoke --games 32
-
-      - name: Run Torus 5x5 Golden current resolver smoke
+      - name: Verify current Golden entrypoints
         run: |
-          python -m tools.torus5_golden \
-            --run-name ci-torus5-golden-v2-smoke \
-            --manifest /tmp/torus5-golden-v2-run-manifest.json \
-            --smoke \
-            | tee /tmp/torus5-golden-smoke.log
-          grep -Eq 'gocube-torus5-golden-v2' /tmp/torus5-golden-smoke.log
-          grep -Eq '"training_step": 1' /tmp/torus5-golden-smoke.log
           python - <<'PY'
-          import json
           from pathlib import Path
 
-          manifest = json.loads(Path('/tmp/torus5-golden-v2-run-manifest.json').read_text())
-          assert manifest['requested_preset'] == 'current'
-          assert manifest['resolved_preset_id'] == 'gocube-torus5-golden-v2'
-          assert manifest['network_channels'] == 48
-          assert manifest['network_blocks'] == 6
-          assert manifest['board_size'] == [5, 5]
-          assert manifest['komi'] == 0.5
-          assert manifest['resolved_config']['universal']['training']['batch_size'] == 64
-          assert manifest['resolved_config']['universal']['replay']['generations'] == 3
-          print('Torus 5x5 Golden current manifest verified')
-          PY
-
-      - name: Run Cube 4 training accounting smoke
-        run: |
-          python -m alphazero.envs.gocube.katago_train \
-            --topology cube --size 4 --workers 1 --sims 1 --arena-sims 1 \
-            --games-per-iteration 4 --iterations 1 --train-batch-size 256 \
-            --train-samples-per-new-sample 1 --endgame-sample-weight 1 \
-            --no-arena --smoke --run-name ci-cube4-v3-budget-smoke \
-            | tee /tmp/cube-training-smoke.log
-          grep -Eq 'Games:[[:space:]]+4' /tmp/cube-training-smoke.log
-          grep -Eq 'komi = 0\.5' /tmp/cube-training-smoke.log
-          grep -Eq 'Regular decisions:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
-          grep -Eq 'Fast decisions:[[:space:]]+0' /tmp/cube-training-smoke.log
-          grep -Eq 'Saved samples:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
-          grep -Eq 'Optimizer steps actual:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
-          grep -Eq 'Examples seen:[[:space:]]+[1-9][0-9]*' /tmp/cube-training-smoke.log
-          python - <<'PY'
-          import os
-          import torch
-          from alphazero.envs.gocube.atomic_io import (
-              REPLAY_TARGET_PROVENANCE_SUFFIX,
-              REPLAY_TENSOR_SUFFIXES,
-              load_replay_marker,
-              load_replay_target_provenance,
+          from gocube_golden.cube_contract import CUBE_PROFILE_ID, load_profile
+          from gocube_golden.torus9_contract import (
+              TORUS9_CURRENT_PROFILE_ID,
+              TORUS9_KOMI,
+              load_torus9_current_profile,
           )
-          base = 'data/ci-cube4-v3-budget-smoke/iteration-0001'
-          marker = load_replay_marker(base)
-          files = [base + suffix for suffix in REPLAY_TENSOR_SUFFIXES]
-          rows = [int(torch.load(path).size(0)) for path in files]
-          assert len(set(rows)) == 1 and rows[0] > 0, rows
-          provenance = load_replay_target_provenance(base, marker=marker)
-          assert provenance.dtype == torch.uint8
-          assert provenance.shape == (rows[0],)
-          assert os.path.getsize(base + REPLAY_TARGET_PROVENANCE_SUFFIX) > 0
-          print('Cube 4 tensor rows:', rows[0])
-          PY
+          from tools.arena_profiles import available_profiles
 
-      - name: Run Torus 9 training accounting smoke
-        run: |
-          python -m alphazero.envs.gocube.katago_train \
-            --topology torus --size 9 --workers 1 --sims 1 --arena-sims 1 \
-            --games-per-iteration 4 --iterations 1 --train-batch-size 256 \
-            --train-samples-per-new-sample 1 --endgame-sample-weight 1 \
-            --no-arena --smoke --run-name ci-torus9-v3-budget-smoke \
-            | tee /tmp/torus-training-smoke.log
-          grep -Eq 'Games:[[:space:]]+4' /tmp/torus-training-smoke.log
-          grep -Eq 'komi = 0\.5' /tmp/torus-training-smoke.log
-          grep -Eq 'Regular decisions:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
-          grep -Eq 'Fast decisions:[[:space:]]+0' /tmp/torus-training-smoke.log
-          grep -Eq 'Saved samples:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
-          grep -Eq 'Optimizer steps actual:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
-          grep -Eq 'Examples seen:[[:space:]]+[1-9][0-9]*' /tmp/torus-training-smoke.log
-          python - <<'PY'
-          import os
-          import torch
-          from alphazero.envs.gocube.atomic_io import (
-              REPLAY_TARGET_PROVENANCE_SUFFIX,
-              REPLAY_TENSOR_SUFFIXES,
-              load_replay_marker,
-              load_replay_target_provenance,
-          )
-          base = 'data/ci-torus9-v3-budget-smoke/iteration-0001'
-          marker = load_replay_marker(base)
-          files = [base + suffix for suffix in REPLAY_TENSOR_SUFFIXES]
-          rows = [int(torch.load(path).size(0)) for path in files]
-          assert len(set(rows)) == 1 and rows[0] > 0, rows
-          provenance = load_replay_target_provenance(base, marker=marker)
-          assert provenance.dtype == torch.uint8
-          assert provenance.shape == (rows[0],)
-          assert os.path.getsize(base + REPLAY_TARGET_PROVENANCE_SUFFIX) > 0
-          print('Torus 9 tensor rows:', rows[0])
+          assert CUBE_PROFILE_ID == 'gocube-cube4-golden-training-v1'
+          assert load_profile()['rules']['komi'] == 0.5
+          assert TORUS9_CURRENT_PROFILE_ID == 'gocube-torus9-golden-v3'
+          assert load_torus9_current_profile()['rules']['komi'] == 0.5
+          assert TORUS9_KOMI == 0.5
+          assert available_profiles() == ('torus9',)
+          assert not list(Path('.').rglob('*.pkl'))
+          print('Golden production entrypoints verified')
           PY
-
-      - name: Run hardened Cube 4 production persistence smoke
-        run: |
-          RUN=ci-cube4-katago-hardened-smoke
-          python -m alphazero.envs.gocube.hardened_train \
-            --topology cube --size 4 --workers 1 --sims 1 --arena-sims 1 \
-            --games-per-iteration 1 --iterations 1 --train-batch-size 64 \
-            --fast-game-prob 0 --endgame-sample-weight 1 --no-arena --smoke \
-            --run-name "$RUN" \
-            | tee /tmp/hardened-training-smoke.log
-          test -s "checkpoint/$RUN/iteration-0000.pkl"
-          test -s "checkpoint/$RUN/iteration-0001.pkl"
-          test -s "data/$RUN/iteration-0001-complete.json"
-          python - <<'PY'
-          import json
-          import os
-          import torch
-          from alphazero.envs.gocube.atomic_io import (
-              RECOVERY_CONTRACT,
-              REPLAY_TARGET_PROVENANCE_SUFFIX,
-              REPLAY_TENSOR_SUFFIXES,
-              load_replay_target_provenance,
-          )
-
-          run = 'ci-cube4-katago-hardened-smoke'
-          base = os.path.join('data', run, 'iteration-0001')
-          with open(base + '-complete.json', encoding='utf-8') as handle:
-              marker = json.load(handle)
-          assert marker['recovery_contract'] == RECOVERY_CONTRACT, marker
-          rows = []
-          for suffix in REPLAY_TENSOR_SUFFIXES:
-              path = base + suffix
-              assert os.path.getsize(path) > 0, path
-              rows.append(int(torch.load(path).size(0)))
-          assert len(set(rows)) == 1 and rows[0] > 0, rows
-          assert marker['row_count'] == rows[0], (marker, rows)
-          provenance = load_replay_target_provenance(base, marker=marker)
-          assert provenance.dtype == torch.uint8
-          assert provenance.shape == (rows[0],)
-          assert os.path.getsize(base + REPLAY_TARGET_PROVENANCE_SUFFIX) > 0
-          checkpoint = torch.load(os.path.join('checkpoint', run, 'iteration-0001.pkl'), map_location='cpu')
-          assert checkpoint['training_state']['training_contract'] == 'sample-clock-v2'
-          assert checkpoint['args']['gocube_recovery_contract'] == RECOVERY_CONTRACT
-          assert checkpoint['args']['gocube_komi'] == 0.5
-          print('Hardened replay rows:', rows[0])
-          PY
-
-      - name: Print rules fingerprints and git status
-        run: |
-          python - <<'PY'
-          from alphazero.envs.gocube.game import Cube4JapaneseGame, Torus9JapaneseGame
-          print('Cube4 rules fingerprint:', Cube4JapaneseGame.rules_fingerprint())
-          print('Torus9 rules fingerprint:', Torus9JapaneseGame.rules_fingerprint())
-          PY
-          git diff --stat origin/main...HEAD
-          git status --short --branch
 
   katago_reference:
     name: Mandatory pinned KataGo rule differential
@@ -209,22 +76,19 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.11'
           cache: pip
 
-      - name: Install Python test dependencies
+      - name: Install differential test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'torch<2.5' --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install -r requirements.txt pytest
+          python -m pip install 'numpy<2' pytest
 
-      - name: Build pinned local KataGo rule-only oracle
+      - name: Build pinned KataGo rule-only oracle
         run: tools/katago_reference/build_oracle.sh
 
       - name: Run pinned KataGo differential, bridge, and symmetry suites

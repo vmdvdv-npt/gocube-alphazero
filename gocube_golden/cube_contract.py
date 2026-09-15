@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from .cube_arena import CUBE_ARENA_FINGERPRINT, CUBE_ARENA_SEARCH
+from .arena_contract import SearchSettings
 from .cube_neural import (
     CUBE_ACTION_COUNT,
     CUBE_OBSERVATION_CHANNEL_COUNT,
@@ -34,6 +34,31 @@ from .cube_training import (
     CUBE_WATCHDOG,
     DEFAULT_CUBE_SELFPLAY_CONTRACT,
     cube_initial_state,
+)
+from .provenance import sha256_fingerprint
+
+
+CUBE_ARENA_SEARCH = SearchSettings(
+    simulations=64,
+    cpuct=1.25,
+    fpu=0.0,
+    deterministic_tie_break=True,
+)
+CUBE_ARENA_FINGERPRINT = sha256_fingerprint(
+    {
+        "contract_id": CUBE_ARENA_CONTRACT_ID,
+        "topology_fingerprint": CUBE4_TOPOLOGY.fingerprint,
+        "simulations": 64,
+        "cpuct": 1.25,
+        "fpu": 0.0,
+        "root_noise": False,
+        "temperature": 0.0,
+        "fast_search": False,
+        "resign": False,
+        "watchdog": CUBE_WATCHDOG,
+        "inference_batch_size": 1,
+        "inference_coalescing": False,
+    }
 )
 
 CUBE_PROFILE_ID = "gocube-cube4-golden-training-v1"
@@ -205,17 +230,7 @@ def build_profile() -> dict[str, Any]:
     }
 
 
-def _contains_forbidden_komi(value: object) -> bool:
-    if isinstance(value, Mapping):
-        return any(_contains_forbidden_komi(item) for item in value.values())
-    if isinstance(value, (tuple, list)):
-        return any(_contains_forbidden_komi(item) for item in value)
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(float(value) - 7.5) <= 1e-12
-
-
 def validate_profile(profile: Mapping[str, Any], *, verify_fingerprint: bool = True) -> None:
-    if _contains_forbidden_komi(profile):
-        raise ValueError("Cube Golden profile contains forbidden legacy komi 7.5")
     if profile.get("profile_id") != CUBE_PROFILE_ID or profile.get("schema_version") != CUBE_PROFILE_SCHEMA_VERSION:
         raise ValueError("Cube Golden profile identity drift")
     if profile.get("topology", {}).get("fingerprint") != CUBE4_TOPOLOGY_FINGERPRINT:

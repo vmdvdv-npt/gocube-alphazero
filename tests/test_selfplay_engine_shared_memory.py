@@ -13,13 +13,12 @@ from gocube_golden.selfplay_engine import (
     SelfPlayEngine,
     SelfPlayEngineConfig,
 )
+from gocube_golden.state import PASS, initial_state
+from gocube_golden.topology import TORUS_9X9
 from gocube_golden.torus9 import (
-    TORUS_9X9,
     build_torus9_observation,
     build_torus9_observation_into,
-    initial_state,
 )
-from gocube_golden.state import PASS
 
 
 class _CooperativeGame:

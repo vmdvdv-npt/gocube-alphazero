@@ -1,82 +1,56 @@
-# GoCube training path boundary
+# GoCube Golden production path
 
-## Current GoCube V3
+This is the current execution map after Stage 6. There is one supported
+production path:
 
-GoCube V3 is trained and searched only through the pinned KataGo contract:
-
-```bash
-python -m alphazero.envs.gocube.katago_train
+```text
+Golden rules/state/search
+        ↓
+SelfPlayEngine
+        ↓
+TrainingEngine
+        ↓
+Golden .pt + metadata sidecar
+        ↓
+standalone Arena / GoCube Protocol V1
 ```
 
-Production wrappers use:
+## Current entrypoints
+
+Torus9 learning uses:
 
 ```bash
-python -m alphazero.envs.gocube.hardened_train
+.venv/bin/python tools/torus9_golden_learning.py
 ```
 
-The current contract uses Japanese V3 semantics, player-relative value
-targets (`[WIN(side-to-move), LOSS(side-to-move), NO_RESULT]`), the pinned
-KataGo search adapter, and `komi=0.5`. The adapter converts neural values to
-absolute Black/White search values exactly once. `GoCube V3 + legacy MCTS`
-is rejected at the MCTS boundary before self-play inference.
+The current Cube profile is exposed through `gocube_golden.cube_training` and
+`gocube_golden.cube_training_adapter`; its self-play adapter and training
+adapter both terminate at the shared engines.
 
-The old command is retired and fails closed:
+The Protocol V1 service is:
 
 ```bash
-python -m alphazero.envs.gocube.train
+.venv/bin/python -m alphazero.envs.gocube.integration.server \
+  --checkpoint-dir runs --host 127.0.0.1 --port 8765
 ```
 
-It must not be used for new self-play or training.
+The stable endpoints are `GET /v1/health`, `GET /v1/checkpoints`, and
+`POST /v1/games`. Only Golden `.pt` checkpoints with a matching metadata
+sidecar are listed or loaded. Unsupported artifacts fail closed.
 
-## Historical compatibility
+## Scientific boundary
 
-`_LegacyGoGame`, `legacy_game_class`, V1/V2 adjudicators, and historical
-checkpoint/model-contract loaders remain available for reading, evaluation,
-or migration of old artifacts. They are not an authorization to create new
-GoCube V3 training data. The V1/V2 classes retain their historical legacy
-MCTS compatibility surface where existing evaluation workflows require it.
+Current profiles keep the frozen rules, topology, observations, targets,
+replay policy, optimizer, network architecture, deterministic seeds and
+`komi=0.5`. Search is `SequentialPUCT` / `SequentialPUCTSession`.
 
-## Generic legacy AlphaZero
+The standalone Arena CLI is `tools/arena.py`; its profile adapters do not
+provide another search or checkpoint execution implementation.
 
-Framework-wide `MCTS.process_results()` and legacy behavior for non-GoCube
-environments remain unchanged. The invariant is scoped to game classes marked
-with the GoCube V3 contract marker, so Connect4 and other environments keep
-their existing search behavior.
+## Historical material
 
-## Shared infrastructure
-
-`alphazero.envs.gocube.training_common` owns the reusable Coach, CLI/config,
-tensor validation, replay accounting, and telemetry components. The pinned
-entrypoints import those components directly; neither production path imports
-the retired executable module.
-
-CI runs pinned Cube4 and Torus9 training-accounting smokes and verifies
-non-empty self-play replay, row accounting, optimizer progress, provenance,
-checkpoint contracts, and `komi=0.5`.
-
-## Torus 5x5 Golden Standard
-
-The canonical 5x5 Golden Standard is resolved through the single current alias
-`gocube-torus5-golden-current`, which points to concrete version
-`gocube-torus5-golden-v2`. Its network is 48 channels x 6 graph blocks and its
-komi is 0.5. The resolver writes the complete resolved configuration and git
-identity into each run manifest:
-
-```bash
-python -m tools.torus5_golden --run-name torus5-v2-smoke --smoke
-```
-
-The old standalone Golden Torus Stage-3/Stage-4 runners are retained only for
-historical reproduction and require explicit `--allow-legacy-config`. They do
-not participate in the default/current launch path. See
-[`TORUS5_GOLDEN_STANDARD.md`](TORUS5_GOLDEN_STANDARD.md) for the audit,
-universal/board-specific split, and legacy mapping.
-
-The deterministic value-contract reproduction is in
-`tests/test_gocube_legacy_training_retirement.py`. The pre-existing Cube3
-learning-sanity Arena artifacts are historical diagnostic evidence, not
-post-fix acceptance evidence: their checkpoint manifest records
-`searchContractId=gocube-search-contract-legacy`, which identifies the
-retired path and reproduces the semantic mismatch. A fresh pinned sanity run
-is recorded in `docs/GOCUBE_LEARNING_SANITY_20260909.md`; small runs are
-diagnostic only and are not production-strength model quality evidence.
+Earlier GoCube path maps, experiment reports and migration evidence remain in
+Git history and dated `docs/` reports. They are archival references only and
+must not be used as current launch commands. The pinned KataGo rule oracle is
+also retained as a separate CI-only differential reference, not as a Golden
+production backend.

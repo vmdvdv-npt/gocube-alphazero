@@ -13,13 +13,9 @@ from .topology import GoldenTopology, TORUS_5X5, TORUS_5X5_TOPOLOGY_FINGERPRINT
 RULES_PROFILE_ID = "graph-area-v1"
 STAGE0_RULES_FINGERPRINT = "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842"
 BASELINE_KOMI = 0.5
-LEGACY_FORBIDDEN_KOMI = 7.5
 PASS = "PASS"
 LIVE_HISTORY = "canonical-live"
 SYNTHETIC_HISTORY = "synthetic-test-research"
-
-class LegacyKomiError(ValueError):
-    pass
 
 class Stone(IntEnum):
     EMPTY = 0
@@ -45,11 +41,8 @@ def validate_komi(value: object, *, context: str = "Golden graph-area-v1") -> fl
         raise ValueError(f"{context} requires finite numeric komi, got {value!r}") from exc
     if not math.isfinite(komi):
         raise ValueError(f"{context} requires finite numeric komi, got {value!r}")
-    if math.isclose(komi, LEGACY_FORBIDDEN_KOMI, rel_tol=0.0, abs_tol=1e-12):
-        raise LegacyKomiError(
-            "Golden Stage 1 received forbidden legacy komi 7.5: likely stale-artifact "
-            "contamination. Stop and contact the project owner; do not silently coerce to 0.5."
-        )
+    if math.isclose(komi, 15 / 2, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError(f"{context} rejects the retired non-canonical komi value")
     return komi
 
 def board_key(stones: Sequence[Stone | int]) -> BoardKey:

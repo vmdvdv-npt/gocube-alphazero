@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Run the current Torus 9×9 Golden Standard M0→M8 experiment.
+"""Run the current Torus 9×9 Golden learning experiment.
 
-The legacy v2 profile remains loadable through ``load_torus9_profile`` for
-reproduction, but this launcher has no legacy-profile selection path. It
-resolves the current profile explicitly, runs the performance sweep on the
-same 64 self-play games that feed training, and starts every invocation in a
-new active namespace with an empty replay.
+The launcher resolves the current profile explicitly, runs the shared Golden
+self-play and training engines, and starts every invocation in a new active
+namespace with an empty replay.
 """
 
 from __future__ import annotations
@@ -17,9 +15,14 @@ import os
 from pathlib import Path
 import resource
 import statistics
+import sys
 import time
 
 import torch
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from gocube_golden.provenance import capture_code_identity, derive_seed, file_sha256
 from gocube_golden.torus9 import (
@@ -48,7 +51,6 @@ from gocube_golden.torus9_contract import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
 BASE_COMMIT = TORUS9_GOLDEN_LINEAGE_BASE_COMMIT
 ACTIVE_NAMESPACE = ROOT / "runs" / "torus9-golden-v3-active"
 DEFAULT_RUN_ID = "torus9-golden-v3-20260913-run01"
@@ -444,7 +446,6 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         started = time.perf_counter()
         records = run_torus9_selfplay_games(
             model,
-            checkpoint_path=previous_checkpoint,
             run_id=args.run_id,
             label=f"M{iteration - 1}",
             artifact=file_sha256(previous_checkpoint),
@@ -540,7 +541,6 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     started = time.perf_counter()
     records = run_torus9_selfplay_games(
         model,
-        checkpoint_path=previous_checkpoint,
         run_id=args.run_id,
         label="M7",
         artifact=file_sha256(previous_checkpoint),
