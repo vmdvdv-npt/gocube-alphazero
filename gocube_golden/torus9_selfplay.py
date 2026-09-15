@@ -255,6 +255,7 @@ def run_torus9_selfplay_games(
     coalescing: bool = False,
     inference_batch_cap: int | None = None,
     inference_batch_wait_ms: float = 0.0,
+    search_lanes_per_worker: int = 4,
     inference_telemetry: MutableMapping[str, object] | None = None,
     execution_activity: MutableMapping[str, object] | None = None,
 ) -> tuple[_t9.Torus9SelfPlayGameRecord, ...]:
@@ -275,7 +276,9 @@ def run_torus9_selfplay_games(
         contract=contract,
         profile_id=profile_id,
     )
-    lanes_per_worker = 4 if coalescing else 1
+    lanes_per_worker = int(search_lanes_per_worker) if coalescing else 1
+    if lanes_per_worker <= 0:
+        raise ValueError("Torus9 coalesced self-play requires positive search lanes per worker")
     batch_cap = (
         int(inference_batch_cap)
         if inference_batch_cap is not None
