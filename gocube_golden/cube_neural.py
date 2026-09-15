@@ -9,7 +9,7 @@ import json
 import math
 import os
 import time
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 torch = importlib.import_module("torch")
 Tensor = torch.Tensor
@@ -56,6 +56,42 @@ CUBE_OBSERVATION_CHANNELS = (
 )
 CUBE_OBSERVATION_CHANNEL_COUNT = len(CUBE_OBSERVATION_CHANNELS)
 CUBE_VALUE_HEAD_SEMANTICS = "side-to-move:[WIN,DRAW,LOSS]"
+
+
+def apply_cube_root_dirichlet_noise(
+    base_policy: Sequence[float],
+    legal_actions: Sequence[int | str],
+    *,
+    epsilon: float,
+    alpha: float,
+    generator: Any,
+) -> tuple[float, ...]:
+    """Apply the frozen Cube root-noise formula to a policy.
+
+    This is the single scientific implementation used by both the serial
+    self-play oracle and the shared cooperative worker path. The generator
+    remains caller-owned so each path preserves its existing deterministic
+    random stream.
+    """
+    if not 0.0 <= epsilon <= 1.0 or alpha <= 0.0:
+        raise ValueError("Invalid Cube self-play Dirichlet parameters")
+    if len(base_policy) != CUBE_ACTION_COUNT:
+        raise ValueError("Cube root-noise policy has the wrong shape")
+    if not legal_actions:
+        raise ValueError("Cube self-play root has no legal actions")
+    legal_indices = [CUBE_PASS_INDEX if action == PASS else int(action) for action in legal_actions]
+    prior = torch.tensor([base_policy[index] for index in legal_indices], dtype=torch.float64)
+    prior = prior / prior.sum() if float(prior.sum()) > 0.0 else torch.full_like(prior, 1.0 / len(legal_actions))
+    noise = torch._standard_gamma(
+        torch.full((len(legal_actions),), alpha, dtype=torch.float64),
+        generator=generator,
+    )
+    noise = noise / noise.sum()
+    mixed = (1.0 - epsilon) * prior + epsilon * noise
+    output = list(base_policy)
+    for index, value in zip(legal_indices, mixed.tolist()):
+        output[index] = float(value)
+    return tuple(output)
 
 
 def configure_single_thread_inference() -> dict[str, str | int]:
@@ -199,16 +235,39 @@ def build_cube_observation_bundle(
         legal_action_mask=legal_action_mask,
     )
     mask = context.action_mask
+    values = torch.empty((CUBE_OBSERVATION_CHANNEL_COUNT, CUBE_POINT_COUNT), dtype=torch.float32)
+    _write_cube_observation_values(state, topology, context, values)
+    return CubeObservation(values, mask, state.state_key)
+
+
+def _write_cube_observation_values(
+    state: GoldenState,
+    topology: CubeGoldenTopology,
+    context: LegalActionContext,
+    destination: Tensor,
+) -> Tensor:
+    """Write the canonical Cube observation representation into ``destination``.
+
+    Both the allocating and shared-memory paths use this helper so that the
+    execution migration cannot introduce a second observation semantics.
+    """
+    if tuple(destination.shape) != (CUBE_OBSERVATION_CHANNEL_COUNT, CUBE_POINT_COUNT):
+        raise ValueError("Cube observation destination must have shape [15,96]")
+    if destination.dtype != torch.float32:
+        raise ValueError("Cube observation destination must be float32")
+    if destination.device.type != "cpu":
+        raise ValueError("Cube shared observation destination must be CPU-resident")
+    mask = context.action_mask
+    destination.zero_()
     own = int(state.side_to_move)
     other = int(WHITE if state.side_to_move == BLACK else BLACK)
-    values = torch.zeros((CUBE_OBSERVATION_CHANNEL_COUNT, CUBE_POINT_COUNT), dtype=torch.float32)
     for point, stone in enumerate(state.stones):
-        values[0, point] = float(int(stone) == own)
-        values[1, point] = float(int(stone) == other)
-    values[2].fill_(1.0 if state.side_to_move == BLACK else -1.0)
-    values[3].fill_(1.0 if state.consecutive_passes == 1 else 0.0)
-    values[4] = torch.tensor(mask[:CUBE_POINT_COUNT], dtype=torch.float32)
-    values[5].fill_(0.5)
+        destination[0, point] = float(int(stone) == own)
+        destination[1, point] = float(int(stone) == other)
+    destination[2].fill_(1.0 if state.side_to_move == BLACK else -1.0)
+    destination[3].fill_(1.0 if state.consecutive_passes == 1 else 0.0)
+    destination[4].copy_(torch.as_tensor(mask[:CUBE_POINT_COUNT], dtype=torch.float32))
+    destination[5].fill_(0.5)
     for point in range(CUBE_POINT_COUNT):
         geometry = topology.geometry(point)
         class_channel = {
@@ -216,17 +275,41 @@ def build_cube_observation_bundle(
             FACE_EDGE: 7,
             FACE_CORNER: 8,
         }[geometry.geometry_class]
-        values[class_channel, point] = 1.0
+        destination[class_channel, point] = 1.0
         bucket_channel = {
             "corner_distance_0": 9,
             "corner_distance_1": 10,
             "corner_distance_2": 11,
             "corner_distance_3_plus": 12,
         }[geometry.corner_distance_bucket]
-        values[bucket_channel, point] = 1.0
-        values[13, point] = float(geometry.has_cross_face_neighbor)
-        values[14, point] = float(geometry.num_cross_face_neighbors) / 4.0
-    return CubeObservation(values, mask, state.state_key)
+        destination[bucket_channel, point] = 1.0
+        destination[13, point] = float(geometry.has_cross_face_neighbor)
+        destination[14, point] = float(geometry.num_cross_face_neighbors) / 4.0
+    return destination
+
+
+def build_cube_observation_into(
+    state: GoldenState,
+    destination: Tensor,
+    *,
+    topology: CubeGoldenTopology = CUBE4_TOPOLOGY,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> None:
+    """Write the canonical float32 Cube observation into a preallocated tensor."""
+    increment("observation_builds")
+    if state.is_terminal:
+        raise ValueError("Terminal Golden Cube states must never be passed to the NN")
+    if topology.fingerprint != CUBE4_TOPOLOGY.fingerprint or state.topology.fingerprint != topology.fingerprint:
+        raise ValueError("Cube observation requires canonical Golden Cube topology")
+    context = _provided_legal_context(
+        state,
+        legal_actions=legal_actions,
+        legal_context=legal_context,
+        legal_action_mask=legal_action_mask,
+    )
+    _write_cube_observation_values(state, topology, context, destination)
 
 
 def build_cube_observation(
@@ -501,19 +584,14 @@ class SelfPlayCubeRootNoiseEvaluator:
         legal = legal_context.actions
         if not legal:
             raise RuntimeError("Cube self-play root has no legal actions")
-        base_policy = [float(value) for value in base.policy]
-        if len(base_policy) != CUBE_ACTION_COUNT:
-            raise RuntimeError("Cube root-noise evaluator received the wrong policy shape")
-        legal_indices = [CUBE_PASS_INDEX if action == PASS else int(action) for action in legal]
-        prior = torch.tensor([base_policy[index] for index in legal_indices], dtype=torch.float64)
-        prior = prior / prior.sum() if float(prior.sum()) > 0.0 else torch.full_like(prior, 1.0 / len(legal))
-        noise = torch._standard_gamma(
-            torch.full((len(legal),), self.alpha, dtype=torch.float64),
-            generator=self._generator,
-        )
-        noise = noise / noise.sum()
-        mixed = (1.0 - self.epsilon) * prior + self.epsilon * noise
-        output = list(base_policy)
-        for index, value in zip(legal_indices, mixed.tolist()):
-            output[index] = float(value)
-        return Evaluation(policy=tuple(output), wdl=base.wdl)
+        try:
+            policy = apply_cube_root_dirichlet_noise(
+                tuple(float(value) for value in base.policy),
+                legal,
+                epsilon=self.epsilon,
+                alpha=self.alpha,
+                generator=self._generator,
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return Evaluation(policy=policy, wdl=base.wdl)
