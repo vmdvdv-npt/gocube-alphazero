@@ -15,6 +15,10 @@ __all__ = [
     "resolve_model_contract",
     "resolve_model_contract_from_metadata",
     "resolve_semantic_game_class_from_contract",
+    "GoldenCheckpointLoader",
+    "GoldenGameGenerator",
+    "GoldenPlayableModel",
+    "GoldenProtocolMapping",
 ]
 
 
@@ -46,4 +50,16 @@ def __getattr__(name):
             "resolve_model_contract_from_metadata": resolve_model_contract_from_metadata,
             "resolve_semantic_game_class_from_contract": resolve_semantic_game_class_from_contract,
         }[name]
+    if name == "GoldenCheckpointLoader":
+        from .golden_models import GoldenCheckpointLoader
+        return GoldenCheckpointLoader
+    if name == "GoldenPlayableModel":
+        from .golden_models import GoldenPlayableModel
+        return GoldenPlayableModel
+    if name == "GoldenGameGenerator":
+        from .golden_generation import GoldenGameGenerator
+        return GoldenGameGenerator
+    if name == "GoldenProtocolMapping":
+        from .golden_mapping import GoldenProtocolMapping
+        return GoldenProtocolMapping
     raise AttributeError(name)

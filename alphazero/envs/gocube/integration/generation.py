@@ -128,6 +128,22 @@ class GameGenerator:
         white_model,
         mcts_sims: int,
     ) -> dict[str, object]:
+        # Keep the historical generator intact, but route Golden descriptors
+        # before any legacy game/player construction is attempted.  The
+        # Golden branch owns its state, rules, evaluator and SequentialPUCT.
+        if (
+            getattr(black, "backend_kind", "legacy_nnet") == "golden"
+            or getattr(white, "backend_kind", "legacy_nnet") == "golden"
+        ):
+            from .golden_generation import GoldenGameGenerator
+
+            return GoldenGameGenerator().generate(
+                black=black,
+                white=white,
+                black_model=black_model,
+                white_model=white_model,
+                mcts_sims=mcts_sims,
+            )
         try:
             black_contract = resolve_contract_for_descriptor(black)
             white_contract = resolve_contract_for_descriptor(white)

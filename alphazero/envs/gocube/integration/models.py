@@ -6,7 +6,6 @@ from typing import Any, Mapping
 
 import torch
 
-from alphazero.NNetWrapper import NNetWrapper
 from alphazero.envs.gocube.game import legacy_game_class
 from alphazero.envs.gocube.contract_versions import (
     TARGET_PROVENANCE_ENCODING,
@@ -26,8 +25,20 @@ from .contract import (
     resolve_model_contract,
 )
 from .errors import CheckpointLoadFailed, CheckpointMetadataInvalid, CheckpointNotFound
+from .golden_models import GoldenCheckpointLoader
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda")
+
+
+def __getattr__(name):
+    """Keep the legacy wrapper import lazy and compatibility-test friendly."""
+
+    if name == "NNetWrapper":
+        from alphazero.NNetWrapper import NNetWrapper
+
+        globals()[name] = NNetWrapper
+        return NNetWrapper
+    raise AttributeError(name)
 
 
 def resolve_device(device: str) -> str:
@@ -201,17 +212,17 @@ class ModelCache:
         if max_entries < 1:
             raise ValueError("Model cache must contain at least one entry")
         self.max_entries = max_entries
-        self._items: OrderedDict[tuple[str, str], object] = OrderedDict()
+        self._items: OrderedDict[tuple[object, ...], object] = OrderedDict()
         self._lock = Lock()
 
-    def get(self, key: tuple[str, str]):
+    def get(self, key: tuple[object, ...]):
         with self._lock:
             model = self._items.get(key)
             if model is not None:
                 self._items.move_to_end(key)
             return model
 
-    def put(self, key: tuple[str, str], model):
+    def put(self, key: tuple[object, ...], model):
         evicted_key = None
         evicted = None
         with self._lock:
@@ -225,7 +236,7 @@ class ModelCache:
                 torch.cuda.empty_cache()
         return model
 
-    def get_or_load(self, key: tuple[str, str], loader):
+    def get_or_load(self, key: tuple[object, ...], loader):
         existing = self.get(key)
         if existing is not None:
             return existing
@@ -247,6 +258,11 @@ class CheckpointModelLoader:
         self.catalog = catalog
         self.device = resolve_device(device)
         self.cache = cache or ModelCache(max_entries=2)
+        self.golden_loader = GoldenCheckpointLoader(
+            catalog,
+            device=self.device,
+            cache=self.cache,
+        )
 
     def descriptor(self, checkpoint_id: str) -> CheckpointDescriptor:
         descriptor = self.catalog.get(checkpoint_id)
@@ -256,12 +272,14 @@ class CheckpointModelLoader:
 
     def load(self, checkpoint_id: str):
         descriptor = self.descriptor(checkpoint_id)
+        if getattr(descriptor, "backend_kind", "legacy_nnet") == "golden":
+            return self.golden_loader.load(checkpoint_id)
         if descriptor.terminal_adjudicator == "gocube-katago-japanese-v3":
             require_gocube_komi(
                 descriptor.komi,
                 context=f"Checkpoint {descriptor.checkpoint_id}",
             )
-        cache_key = (descriptor.checkpoint_id, self.device)
+        cache_key = (descriptor.checkpoint_id, self.device, "legacy_nnet")
 
         def load_uncached():
             try:
@@ -316,7 +334,11 @@ class CheckpointModelLoader:
                             f"Checkpoint GoCube contract mismatch for {_contract_error_field(field)}: "
                             f"saved={saved!r}, expected={expected!r}"
                         )
-                model = NNetWrapper.from_checkpoint(
+                legacy_wrapper = globals().get("NNetWrapper")
+                if legacy_wrapper is None:
+                    from alphazero.NNetWrapper import NNetWrapper as legacy_wrapper
+
+                model = legacy_wrapper.from_checkpoint(
                     cls,
                     folder="",
                     filename=descriptor.path,
