@@ -490,135 +490,6 @@ def sample_cube_action_from_visits(result: SearchResult, *, temperature: float, 
     return result.legal_actions[-1]
 
 
-class CubeSelfPlayRunner:
-    def __init__(
-        self,
-        model: nn.Module,
-        *,
-        run_id: str,
-        profile_id: str,
-        profile_fingerprint: str,
-        model_checkpoint_label: str,
-        checkpoint_artifact_hash: str,
-        master_seed: int,
-        chunk_id: str,
-        contract: CubeSelfPlaySearchContract = DEFAULT_CUBE_SELFPLAY_CONTRACT,
-        code_identity: CodeIdentity | None = None,
-        device: str | torch.device = "cpu",
-        evaluator: GoldenCubeNeuralEvaluator | None = None,
-        allow_noncanonical_contract: bool = False,
-    ) -> None:
-        contract.validate(canonical=not allow_noncanonical_contract)
-        self.model = model
-        self.run_id = run_id
-        self.profile_id = profile_id
-        self.profile_fingerprint = profile_fingerprint
-        self.model_checkpoint_label = model_checkpoint_label
-        self.model_hash = cube_model_hash(model)
-        self.checkpoint_artifact_hash = checkpoint_artifact_hash
-        self.master_seed = int(master_seed)
-        self.chunk_id = str(chunk_id)
-        self.contract = contract
-        self.code_identity = code_identity or capture_code_identity()
-        self.device = torch.device(device)
-        self.evaluator = evaluator or GoldenCubeNeuralEvaluator(model, device=self.device)
-
-    def play_game(self, game_id: str) -> CubeSelfPlayGameRecord:
-        game_seed = derive_seed(self.master_seed, "cube-selfplay-game-v1", self.chunk_id, game_id)
-        rng = random.Random(game_seed)
-        state = cube_initial_state(komi=self.contract.komi)
-        start = cube_state_identity(state)
-        positions: list[CubeSelfPlayPosition] = []
-        trace: list[int | str] = []
-        formal: str | None = None
-        technical: str | None = None
-        error: str | None = None
-        for ply in range(1, self.contract.watchdog + 1):
-            search_seed = derive_seed(game_seed, ply, "search")
-            try:
-                wrapped = SelfPlayCubeRootNoiseEvaluator(
-                    self.evaluator,
-                    state,
-                    seed=derive_seed(search_seed, "dirichlet"),
-                    epsilon=self.contract.dirichlet_epsilon,
-                    alpha=self.contract.dirichlet_alpha,
-                )
-                result = SequentialPUCT(self.contract.puct_settings).search(state, wrapped, seed=search_seed)
-                if result.simulations != self.contract.simulations or sum(result.root_visits) != self.contract.simulations:
-                    raise SearchError("Cube root visits do not match the self-play simulation contract")
-                action = sample_cube_action_from_visits(
-                    result,
-                    temperature=1.0 if ply <= self.contract.temperature_plies[1] else self.contract.temperature_after,
-                    rng=rng,
-                )
-            except SearchError as exc:
-                technical, error = "ERROR_SEARCH", f"{type(exc).__name__}: {exc}"
-                break
-            except Exception as exc:
-                technical, error = "ERROR_SEARCH", f"{type(exc).__name__}: {exc}"
-                break
-            positions.append(CubeSelfPlayPosition(
-                ply=ply,
-                state=cube_state_identity(state),
-                side_to_move=state.side_to_move.name,
-                legal_action_mask=tuple(result.legal_action_mask),
-                root_visits=tuple(int(value) for value in result.root_visits),
-                pi=tuple(float(value) for value in result.pi),
-                selected_action=action,
-                search_seed=search_seed,
-                model_hash=self.model_hash,
-            ))
-            trace.append(action)
-            try:
-                state = apply_action(state, action).after
-            except IllegalMoveError as exc:
-                technical, error = "ERROR_ILLEGAL_PLAYER_ACTION", f"{type(exc).__name__}: {exc}"
-                break
-            termination = cube_post_action_termination(state, ply)
-            if termination == "DOUBLE_PASS":
-                formal = result_from_terminal(state).winner.value
-                break
-            if termination == "TRUNCATED_MOVE_LIMIT":
-                technical, error = "TRUNCATED_MOVE_LIMIT", f"Cube watchdog reached {self.contract.watchdog} actions"
-                break
-        else:
-            technical, error = "TRUNCATED_MOVE_LIMIT", f"Cube watchdog reached {self.contract.watchdog} actions"
-        record = CubeSelfPlayGameRecord(
-            run_id=self.run_id,
-            game_id=game_id,
-            chunk_id=self.chunk_id,
-            profile_id=self.profile_id,
-            profile_fingerprint=self.profile_fingerprint,
-            selfplay_contract_id=self.contract.contract_id,
-            selfplay_contract_fingerprint=self.contract.fingerprint,
-            topology_fingerprint=CUBE4_TOPOLOGY.fingerprint,
-            geometry_fingerprint=CUBE4_TOPOLOGY.geometry_fingerprint,
-            rules_fingerprint=state.rules_fingerprint,
-            komi=self.contract.komi,
-            observation_fingerprint=CUBE_OBSERVATION_FINGERPRINT,
-            target_fingerprint=CUBE_TARGET_FINGERPRINT,
-            model_checkpoint_label=self.model_checkpoint_label,
-            model_hash=self.model_hash,
-            checkpoint_artifact_hash=self.checkpoint_artifact_hash,
-            git_commit=self.code_identity.git_commit_sha,
-            git_tree=self.code_identity.git_tree_sha,
-            git_worktree_clean=self.code_identity.working_tree_clean,
-            master_seed=self.master_seed,
-            game_seed=game_seed,
-            start_state=start,
-            positions=tuple(positions),
-            final_action_trace=tuple(trace),
-            formal_result=formal,
-            technical_termination=technical,
-            error=error,
-            nn_evaluations=self.evaluator.nn_evaluations,
-        )
-        # Generation-time validation checks local record shape/policy invariants.
-        # Full replay/identity auditing is performed once at the evidence boundary.
-        record.validate(deep=False)
-        return record
-
-
 def run_cube_selfplay_games(
     model: nn.Module,
     game_ids: Sequence[str],
@@ -631,7 +502,6 @@ def run_cube_selfplay_games(
     master_seed: int,
     chunk_id: str = "default",
     code_identity: CodeIdentity | None = None,
-    checkpoint_path: str | Path | None = None,
     workers: int = 16,
     active_games_per_worker: int = 4,
     total_active_contexts: int | None = 64,
@@ -645,9 +515,8 @@ def run_cube_selfplay_games(
 ) -> tuple[CubeSelfPlayGameRecord, ...]:
     """Run Cube self-play through the universal shared execution rails.
 
-    ``checkpoint_path`` remains accepted for callers and provenance, but the
-    current path deliberately keeps the one model instance in the parent
-    inference owner instead of loading model replicas in workers.
+    The model remains in the parent inference owner; workers only step
+    cooperative Golden search sessions through shared-memory rails.
     """
     from .cube_selfplay import run_cube_selfplay_games_shared
 
@@ -662,7 +531,6 @@ def run_cube_selfplay_games(
         master_seed=master_seed,
         chunk_id=chunk_id,
         code_identity=code_identity,
-        checkpoint_path=checkpoint_path,
         workers=workers,
         active_games_per_worker=active_games_per_worker,
         total_active_contexts=total_active_contexts,
@@ -674,49 +542,6 @@ def run_cube_selfplay_games(
         inference_telemetry=inference_telemetry,
         execution_activity=execution_activity,
     )
-
-
-def cube_compare_selfplay_evidence(
-    serial: Sequence[CubeSelfPlayGameRecord],
-    parallel: Sequence[CubeSelfPlayGameRecord],
-) -> None:
-    """Exact serial/process equivalence gate for fixed game IDs."""
-
-    left = {record.game_id: record for record in serial}
-    right = {record.game_id: record for record in parallel}
-    if set(left) != set(right):
-        raise ValueError("Cube self-play equivalence game ID sets differ")
-    for game_id in sorted(left):
-        a, b = left[game_id], right[game_id]
-        if (a.formal_result, a.technical_termination, a.final_action_trace) != (
-            b.formal_result, b.technical_termination, b.final_action_trace
-        ):
-            raise ValueError(f"Cube self-play equivalence action/result drift for {game_id}")
-        if len(a.positions) != len(b.positions):
-            raise ValueError(f"Cube self-play equivalence position-count drift for {game_id}")
-        for left_position, right_position in zip(a.positions, b.positions):
-            left_state = cube_state_from_identity(left_position.state)
-            right_state = cube_state_from_identity(right_position.state)
-            left_z = cube_z_target(a.formal_result or "DRAW", left_state.side_to_move) if a.formal_result else None
-            right_z = cube_z_target(b.formal_result or "DRAW", right_state.side_to_move) if b.formal_result else None
-            if (
-                left_position.state,
-                left_position.side_to_move,
-                left_position.legal_action_mask,
-                left_position.root_visits,
-                left_position.pi,
-                left_position.selected_action,
-                left_z,
-            ) != (
-                right_position.state,
-                right_position.side_to_move,
-                right_position.legal_action_mask,
-                right_position.root_visits,
-                right_position.pi,
-                right_position.selected_action,
-                right_z,
-            ):
-                raise ValueError(f"Cube self-play equivalence target drift for {game_id} ply {left_position.ply}")
 
 
 @dataclass(frozen=True)

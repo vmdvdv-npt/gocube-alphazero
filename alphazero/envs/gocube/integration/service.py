@@ -3,11 +3,6 @@ from __future__ import annotations
 from threading import Lock
 
 from .catalog import CheckpointCatalog, CheckpointDescriptor
-from .contract import (
-    ContractError,
-    evaluation_contract_differences,
-    resolve_contract_for_descriptor,
-)
 from .errors import (
     CheckpointIncompatible,
     CheckpointNotFound,
@@ -17,55 +12,32 @@ from .errors import (
     InvalidRequest,
     UnsupportedProtocol,
 )
-from .generation import GameGenerator
-from .models import CheckpointModelLoader
-from ..production_contract import require_gocube_komi
+from .golden_generation import GoldenGameGenerator
+from .golden_models import GoldenCheckpointLoader
 
 PROTOCOL_VERSION = 1
 
 
 def _compatible(a: CheckpointDescriptor, b: CheckpointDescriptor) -> bool:
-    a_backend = getattr(a, "backend_kind", "legacy_nnet")
-    b_backend = getattr(b, "backend_kind", "legacy_nnet")
-    if a_backend != b_backend:
-        return False
-    if a_backend == "golden":
-        # Display fields are intentionally not enough for Golden compatibility:
-        # a same-looking board can still have a different scientific topology,
-        # rules, observation or target contract.
-        return all(
-            getattr(a, field, None) == getattr(b, field, None)
-            for field in (
-                "checkpoint_format",
-                "topology",
-                "size",
-                "rule_set",
-                "terminal_adjudicator",
-                "profile_id",
-                "profile_fingerprint",
-                "architecture_id",
-                "rules_fingerprint",
-                "observation_fingerprint",
-                "target_fingerprint",
-                "komi",
-            )
+    # Display fields are intentionally not enough for Golden compatibility: a
+    # same-looking board can still have a different scientific topology,
+    # rules, observation or target contract.
+    return all(
+        getattr(a, field, None) == getattr(b, field, None)
+        for field in (
+            "topology",
+            "size",
+            "rule_set",
+            "terminal_adjudicator",
+            "profile_id",
+            "profile_fingerprint",
+            "architecture_id",
+            "rules_fingerprint",
+            "observation_fingerprint",
+            "target_fingerprint",
+            "komi",
         )
-    if not (
-        a.topology == b.topology
-        and a.size == b.size
-        and a.rule_set == b.rule_set
-        and a.terminal_adjudicator == b.terminal_adjudicator
-    ):
-        return False
-    try:
-        require_gocube_komi(a.komi, context=f"Checkpoint {a.checkpoint_id}")
-        require_gocube_komi(b.komi, context=f"Checkpoint {b.checkpoint_id}")
-        return not evaluation_contract_differences(
-            resolve_contract_for_descriptor(a),
-            resolve_contract_for_descriptor(b),
-        )
-    except (ContractError, TypeError, ValueError):
-        return False
+    )
 
 
 class GoCubeAlphaZeroService:
@@ -75,12 +47,15 @@ class GoCubeAlphaZeroService:
         *,
         device: str = "auto",
         catalog: CheckpointCatalog | None = None,
-        loader: CheckpointModelLoader | None = None,
-        generator: GameGenerator | None = None,
+        loader: GoldenCheckpointLoader | None = None,
+        generator: GoldenGameGenerator | None = None,
     ):
         self.catalog = catalog or CheckpointCatalog(checkpoint_dir)
-        self.loader = loader or CheckpointModelLoader(self.catalog, device=device)
-        self.generator = generator or GameGenerator()
+        self.loader = loader or GoldenCheckpointLoader(
+            self.catalog,
+            device=device,
+        )
+        self.generator = generator or GoldenGameGenerator()
         self.device = self.loader.device
         self._generation_lock = Lock()
 
@@ -140,12 +115,6 @@ class GoCubeAlphaZeroService:
         if white is None:
             raise CheckpointNotFound(f"Unknown checkpoint: {white_id}")
         if not _compatible(black, white):
-            if getattr(black, "backend_kind", "legacy_nnet") != getattr(white, "backend_kind", "legacy_nnet"):
-                raise CheckpointIncompatible(
-                    f"Golden/legacy mixed game is not supported: "
-                    f"black={getattr(black, 'backend_kind', 'legacy_nnet')!r}, "
-                    f"white={getattr(white, 'backend_kind', 'legacy_nnet')!r}"
-                )
             raise CheckpointIncompatible(
                 f"Checkpoints {black_id} and {white_id} do not share their exact "
                 "topology/rules/model/search contract"

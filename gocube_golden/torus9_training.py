@@ -54,13 +54,12 @@ from .torus9_contract import (
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-# Keep one scientific implementation.  These aliases are compatibility
-# exports for historical callers; the new engine calls these exact objects.
+# Keep one scientific implementation.  These aliases expose numerical
+# primitives consumed by the current adapter; orchestration lives below.
 Torus9GraphNet = _core.Torus9GraphNet
 Torus9CurrentGraphNet = _core.Torus9CurrentGraphNet
 Torus9OwnershipGraphNet = _core.Torus9OwnershipGraphNet
 Torus9OwnershipScoreGraphNet = _core.Torus9OwnershipScoreGraphNet
-Torus9Trainer = _core.Torus9Trainer
 Torus9OwnershipTrainer = _core.Torus9OwnershipTrainer
 Torus9OwnershipScoreTrainer = _core.Torus9OwnershipScoreTrainer
 torus9_checkpoint_metadata = _core.torus9_checkpoint_metadata
@@ -912,7 +911,6 @@ __all__ = [
     "Torus9OwnershipScoreTrainer",
     "Torus9OwnershipTrainer",
     "Torus9RollingReplay",
-    "Torus9Trainer",
     "Torus9TrainingAdapter",
     "TrainingState",
     "run_torus9_training_iteration",

@@ -23,7 +23,18 @@ from .errors import CheckpointLoadFailed, CheckpointMetadataInvalid
 
 GOLDEN_BACKEND_KIND = "golden"
 GOLDEN_CHECKPOINT_FORMAT = "golden_pt"
+DEVICE_CHOICES = ("auto", "cpu", "cuda")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def resolve_device(device: str) -> str:
+    if device not in DEVICE_CHOICES:
+        raise ValueError(f"Unsupported device {device!r}; expected one of {DEVICE_CHOICES}")
+    if device == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA was requested but torch.cuda.is_available() is false")
+    return device
 
 
 def _metadata_value(metadata: Mapping[str, object], *keys: str, default: object = None) -> object:
@@ -216,7 +227,6 @@ class GoldenPlayableModel:
     evaluator: object
     metadata: Mapping[str, object]
     device: str
-    backend_kind: str = GOLDEN_BACKEND_KIND
 
     def evaluate(self, state, legal_context=None):
         evaluate = getattr(self.evaluator, "evaluate_prepared", None)
@@ -230,15 +240,13 @@ class GoldenCheckpointLoader:
 
     def __init__(self, catalog: CheckpointCatalog, *, device: str = "cpu", cache=None):
         self.catalog = catalog
-        self.device = device
+        self.device = resolve_device(device)
         self.cache = cache
 
     def descriptor(self, checkpoint_id: str) -> CheckpointDescriptor:
         descriptor = self.catalog.get(checkpoint_id)
         if descriptor is None:
             raise CheckpointMetadataInvalid(f"Unknown Golden checkpoint: {checkpoint_id}")
-        if getattr(descriptor, "backend_kind", "legacy") != GOLDEN_BACKEND_KIND:
-            raise CheckpointMetadataInvalid(f"Checkpoint {checkpoint_id} is not a Golden checkpoint")
         return descriptor
 
     def load(self, checkpoint_id: str):
@@ -341,4 +349,11 @@ class GoldenCheckpointLoader:
         )
 
 
-__all__ = ["GOLDEN_BACKEND_KIND", "GOLDEN_CHECKPOINT_FORMAT", "GoldenPlayableModel", "GoldenCheckpointLoader"]
+__all__ = [
+    "DEVICE_CHOICES",
+    "GOLDEN_BACKEND_KIND",
+    "GOLDEN_CHECKPOINT_FORMAT",
+    "GoldenPlayableModel",
+    "GoldenCheckpointLoader",
+    "resolve_device",
+]

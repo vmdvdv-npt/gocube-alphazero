@@ -7,7 +7,49 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from .core import BLACK, EMPTY, WHITE, FinalScore, StoneBreakdown, TerritoryBreakdown, TerritoryPoints, Topology
+from .core import Topology
+
+BLACK = 1
+EMPTY = 0
+WHITE = 2
+
+
+@dataclass(frozen=True)
+class TerritoryBreakdown:
+    black: int
+    white: int
+    neutral: int
+    seki: int
+
+
+@dataclass(frozen=True)
+class TerritoryPoints:
+    black: tuple[int, ...]
+    white: tuple[int, ...]
+    neutral: tuple[int, ...]
+    seki: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class StoneBreakdown:
+    black: int
+    white: int
+
+
+@dataclass(frozen=True)
+class FinalScore:
+    ruleset: str
+    black: float
+    white: float
+    komi: float
+    territory: TerritoryBreakdown
+    territory_points: TerritoryPoints
+    stones_on_board: StoneBreakdown
+    captures: tuple[int, int]
+    prisoners: tuple[int, int] | None
+    dead_stones: StoneBreakdown
+    winner: str
+    margin: float
 MAIN = "main"
 CLEANUP_1 = "cleanup1"
 CLEANUP_2 = "cleanup2"

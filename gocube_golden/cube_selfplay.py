@@ -27,6 +27,7 @@ from .cube_neural import (
     configure_single_thread_inference,
     cube_model_hash,
 )
+from .cube_contract import CUBE_PROFILE_ID, load_profile
 from .cube_topology import CUBE4_TOPOLOGY
 from .cube_training import (
     CUBE_SELFPLAY_CONTRACT_ID,
@@ -364,20 +365,6 @@ class CubeCentralInferenceOwner:
             forward_finished_at=forward_finished,
         )
 
-    def evaluate_batch(self, observations: Sequence[Any]) -> tuple[Evaluation, ...]:
-        if not observations:
-            raise ValueError("Cube central inference requires a non-empty batch")
-        tensor = torch.stack([torch.as_tensor(value, dtype=torch.float32) for value in observations], dim=0)
-        policies, wdls, *_ = self._forward(tensor)
-        return tuple(
-            Evaluation(
-                policy=tuple(float(value) for value in policy),
-                wdl=tuple(float(value) for value in wdl),
-            )
-            for policy, wdl in zip(policies.detach().cpu(), wdls.detach().cpu())
-        )
-
-
 class CubeSelfPlayAdapter:
     """Cube profile boundary consumed by the generic ``SelfPlayEngine``."""
 
@@ -386,27 +373,22 @@ class CubeSelfPlayAdapter:
         model: GoldenCubeGraphNetV1,
         *,
         run_id: str,
-        model_checkpoint_label: str | None = None,
-        checkpoint_artifact_hash: str | None = None,
+        model_checkpoint_label: str,
+        checkpoint_artifact_hash: str,
         master_seed: int,
         chunk_id: str,
         profile_id: str,
-        profile_fingerprint: str | None = None,
+        profile_fingerprint: str,
         code_identity: CodeIdentity | None = None,
         contract: CubeSelfPlaySearchContract = DEFAULT_CUBE_SELFPLAY_CONTRACT,
         device: str | torch.device = "cpu",
         allow_noncanonical_contract: bool = False,
-        # Match the generic Torus adapter vocabulary while retaining the
-        # pre-Stage-5 Cube front-door names above.
-        label: str | None = None,
-        artifact: str | None = None,
-        profile_fp: str | None = None,
     ) -> None:
-        resolved_label = model_checkpoint_label if model_checkpoint_label is not None else label
-        resolved_artifact = checkpoint_artifact_hash if checkpoint_artifact_hash is not None else artifact
-        resolved_profile_fp = profile_fingerprint if profile_fingerprint is not None else profile_fp
-        if resolved_label is None or resolved_artifact is None or resolved_profile_fp is None:
-            raise TypeError("Cube self-play requires label, artifact, and profile fingerprint")
+        if profile_id != CUBE_PROFILE_ID:
+            raise ValueError("Cube self-play supports only the current Golden profile")
+        current_profile = load_profile()
+        if profile_fingerprint != current_profile.get("profile_fingerprint"):
+            raise ValueError("Cube self-play profile fingerprint drift")
         resolved_code = code_identity or capture_code_identity()
         contract.validate(canonical=not allow_noncanonical_contract)
         if contract.komi != 0.5:
@@ -416,12 +398,12 @@ class CubeSelfPlayAdapter:
         self.owner = CubeCentralInferenceOwner(model, device=device)
         self.worker_context = CubeSelfPlayWorkerContext(
             run_id=str(run_id),
-            model_checkpoint_label=str(resolved_label),
-            checkpoint_artifact_hash=str(resolved_artifact),
+            model_checkpoint_label=str(model_checkpoint_label),
+            checkpoint_artifact_hash=str(checkpoint_artifact_hash),
             master_seed=int(master_seed),
             chunk_id=str(chunk_id),
             profile_id=str(profile_id),
-            profile_fingerprint=str(resolved_profile_fp),
+            profile_fingerprint=str(profile_fingerprint),
             code_identity=resolved_code,
             contract=contract,
             allow_noncanonical_contract=allow_noncanonical_contract,
@@ -460,7 +442,6 @@ def run_cube_selfplay_games_shared(
     master_seed: int,
     chunk_id: str,
     code_identity: CodeIdentity | None = None,
-    checkpoint_path: str | None = None,
     workers: int = 16,
     active_games_per_worker: int = 4,
     total_active_contexts: int | None = 64,
@@ -472,7 +453,6 @@ def run_cube_selfplay_games_shared(
     inference_telemetry: MutableMapping[str, object] | None = None,
     execution_activity: MutableMapping[str, object] | None = None,
 ) -> tuple[CubeSelfPlayGameRecord, ...]:
-    del checkpoint_path  # retained as provenance/API compatibility only
     execution = CubeSelfPlayExecutionConfig(
         workers=int(workers),
         active_games_per_worker=int(active_games_per_worker),

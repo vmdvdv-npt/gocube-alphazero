@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from pathlib import Path
 import time
 from typing import Any, Mapping, MutableMapping, Sequence
 
@@ -26,15 +25,12 @@ from .selfplay_engine import (
 )
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
-    TORUS9_BLOCKS,
     TORUS9_CURRENT_BLOCKS,
     TORUS9_CURRENT_DIRICHLET_ALPHA,
     TORUS9_CURRENT_HIDDEN,
     TORUS9_CURRENT_PROFILE_ID,
     TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
-    TORUS9_HIDDEN,
     TORUS9_KOMI,
-    TORUS9_PROFILE_ID,
     TORUS9_WORKERS,
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
@@ -230,28 +226,6 @@ class Torus9CentralInferenceOwner:
         self.model.to(self.device)
         self.model.eval()
 
-    def _evaluate_batch_tensors(self, payloads: Sequence[object]):
-        if not payloads:
-            raise ValueError("Torus9 central inference requires a non-empty batch")
-        observations = torch.stack(
-            [torch.as_tensor(payload, dtype=torch.float32) for payload in payloads],
-            dim=0,
-        ).to(self.device)
-        if tuple(observations.shape[1:]) != (6, _t9.TORUS9_POINT_COUNT):
-            raise ValueError("Torus9 inference payload must have shape [batch,6,81]")
-        with torch.inference_mode():
-            policy_logits, value_logits = self.model(observations)
-            policies = torch.softmax(policy_logits, dim=1)
-            wdls = torch.softmax(value_logits, dim=1)
-        if tuple(policies.shape) != (len(payloads), TORUS9_ACTION_COUNT):
-            raise ValueError("Torus9 central policy head shape drift")
-        if tuple(wdls.shape) != (len(payloads), 3):
-            raise ValueError("Torus9 central WDL head shape drift")
-        outputs = torch.cat((policies, wdls), dim=1)
-        if not bool(torch.isfinite(outputs).all()) or bool((outputs < 0.0).any()):
-            raise ValueError("Torus9 central inference produced invalid probabilities")
-        return outputs
-
     def evaluate_shared_batch(self, observations: Any) -> SharedInferenceResult:
         """Forward a preassembled staging tensor without queue payload copies."""
         if tuple(observations.shape[1:]) != (6, _t9.TORUS9_POINT_COUNT):
@@ -281,17 +255,6 @@ class Torus9CentralInferenceOwner:
             forward_finished_at=forward_finished,
         )
 
-    def evaluate_batch(self, payloads: Sequence[object]) -> tuple[Evaluation, ...]:
-        """Return the legacy in-process Evaluation representation."""
-        outputs = self._evaluate_batch_tensors(payloads)
-        rows: list[Evaluation] = []
-        for output in outputs.detach().cpu():
-            values = tuple(float(value) for value in output)
-            policy_values = values[:TORUS9_ACTION_COUNT]
-            wdl_values = values[TORUS9_ACTION_COUNT:]
-            rows.append(Evaluation(policy=policy_values, wdl=wdl_values))
-        return tuple(rows)
-
 def torus9_game_seed(master_seed: int, run_id: str, game_id: str) -> int:
     """Canonical scheduling-independent Torus9 game seed."""
     return derive_seed(int(master_seed), str(run_id), str(game_id), "game")
@@ -307,7 +270,7 @@ def _validate_current_scientific_boundary(
     if float(TORUS9_KOMI) != 0.5:
         raise RuntimeError("Current Torus9 self-play requires komi 0.5")
     if profile_id != TORUS9_CURRENT_PROFILE_ID:
-        return
+        raise ValueError("Torus9 self-play supports only the current Golden profile")
     profile = load_torus9_current_profile()
     expected_profile_fp = current_torus9_profile_fingerprint(profile)
     if profile_fp != expected_profile_fp:
@@ -390,12 +353,9 @@ def _make_torus9_cooperative_game(
     return _Torus9CooperativeGame(context, game_id, client)
 
 
-# Keep the exact pre-Stage-2 public call shape. checkpoint_path is retained as
-# provenance/API compatibility even though workers no longer load a model copy.
 def run_torus9_selfplay_games(
     model: _t9.Torus9GraphNet,
     *,
-    checkpoint_path: Path,
     run_id: str,
     label: str,
     artifact: str,
@@ -406,7 +366,7 @@ def run_torus9_selfplay_games(
     code_identity: CodeIdentity | None = None,
     device: str | torch.device = "cpu",
     contract: _t9.Torus9SelfPlaySearchContract = _t9.Torus9SelfPlaySearchContract(),
-    profile_id: str = TORUS9_PROFILE_ID,
+    profile_id: str = TORUS9_CURRENT_PROFILE_ID,
     coalescing: bool = False,
     inference_batch_cap: int | None = None,
     inference_batch_wait_ms: float = 0.0,
@@ -416,7 +376,6 @@ def run_torus9_selfplay_games(
     inference_telemetry: MutableMapping[str, object] | None = None,
     execution_activity: MutableMapping[str, object] | None = None,
 ) -> tuple[_t9.Torus9SelfPlayGameRecord, ...]:
-    del checkpoint_path
     if workers <= 0 or len(set(game_ids)) != len(game_ids):
         raise ValueError("Torus9 self-play workers/game IDs are invalid")
     code = code_identity or capture_code_identity()

@@ -1,7 +1,0 @@
-{
-  "alias_id": "gocube-torus5-golden-current",
-  "alias_kind": "canonical-current",
-  "standard": "torus-5x5",
-  "resolves_to": "gocube-torus5-golden-v2",
-  "legacy_requires_explicit_override": true
-}

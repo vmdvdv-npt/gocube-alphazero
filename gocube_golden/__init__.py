@@ -1,131 +1,63 @@
-"Independent Golden Stage-1 referee plus Stage-2 sequential Arena/search proof line."
+"""Current Golden rules, search, adapters, and checkpoint primitives.
 
-from training_engine import (
-    CheckpointContext,
-    TrainingEngine,
-    TrainingIterationResult,
-    TrainingState,
-)
+Production execution is deliberately explicit: profile adapters feed the
+shared ``SelfPlayEngine``/``TrainingEngine`` and the standalone Arena engine.
+Retired generic runners are not re-exported from this package.
+"""
 
-from .demo import DEMO_ACTIONS, demonstration_text
-from .replay import ReplayReport, replay
-from .arena import (
-    ActionEvidence,
-    ArenaSummary,
-    GameRecord,
-    MappedResult,
-    PairSummary,
-    PlayerSlot,
-    SequentialGoldenArena,
-    TECHNICAL_TERMINATIONS,
-    TerminationReason,
-    map_absolute_result,
-    pair_schedule_from_records,
-    post_action_termination,
-    recompute_summary,
-    validate_game_record,
-    validate_pair_records,
-    validate_run_evidence,
-    write_records_jsonl,
-    write_run_evidence,
+from .arena_contract import SearchSettings
+from .cube_neural import (
+    CUBE_ACTION_COUNT,
+    GoldenCubeGraphNetV1,
+    GoldenCubeNeuralEvaluator,
+    build_cube_action_mask,
+    build_cube_observation,
+    cube_model_hash,
 )
-from .arena_process import (
-    ArenaPairTask,
-    ArenaWorkerError,
-    CheckpointPlayerSpec,
-    GameTask,
-    PairTask,
-    PlayerSpec,
-    ProcessParallelGoldenArena,
+from .cube_selfplay import CubeSelfPlayAdapter, run_cube_selfplay_games_shared
+from .cube_topology import CUBE4_TOPOLOGY
+from .cube_training import (
+    CUBE_SELFPLAY_CONTRACT_ID,
+    CUBE_TARGET_CONTRACT_ID,
+    CUBE_TARGET_FINGERPRINT,
+    CubeSelfPlayGameRecord,
+    CubeSelfPlayPosition,
+    CubeSelfPlaySearchContract,
+    CubeTrainingSample,
+    DEFAULT_CUBE_SELFPLAY_CONTRACT,
+    cube_initial_state,
+    cube_state_from_identity,
+    cube_state_identity,
+    run_cube_selfplay_games,
 )
-from .arena_contract import (
-    ARENA_CONTRACT_ID,
-    ARENA_WATCHDOG_SCALING_ID,
-    DEFAULT_ARENA_CONTRACT,
-    GOLDEN_MOVE_LIMIT,
-    LEGACY_ARENA_WATCHDOG,
-    SEARCH_CONTRACT_FINGERPRINT,
-    SEARCH_IMPLEMENTATION_ID,
-    SEARCH_PATH,
-    GoldenArenaContract,
-    SearchSettings,
-    compute_search_contract_fingerprint,
-    reject_checkpoint_arena_overrides,
-    resolve_arena_watchdog,
-)
-from .experiment_profile import (
-    EXPERIMENT_FINGERPRINT,
-    PROFILE_ID as EXPERIMENT_PROFILE_ID,
-    SEED_DERIVATION_ID,
-    load_profile as load_experiment_profile,
-)
-from .players import BadPlayer, GoodPlayer, PlayerContext, SearchPlayer, TracePlayer
-from .provenance import (
-    CodeIdentity,
-    PlayerIdentity,
-    RunManifest,
-    capture_code_identity,
-    checkpoint_player_identity,
-    derive_game_seeds,
-    evaluator_player_identity,
-    infer_player_identity,
-    validate_run_manifest,
-)
-from .result import DOUBLE_PASS, GoldenResult, Winner, result_from_terminal
+from .cube_training_adapter import CubeTrainingAdapter, run_cube_training_iteration
+from .neural import GoldenGraphNetV1, build_observation, model_hash
+from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
+from .result import Winner
 from .rules import (
-    ActionProbe,
     IllegalMoveError,
-    IllegalMoveReason,
     LegalActionContext,
-    Transition,
     apply_action,
-    group_from_board,
     legal_actions,
-    liberties_from_board,
     prepare_legal_actions,
-    probe_action,
-    reference_apply_action,
-    reference_legal_actions,
 )
 from .scoring import GoldenScore, Ownership, score_terminal
 from .search import (
-    INTERNAL_Q_CONVENTION,
-    SEARCH_IMPLEMENTATION_FINGERPRINT,
-    WDL_SEMANTICS,
     Evaluation,
-    ExactSolveResult,
-    SearchError,
     SearchResult,
     SequentialPUCT,
     SequentialPUCTSession,
-    SolveStatus,
-    solve_exact,
-    wdl_to_side_to_move_utility,
 )
-from .search_adapter import GoldenSearchAdapter, GoldenSearchBoundaryError
-from .serialization import (
-    GoldenSerializationError,
-    game_record_from_dict,
-    game_record_from_json,
-    game_record_to_dict,
-    game_record_to_json,
-    load_and_validate_game_record,
-    read_records_jsonl,
-)
+from .search_adapter import GoldenSearchAdapter
 from .state import (
     BASELINE_KOMI,
     BLACK,
     EMPTY,
-    LEGACY_FORBIDDEN_KOMI,
-    LIVE_HISTORY,
     PASS,
     RULES_PROFILE_ID,
     STAGE0_RULES_FINGERPRINT,
-    SYNTHETIC_HISTORY,
     WHITE,
-    BoardKey,
     GoldenState,
-    LegacyKomiError,
     Stone,
     board_key,
     initial_state,
@@ -145,255 +77,35 @@ from .topology import (
     GoldenTopology,
     permute_topology,
     research_topology,
-    torus_9x9,
     torus_5x5,
-)
-from .cube_topology import (
-    CROSS_FACE_SEAM,
-    CUBE4_GEOMETRY_FINGERPRINT,
-    CUBE4_ROTATION_PERMUTATIONS,
-    CUBE4_TOPOLOGY,
-    CUBE4_TOPOLOGY_FINGERPRINT,
-    CUBE4_TOPOLOGY_ID,
-    FACE_CORNER,
-    FACE_EDGE,
-    FACE_INTERIOR,
-    GEOMETRY_SCHEMA_ID,
-    SAME_FACE,
-    CubeGoldenTopology,
-    cube4x4x6,
-    cube_rotation_permutations,
-)
-from .neural import (
-    ACTION_COUNT,
-    OBSERVATION_CHANNELS,
-    OBSERVATION_FINGERPRINT,
-    OBSERVATION_LAYOUT,
-    OBSERVATION_SCHEMA_ID,
-    OBSERVATION_SCHEMA_VERSION,
-    PASS_INDEX,
-    VALUE_HEAD_SEMANTICS,
-    AUXILIARY_VARIANTS,
-    AuxiliaryGoldenGraphNet,
-    GoldenGraphNetV1,
-    GoldenNeuralEvaluator,
-    GoldenObservation,
-    SelfPlayRootNoiseEvaluator,
-    Torus5GoldenGraphNetV2,
-    build_action_mask,
-    build_observation,
-    build_observation_bundle,
-    count_parameters,
-    model_hash,
-)
-from .cube_neural import (
-    CUBE_ACTION_COUNT,
-    CUBE_OBSERVATION_CHANNELS,
-    CUBE_OBSERVATION_FINGERPRINT,
-    CUBE_OBSERVATION_SCHEMA_ID,
-    CUBE_OBSERVATION_SCHEMA_VERSION,
-    CUBE_PASS_INDEX,
-    GoldenCubeGraphNetV1,
-    GoldenCubeNeuralEvaluator,
-    SelfPlayCubeRootNoiseEvaluator,
-    apply_cube_root_dirichlet_noise,
-    build_cube_action_mask,
-    build_cube_observation,
-    build_cube_observation_into,
-    build_cube_observation_bundle,
-    cube_model_hash,
-    configure_single_thread_inference,
-)
-from .cube_contract import (
-    CUBE_PROFILE_ID,
-    load_profile as load_cube_profile,
-    profile_fingerprint as cube_profile_fingerprint,
-)
-from .cube_training import (
-    CUBE_WATCHDOG,
-    CUBE_SELFPLAY_CONTRACT_ID,
-    CUBE_TARGET_CONTRACT_ID,
-    CUBE_TARGET_FINGERPRINT,
-    CubeSelfPlayGameRecord,
-    CubeSelfPlayPosition,
-    CubeSelfPlayRunner,
-    CubeSelfPlaySearchContract,
-    CubeTrainingSample,
-    DEFAULT_CUBE_SELFPLAY_CONTRACT,
-    build_cube_replay_samples,
-    cube_initial_state,
-    cube_compare_selfplay_evidence,
-    cube_post_action_termination,
-    cube_state_from_identity,
-    cube_state_identity,
-    cube_z_target,
-    run_cube_selfplay_games,
-)
-from .cube_selfplay import (
-    CubeCentralInferenceOwner,
-    CubeSelfPlayAdapter,
-    CubeSelfPlayExecutionConfig,
-    CubeSelfPlayWorkerContext,
-    run_cube_selfplay_games_shared,
-)
-from .cube_training_adapter import (
-    CUBE_BATCH_SIZE,
-    CUBE_CHUNKS,
-    CUBE_GAMES_PER_CHUNK,
-    CUBE_MODEL_INIT_SEED,
-    CubeCumulativeReplay,
-    CubeTrainingAdapter,
-    run_cube_training_iteration,
-)
-from .cube_arena import (
-    CUBE_ARENA_CONTRACT_ID,
-    CUBE_ARENA_FINGERPRINT,
-    CubeArenaRecord,
-    CubeSearchPlayer,
-    SequentialGoldenCubeArena,
-    cube_hoeffding_interval,
-    cube_pair_score,
-    summarize_cube_arena,
-)
-from .standard import (
-    CURRENT_ALIAS as TORUS5_CURRENT_ALIAS,
-    CURRENT_PRESET_ID as TORUS5_CURRENT_PRESET_ID,
-    LegacyGoldenStandardError,
-    ResolvedGoldenPreset,
-    build_run_metadata as build_torus5_run_metadata,
-    build_torus5_model,
-    load_universal_training_config,
-    resolve_torus5_golden,
-    validate_run_metadata as validate_torus5_run_metadata,
-    write_run_manifest as write_torus5_run_manifest,
-)
-from .stage3_contract import (
-    PROFILE_ID as STAGE3_PROFILE_ID,
-    SELFPLAY_CONTRACT_ID,
-    SELFPLAY_CONTRACT_FINGERPRINT,
-    Stage3ContractError,
-    load_profile as load_stage3_profile,
-    profile_fingerprint as stage3_profile_fingerprint,
-)
-from .training import (
-    DEFAULT_SELFPLAY_CONTRACT,
-    GoldenSelfPlayRunner,
-    GoldenTrainer,
-    GoldenTrainingSample,
-    GOLDEN_AUXILIARY_TARGET_SOURCE,
-    OWNERSHIP_CLASSES,
-    OWNERSHIP_TARGET_CONTRACT_ID,
-    SCORE_TARGET_CONTRACT_ID,
-    SCORE_TARGET_NORMALIZATION,
-    SelfPlayGameRecord,
-    SelfPlayPosition,
-    SelfPlaySearchContract,
-    build_replay_samples,
-    compare_selfplay_evidence,
-    ownership_target,
-    sample_action_from_visits,
-    score_target,
-    train_variant_batch_schedule,
-    z_target,
-)
-from .torus9_contract import (
-    TORUS9_ACTION_COUNT,
-    TORUS9_ARCHITECTURE_ID,
-    TORUS9_ARENA_MOVE_LIMIT,
-    TORUS9_BLOCKS,
-    TORUS9_KOMI,
-    TORUS9_LEGACY_ARENA_CONTRACT_FINGERPRINT,
-    TORUS9_LEGACY_ARENA_CONTRACT_ID,
-    TORUS9_MOVE_LIMIT,
-    TORUS9_MAX_REPLAY_POSITIONS,
-    TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
-    TORUS9_PASS_INDEX,
-    TORUS9_POINT_COUNT,
-    TORUS9_PROFILE_ID,
-    TORUS9_ROLLING_GENERATIONS,
-    TORUS9_RULES_FINGERPRINT,
-    TORUS9_OBSERVATION_FINGERPRINT,
-    TORUS9_TARGET_FINGERPRINT,
-    TORUS9_CURRENT_PROFILE_ID,
-    TORUS9_CURRENT_ARCHITECTURE_ID,
-    TORUS9_CURRENT_HIDDEN,
-    TORUS9_CURRENT_BLOCKS,
-    TORUS9_CURRENT_DIRICHLET_ALPHA,
-    TORUS9_CURRENT_TARGET_FINGERPRINT,
-    TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
-    current_torus9_profile_fingerprint,
-    current_torus9_selfplay_contract_fingerprint,
-    load_torus9_current_profile,
-    torus9_selfplay_contract_fingerprint,
-    load_torus9_profile,
+    torus_9x9,
 )
 from .torus9 import (
-    Torus9GraphNet,
+    TORUS9_TOPOLOGY_FINGERPRINT,
+    TORUS9_TOPOLOGY_ID,
     Torus9CurrentGraphNet,
-    Torus9OwnershipGraphNet,
-    Torus9OwnershipScoreGraphNet,
-    Torus9OwnershipTrainer,
-    Torus9OwnershipScoreTrainer,
     Torus9NeuralEvaluator,
-    Torus9ExecutionActivity,
-    Torus9InferenceCoordinator,
-    Torus9UncoalescedInference,
-    Torus9Observation,
+    Torus9OwnershipScoreTrainer,
+    Torus9OwnershipTrainer,
+    Torus9RollingReplay,
+    Torus9SelfPlayAdapter,
     Torus9SelfPlayGameRecord,
     Torus9SelfPlayPosition,
-    Torus9SelfPlayRunner,
     Torus9SelfPlaySearchContract,
-    Torus9RollingReplay,
-    Torus9Trainer,
-    build_torus9_observation,
-    build_torus9_observation_into,
-    build_torus9_observation_bundle,
-    generate_torus9_evaluation_starts,
-    graph_diameter,
-    graph_distance,
+    Torus9TrainingAdapter,
     run_torus9_selfplay_games,
-    torus9_build_replay_samples,
-    torus9_build_ownership_replay_samples,
-    torus9_build_ownership_score_replay_samples,
-    torus9_checkpoint_info,
-    torus9_contract_proof,
-    torus9_first_move_statistics,
+    run_torus9_training_iteration,
     torus9_load_checkpoint,
     torus9_model_from_metadata,
-    torus9_ownership_target,
-    torus9_score_target,
-    torus9_restore_optimizer_state,
-    torus9_save_checkpoint,
-    torus9_state_from_identity,
-    torus9_state_identity,
-    torus9_z_target,
-    torus9_arena_termination_reason,
-    validate_torus9_replay_sample,
+)
+from .torus9_contract import (
+    TORUS9_CURRENT_PROFILE_ID,
+    TORUS9_CURRENT_PROFILE_FINGERPRINT,
+    TORUS9_CURRENT_TARGET_FINGERPRINT,
+    TORUS9_KOMI,
+    current_torus9_profile_fingerprint,
+    load_torus9_current_profile,
 )
 
-# Production Arena execution has one public CLI: tools/arena.py. Torus9 is a
-# game profile of that engine; historical Torus9 executors remain frozen and
-# even direct module calls require the explicit reproduction override.
-from . import torus9 as _torus9_module
-from .arena_policy import require_frozen_override as _require_frozen_arena_override
-
-
-def _guard_frozen_arena(engine_name, function):
-    def guarded(*args, **kwargs):
-        _require_frozen_arena_override(engine=engine_name)
-        return function(*args, **kwargs)
-    guarded.__name__ = function.__name__
-    guarded.__doc__ = "Frozen historical Arena entry point; explicit override required."
-    return guarded
-
-
-_torus9_module.run_torus9_arena = _guard_frozen_arena(
-    "gocube_golden.torus9.run_torus9_arena",
-    _torus9_module.run_torus9_arena,
-)
-_torus9_module.run_torus9_batched_arena = _guard_frozen_arena(
-    "gocube_golden.torus9.run_torus9_batched_arena",
-    _torus9_module.run_torus9_batched_arena,
-)
 
 __all__ = [name for name in globals() if not name.startswith("_")]
