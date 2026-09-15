@@ -63,7 +63,9 @@ class _RemoteTorus9Evaluator:
     def evaluate_prepared(self, state: _t9.GoldenState, legal_context: _t9.LegalActionContext) -> Evaluation:
         legal_context.assert_compatible(state)
         observation = _t9.build_torus9_observation(state, legal_context=legal_context)
-        payload = tuple(tuple(float(value) for value in row) for row in observation.tolist())
+        # Keep the scientific observation unchanged while avoiding the large
+        # nested-Python-object pickle/rehydration cost on the process IPC path.
+        payload = observation.detach().to(dtype=torch.float32).contiguous().numpy().tobytes()
         result = self.client.request(payload)
         if not isinstance(result, Evaluation):
             raise InferenceTransportError(
@@ -131,7 +133,16 @@ class Torus9CentralInferenceOwner:
     def evaluate_batch(self, payloads: Sequence[object]) -> tuple[Evaluation, ...]:
         if not payloads:
             raise ValueError("Torus9 central inference requires a non-empty batch")
-        observations = torch.tensor(payloads, dtype=torch.float32, device=self.device)
+        if all(isinstance(payload, (bytes, bytearray, memoryview)) for payload in payloads):
+            row_bytes = 6 * _t9.TORUS9_POINT_COUNT * 4
+            if any(len(payload) != row_bytes for payload in payloads):
+                raise ValueError("Torus9 inference byte payload has the wrong size")
+            raw = bytearray().join(bytes(payload) for payload in payloads)
+            observations = torch.frombuffer(raw, dtype=torch.float32).reshape(
+                len(payloads), 6, _t9.TORUS9_POINT_COUNT
+            ).to(self.device)
+        else:
+            observations = torch.tensor(payloads, dtype=torch.float32, device=self.device)
         if tuple(observations.shape[1:]) != (6, _t9.TORUS9_POINT_COUNT):
             raise ValueError("Torus9 inference payload must have shape [batch,6,81]")
         with torch.inference_mode():
