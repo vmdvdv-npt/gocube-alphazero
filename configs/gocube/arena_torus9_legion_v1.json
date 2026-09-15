@@ -1,0 +1,34 @@
+{
+  "preset_id": "torus9-arena-legion-v1",
+  "profile": "torus9",
+  "execution_only": true,
+  "scientific_semantics": "resolved by the Torus9 profile; this file does not change them",
+  "workers": 16,
+  "games_per_worker": 4,
+  "configured_context_capacity": 64,
+  "central_model_owner": "parent",
+  "device": "cuda",
+  "shared_memory": true,
+  "worker_local_inference_batch_wait_ms": 0.0,
+  "inference_batch_rows": 64,
+  "inference_batch_wait_ms": 1.0,
+  "master_seed": 202609131004,
+  "strict_production": true,
+  "performance_gate": {
+    "minimum_games": 64,
+    "minimum_mean_inference_batch_rows": 16.0,
+    "minimum_effective_cpu_cores": 8.0,
+    "technical_games": 0,
+    "fail_closed": true
+  },
+  "selection_basis": {
+    "date": "2026-09-16",
+    "winner_among_measured_variants": [
+      "cap64-wait1",
+      "cap64-wait2",
+      "cap32-wait1"
+    ],
+    "criterion": "highest measured moves_per_sec while preserving 64 observed contexts and zero technical games",
+    "note": "The fixed-seed local benchmark retained PERFORMANCE_DEGRADED because host-observed mean batch and aggregate effective CPU were below hard gates; strict production must fail closed until the host satisfies them."
+  }
+}
