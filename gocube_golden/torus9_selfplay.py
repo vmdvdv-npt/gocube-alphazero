@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
+import struct
 from typing import Any, Mapping, MutableMapping, Sequence
 
 from .neural import model_hash
@@ -40,6 +41,33 @@ from . import torus9_monolith as _t9
 torch = _t9.torch
 
 
+_TORUS9_EVALUATION_STRUCT = struct.Struct(
+    "<" + ("f" * (TORUS9_ACTION_COUNT + 3))
+)
+
+
+def _decode_torus9_evaluation_payload(payload: object) -> Evaluation:
+    if isinstance(payload, Evaluation):
+        if len(payload.policy) != TORUS9_ACTION_COUNT or len(payload.wdl) != 3:
+            raise InferenceTransportError("Torus9 central inference returned malformed head shapes")
+        values = tuple(float(value) for value in payload.policy + payload.wdl)
+        if any(not math.isfinite(value) or value < 0.0 for value in values):
+            raise InferenceTransportError("Torus9 central inference returned invalid probabilities")
+        return payload
+    if not isinstance(payload, (bytes, bytearray, memoryview)):
+        raise InferenceTransportError(
+            f"Torus9 central inference returned {type(payload).__name__}, expected compact bytes"
+        )
+    if len(payload) != _TORUS9_EVALUATION_STRUCT.size:
+        raise InferenceTransportError("Torus9 central inference returned malformed compact output size")
+    values = _TORUS9_EVALUATION_STRUCT.unpack(payload)
+    policy = tuple(float(value) for value in values[:TORUS9_ACTION_COUNT])
+    wdl = tuple(float(value) for value in values[TORUS9_ACTION_COUNT:])
+    if any(not math.isfinite(value) or value < 0.0 for value in policy + wdl):
+        raise InferenceTransportError("Torus9 central inference returned invalid probabilities")
+    return Evaluation(policy=policy, wdl=wdl)
+
+
 @dataclass(frozen=True)
 class Torus9SelfPlayWorkerContext:
     run_id: str
@@ -67,14 +95,7 @@ class _RemoteTorus9Evaluator:
         # nested-Python-object pickle/rehydration cost on the process IPC path.
         payload = observation.detach().to(dtype=torch.float32).contiguous().numpy().tobytes()
         result = self.client.request(payload)
-        if not isinstance(result, Evaluation):
-            raise InferenceTransportError(
-                f"Torus9 central inference returned {type(result).__name__}, expected Evaluation"
-            )
-        if len(result.policy) != TORUS9_ACTION_COUNT or len(result.wdl) != 3:
-            raise InferenceTransportError("Torus9 central inference returned malformed head shapes")
-        if any(not math.isfinite(float(value)) or float(value) < 0.0 for value in result.policy + result.wdl):
-            raise InferenceTransportError("Torus9 central inference returned invalid probabilities")
+        result = _decode_torus9_evaluation_payload(result)
         self.nn_evaluations += 1
         return result
 
@@ -130,7 +151,7 @@ class Torus9CentralInferenceOwner:
         self.model.to(self.device)
         self.model.eval()
 
-    def evaluate_batch(self, payloads: Sequence[object]) -> tuple[Evaluation, ...]:
+    def _evaluate_batch_tensors(self, payloads: Sequence[object]):
         if not payloads:
             raise ValueError("Torus9 central inference requires a non-empty batch")
         if all(isinstance(payload, (bytes, bytearray, memoryview)) for payload in payloads):
@@ -153,14 +174,28 @@ class Torus9CentralInferenceOwner:
             raise ValueError("Torus9 central policy head shape drift")
         if tuple(wdls.shape) != (len(payloads), 3):
             raise ValueError("Torus9 central WDL head shape drift")
+        outputs = torch.cat((policies, wdls), dim=1)
+        if not bool(torch.isfinite(outputs).all()) or bool((outputs < 0.0).any()):
+            raise ValueError("Torus9 central inference produced invalid probabilities")
+        return outputs
+
+    def evaluate_batch(self, payloads: Sequence[object]) -> tuple[Evaluation, ...]:
+        """Return the legacy in-process Evaluation representation."""
+        outputs = self._evaluate_batch_tensors(payloads)
         rows: list[Evaluation] = []
-        for policy, wdl in zip(policies.detach().cpu(), wdls.detach().cpu()):
-            policy_values = tuple(float(value) for value in policy)
-            wdl_values = tuple(float(value) for value in wdl)
-            if any(not math.isfinite(value) or value < 0.0 for value in policy_values + wdl_values):
-                raise ValueError("Torus9 central inference produced invalid probabilities")
+        for output in outputs.detach().cpu():
+            values = tuple(float(value) for value in output)
+            policy_values = values[:TORUS9_ACTION_COUNT]
+            wdl_values = values[TORUS9_ACTION_COUNT:]
             rows.append(Evaluation(policy=policy_values, wdl=wdl_values))
         return tuple(rows)
+
+    def evaluate_batch_ipc(self, payloads: Sequence[object]) -> tuple[bytes, ...]:
+        """Return fixed-width float32 rows to minimize process IPC overhead."""
+        outputs = self._evaluate_batch_tensors(payloads).detach().to("cpu").contiguous()
+        raw = outputs.numpy().tobytes()
+        row_size = _TORUS9_EVALUATION_STRUCT.size
+        return tuple(raw[offset:offset + row_size] for offset in range(0, len(raw), row_size))
 
 
 def torus9_game_seed(master_seed: int, run_id: str, game_id: str) -> int:
@@ -239,7 +274,7 @@ class Torus9SelfPlayAdapter:
 
     @property
     def infer_batch(self):
-        return self.owner.evaluate_batch
+        return self.owner.evaluate_batch_ipc
 
     @property
     def record_metrics(self):
