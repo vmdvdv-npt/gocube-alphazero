@@ -24,14 +24,10 @@ import torch
 from gocube_golden.provenance import capture_code_identity, derive_seed, file_sha256
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
-    Torus9OwnershipScoreTrainer,
-    Torus9RollingReplay,
     Torus9SelfPlaySearchContract,
+    Torus9TrainingAdapter,
     run_torus9_selfplay_games,
-    torus9_build_ownership_score_replay_samples,
-    torus9_checkpoint_metadata,
-    torus9_save_checkpoint,
-    validate_torus9_replay_sample,
+    run_torus9_training_iteration,
     write_json,
     write_jsonl,
 )
@@ -45,6 +41,7 @@ from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
     TORUS9_CURRENT_TRAINING_MASTER_SEED,
     TORUS9_CURRENT_TARGET_FINGERPRINT,
+    TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     TORUS9_WORKERS,
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
@@ -52,7 +49,7 @@ from gocube_golden.torus9_contract import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "53946d0c84fca5a6f81a387bfd399ea62e34b088"
+BASE_COMMIT = TORUS9_GOLDEN_LINEAGE_BASE_COMMIT
 ACTIVE_NAMESPACE = ROOT / "runs" / "torus9-golden-v3-active"
 DEFAULT_RUN_ID = "torus9-golden-v3-20260913-run01"
 
@@ -61,64 +58,6 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(int(seed))
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(int(seed))
-
-
-def _checkpoint(
-    path: Path,
-    model: Torus9CurrentGraphNet,
-    optimizer: torch.optim.Optimizer | None,
-    *,
-    run_id: str,
-    label: str,
-    parent: str | None,
-    code,
-    profile_fp: str,
-    contract: Torus9SelfPlaySearchContract,
-    completed_games: int,
-    replay_positions: int,
-    optimizer_updates: int,
-    samples_consumed: int,
-    device: str,
-) -> dict[str, object]:
-    metadata = torus9_checkpoint_metadata(
-        model=model,
-        run_id=run_id,
-        label=label,
-        parent=parent,
-        model_seed=TORUS9_CURRENT_MODEL_INIT_SEED,
-        code=code,
-        profile_fp=profile_fp,
-        completed_games=completed_games,
-        replay_positions=replay_positions,
-        optimizer_updates=optimizer_updates,
-        samples_consumed=samples_consumed,
-        ownership_loss_enabled=True,
-        score_loss_enabled=True,
-        profile_id=TORUS9_CURRENT_PROFILE_ID,
-        target_fingerprint=TORUS9_CURRENT_TARGET_FINGERPRINT,
-        selfplay_contract_id=TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
-        selfplay_contract_fingerprint=contract.fingerprint,
-        base_commit=BASE_COMMIT,
-    )
-    metadata["adam_step"] = optimizer_updates
-    metadata["model_init_seed"] = TORUS9_CURRENT_MODEL_INIT_SEED
-    metadata["device"] = device
-    metadata["device_locked"] = True
-    metadata["execution_only_parameters"] = {
-        "self_play_inference_batch_cap": "not checkpoint semantic",
-        "self_play_inference_batch_wait_ms": "not checkpoint semantic",
-    }
-    return torus9_save_checkpoint(path, model=model, optimizer=optimizer, metadata=metadata)
-
-
-def _compact_samples(samples: list[dict[str, object]], generation: int) -> list[dict[str, object]]:
-    compact: list[dict[str, object]] = []
-    for position, sample in enumerate(samples):
-        row = dict(sample)
-        row["source_generation"] = int(generation)
-        row["replay_row_id"] = f"M{generation}:{row['game_id']}:{row['ply']}:{position}"
-        compact.append(row)
-    return compact
 
 
 def _execution_profile(profile: dict[str, object], name: str) -> dict[str, object]:
@@ -154,7 +93,6 @@ def _profile_comparison(profile: dict[str, object]) -> dict[str, object]:
     replay = profile["replay"]
     checked = {
         "komi": profile["rules"]["komi"],  # type: ignore[index]
-        "legacy_komi_sentinel": profile["rules"]["legacy_komi_sentinel"],  # type: ignore[index]
         "network": f"{network['hidden']}×{network['blocks']}",  # type: ignore[index]
         "ownership": network["ownership"],  # type: ignore[index]
         "score": network["score"],  # type: ignore[index]
@@ -442,35 +380,30 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
     seed_everything(TORUS9_CURRENT_MODEL_INIT_SEED)
     model = Torus9CurrentGraphNet().to(args.device)
+    adapter = Torus9TrainingAdapter(
+        profile=profile,
+        code_identity=code,
+        base_commit=BASE_COMMIT,
+    )
+    state = adapter.create_state(model, run_id=args.run_id)
     contract = _contract(profile)
-    trainer = Torus9OwnershipScoreTrainer(
-        model,
-        score_loss_enabled=True,
-        learning_rate=float(profile["training"]["learning_rate"]),  # type: ignore[index]
-        weight_decay=float(profile["training"]["weight_decay"]),  # type: ignore[index]
-        optimizer_steps_per_iteration=int(profile["training"]["optimizer_steps_per_iteration"]),  # type: ignore[index]
-    )
-    replay = Torus9RollingReplay(
-        generations=int(profile["replay"]["generations"]),  # type: ignore[index]
-        maximum_positions=int(profile["replay"]["cap"]),  # type: ignore[index]
-    )
     m0_path = root / "checkpoints" / "M0.pt"
-    m0_metadata = _checkpoint(
+    m0_metadata = adapter.save_initial_checkpoint(
         m0_path,
-        model,
-        None,
+        state,
         run_id=args.run_id,
         label="M0",
-        parent=None,
-        code=code,
-        profile_fp=profile_fp,
-        contract=contract,
         completed_games=0,
-        replay_positions=0,
-        optimizer_updates=0,
-        samples_consumed=0,
         device=str(args.device),
+        code_identity=code,
     )
+    state.parent_checkpoint_identity = {
+        "label": "M0",
+        "path": str(m0_path),
+        "metadata_path": str(m0_path.with_suffix(".metadata.json")),
+        "model_hash": m0_metadata["model_hash"],
+        "artifact_sha256": file_sha256(m0_path),
+    }
     manifest = {
         "manifest_schema": "torus9-golden-current-v3-run-v1",
         "run_id": args.run_id,
@@ -537,64 +470,40 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             raise AssertionError("Torus 9×9 game seed invariance drifted")
         if sum(record.nn_evaluations for record in records) != int(telemetry.get("total_rows", -1)):
             raise AssertionError("Torus 9×9 inference coordinator lost or duplicated rows")
-        fresh: list[dict[str, object]] = []
         for record in records:
             record.validate()
-            if record.technical_termination is not None:
-                continue
-            rows = list(torus9_build_ownership_score_replay_samples(record))
-            for row in rows:
-                validate_torus9_replay_sample(row, expected_target_fingerprint=TORUS9_CURRENT_TARGET_FINGERPRINT)
-            fresh.extend(rows)
-        if not fresh:
-            raise RuntimeError(f"M{iteration} produced no formal replay positions")
-        stamped = _compact_samples(fresh, iteration)
-        write_jsonl(root / "replay" / f"iter-{iteration:02d}-fresh.jsonl", stamped)
-        replay_metrics = replay.append_generation(iteration, stamped)
-        write_jsonl(root / "replay" / f"rolling-after-{iteration:02d}.jsonl", list(replay.rows))
-        train_metrics = trainer.train_fixed_budget(
-            list(replay.rows),
-            seed=derive_seed(TORUS9_CURRENT_TRAINING_MASTER_SEED, args.run_id, "training", iteration),
-        )
-        if train_metrics["optimizer_steps"] != 80 or train_metrics["samples_consumed"] != 5120 or train_metrics["batch_sizes"] != [64] * 80:
-            raise AssertionError("Current Torus 9×9 fixed training budget drifted")
-        if train_metrics["ownership_loss_enabled"] is not True or train_metrics["score_loss_enabled"] is not True:
-            raise AssertionError("Current Torus 9×9 auxiliary losses are not enabled")
-        if any(not math.isfinite(float(train_metrics[key])) for key in ("mean_policy_loss", "mean_value_loss", "mean_ownership_loss", "mean_score_loss_normalized", "mean_total_loss")):
-            raise AssertionError("Current Torus 9×9 training loss is non-finite")
-        checkpoint_path = root / "checkpoints" / f"M{iteration}.pt"
-        checkpoint_metadata = _checkpoint(
-            checkpoint_path,
-            model,
-            trainer.optimizer,
+        result = run_torus9_training_iteration(
+            state=state,
+            generation=iteration,
+            output_dir=root,
             run_id=args.run_id,
-            label=f"M{iteration}",
-            parent=f"M{iteration - 1}",
-            code=code,
-            profile_fp=profile_fp,
-            contract=contract,
-            completed_games=iteration * 64,
-            replay_positions=len(replay.rows),
-            optimizer_updates=int(trainer.update_count),
-            samples_consumed=int(trainer.samples_consumed),
-            device=str(args.device),
-        )
-        row = _iteration_record(
-            iteration=iteration,
-            execution=execution,
             records=records,
-            fresh_positions=len(fresh),
-            replay_metrics=replay_metrics,
-            train_metrics=train_metrics,
-            selfplay_wall=selfplay_wall,
-            cpu_before=cpu_before,
-            inference_telemetry=telemetry,
-            checkpoint={"path": str(checkpoint_path), "model_hash": checkpoint_metadata["model_hash"], "artifact_sha256": file_sha256(checkpoint_path)},
+            training_seed=derive_seed(
+                TORUS9_CURRENT_TRAINING_MASTER_SEED,
+                args.run_id,
+                "training",
+                iteration,
+            ),
+            completed_games=iteration * 64,
+            code_identity=code,
             device=str(args.device),
+            adapter=adapter,
+            summary_builder=lambda base: _iteration_record(
+                iteration=iteration,
+                execution=execution,
+                records=records,
+                fresh_positions=int(base["fresh_positions"]),
+                replay_metrics=base["replay"],  # type: ignore[arg-type]
+                train_metrics=base["training"],  # type: ignore[arg-type]
+                selfplay_wall=selfplay_wall,
+                cpu_before=cpu_before,
+                inference_telemetry=telemetry,
+                checkpoint=base["checkpoint"],  # type: ignore[arg-type]
+                device=str(args.device),
+            ),
         )
+        row = dict(result.summary)
         iteration_rows.append(row)
-        write_json(root / "training" / f"iter-{iteration:02d}.json", train_metrics)
-        write_json(root / f"iter-{iteration:02d}-summary.json", row)
 
     selection = _select_winner(iteration_rows)
     write_json(root / "sweep-selection-m1-m7.json", selection)
@@ -657,61 +566,39 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         raise AssertionError("Torus 9×9 M8 game seed invariance drifted")
     if sum(record.nn_evaluations for record in records) != int(telemetry.get("total_rows", -1)):
         raise AssertionError("Torus 9×9 M8 inference coordinator lost or duplicated rows")
-    fresh = []
     for record in records:
         record.validate()
-        if record.technical_termination is not None:
-            continue
-        rows = list(torus9_build_ownership_score_replay_samples(record))
-        for row in rows:
-            validate_torus9_replay_sample(row, expected_target_fingerprint=TORUS9_CURRENT_TARGET_FINGERPRINT)
-        fresh.extend(rows)
-    if not fresh:
-        raise RuntimeError("M8 produced no formal replay positions")
-    stamped = _compact_samples(fresh, 8)
-    write_jsonl(root / "replay" / "iter-08-fresh.jsonl", stamped)
-    replay_metrics = replay.append_generation(8, stamped)
-    write_jsonl(root / "replay" / "rolling-after-08.jsonl", list(replay.rows))
-    train_metrics = trainer.train_fixed_budget(
-        list(replay.rows),
-        seed=derive_seed(TORUS9_CURRENT_TRAINING_MASTER_SEED, args.run_id, "training", 8),
-    )
-    if train_metrics["optimizer_steps"] != 80 or train_metrics["samples_consumed"] != 5120 or train_metrics["batch_sizes"] != [64] * 80:
-        raise AssertionError("Current Torus 9×9 M8 training budget drifted")
-    if train_metrics["ownership_loss_enabled"] is not True or train_metrics["score_loss_enabled"] is not True:
-        raise AssertionError("Current Torus 9×9 M8 auxiliary losses are not enabled")
-    if any(not math.isfinite(float(train_metrics[key])) for key in ("mean_policy_loss", "mean_value_loss", "mean_ownership_loss", "mean_score_loss_normalized", "mean_total_loss")):
-        raise AssertionError("Current Torus 9×9 M8 training loss is non-finite")
-    checkpoint_path = root / "checkpoints" / "M8.pt"
-    checkpoint_metadata = _checkpoint(
-        checkpoint_path,
-        model,
-        trainer.optimizer,
+    result = run_torus9_training_iteration(
+        state=state,
+        generation=8,
+        output_dir=root,
         run_id=args.run_id,
-        label="M8",
-        parent="M7",
-        code=code,
-        profile_fp=profile_fp,
-        contract=contract,
-        completed_games=8 * 64,
-        replay_positions=len(replay.rows),
-        optimizer_updates=int(trainer.update_count),
-        samples_consumed=int(trainer.samples_consumed),
-        device=str(args.device),
-    )
-    m8_row = _iteration_record(
-        iteration=8,
-        execution=execution,
         records=records,
-        fresh_positions=len(fresh),
-        replay_metrics=replay_metrics,
-        train_metrics=train_metrics,
-        selfplay_wall=selfplay_wall,
-        cpu_before=cpu_before,
-        inference_telemetry=telemetry,
-        checkpoint={"path": str(checkpoint_path), "model_hash": checkpoint_metadata["model_hash"], "artifact_sha256": file_sha256(checkpoint_path)},
+        training_seed=derive_seed(
+            TORUS9_CURRENT_TRAINING_MASTER_SEED,
+            args.run_id,
+            "training",
+            8,
+        ),
+        completed_games=8 * 64,
+        code_identity=code,
         device=str(args.device),
+        adapter=adapter,
+        summary_builder=lambda base: _iteration_record(
+            iteration=8,
+            execution=execution,
+            records=records,
+            fresh_positions=int(base["fresh_positions"]),
+            replay_metrics=base["replay"],  # type: ignore[arg-type]
+            train_metrics=base["training"],  # type: ignore[arg-type]
+            selfplay_wall=selfplay_wall,
+            cpu_before=cpu_before,
+            inference_telemetry=telemetry,
+            checkpoint=base["checkpoint"],  # type: ignore[arg-type]
+            device=str(args.device),
+        ),
     )
+    m8_row = dict(result.summary)
     iteration_rows.append(m8_row)
     confirmation = _confirmation(selection, m8_row)
     status = "CONFIRMED" if confirmation["status"] == "CONFIRMED" else "INCONCLUSIVE"
@@ -748,7 +635,6 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "score": True,
             "explicit_symmetry_augmentation": False,
             "komi": 0.5,
-            "legacy_komi_sentinel": 7.5,
         },
     }
     write_json(root / "final-report.json", report)

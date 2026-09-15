@@ -58,7 +58,8 @@ from gocube_golden.torus9_contract import (
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
 )
-from tools.torus9_golden_learning import BASE_COMMIT, _checkpoint, _contract
+from tools.torus9_golden_learning import BASE_COMMIT, _contract
+from tools._torus9_legacy_compat import checkpoint as _checkpoint
 
 
 RUN_ID = "torus9-golden-v3-20260914-run03"

@@ -1825,14 +1825,21 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
         self.ownership_loss_enabled = True
         self.score_loss_enabled = bool(score_loss_enabled)
 
-    def train_fixed_budget(self, samples: Sequence[Mapping[str, object]], *, seed: int) -> dict[str, object]:
+    def train_fixed_budget(
+        self,
+        samples: Sequence[Mapping[str, object]],
+        *,
+        seed: int,
+        validate_samples: bool = True,
+    ) -> dict[str, object]:
         self.assert_optimizer_continuity()
         count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
         indices = self._sample_indices(len(samples), seed=seed, count=count)
-        for sample in samples:
-            validate_torus9_replay_sample(sample)
-            if sample.get("ownership_target") is None or sample.get("score_target") is None:
-                raise ValueError("Torus 9×9 score training requires ownership and score targets")
+        if validate_samples:
+            for sample in samples:
+                validate_torus9_replay_sample(sample)
+                if sample.get("ownership_target") is None or sample.get("score_target") is None:
+                    raise ValueError("Torus 9×9 score training requires ownership and score targets")
         device = next(self.model.parameters()).device
         updates: list[dict[str, object]] = []
         sampled_rows = [str(samples[index].get("replay_row_id", index)) for index in indices]
