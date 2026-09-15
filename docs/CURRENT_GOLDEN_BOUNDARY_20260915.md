@@ -1,6 +1,6 @@
-# Current Golden boundary — Torus 9×9 M0→M17 (2026-09-15)
+# Current Golden boundary — Torus 9×9 M0→M17 + Self-play Stage 2 (2026-09-15)
 
-This document freezes the dependency and scientific boundary proven by the successful Torus 9×9 line `M0→M17`. It is an audit/ownership document, not a redesign of self-play, training, MCTS, the network, or Arena.
+This document preserves the immutable scientific/dependency boundary proven by the successful Torus 9×9 line `M0→M17` and records the later Stage-2 extraction of **current self-play execution**. The extraction changes execution architecture only; it does not redefine rules, search semantics, targets, replay, training, the network, checkpoint identity, Arena semantics or the M0→M17 lineage.
 
 ## 1. Immutable reference
 
@@ -12,51 +12,61 @@ This document freezes the dependency and scientific boundary proven by the succe
 | Common Git tree | `d4b438ff6b8442aae03ef16cafacbad4ad7ece14` |
 | M1 baseline run Git SHA | `d54de530fc4026d22409ca017f329f88a920dec2` |
 | Original base commit | `53946d0c84fca5a6f81a387bfd399ea62e34b088` |
+| PR #100 / Stage-2 base | `1f80db26cfb8f46a7661cc13383cead65918a5f7` |
 | Semantic/lineage profile fingerprint | `sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775` |
 | Sanitized current JSON content fingerprint | `sha256:7e97c50e1697641fb8f5b9a3566144f0a58c105e3b688940f42e7b6154fb0831` |
 | Last clean resumable boundary | M17 |
 | M18 | never started |
 
-The run report is `docs/TORUS9_GOLDEN_CURRENT_V3_M1_M17_NIGHT_RUN_20260914.md`. The external run namespace is `runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03` on Legion. M2…M17 completed with 64 games/iteration and `technical=0`.
+The immutable run report remains `docs/TORUS9_GOLDEN_CURRENT_V3_M1_M17_NIGHT_RUN_20260914.md`. The physical namespace is `runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03` on Legion and remains read-only for parity/benchmark work. No M18 is created by Stage 2.
 
-The two fingerprints have deliberately different roles. `36911…` remains the immutable **semantic/lineage identity** stored in the M0→M17 manifest/checkpoint metadata and expected by the continuation runtime. It must remain stable because no scientific contract changed. `7e97…` is a separate **content-integrity fingerprint** for the sanitized current JSON, calculated with `profile_fingerprint` and `content_fingerprint` excluded. This lets the repository remove forbidden historical sentinel metadata without invalidating M17 resume identity.
+The two fingerprints retain their original distinct roles. `36911…` is the semantic/lineage identity stored in M0→M17 metadata and required by the continuation runtime. `7e97…` is the sanitized profile content-integrity fingerprint. Stage 2 changes neither.
 
-No topology, rules, observation, target, network, search, replay, training, seed, checkpoint, or Arena scientific semantics changed.
+## 2. Current production ownership
 
-## 2. Production and preservation entrypoints
-
-| Purpose | Entrypoint / boundary | Status |
+| Purpose | Entrypoint / boundary | Ownership |
 |---|---|---|
-| Torus9 continuation front door | `tools/continue_torus9_golden_m1_m100.py` | KEEP CURRENT as fail-closed compatibility/front-door boundary |
-| Preserved M1→M100 runtime | `tools/_frozen_continue_torus9_golden_m1_m100.py` | KEEP CURRENT for M0→M17 lineage/resume compatibility; frozen from redesign |
-| Standalone Arena CLI | `tools/arena.py` | KEEP CURRENT |
-| Standalone Arena engine | `tools/arena_engine.py` | KEEP CURRENT |
-| Torus9 Arena adapter/profile | `tools/arena_profiles/torus9.py` | KEEP CURRENT; duplicated scientific literals guarded against canonical profile |
-| Torus9 checkpoint/replay/training library boundary | `gocube_golden/torus9.py` | KEEP CURRENT |
-| GoCube product Protocol V1 service | `python -m alphazero.envs.gocube.integration.server` | KEEP CURRENT |
+| Torus9 continuation front door | `tools/continue_torus9_golden_m1_m100.py` | compatibility/front door |
+| Preserved M1→M100 runtime | `tools/_frozen_continue_torus9_golden_m1_m100.py` | frozen orchestration/training compatibility |
+| Current Torus9 public library facade | `gocube_golden/torus9.py` | stable imports + current self-play front door |
+| Universal self-play engine | `gocube_golden/selfplay_engine.py` | **EXECUTION** |
+| Torus9 self-play adapter | `gocube_golden/torus9_selfplay.py` | **SCIENTIFIC/profile adapter** |
+| Preserved Torus9 scientific/replay/training implementation | `gocube_golden/torus9_monolith.py` | scientific + unchanged downstream training/replay/checkpoint code |
+| Standalone Arena CLI | `tools/arena.py` | unchanged |
+| Standalone Arena engine | `tools/arena_engine.py` | unchanged |
+| Torus9 Arena adapter/profile | `tools/arena_profiles/torus9.py` | unchanged |
+| GoCube product Protocol V1 | `python -m alphazero.envs.gocube.integration.server` | unchanged |
 
-The continuation front door resolves the preserved runtime through the module identity `tools._frozen_continue_torus9_golden_m1_m100` and remains fail-closed around the historical Arena path. The preservation requirement in this PR is that the M17 lineage can still be validated/resumed under its original semantic fingerprint; it does not promote old Arena execution to current production Arena.
+`gocube_golden/torus9.py` intentionally re-exports the established Torus9 library surface from the preserved implementation and overrides only `run_torus9_selfplay_games(...)` with the Stage-2 engine adapter. There is therefore one current public self-play route.
 
-## 3. Proven M0→M17 dependency graph
+## 3. Dependency graph
+
+Before Stage 2, current-profile self-play was mixed inside `gocube_golden/torus9.py`:
+
+```text
+run_torus9_selfplay_games(...)
+  -> ThreadPoolExecutor lanes                    EXECUTION
+  -> Torus9InferenceCoordinator/thread/Queue     EXECUTION
+  -> Torus9SelfPlayRunner                        SCIENTIFIC
+  -> Torus9 search/rules/observation/records     SCIENTIFIC
+  -> model evaluator                             MIXED
+```
+
+After Stage 2:
 
 ```text
 tools/continue_torus9_golden_m1_m100.py
   -> tools._frozen_continue_torus9_golden_m1_m100
-  -> configs/gocube/torus9_golden_current_v3.json
-  -> gocube_golden.torus9_contract.load_torus9_current_profile()
-  -> gocube_golden.torus9
-       -> gocube_golden.topology
-       -> gocube_golden.state
-       -> gocube_golden.rules
-       -> gocube_golden.search
-       -> gocube_golden.neural
-       -> self-play/inference coordination
-       -> replay/training
-       -> checkpoint + optimizer state
-       -> resume loaders
+  -> gocube_golden.torus9                         public facade
+       -> gocube_golden.torus9_selfplay           Torus9 scientific adapter
+            -> gocube_golden.selfplay_engine      process/IPC/batching execution
+            -> gocube_golden.torus9_monolith      unchanged game/search/model/record semantics
+       -> gocube_golden.torus9_monolith            unchanged replay/training/checkpoint downstream
 ```
 
-The preserved runtime does **not** route M0→M17 through `alphazero.Coach`, `alphazero.SelfPlayAgent`, or `alphazero.NNetWrapper`.
+The new engine does not import `alphazero.Coach`, `alphazero.SelfPlayAgent`, `alphazero.NNetWrapper`, Torus9 rules, topology, board dimensions, action count, Torus9 model classes or MCTS.
+
+The pre-extraction `run_torus9_selfplay_games` implementation remains physically present only in the preserved monolith for source/reference compatibility. It is not the public current self-play front door and is not used by the current continuation import path.
 
 ## 4. Scientific contract frozen to M0→M17
 
@@ -97,7 +107,7 @@ The preserved runtime does **not** route M0→M17 through `alphazero.Coach`, `al
 - fast search OFF, resign OFF, watchdog 500;
 - self-play fingerprint `sha256:22a4e4dd37d70bd3d712b909476120b96385802ec874b99358fab256c4e3351f`.
 
-**Replay/training**
+**Replay/training — unchanged downstream**
 
 - rolling last 3 generations, cap 20,000, deterministic sampling;
 - Adam, LR 0.001, weight decay 0;
@@ -105,111 +115,157 @@ The preserved runtime does **not** route M0→M17 through `alphazero.Coach`, `al
 - LR scheduler none, model gating false;
 - ownership loss ON, score loss ON.
 
-## 5. Checkpoint/resume identity
+## 5. Self-play execution boundary
 
-M17 is the last clean resumable boundary. The physical M17 checkpoint, replay state, optimizer state and continuation state live on Legion rather than in Git, so GitHub CI cannot honestly reload those bytes.
+The universal `SelfPlayEngine` owns only:
 
-The repository can and does protect the compatibility contract:
+- worker process creation/termination;
+- task scheduling and canonical game ordering;
+- IPC request/response transport;
+- one central inference service;
+- batching/coalescing, batch cap and batch wait;
+- timeouts and fail-closed error propagation;
+- clean shutdown;
+- execution telemetry.
 
-- `profile_fingerprint` remains `36911…`, matching M1→M17 checkpoint/manifest metadata and the preserved runtime expectation;
-- the sanitized profile file is independently protected by `content_fingerprint=7e97…`;
-- the loader validates both identities fail-closed;
-- a focused regression test calls the preserved runtime's profile resolution and proves it still resolves the M17 lineage fingerprint;
-- scientific sub-contract fingerprints remain unchanged.
+`Torus9SelfPlayAdapter` owns:
 
-This is intentionally **not** an M18 fingerprint migration. No new checkpoint identity is introduced merely because forbidden non-semantic metadata was removed.
+- the Torus9 scientific profile identity;
+- canonical `6×81` observation building;
+- current 80×8 model/head interpretation;
+- the unchanged Torus9 game/search runner;
+- search contract, root noise, temperature and watchdog semantics;
+- Torus9 record/provenance validation;
+- canonical game seed derivation.
 
-## 6. Execution mechanics are not scientific semantics
+CUDA production shape:
 
-The M0→M17 run was scientifically valid but performance-degraded. Historical self-play telemetry showed roughly one CPU core-equivalent despite `workers=16`, with mean inference batches commonly around 9–10 rows. Those measurements are execution debt, not a reason to alter the scientific contract in this PR.
+```text
+16 OS search workers
+        -> observation IPC
+        -> one parent CUDA inference owner
+        -> batched forward
+        -> per-worker response IPC
+```
 
-The current standalone Arena is a separate later boundary. Its execution mechanics are authoritative in `tools/arena_engine.py` / `tools/arena.py`, not in the historical Arena execution fields retained in the M0→M17 profile. Current production Arena defaults/gates include:
+Workers do not own CUDA model copies. CUDA uses `spawn`; CPU can use `fork` where available.
 
-- at least 64 games;
-- 16 OS search workers;
-- 4 active games per worker;
-- one parent CUDA inference owner;
-- central batch cap 64;
-- central wait 1 ms;
-- worker-local wait 0;
-- mean inference batch rows >=16;
-- effective worker CPU cores >=8;
-- technical outcomes fail closed.
+## 6. Reproducibility and result ordering
 
-No process/thread architecture or throughput optimization is changed here.
+Scientific RNG is scheduling-independent. The canonical game seed remains:
 
-## 7. Canonical source of truth
+```text
+derive_seed(master_seed, run_id, game_id, "game")
+```
 
-The only current Torus9 scientific profile is:
+PID, worker number, queue timing, completion order and inference batch composition do not enter the seed. Search seeds remain derived by the unchanged Torus9 runner from game seed + ply.
 
-`configs/gocube/torus9_golden_current_v3.json`
+The engine sorts game IDs before scheduling and returns records in that same canonical order regardless of completion order.
 
-The profile owns topology/rules, observation/targets, 80×8 network shape, self-play semantics, replay/training budgets and seeds. `gocube_golden/torus9_contract.py` validates it fail-closed and separates semantic lineage identity from file-content integrity.
+A focused CPU/single-lane parity test compares the complete game record against the pre-extraction `Torus9SelfPlayRunner` under the same fixed model, seeds and scientific contract.
 
-Arena scientific semantics are canonical in that same profile. `tools/arena_profiles/torus9.py` still repeats several fixed scientific literals; this is a temporary duplicate protected by parity tests until a narrow direct-profile-resolution migration removes it. Arena **execution** defaults remain owned by the universal engine/CLI.
+## 7. Fail-closed execution
 
-## 8. Legacy inventory
+The complete self-play batch fails on:
 
-### KEEP CURRENT / SHARED
+- worker exception;
+- abnormal worker process death;
+- central inference exception;
+- malformed request/response;
+- batch response count mismatch;
+- inference timeout;
+- incomplete result set;
+- duplicate completion;
+- unclean shutdown.
 
-- current Torus9 profile and contract;
-- `gocube_golden/torus9.py`;
-- shared Golden topology/state/rules/search/neural/provenance helpers;
-- continuation front door and preserved runtime needed for M17 lineage compatibility;
-- universal standalone Arena and Torus9 adapter;
+Inference transport failures are infrastructure failures, not scientific game outcomes; they intentionally escape the game runner's `except Exception` conversion and invalidate the batch. No partial iteration is returned as valid.
+
+## 8. Execution telemetry and Legion gates
+
+Standalone self-play telemetry includes:
+
+- configured workers, concrete worker PIDs and PID count;
+- peak concurrent search workers;
+- child process CPU seconds and effective CPU cores;
+- worker failures/restarts;
+- games requested/completed/failed/technical;
+- moves, wall time, games/sec and moves/sec;
+- inference requests/forwards/rows;
+- batch rows mean/p50/p95/max;
+- rows/sec and forwards/sec;
+- batch cap, wait, device and central inference owner PID.
+
+The Torus9 compatibility layer also preserves the telemetry keys consumed by the frozen continuation runtime.
+
+Legion production validation remains:
+
+- workers = 16;
+- CUDA inference;
+- central batching ON;
+- mean inference batch rows >=16 when workload can form such batches;
+- effective CPU cores >=8 on a sufficiently long smoke;
+- no technical/infrastructure failures.
+
+If mean inference batch rows is below 16, the run is performance-degraded; do not repeat a long benchmark with identical settings.
+
+Reference-vs-new benchmarking must use M17 read-only, a separate temporary namespace and identical checkpoint, game IDs, seeds, simulations, device, rules and komi 0.5. The reference checkout is `152be924db12530ff04b37266925838da191e948` or equivalent PR #93 tree.
+
+## 9. Checkpoint/resume identity
+
+M17 remains the last clean resumable boundary. Its checkpoint, replay, optimizer state and continuation state live on Legion and are not GitHub repository contents.
+
+Stage 2 does not create a new checkpoint identity:
+
+- `profile_fingerprint` remains `36911…`;
+- sanitized profile content fingerprint remains `7e97…`;
+- scientific sub-contract fingerprints remain unchanged;
+- the continuation path keeps its established call shape and telemetry compatibility;
+- replay/training/checkpoint downstream code remains unchanged.
+
+This is **not** an M18 migration.
+
+## 10. Arena and GoCube boundaries
+
+The standalone Arena remains a separate subsystem in `tools/arena_engine.py` / `tools/arena.py`; Stage 2 does not redesign Arena.
+
+Protocol V1 remains stable. Existing migration blockers around `NNetWrapper`, historical descriptors and `GenericPlayers.MCTSPlayer` are unchanged and remain deferred.
+
+## 11. Legacy/deferred inventory
+
+### KEEP CURRENT
+
+- current Torus9 scientific profile/contract;
+- `gocube_golden/selfplay_engine.py` execution boundary;
+- `gocube_golden/torus9_selfplay.py` Torus9 adapter;
+- `gocube_golden/torus9.py` public facade;
+- shared Golden topology/state/rules/search/neural/provenance;
+- continuation front door/frozen runtime;
+- standalone Arena + Torus9 Arena adapter;
 - Protocol V1 integration surface.
 
-### KEEP TEMPORARILY FOR MIGRATION
+### KEEP TEMPORARILY
 
-- Torus9 Arena duplicate scientific literals, guarded by parity tests;
-- `alphazero/NNetWrapper.py`, because Protocol V1 model loading still depends on it;
-- `alphazero/GenericPlayers.py` / legacy Cython MCTS, because Protocol V1 game generation still uses `MCTSPlayer`;
-- loader/migration compatibility needed for historical GoCube descriptors.
+- `gocube_golden/torus9_monolith.py`, because training/replay/checkpoint extraction is explicitly deferred;
+- Torus9 Arena duplicate scientific literals guarded by parity tests;
+- `alphazero/NNetWrapper.py`, `GenericPlayers.py` and legacy Cython MCTS for Protocol V1 migration compatibility.
 
-### LEGACY — REMOVE IN LATER STAGE
+### DEFERRED
 
-- `alphazero/Coach.py` for the current Golden line;
-- current-line dependence on `SelfPlayAgent` once broad legacy CI/build obligations are removed;
-- retired Torus9 learning/ownership experiment profiles;
-- superseded Torus training/demo/calibration entrypoints;
-- superseded checkpoint-Arena/gating runners;
-- historical one-off diagnostics/docs that still describe retired paths as current.
+- training extraction;
+- Cube self-play adapter and GoCube integration migration;
+- legacy deletion;
+- Arena redesign;
+- MCTS algorithm rewrite;
+- network/optimizer/LR/replay-policy changes;
+- long training;
+- M17→M18 continuation.
 
-Unknown historical fixtures referenced by tests must stay UNKNOWN until their remaining consumer is proven absent.
+## 12. Boundary conclusion
 
-## 9. GoCube product boundary
-
-Protocol V1 remains a stable frontend/API boundary. Its backend still has explicit migration blockers:
-
-1. `integration/models.py` imports `alphazero.NNetWrapper` and loads historical `.pkl` checkpoints;
-2. legacy model/game metadata is still resolved for old descriptors;
-3. `integration/generation.py` creates `GenericPlayers.MCTSPlayer`.
-
-The next GoCube migration should replace those backend adapters while preserving Protocol V1 endpoints/schema.
-
-## 10. Regression guards
-
-Focused tests lock:
-
-- exactly one Torus9 profile with `status=current`;
-- semantic/lineage fingerprint `36911…` and sanitized content fingerprint `7e97…` as distinct identities;
-- M17 continuation runtime resolves the original lineage identity;
-- content tampering fails closed;
-- komi 0.5 and rejection of noncanonical explicit komi;
-- 80×8 network and exact heads;
-- observation, target and self-play fingerprints;
-- self-play/replay/training budgets;
-- retired profiles absent from continuation selection;
-- continuation path does not depend on `Coach`, `SelfPlayAgent` or `NNetWrapper`;
-- Arena adapter scientific semantics remain equal to the canonical profile;
-- the forbidden historical komi literal is absent from the current path.
-
-Repository CI continues to run full pytest, smoke suites and the pinned KataGo differential. No long training run is added.
-
-## 11. Boundary conclusion
-
-`M0→M17` remains reproducibly identifiable by immutable Git/run provenance and its original semantic lineage fingerprint. The current profile is sanitized without changing that checkpoint/resume identity, and its sanitized bytes are protected by a separate content fingerprint. Training/resume lineage, standalone Arena and GoCube product boundaries are explicitly separated.
+`M0→M17` remains reproducibly identifiable by its immutable Git/run provenance and original scientific lineage fingerprint. Stage 2 changes only current self-play execution ownership: OS search workers now communicate with one central inference owner through a generic engine, while Torus9 scientific semantics and existing training remain downstream and unchanged.
 
 **Scientific semantics changed: NO.**
 
-**Execution architecture changed: NO.**
+**Training semantics changed: NO.**
+
+**Self-play execution architecture changed: YES.**
