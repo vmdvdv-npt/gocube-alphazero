@@ -854,13 +854,17 @@ class SelfPlayEngine:
         if per_worker_capacity <= 0:
             raise ValueError("active games per worker must be positive")
         configured_total = total_active_contexts if total_active_contexts is not None else self.config.total_active_contexts
+        count = min(self.config.workers, len(ids))
+        target = min(len(ids), count * per_worker_capacity)
         if configured_total is not None:
             if configured_total <= 0:
                 raise ValueError("total active contexts must be positive")
-            count = min(self.config.workers, len(ids), int(configured_total))
-        else:
-            count = min(self.config.workers, len(ids))
-        target = min(len(ids), count * per_worker_capacity)
+            # ``total_active_contexts`` is a cap on cooperative game
+            # contexts, not on the number of OS worker processes. Keeping
+            # the configured worker pool intact preserves the separate
+            # workers-vs-contexts tuning axes and leaves idle workers out of
+            # the initial balanced fill when the cap is smaller.
+            target = min(target, int(configured_total))
         if target <= 0:
             raise ValueError("self-play active context target must be positive")
         per_worker = [target // count + (1 if index < target % count else 0) for index in range(count)]

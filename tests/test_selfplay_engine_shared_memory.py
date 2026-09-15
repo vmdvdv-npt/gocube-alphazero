@@ -110,6 +110,34 @@ def test_shared_memory_cooperative_scheduler_batches_and_replenishes():
     assert telemetry["worker_to_broker_latency_ms"]["count"] == telemetry["worker_blocked_inference_calls"]
 
 
+def test_total_active_contexts_caps_contexts_without_reducing_worker_pool():
+    spec = SharedMemorySpec(
+        observation_shape=(2,),
+        policy_size=2,
+        wdl_size=1,
+        write_input=_write_int,
+        decode_output=_decode_int,
+    )
+    telemetry = {}
+    records = SelfPlayEngine(_shared_config(workers=4)).run(
+        [f"game-{index}" for index in range(6)],
+        worker_play=lambda *_args: None,
+        worker_context={"steps": 2},
+        infer_batch=None,
+        infer_shared_batch=_infer_shared,
+        worker_game_factory=_make_game,
+        shared_memory=spec,
+        active_games_per_worker=2,
+        total_active_contexts=3,
+        record_metrics=_metrics,
+        telemetry=telemetry,
+    )
+    assert len(records) == 6
+    assert telemetry["target_active_contexts"] == 3
+    assert telemetry["peak_concurrent_search_contexts"] == 3
+    assert telemetry["real_worker_pid_count"] == 4
+
+
 def test_preallocated_torus9_observation_is_byte_identical_to_canonical_builder():
     state = initial_state(topology=TORUS_9X9, komi=0.5)
     for action in (0, 10, 20, PASS):
