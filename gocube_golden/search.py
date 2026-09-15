@@ -7,7 +7,7 @@ import json
 import math
 from numbers import Real
 import random
-from typing import Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .arena_contract import SEARCH_IMPLEMENTATION_ID, SearchSettings
 from .diagnostics import increment
@@ -323,6 +323,197 @@ class SequentialPUCT:
             root_q=root_q,
             legal_action_mask=root.legal_context.action_mask,
         )
+
+
+@dataclass(frozen=True)
+class SearchEvaluationRequest:
+    """Execution boundary for one suspended Golden leaf evaluation.
+
+    The request contains scientific state/context objects only inside the
+    worker process.  An execution adapter may encode them into a shared slot
+    and resume the session with the resulting ``Evaluation``.
+    """
+
+    state: GoldenState
+    legal_context: LegalActionContext
+
+
+class SequentialPUCTSession:
+    """Cooperative form of :class:`SequentialPUCT` with identical PUCT code.
+
+    A session performs ordinary single-tree simulations.  It yields only at
+    neural evaluations, allowing a process-local scheduler to interleave
+    independent games without virtual loss, parallel simulations, or a second
+    search implementation.
+    """
+
+    def __init__(
+        self,
+        state: GoldenState,
+        settings: SearchSettings | None = None,
+        *,
+        adapter: GoldenSearchAdapter | None = None,
+        seed: int = 0,
+        trace: list[dict[str, object]] | None = None,
+        evaluation_transform: Callable[[Evaluation, GoldenState, LegalActionContext], Evaluation] | None = None,
+    ) -> None:
+        if state.is_terminal:
+            raise SearchError("Search cannot be started from a terminal Golden state")
+        self.settings = settings or SearchSettings()
+        self.adapter = adapter or GoldenSearchAdapter()
+        self.trace = trace
+        self._seed = int(seed)
+        self._transform = evaluation_transform
+        self._pending: SearchEvaluationRequest | None = None
+        self._result: SearchResult | None = None
+        self._generator = self._run(state)
+        self._read_yield(next(self._generator))
+
+    @property
+    def result(self) -> SearchResult | None:
+        return self._result
+
+    @property
+    def pending(self) -> SearchEvaluationRequest | None:
+        return self._pending
+
+    def _expand(self, node: _Node, evaluation: Evaluation, context: LegalActionContext) -> float:
+        if self.adapter.is_terminal(node.state):
+            return self.adapter.terminal_utility(node.state)
+        utility = wdl_to_side_to_move_utility(evaluation.wdl)
+        legal = context.actions
+        if not legal:
+            raise SearchError("Nonterminal Golden state exposed no legal actions")
+        priors = _policy_for_legal(evaluation, node.state, legal, self.adapter)
+        node.edges = {action: _Edge(prior=priors[action]) for action in legal}
+        node.legal_context = context
+        node.expanded = True
+        if self.trace is not None:
+            self.trace.append({"event": "expanded", "state": node.state.state_key, "legal_actions": legal})
+        return utility
+
+    def _select(self, node: _Node, rng: random.Random) -> tuple[int | str, _Edge]:
+        total_visits = sum(edge.visits for edge in node.edges.values())
+        scale = math.sqrt(total_visits + 1.0)
+        best_value = -float("inf")
+        candidates: list[tuple[int | str, _Edge]] = []
+        for action, edge in node.edges.items():
+            q = edge.q if edge.visits else float(self.settings.fpu)
+            score = q + float(self.settings.cpuct) * edge.prior * scale / (1.0 + edge.visits)
+            if score > best_value + 1e-15:
+                best_value = score
+                candidates = [(action, edge)]
+            elif abs(score - best_value) <= 1e-15:
+                candidates.append((action, edge))
+        if not candidates:
+            raise SearchError("PUCT could not select a legal edge")
+        if self.settings.deterministic_tie_break:
+            return min(candidates, key=lambda item: self.adapter.action_index(node.state, item[0]))
+        return rng.choice(candidates)
+
+    def _run(self, state: GoldenState):
+        before = state.state_key
+        increment("searches")
+        rng = random.Random(self._seed)
+        root = _Node(state)
+        root_context = self.adapter.prepare_legal_actions(state)
+        increment("leaf_expansions")
+        evaluation = yield SearchEvaluationRequest(state, root_context)
+        if self._transform is not None:
+            evaluation = self._transform(evaluation, state, root_context)
+        self._expand(root, evaluation, root_context)
+        evaluator_calls = 1
+        for _ in range(self.settings.simulations):
+            increment("simulations")
+            node = root
+            path: list[tuple[_Node, int | str, _Edge]] = []
+            while node.expanded:
+                action, edge = self._select(node, rng)
+                if edge.child is None:
+                    edge.child = _Node(self.adapter.apply_action(node.state, action))
+                path.append((node, action, edge))
+                node = edge.child
+            if self.adapter.is_terminal(node.state):
+                utility = self.adapter.terminal_utility(node.state)
+            else:
+                context = self.adapter.prepare_legal_actions(node.state)
+                increment("leaf_expansions")
+                evaluation = yield SearchEvaluationRequest(node.state, context)
+                if self._transform is not None:
+                    evaluation = self._transform(evaluation, node.state, context)
+                utility = self._expand(node, evaluation, context)
+                evaluator_calls += 1
+            for parent, action, edge in reversed(path):
+                utility = _child_to_parent_utility(utility)
+                edge.visits += 1
+                edge.value_sum += utility
+                if self.trace is not None:
+                    self.trace.append({
+                        "event": "selected_edge",
+                        "state": parent.state.state_key,
+                        "action": action,
+                        "edge_visits": edge.visits,
+                        "backup_utility": utility,
+                    })
+        if state.state_key != before:
+            raise SearchError("Golden search mutated its parent state")
+        if root.legal_context is None:
+            raise SearchError("Golden search root has no prepared legal context")
+        legal = root.legal_context.actions
+        action_space = self.adapter.action_space(state)
+        visit_map = {action: root.edges[action].visits for action in legal}
+        root_visits = tuple(visit_map.get(action, 0) for action in action_space)
+        total = sum(root_visits)
+        if total <= 0:
+            raise SearchError("Golden search produced zero root visits")
+        root_q = tuple(root.edges[action].q if action in root.edges and root.edges[action].visits else None for action in action_space)
+        pi = tuple(count / total for count in root_visits)
+        maximum = max(visit_map.values())
+        candidates = [action for action, visits in visit_map.items() if visits == maximum]
+        selected = min(candidates, key=lambda action: self.adapter.action_index(state, action)) if self.settings.deterministic_tie_break else rng.choice(candidates)
+        if selected not in legal:
+            raise SearchError("Search selected an illegal action")
+        if self.trace is not None:
+            self.trace.append({"event": "final_root", "root_visits": root_visits, "selected_action": selected})
+        return SearchResult(
+            action=selected,
+            legal_actions=legal,
+            root_visits=root_visits,
+            pi=pi,
+            simulations=self.settings.simulations,
+            evaluator_calls=evaluator_calls,
+            root_q=root_q,
+            legal_action_mask=root.legal_context.action_mask,
+        )
+
+    def _read_yield(self, value: object) -> None:
+        if isinstance(value, SearchEvaluationRequest):
+            self._pending = value
+            return
+        if isinstance(value, SearchResult):
+            self._result = value
+            self._pending = None
+            return
+        raise SearchError(f"Golden search session yielded {type(value).__name__}")
+
+    def advance(self) -> SearchEvaluationRequest | SearchResult:
+        if self._pending is not None:
+            return self._pending
+        if self._result is not None:
+            return self._result
+        raise SearchError("Golden search session is not suspended at an evaluation")
+
+    def resume(self, evaluation: Evaluation) -> SearchEvaluationRequest | SearchResult:
+        if self._pending is None:
+            raise SearchError("Golden search session is not waiting for an evaluation")
+        self._pending = None
+        try:
+            value = self._generator.send(evaluation)
+        except StopIteration as stopped:
+            self._read_yield(stopped.value)
+        else:
+            self._read_yield(value)
+        return self.advance()
 
 
 class SolveStatus(str, Enum):

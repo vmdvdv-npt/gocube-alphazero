@@ -8,15 +8,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
-import struct
+import time
 from typing import Any, Mapping, MutableMapping, Sequence
 
 from .neural import model_hash
 from .provenance import CodeIdentity, capture_code_identity, derive_seed
 from .search import Evaluation
 from .selfplay_engine import (
+    GameFinished,
+    InferenceNeed,
     InferenceClient,
     InferenceTransportError,
+    SharedInferenceResult,
+    SharedMemorySpec,
     SelfPlayEngine,
     SelfPlayEngineConfig,
 )
@@ -36,36 +40,10 @@ from .torus9_contract import (
     load_torus9_current_profile,
 )
 from . import torus9_monolith as _t9
+from .search import SearchEvaluationRequest, SequentialPUCTSession
 
 
 torch = _t9.torch
-
-
-_TORUS9_EVALUATION_STRUCT = struct.Struct(
-    "<" + ("f" * (TORUS9_ACTION_COUNT + 3))
-)
-
-
-def _decode_torus9_evaluation_payload(payload: object) -> Evaluation:
-    if isinstance(payload, Evaluation):
-        if len(payload.policy) != TORUS9_ACTION_COUNT or len(payload.wdl) != 3:
-            raise InferenceTransportError("Torus9 central inference returned malformed head shapes")
-        values = tuple(float(value) for value in payload.policy + payload.wdl)
-        if any(not math.isfinite(value) or value < 0.0 for value in values):
-            raise InferenceTransportError("Torus9 central inference returned invalid probabilities")
-        return payload
-    if not isinstance(payload, (bytes, bytearray, memoryview)):
-        raise InferenceTransportError(
-            f"Torus9 central inference returned {type(payload).__name__}, expected compact bytes"
-        )
-    if len(payload) != _TORUS9_EVALUATION_STRUCT.size:
-        raise InferenceTransportError("Torus9 central inference returned malformed compact output size")
-    values = _TORUS9_EVALUATION_STRUCT.unpack(payload)
-    policy = tuple(float(value) for value in values[:TORUS9_ACTION_COUNT])
-    wdl = tuple(float(value) for value in values[TORUS9_ACTION_COUNT:])
-    if any(not math.isfinite(value) or value < 0.0 for value in policy + wdl):
-        raise InferenceTransportError("Torus9 central inference returned invalid probabilities")
-    return Evaluation(policy=policy, wdl=wdl)
 
 
 @dataclass(frozen=True)
@@ -81,54 +59,155 @@ class Torus9SelfPlayWorkerContext:
     expected_model_hash: str
 
 
-class _RemoteTorus9Evaluator:
-    """Worker-side Torus9 evaluator backed by central inference RPC."""
-
-    def __init__(self, client: InferenceClient) -> None:
-        self.client = client
-        self.nn_evaluations = 0
-
-    def evaluate_prepared(self, state: _t9.GoldenState, legal_context: _t9.LegalActionContext) -> Evaluation:
-        legal_context.assert_compatible(state)
-        observation = _t9.build_torus9_observation(state, legal_context=legal_context)
-        # Keep the scientific observation unchanged while avoiding the large
-        # nested-Python-object pickle/rehydration cost on the process IPC path.
-        payload = observation.detach().to(dtype=torch.float32).contiguous().numpy().tobytes()
-        result = self.client.request(payload)
-        result = _decode_torus9_evaluation_payload(result)
-        self.nn_evaluations += 1
-        return result
+def _write_torus9_shared_observation(payload: object, destination: Any) -> None:
+    """Adapter codec: write one prepared scientific observation into a slot."""
+    if not isinstance(payload, tuple) or len(payload) != 2:
+        raise InferenceTransportError("Torus9 shared input payload must be (state, legal_context)")
+    state, legal_context = payload
+    _t9.build_torus9_observation_into(state, destination, legal_context=legal_context)
 
 
-class _RemoteTorus9Runner(_t9.Torus9SelfPlayRunner):
-    """Reuse the exact current game/search loop without a worker-local model."""
+def _decode_torus9_shared_output(policy: Any, wdl: Any) -> Evaluation:
+    policy_values = tuple(float(value) for value in policy.tolist())
+    wdl_values = tuple(float(value) for value in wdl.tolist())
+    if len(policy_values) != TORUS9_ACTION_COUNT or len(wdl_values) != 3:
+        raise InferenceTransportError("Torus9 shared output head shape drift")
+    if any(not math.isfinite(value) or value < 0.0 for value in policy_values + wdl_values):
+        raise InferenceTransportError("Torus9 shared output contains invalid probabilities")
+    return Evaluation(policy=policy_values, wdl=wdl_values)
 
-    def __init__(self, context: Torus9SelfPlayWorkerContext, evaluator: _RemoteTorus9Evaluator) -> None:
+
+class _Torus9CooperativeGame:
+    """One Torus9 game stepped between neural evaluations.
+
+    The session is the canonical Golden PUCT implementation.  This object
+    only turns its evaluation suspension points into the generic execution
+    engine's ``InferenceNeed`` messages and keeps the existing record logic.
+    """
+
+    def __init__(self, context: Torus9SelfPlayWorkerContext, game_id: str, _client: InferenceClient) -> None:
         context.contract.validate()
-        self.model = None
-        self.run_id = context.run_id
-        self.model_checkpoint_label = context.model_checkpoint_label
-        self.model_hash = context.expected_model_hash
-        self.checkpoint_artifact_hash = context.checkpoint_artifact_hash
-        self.master_seed = int(context.master_seed)
-        self.profile_fp = context.profile_fingerprint
-        self.seed_namespace = context.run_id
-        self.code_identity = context.code_identity
-        self.device = torch.device("cpu")
-        self.contract = context.contract
-        self.profile_id = context.profile_id
-        self.evaluator = evaluator
-        self.activity_tracker = None
-        self.adapter = _t9.GoldenSearchAdapter()
+        self.context = context
+        self.game_id = str(game_id)
+        self.game_seed = derive_seed(context.master_seed, context.run_id, self.game_id, "game")
+        self.rng = __import__("random").Random(self.game_seed)
+        self.state = _t9.initial_state(topology=_t9.TORUS_9X9, komi=TORUS9_KOMI)
+        self.start_state = _t9.torus9_state_identity(self.state)
+        self.positions: list[_t9.Torus9SelfPlayPosition] = []
+        self.trace: list[int | str] = []
+        self.formal: str | None = None
+        self.technical: str | None = None
+        self.error: str | None = None
+        self._session: SequentialPUCTSession | None = None
+        self._root_noise: _t9.Torus9RootNoiseEvaluator | None = None
+        self._nn_evaluations = 0
 
+    def _finish(self) -> _t9.Torus9SelfPlayGameRecord:
+        record = _t9.Torus9SelfPlayGameRecord(
+            run_id=self.context.run_id,
+            game_id=self.game_id,
+            profile_id=self.context.profile_id,
+            profile_fingerprint=self.context.profile_fingerprint,
+            selfplay_contract_id=self.context.contract.contract_id,
+            selfplay_contract_fingerprint=self.context.contract.fingerprint,
+            model_checkpoint_label=self.context.model_checkpoint_label,
+            model_hash=self.context.expected_model_hash,
+            checkpoint_artifact_hash=self.context.checkpoint_artifact_hash,
+            git_commit=self.context.code_identity.git_commit_sha,
+            git_tree=self.context.code_identity.git_tree_sha,
+            git_worktree_clean=self.context.code_identity.working_tree_clean,
+            master_seed=self.context.master_seed,
+            game_seed=self.game_seed,
+            start_state=self.start_state,
+            positions=tuple(self.positions),
+            final_action_trace=tuple(self.trace),
+            formal_result=self.formal,
+            technical_termination=self.technical,
+            error=self.error,
+            nn_evaluations=self._nn_evaluations,
+        )
+        record.validate()
+        return record
 
-def _play_torus9_worker_game(
-    context: Torus9SelfPlayWorkerContext,
-    game_id: str,
-    client: InferenceClient,
-) -> _t9.Torus9SelfPlayGameRecord:
-    runner = _RemoteTorus9Runner(context, _RemoteTorus9Evaluator(client))
-    return runner.play_game(game_id)
+    def _start_search(self) -> None:
+        search_seed = derive_seed(self.game_seed, len(self.trace) + 1, "search")
+        self._root_noise = _t9.Torus9RootNoiseEvaluator(
+            None,
+            self.state,
+            seed=derive_seed(search_seed, "dirichlet"),
+            alpha=self.context.contract.dirichlet_alpha,
+        )
+        self._session = SequentialPUCTSession(
+            self.state,
+            self.context.contract.settings,
+            adapter=_t9.GoldenSearchAdapter(),
+            seed=search_seed,
+            evaluation_transform=self._root_noise.transform,
+        )
+
+    def advance(self) -> InferenceNeed | GameFinished:
+        if self.technical is not None or self.formal is not None:
+            return GameFinished(self._finish())
+        try:
+            while True:
+                if self._session is None:
+                    if len(self.trace) >= self.context.contract.watchdog:
+                        self.technical = "TRUNCATED_MOVE_LIMIT"
+                        self.error = "Torus 9×9 self-play watchdog reached 500 actions"
+                        return GameFinished(self._finish())
+                    self._start_search()
+                step = self._session.advance()
+                if isinstance(step, SearchEvaluationRequest):
+                    self._nn_evaluations += 1
+                    return InferenceNeed((step.state, step.legal_context))
+                if not isinstance(step, _t9.SearchResult):
+                    raise RuntimeError("Torus9 cooperative search returned malformed result")
+                ply = len(self.trace) + 1
+                search_seed = derive_seed(self.game_seed, ply, "search")
+                action = _t9._sample_action(
+                    step,
+                    temperature=1.0 if ply <= self.context.contract.temperature_until_ply else self.context.contract.temperature_after,
+                    rng=self.rng,
+                )
+                self.positions.append(_t9.Torus9SelfPlayPosition(
+                    ply=ply,
+                    state=_t9.torus9_state_identity(self.state),
+                    side_to_move=self.state.side_to_move.name,
+                    root_visits=tuple(int(value) for value in step.root_visits),
+                    pi=tuple(float(value) for value in step.pi),
+                    selected_action=action,
+                    search_seed=search_seed,
+                    model_hash=self.context.expected_model_hash,
+                ))
+                self.trace.append(action)
+                try:
+                    self.state = _t9.apply_action(self.state, action).after
+                except _t9.IllegalMoveError as exc:
+                    self.technical = "ERROR_ILLEGAL_PLAYER_ACTION"
+                    self.error = f"{type(exc).__name__}: {exc}"
+                    return GameFinished(self._finish())
+                self._session = None
+                self._root_noise = None
+                if self.state.is_terminal:
+                    self.formal = _t9.result_from_terminal(self.state).winner.value
+                    return GameFinished(self._finish())
+        except Exception as exc:
+            self.technical = "ERROR_SEARCH"
+            self.error = f"{type(exc).__name__}: {exc}"
+            self._session = None
+            return GameFinished(self._finish())
+
+    def resume(self, evaluation: Evaluation) -> None:
+        if self.technical is not None or self.formal is not None:
+            return
+        if self._session is None:
+            raise InferenceTransportError("Torus9 cooperative game is not waiting for inference")
+        try:
+            self._session.resume(evaluation)
+        except Exception as exc:
+            self.technical = "ERROR_SEARCH"
+            self.error = f"{type(exc).__name__}: {exc}"
+            self._session = None
 
 
 def _torus9_record_metrics(record: object) -> Mapping[str, object]:
@@ -154,16 +233,10 @@ class Torus9CentralInferenceOwner:
     def _evaluate_batch_tensors(self, payloads: Sequence[object]):
         if not payloads:
             raise ValueError("Torus9 central inference requires a non-empty batch")
-        if all(isinstance(payload, (bytes, bytearray, memoryview)) for payload in payloads):
-            row_bytes = 6 * _t9.TORUS9_POINT_COUNT * 4
-            if any(len(payload) != row_bytes for payload in payloads):
-                raise ValueError("Torus9 inference byte payload has the wrong size")
-            raw = bytearray().join(bytes(payload) for payload in payloads)
-            observations = torch.frombuffer(raw, dtype=torch.float32).reshape(
-                len(payloads), 6, _t9.TORUS9_POINT_COUNT
-            ).to(self.device)
-        else:
-            observations = torch.tensor(payloads, dtype=torch.float32, device=self.device)
+        observations = torch.stack(
+            [torch.as_tensor(payload, dtype=torch.float32) for payload in payloads],
+            dim=0,
+        ).to(self.device)
         if tuple(observations.shape[1:]) != (6, _t9.TORUS9_POINT_COUNT):
             raise ValueError("Torus9 inference payload must have shape [batch,6,81]")
         with torch.inference_mode():
@@ -179,6 +252,35 @@ class Torus9CentralInferenceOwner:
             raise ValueError("Torus9 central inference produced invalid probabilities")
         return outputs
 
+    def evaluate_shared_batch(self, observations: Any) -> SharedInferenceResult:
+        """Forward a preassembled staging tensor without queue payload copies."""
+        if tuple(observations.shape[1:]) != (6, _t9.TORUS9_POINT_COUNT):
+            raise ValueError("Torus9 shared observations must have shape [batch,6,81]")
+        h2d_started = time.perf_counter()
+        device_observations = observations.to(self.device, non_blocking=self.device.type == "cuda")
+        h2d_finished = time.perf_counter()
+        forward_started = time.perf_counter()
+        with torch.inference_mode():
+            policy_logits, value_logits = self.model(device_observations)
+            policies = torch.softmax(policy_logits, dim=1)
+            wdls = torch.softmax(value_logits, dim=1)
+        forward_finished = time.perf_counter()
+        if tuple(policies.shape) != (int(observations.shape[0]), TORUS9_ACTION_COUNT):
+            raise ValueError("Torus9 central policy head shape drift")
+        if tuple(wdls.shape) != (int(observations.shape[0]), 3):
+            raise ValueError("Torus9 central WDL head shape drift")
+        outputs = torch.cat((policies, wdls), dim=1)
+        if not bool(torch.isfinite(outputs).all()) or bool((outputs < 0.0).any()):
+            raise ValueError("Torus9 central inference produced invalid probabilities")
+        return SharedInferenceResult(
+            policy=policies,
+            wdl=wdls,
+            h2d_started_at=h2d_started,
+            h2d_finished_at=h2d_finished,
+            forward_started_at=forward_started,
+            forward_finished_at=forward_finished,
+        )
+
     def evaluate_batch(self, payloads: Sequence[object]) -> tuple[Evaluation, ...]:
         """Return the legacy in-process Evaluation representation."""
         outputs = self._evaluate_batch_tensors(payloads)
@@ -189,14 +291,6 @@ class Torus9CentralInferenceOwner:
             wdl_values = values[TORUS9_ACTION_COUNT:]
             rows.append(Evaluation(policy=policy_values, wdl=wdl_values))
         return tuple(rows)
-
-    def evaluate_batch_ipc(self, payloads: Sequence[object]) -> tuple[bytes, ...]:
-        """Return fixed-width float32 rows to minimize process IPC overhead."""
-        outputs = self._evaluate_batch_tensors(payloads).detach().to("cpu").contiguous()
-        raw = outputs.numpy().tobytes()
-        row_size = _TORUS9_EVALUATION_STRUCT.size
-        return tuple(raw[offset:offset + row_size] for offset in range(0, len(raw), row_size))
-
 
 def torus9_game_seed(master_seed: int, run_id: str, game_id: str) -> int:
     """Canonical scheduling-independent Torus9 game seed."""
@@ -267,18 +361,33 @@ class Torus9SelfPlayAdapter:
             profile_id=str(profile_id),
             expected_model_hash=model_hash(model),
         )
+        self.shared_memory = SharedMemorySpec(
+            observation_shape=(6, _t9.TORUS9_POINT_COUNT),
+            policy_size=TORUS9_ACTION_COUNT,
+            wdl_size=3,
+            write_input=_write_torus9_shared_observation,
+            decode_output=_decode_torus9_shared_output,
+        )
 
     @property
-    def worker_play(self):
-        return _play_torus9_worker_game
+    def infer_shared_batch(self):
+        return self.owner.evaluate_shared_batch
 
     @property
-    def infer_batch(self):
-        return self.owner.evaluate_batch_ipc
+    def worker_game_factory(self):
+        return _make_torus9_cooperative_game
 
     @property
     def record_metrics(self):
         return _torus9_record_metrics
+
+
+def _make_torus9_cooperative_game(
+    context: Torus9SelfPlayWorkerContext,
+    game_id: str,
+    client: InferenceClient,
+) -> _Torus9CooperativeGame:
+    return _Torus9CooperativeGame(context, game_id, client)
 
 
 # Keep the exact pre-Stage-2 public call shape. checkpoint_path is retained as
@@ -302,6 +411,8 @@ def run_torus9_selfplay_games(
     inference_batch_cap: int | None = None,
     inference_batch_wait_ms: float = 0.0,
     search_lanes_per_worker: int = 4,
+    active_games_per_worker: int | None = None,
+    total_active_contexts: int | None = None,
     inference_telemetry: MutableMapping[str, object] | None = None,
     execution_activity: MutableMapping[str, object] | None = None,
 ) -> tuple[_t9.Torus9SelfPlayGameRecord, ...]:
@@ -322,13 +433,13 @@ def run_torus9_selfplay_games(
         contract=contract,
         profile_id=profile_id,
     )
-    lanes_per_worker = int(search_lanes_per_worker) if coalescing else 1
-    if lanes_per_worker <= 0:
-        raise ValueError("Torus9 coalesced self-play requires positive search lanes per worker")
+    active_games = int(active_games_per_worker) if active_games_per_worker is not None else (int(search_lanes_per_worker) if coalescing else 1)
+    if active_games <= 0:
+        raise ValueError("Torus9 self-play requires positive active games per worker")
     batch_cap = (
         int(inference_batch_cap)
         if inference_batch_cap is not None
-        else (max(16, int(workers) * lanes_per_worker) if coalescing else 1)
+        else (max(16, int(workers) * active_games) if coalescing else 1)
     )
     if coalescing and batch_cap <= 1:
         raise ValueError("Coalesced Torus9 self-play requires batch_cap > 1")
@@ -341,17 +452,26 @@ def run_torus9_selfplay_games(
             inference_batch_wait_ms=wait_ms,
             device=str(torch.device(device)),
             process_start_method=start_method,
-            lanes_per_worker=lanes_per_worker,
+            # ``lanes_per_worker`` is reported only for compatibility. The
+            # shared production path uses cooperative game contexts.
+            lanes_per_worker=1,
+            active_games_per_worker=active_games,
+            total_active_contexts=total_active_contexts,
         )
     )
     raw_telemetry: dict[str, object] = {}
     records = engine.run(
         ids,
-        worker_play=adapter.worker_play,
+        worker_play=None,
         worker_context=adapter.worker_context,
-        infer_batch=adapter.infer_batch,
+        infer_batch=None,
         record_metrics=adapter.record_metrics,
         telemetry=raw_telemetry,
+        shared_memory=adapter.shared_memory,
+        infer_shared_batch=adapter.infer_shared_batch,
+        worker_game_factory=adapter.worker_game_factory,
+        active_games_per_worker=active_games,
+        total_active_contexts=total_active_contexts,
     )
 
     compatibility_inference = {

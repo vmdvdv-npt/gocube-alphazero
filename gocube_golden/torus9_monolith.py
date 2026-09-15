@@ -215,15 +215,41 @@ def build_torus9_observation_bundle(
         raise ValueError("Torus 9×9 legal-action mask length drift")
     own = state.side_to_move
     other = WHITE if own == BLACK else BLACK
-    values = torch.zeros((6, TORUS9_POINT_COUNT), dtype=torch.float32)
-    for point, stone in enumerate(state.stones):
-        values[0, point] = float(stone == own)
-        values[1, point] = float(stone == other)
-    values[2].fill_(1.0 if own == BLACK else -1.0)
-    values[3].fill_(1.0 if state.consecutive_passes == 1 else 0.0)
-    values[4] = torch.tensor(context.action_mask[:TORUS9_POINT_COUNT], dtype=torch.float32)
-    values[5].fill_(TORUS9_KOMI)
+    values = torch.empty((6, TORUS9_POINT_COUNT), dtype=torch.float32)
+    build_torus9_observation_into(state, values, legal_context=context)
     return Torus9Observation(values, context.action_mask, state.state_key)
+
+
+def build_torus9_observation_into(
+    state: GoldenState,
+    destination: torch.Tensor,
+    *,
+    legal_context: LegalActionContext | None = None,
+) -> None:
+    """Fill a preallocated float32 observation row, value-for-value.
+
+    This is the execution form of ``build_torus9_observation``.  Keeping the
+    canonical builder as a thin allocation wrapper makes the shared-memory
+    path and the ordinary scientific path use exactly the same channel logic.
+    """
+    if state.is_terminal:
+        raise ValueError("Terminal Torus 9×9 states must never be observed")
+    if state.topology.fingerprint != TORUS9_TOPOLOGY_FINGERPRINT:
+        raise ValueError("Observation requires canonical Torus 9×9")
+    if tuple(destination.shape) != (6, TORUS9_POINT_COUNT) or destination.dtype != torch.float32:
+        raise ValueError("Torus 9×9 destination must have shape [6,81] and float32 dtype")
+    context = legal_context if legal_context is not None else prepare_legal_actions(state)
+    context.assert_compatible(state)
+    own = state.side_to_move
+    other = WHITE if own == BLACK else BLACK
+    destination.zero_()
+    for point, stone in enumerate(state.stones):
+        destination[0, point] = float(stone == own)
+        destination[1, point] = float(stone == other)
+    destination[2].fill_(1.0 if own == BLACK else -1.0)
+    destination[3].fill_(1.0 if state.consecutive_passes == 1 else 0.0)
+    destination[4].copy_(torch.tensor(context.action_mask[:TORUS9_POINT_COUNT], dtype=torch.float32))
+    destination[5].fill_(TORUS9_KOMI)
 
 
 def build_torus9_observation(state: GoldenState, *, legal_context: LegalActionContext | None = None) -> torch.Tensor:
@@ -905,6 +931,9 @@ class Torus9RootNoiseEvaluator:
 
     def evaluate_prepared(self, state: GoldenState, legal_context: LegalActionContext) -> Evaluation:
         base = self.evaluator.evaluate_prepared(state, legal_context)
+        return self.transform(base, state, legal_context)
+
+    def transform(self, base: Evaluation, state: GoldenState, legal_context: LegalActionContext) -> Evaluation:
         if state.state_key != self.root_state_key:
             return base
         legal_indices = [TORUS9_PASS_INDEX if action == PASS else int(action) for action in legal_context.actions]

@@ -319,6 +319,7 @@ from .torus9 import (
     Torus9RollingReplay,
     Torus9Trainer,
     build_torus9_observation,
+    build_torus9_observation_into,
     build_torus9_observation_bundle,
     generate_torus9_evaluation_starts,
     graph_diameter,
