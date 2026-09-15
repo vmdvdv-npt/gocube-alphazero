@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 import gocube_golden as g
+from gocube_golden.search import SearchEvaluationRequest, SequentialPUCTSession
 
 
 def board(*, black=(), white=(), points=25):
@@ -39,6 +40,17 @@ class UniformEvaluator:
             policy=full_policy(state),
             wdl=self.wdl,
         )
+
+
+def session_search(state, settings, seed):
+    evaluator = UniformEvaluator()
+    session = SequentialPUCTSession(state, settings, seed=seed)
+    step = session.advance()
+    while isinstance(step, SearchEvaluationRequest):
+        step = session.resume(evaluator.evaluate(step.state))
+    assert isinstance(step, g.SearchResult)
+    assert session.result == step
+    return step, evaluator.calls
 
 
 def black_immediate_pass_win():
@@ -180,6 +192,24 @@ def test_same_contract_evaluator_and_seed_reproduce_root_visits_and_action():
     assert one.root_visits == two.root_visits
     assert one.action == two.action
     assert one.pi == two.pi
+
+
+@pytest.mark.parametrize(
+    "state_factory,settings,seed",
+    [
+        (g.initial_state, g.SearchSettings(simulations=7), 0),
+        (g.initial_state, g.SearchSettings(simulations=19, cpuct=0.75, fpu=-0.2), 37),
+        (black_immediate_pass_win, g.SearchSettings(simulations=13), 2026),
+        (white_immediate_pass_win, g.SearchSettings(simulations=11, deterministic_tie_break=False), 91),
+    ],
+)
+def test_cooperative_session_matches_canonical_puct_for_multiple_states_and_settings(state_factory, settings, seed):
+    state = state_factory()
+    expected_evaluator = UniformEvaluator()
+    expected = g.SequentialPUCT(settings).search(state, expected_evaluator, seed=seed)
+    actual, session_calls = session_search(state, settings, seed)
+    assert actual == expected
+    assert session_calls == expected.evaluator_calls
 
 
 def test_wdl_boundary_is_side_to_move_not_absolute_color():
