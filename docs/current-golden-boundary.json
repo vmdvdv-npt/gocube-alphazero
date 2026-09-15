@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "generated_for": "current-golden-boundary-20260915",
+  "schema_version": 2,
+  "generated_for": "current-golden-boundary-20260915-stage2-selfplay-engine",
   "reference": {
     "run": "torus9-golden-v3-20260914-run03",
     "merge_commit": "152be924db12530ff04b37266925838da191e948",
@@ -8,6 +8,7 @@
     "git_tree": "d4b438ff6b8442aae03ef16cafacbad4ad7ece14",
     "m1_baseline_git_sha": "d54de530fc4026d22409ca017f329f88a920dec2",
     "base_commit": "53946d0c84fca5a6f81a387bfd399ea62e34b088",
+    "stage2_base_commit": "1f80db26cfb8f46a7661cc13383cead65918a5f7",
     "profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
     "last_clean_resumable_boundary": 17,
     "m18_started": false
@@ -24,11 +25,14 @@
   "production_entrypoints": {
     "training_resume": "tools/continue_torus9_golden_m1_m100.py",
     "frozen_runtime": "tools/_frozen_continue_torus9_golden_m1_m100.py",
+    "torus9_public_facade": "gocube_golden/torus9.py",
+    "selfplay_engine": "gocube_golden/selfplay_engine.py",
+    "torus9_selfplay_adapter": "gocube_golden/torus9_selfplay.py",
+    "torus9_preserved_scientific_training": "gocube_golden/torus9_monolith.py",
     "arena_cli": "tools/arena.py",
     "arena_engine": "tools/arena_engine.py",
     "arena_profile": "tools/arena_profiles/torus9.py",
-    "gocube_protocol_v1": "alphazero/envs/gocube/integration/server.py",
-    "checkpoint_library_boundary": "gocube_golden.torus9"
+    "gocube_protocol_v1": "alphazero/envs/gocube/integration/server.py"
   },
   "scientific_contract": {
     "topology": "torus-9x9-row-major-v1",
@@ -98,11 +102,24 @@
       "komi": 0.5
     }
   },
+  "current_selfplay_execution": {
+    "engine": "gocube_golden.selfplay_engine.SelfPlayEngine",
+    "adapter": "gocube_golden.torus9_selfplay.Torus9SelfPlayAdapter",
+    "public_front_door": "gocube_golden.torus9.run_torus9_selfplay_games",
+    "workers": 16,
+    "os_process_workers": true,
+    "central_inference_owner": true,
+    "worker_cuda_model_copies": false,
+    "central_batching": true,
+    "default_coalesced_batch_cap": 16,
+    "seed_mapping": "derive_seed(master_seed, run_id, game_id, game)",
+    "result_order": "canonical sorted game_id",
+    "min_mean_inference_batch_rows_legion": 16.0,
+    "min_effective_cpu_cores_legion": 8.0,
+    "partial_failure_policy": "fail-closed"
+  },
   "current_arena_execution": {
-    "canonical_source": [
-      "tools/arena.py",
-      "tools/arena_engine.py"
-    ],
+    "canonical_source": ["tools/arena.py", "tools/arena_engine.py"],
     "games_minimum": 64,
     "workers": 16,
     "games_per_worker": 4,
@@ -118,10 +135,18 @@
       "kind": "temporary scientific adapter duplicate",
       "canonical_source": "configs/gocube/torus9_golden_current_v3.json",
       "policy": "fail closed on parity drift until direct profile resolution is migrated"
+    },
+    "gocube_golden/torus9_monolith.py::run_torus9_selfplay_games": {
+      "kind": "preserved pre-extraction source/reference implementation",
+      "public_production_front_door": false,
+      "policy": "do not use for current production; remove only with later legacy/training extraction"
     }
   },
   "component_status": {
-    "gocube_golden/torus9.py": "KEEP CURRENT",
+    "gocube_golden/selfplay_engine.py": "KEEP CURRENT EXECUTION ENGINE",
+    "gocube_golden/torus9_selfplay.py": "KEEP CURRENT TORUS9 SELFPLAY ADAPTER",
+    "gocube_golden/torus9.py": "KEEP CURRENT PUBLIC FACADE",
+    "gocube_golden/torus9_monolith.py": "KEEP TEMPORARILY FOR UNCHANGED SCIENTIFIC/TRAINING/REPLAY/CHECKPOINT IMPLEMENTATION",
     "gocube_golden/torus9_contract.py": "KEEP CURRENT",
     "gocube_golden/neural.py": "KEEP SHARED",
     "gocube_golden/rules.py": "KEEP SHARED",
@@ -135,9 +160,7 @@
     "alphazero/GenericPlayers.py": "KEEP TEMPORARILY FOR MIGRATION",
     "alphazero/MCTS.pyx": "KEEP TEMPORARILY FOR MIGRATION",
     "alphazero/Coach.py": "LEGACY — REMOVE IN LATER STAGE",
-    "alphazero/SelfPlayAgent.pyx": "LEGACY — REMOVE IN LATER STAGE",
-    "configs/gocube/torus9_golden_learning_v1.json": "LEGACY — REMOVE IN LATER STAGE",
-    "configs/gocube/torus9_ownership_ab_v1.json": "LEGACY — REMOVE IN LATER STAGE"
+    "alphazero/SelfPlayAgent.pyx": "LEGACY — REMOVE IN LATER STAGE"
   },
   "external_artifacts": {
     "reference_run_path": "runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03",
@@ -147,8 +170,9 @@
   },
   "behavior": {
     "scientific_semantics_changed": false,
-    "execution_architecture_changed": false,
-    "forbidden_legacy_komi_metadata_removed": true,
-    "m17_resume_lineage_preserved": true
+    "training_semantics_changed": false,
+    "selfplay_execution_architecture_changed": true,
+    "m17_resume_lineage_preserved": true,
+    "m18_started": false
   }
 }
