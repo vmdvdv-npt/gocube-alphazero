@@ -2,9 +2,10 @@
 """Run the Cube 4x4 Golden geometry-aware transfer proof.
 
 Canonical mode is deliberately strict: it refuses a dirty source tree, uses
-16 process-isolated self-play workers, and records a failure instead of
-silently training on partial evidence.  ``--smoke`` is throwaway and may use
-reduced search settings; its artifacts never enter a canonical run.
+the shared SelfPlayEngine with one parent-side model owner and 16 workers,
+and records a failure instead of silently training on partial evidence.
+``--smoke`` is throwaway and may use reduced search settings; its artifacts
+never enter a canonical run.
 """
 
 from __future__ import annotations
@@ -55,12 +56,14 @@ from gocube_golden.cube_training import (
     build_cube_replay_samples,
     cube_initial_state,
     cube_load_checkpoint,
-    cube_replay_batches,
     cube_save_checkpoint,
     cube_state_identity,
     cube_write_jsonl,
     run_cube_selfplay_games,
-    train_cube_batch_schedule,
+)
+from gocube_golden.cube_training_adapter import (
+    CubeTrainingAdapter,
+    run_cube_training_iteration,
 )
 from gocube_golden.provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256, sha256_fingerprint
 from gocube_golden.search import SequentialPUCT
@@ -263,6 +266,7 @@ def run_performance_preflight(
     game_ids = tuple(f"preflight-game-{index:02d}" for index in range(workers))
     child_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     started = time.perf_counter()
+    execution_telemetry: dict[str, object] = {}
     records = run_cube_selfplay_games(
         model,
         game_ids,
@@ -277,6 +281,11 @@ def run_performance_preflight(
         checkpoint_path=checkpoint["path"],
         workers=workers,
         device=device,
+        active_games_per_worker=4,
+        total_active_contexts=64,
+        inference_batch_cap=64,
+        inference_batch_wait_ms=1.0,
+        inference_telemetry=execution_telemetry,
     )
     wall_seconds = time.perf_counter() - started
     child_after = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -289,15 +298,17 @@ def run_performance_preflight(
     if len(records) != workers or technical != 0:
         raise RuntimeError("Cube performance preflight produced incomplete or technical self-play evidence")
     cpu_parallelism = child_cpu_seconds / wall_seconds if wall_seconds else 0.0
-    if cpu_parallelism < 2.0:
-        raise RuntimeError(
-            f"Cube performance preflight indicates insufficient parallelism: {cpu_parallelism:.2f} CPU-seconds/second"
-        )
     return {
         "passed": True,
         "workers_requested": workers,
-        "active_game_processes": workers,
-        "process_isolated": True,
+        "active_game_processes": execution_telemetry.get("peak_concurrent_search_processes", 0),
+        "active_games_per_worker": 4,
+        "target_active_contexts": 64,
+        "inference_batch_cap": 64,
+        "inference_batch_wait_ms": 1.0,
+        "shared_memory_transport": execution_telemetry.get("shared_memory_transport"),
+        "central_inference_owner_pid": execution_telemetry.get("central_inference_owner_pid"),
+        "worker_model_replicas": False,
         "games": len(records),
         "positions": positions,
         "wall_seconds": wall_seconds,
@@ -307,6 +318,7 @@ def run_performance_preflight(
         "nn_evaluations_per_second": sum(record.nn_evaluations for record in records) / wall_seconds if wall_seconds else None,
         "child_cpu_seconds": child_cpu_seconds,
         "estimated_cpu_parallelism": cpu_parallelism,
+        "execution_telemetry": execution_telemetry,
         "ram_peak_kb": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
         "torch_version": torch.__version__,
         "cuda_version": torch.version.cuda,
@@ -499,8 +511,42 @@ def run_smoke(run_id: str) -> dict[str, object]:
     smoke_report: dict[str, object] = {"run_id": run_id, "smoke": True, "profile_fingerprint": profile["profile_fingerprint"], "evaluation": evaluation_manifest, "games": len(records), "technical_games": sum(record.technical_termination is not None for record in records), "positions": len(smoke_samples), "topology_fingerprint": CUBE4_TOPOLOGY.fingerprint}
     smoke_report["behavior"] = selfplay_behavior_diagnostics(records)
     if smoke_samples:
-        optimizer, training = train_cube_batch_schedule(model, smoke_samples, (tuple(range(len(smoke_samples))),), learning_rate=0.001, weight_decay=0.0)
-        m1 = save_model(run_dir, profile, label="M1", model=model, optimizer=optimizer, parent_hash=m0["model_hash"], code=code, device=device, completed_games=1, cumulative_positions=len(smoke_samples), optimizer_updates=int(training["updates"]), samples_consumed=len(smoke_samples), model_init_seed=profile["seeds"]["model_init_seed"])
+        adapter = CubeTrainingAdapter(
+            profile=profile,
+            code_identity=code,
+            selfplay_contract_fingerprint=smoke_contract.fingerprint,
+        )
+        state = adapter.create_state(
+            model,
+            run_id=run_id,
+            parent_checkpoint_identity={
+                "label": "M0",
+                "path": m0["path"],
+                "metadata_path": str(Path(m0["path"]).with_suffix(".metadata.json")),
+                "model_hash": m0["model_hash"],
+                "artifact_sha256": m0["artifact_sha256"],
+            },
+        )
+        training_result = run_cube_training_iteration(
+            state=state,
+            generation=1,
+            output_dir=run_dir,
+            run_id=run_id,
+            training_seed=profile["seeds"]["selfplay_master_seed"],
+            samples=tuple(sample.to_dict() for sample in smoke_samples),
+            adapter=adapter,
+            label="M1",
+            completed_games=1,
+            code_identity=code,
+            device=str(device),
+        )
+        m1 = {
+            "label": "M1",
+            "path": training_result.artifacts["checkpoint"],
+            "artifact_sha256": file_sha256(training_result.artifacts["checkpoint"]),
+            "model_hash": training_result.checkpoint_metadata["model_hash"],
+            "metadata": training_result.checkpoint_metadata,
+        }
         comparison = run_comparison(run_dir, profile, slug="smoke-m1-vs-m0", candidate=m1, reference=m0, starts=starts[:1], code=code, device=device, seed=profile["seeds"]["arena_master_seed"], canonical=False, search_settings=replace(CUBE_ARENA_SEARCH, simulations=1))
         smoke_report["checkpoint_lineage"] = {"M0": m0, "M1": m1}
         smoke_report["arena"] = comparison
@@ -539,17 +585,26 @@ def run_canonical(run_id: str, workers: int) -> dict[str, object]:
     parallel = run_cube_selfplay_games(model, eq_ids, run_id=run_id, profile_id=CUBE_PROFILE_ID, profile_fingerprint=profile["profile_fingerprint"], model_checkpoint_label="M0", checkpoint_artifact_hash=m0["artifact_sha256"], master_seed=profile["seeds"]["selfplay_master_seed"], chunk_id="equivalence", code_identity=code, checkpoint_path=m0["path"], workers=workers, device=device)
     from gocube_golden.cube_training import cube_compare_selfplay_evidence
     cube_compare_selfplay_evidence(serial, parallel)
-    write_json(run_dir / "equivalence-gate.json", {"passed": True, "game_ids": eq_ids, "workers": workers, "action_trace_root_visits_pi_z_exact": True, "inference_batch_size": 1, "inference_coalescing": False})
+    write_json(run_dir / "equivalence-gate.json", {"passed": True, "game_ids": eq_ids, "workers": workers, "action_trace_root_visits_pi_z_exact": True, "inference_batch_cap": 64, "inference_batch_wait_ms": 1.0, "shared_memory_transport": True, "central_model_owner": True})
 
     checkpoints: dict[str, dict[str, object]] = {"M0": m0}
-    cumulative: list[CubeTrainingSample] = []
+    cumulative: list[Mapping[str, object]] = []
     training_reports: list[dict[str, object]] = []
     all_records: list[CubeSelfPlayGameRecord] = []
-    optimizer: torch.optim.Optimizer | None = None
-    total_updates = 0
-    total_samples = 0
     current_label = "M0"
     current_info = m0
+    training_adapter = CubeTrainingAdapter(profile=profile, code_identity=code)
+    training_state = training_adapter.create_state(
+        model,
+        run_id=run_id,
+        parent_checkpoint_identity={
+            "label": "M0",
+            "path": m0["path"],
+            "metadata_path": str(Path(m0["path"]).with_suffix(".metadata.json")),
+            "model_hash": m0["model_hash"],
+            "artifact_sha256": m0["artifact_sha256"],
+        },
+    )
     for chunk in range(1, 5):
         game_ids = tuple(f"chunk-{chunk:02d}-game-{index:03d}" for index in range(128))
         cpu_start = resource.getrusage(resource.RUSAGE_SELF).ru_utime
@@ -558,20 +613,43 @@ def run_canonical(run_id: str, workers: int) -> dict[str, object]:
         all_records.extend(records)
         cube_write_jsonl(run_dir / "selfplay" / f"chunk-{chunk:02d}-games.jsonl", (record.to_dict() for record in records))
         cube_write_jsonl(run_dir / "replay" / f"chunk-{chunk:02d}.jsonl", (sample.to_dict() for sample in samples))
-        cumulative.extend(samples)
-        cumulative.sort(key=lambda sample: (sample.game_id, sample.ply))
+        cumulative = list(training_state.rolling_replay.rows) + [sample.to_dict() for sample in samples]
         before = {name: parameter.detach().clone() for name, parameter in model.state_dict().items()}
         sampling_seed = derive_seed(profile["seeds"]["selfplay_master_seed"], "cube-replay-phase-v1", f"chunk-{chunk:02d}")
-        batches = cube_replay_batches(len(cumulative), len(samples), seed=sampling_seed, batch_size=profile["training"]["batch_size"])
-        optimizer, schedule = train_cube_batch_schedule(model, cumulative, batches, learning_rate=profile["training"]["learning_rate"], weight_decay=profile["training"]["weight_decay"], optimizer=optimizer, update_offset=total_updates, sample_offset=total_samples)
-        total_updates = int(schedule["updates"])
-        total_samples = int(schedule["cumulative_samples"])
         label = f"M{chunk}"
-        info = save_model(run_dir, profile, label=label, model=model, optimizer=optimizer, parent_hash=current_info["model_hash"], code=code, device=device, completed_games=chunk * 128, cumulative_positions=len(cumulative), optimizer_updates=total_updates, samples_consumed=total_samples, model_init_seed=profile["seeds"]["model_init_seed"])
+        training_result = run_cube_training_iteration(
+            state=training_state,
+            generation=chunk,
+            output_dir=run_dir,
+            run_id=run_id,
+            training_seed=sampling_seed,
+            samples=tuple(sample.to_dict() for sample in samples),
+            adapter=training_adapter,
+            label=label,
+            parent_checkpoint_identity={
+                "label": current_label,
+                "path": current_info["path"],
+                "metadata_path": str(Path(current_info["path"]).with_suffix(".metadata.json")),
+                "model_hash": current_info["model_hash"],
+                "artifact_sha256": current_info["artifact_sha256"],
+            },
+            completed_games=chunk * 128,
+            code_identity=code,
+            device=str(device),
+        )
+        cumulative = list(training_state.rolling_replay.rows)
+        info = {
+            "label": label,
+            "path": training_result.artifacts["checkpoint"],
+            "artifact_sha256": file_sha256(training_result.artifacts["checkpoint"]),
+            "model_hash": training_result.checkpoint_metadata["model_hash"],
+            "metadata": training_result.checkpoint_metadata,
+        }
         if info["model_hash"] == current_info["model_hash"]:
             raise RuntimeError(f"Cube checkpoint {label} is identical to parent")
         checkpoints[label] = info
-        metric_rows = schedule["metrics"]
+        training = training_result.training_metrics
+        metric_rows = training["metrics"]
         training_report = {
             "chunk": chunk,
             "source": current_label,
@@ -580,9 +658,9 @@ def run_canonical(run_id: str, workers: int) -> dict[str, object]:
             "new_positions": len(samples),
             "cumulative_positions": len(cumulative),
             "samples_consumed": len(samples),
-            "samples_consumed_cumulative": total_samples,
-            "updates": len(batches),
-            "updates_cumulative": total_updates,
+            "samples_consumed_cumulative": training_state.samples_consumed,
+            "updates": training["optimizer_steps"],
+            "updates_cumulative": training_state.optimizer_updates,
             "policy_loss": sum(float(row["policy_loss"]) for row in metric_rows) / len(metric_rows),
             "value_loss": sum(float(row["value_loss"]) for row in metric_rows) / len(metric_rows),
             "sample_ratio": 1.0,

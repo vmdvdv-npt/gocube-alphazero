@@ -97,6 +97,7 @@ from .search import (
     SearchError,
     SearchResult,
     SequentialPUCT,
+    SequentialPUCTSession,
     SolveStatus,
     solve_exact,
     wdl_to_side_to_move_utility,
@@ -197,6 +198,7 @@ from .cube_neural import (
     SelfPlayCubeRootNoiseEvaluator,
     build_cube_action_mask,
     build_cube_observation,
+    build_cube_observation_into,
     build_cube_observation_bundle,
     cube_model_hash,
     configure_single_thread_inference,
@@ -225,6 +227,22 @@ from .cube_training import (
     cube_state_identity,
     cube_z_target,
     run_cube_selfplay_games,
+)
+from .cube_selfplay import (
+    CubeCentralInferenceOwner,
+    CubeSelfPlayAdapter,
+    CubeSelfPlayExecutionConfig,
+    CubeSelfPlayWorkerContext,
+    run_cube_selfplay_games_shared,
+)
+from .cube_training_adapter import (
+    CUBE_BATCH_SIZE,
+    CUBE_CHUNKS,
+    CUBE_GAMES_PER_CHUNK,
+    CUBE_MODEL_INIT_SEED,
+    CubeCumulativeReplay,
+    CubeTrainingAdapter,
+    run_cube_training_iteration,
 )
 from .cube_arena import (
     CUBE_ARENA_CONTRACT_ID,

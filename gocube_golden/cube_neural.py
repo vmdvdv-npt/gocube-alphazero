@@ -199,16 +199,39 @@ def build_cube_observation_bundle(
         legal_action_mask=legal_action_mask,
     )
     mask = context.action_mask
+    values = torch.empty((CUBE_OBSERVATION_CHANNEL_COUNT, CUBE_POINT_COUNT), dtype=torch.float32)
+    _write_cube_observation_values(state, topology, context, values)
+    return CubeObservation(values, mask, state.state_key)
+
+
+def _write_cube_observation_values(
+    state: GoldenState,
+    topology: CubeGoldenTopology,
+    context: LegalActionContext,
+    destination: Tensor,
+) -> Tensor:
+    """Write the canonical Cube observation representation into ``destination``.
+
+    Both the allocating and shared-memory paths use this helper so that the
+    execution migration cannot introduce a second observation semantics.
+    """
+    if tuple(destination.shape) != (CUBE_OBSERVATION_CHANNEL_COUNT, CUBE_POINT_COUNT):
+        raise ValueError("Cube observation destination must have shape [15,96]")
+    if destination.dtype != torch.float32:
+        raise ValueError("Cube observation destination must be float32")
+    if destination.device.type != "cpu":
+        raise ValueError("Cube shared observation destination must be CPU-resident")
+    mask = context.action_mask
+    destination.zero_()
     own = int(state.side_to_move)
     other = int(WHITE if state.side_to_move == BLACK else BLACK)
-    values = torch.zeros((CUBE_OBSERVATION_CHANNEL_COUNT, CUBE_POINT_COUNT), dtype=torch.float32)
     for point, stone in enumerate(state.stones):
-        values[0, point] = float(int(stone) == own)
-        values[1, point] = float(int(stone) == other)
-    values[2].fill_(1.0 if state.side_to_move == BLACK else -1.0)
-    values[3].fill_(1.0 if state.consecutive_passes == 1 else 0.0)
-    values[4] = torch.tensor(mask[:CUBE_POINT_COUNT], dtype=torch.float32)
-    values[5].fill_(0.5)
+        destination[0, point] = float(int(stone) == own)
+        destination[1, point] = float(int(stone) == other)
+    destination[2].fill_(1.0 if state.side_to_move == BLACK else -1.0)
+    destination[3].fill_(1.0 if state.consecutive_passes == 1 else 0.0)
+    destination[4].copy_(torch.as_tensor(mask[:CUBE_POINT_COUNT], dtype=torch.float32))
+    destination[5].fill_(0.5)
     for point in range(CUBE_POINT_COUNT):
         geometry = topology.geometry(point)
         class_channel = {
@@ -216,17 +239,41 @@ def build_cube_observation_bundle(
             FACE_EDGE: 7,
             FACE_CORNER: 8,
         }[geometry.geometry_class]
-        values[class_channel, point] = 1.0
+        destination[class_channel, point] = 1.0
         bucket_channel = {
             "corner_distance_0": 9,
             "corner_distance_1": 10,
             "corner_distance_2": 11,
             "corner_distance_3_plus": 12,
         }[geometry.corner_distance_bucket]
-        values[bucket_channel, point] = 1.0
-        values[13, point] = float(geometry.has_cross_face_neighbor)
-        values[14, point] = float(geometry.num_cross_face_neighbors) / 4.0
-    return CubeObservation(values, mask, state.state_key)
+        destination[bucket_channel, point] = 1.0
+        destination[13, point] = float(geometry.has_cross_face_neighbor)
+        destination[14, point] = float(geometry.num_cross_face_neighbors) / 4.0
+    return destination
+
+
+def build_cube_observation_into(
+    state: GoldenState,
+    destination: Tensor,
+    *,
+    topology: CubeGoldenTopology = CUBE4_TOPOLOGY,
+    legal_actions: Sequence[int | str] | LegalActionContext | None = None,
+    legal_context: LegalActionContext | None = None,
+    legal_action_mask: Sequence[bool] | None = None,
+) -> None:
+    """Write the canonical float32 Cube observation into a preallocated tensor."""
+    increment("observation_builds")
+    if state.is_terminal:
+        raise ValueError("Terminal Golden Cube states must never be passed to the NN")
+    if topology.fingerprint != CUBE4_TOPOLOGY.fingerprint or state.topology.fingerprint != topology.fingerprint:
+        raise ValueError("Cube observation requires canonical Golden Cube topology")
+    context = _provided_legal_context(
+        state,
+        legal_actions=legal_actions,
+        legal_context=legal_context,
+        legal_action_mask=legal_action_mask,
+    )
+    _write_cube_observation_values(state, topology, context, destination)
 
 
 def build_cube_observation(

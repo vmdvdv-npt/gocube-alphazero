@@ -12,7 +12,6 @@ import hashlib
 import importlib
 import json
 import math
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 import random
 from typing import Any, Iterable, Mapping, Sequence
@@ -32,7 +31,6 @@ from .cube_neural import (
     cube_count_parameters,
     cube_model_hash,
     GoldenCubeGraphNetV1,
-    configure_single_thread_inference,
 )
 from .cube_topology import CUBE4_TOPOLOGY
 from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
@@ -621,71 +619,6 @@ class CubeSelfPlayRunner:
         return record
 
 
-_PROCESS_MODEL: nn.Module | None = None
-_PROCESS_CONFIG: dict[str, object] = {}
-
-
-def _cube_process_worker_init(
-    checkpoint_path: str,
-    expected_hash: str,
-    run_id: str,
-    profile_id: str,
-    profile_fingerprint: str,
-    label: str,
-    artifact: str,
-    master_seed: int,
-    chunk_id: str,
-    code_commit: str,
-    code_tree: str,
-    code_clean: bool,
-    device: str,
-    contract: Mapping[str, object],
-    allow_noncanonical_contract: bool,
-) -> None:
-    global _PROCESS_MODEL, _PROCESS_CONFIG
-    configure_single_thread_inference()
-    worker_device = torch.device(device)
-    model = GoldenCubeGraphNetV1().to(worker_device)
-    cube_load_checkpoint(checkpoint_path, model=model, expected={"model_hash": expected_hash}, device=worker_device)
-    if cube_model_hash(model) != expected_hash:
-        raise RuntimeError("Cube worker loaded the wrong model hash")
-    _PROCESS_MODEL = model
-    _PROCESS_CONFIG = {
-        "run_id": run_id,
-        "profile_id": profile_id,
-        "profile_fingerprint": profile_fingerprint,
-        "label": label,
-        "artifact": artifact,
-        "master_seed": master_seed,
-        "chunk_id": chunk_id,
-        "device": str(worker_device),
-        "contract": dict(contract),
-        "allow_noncanonical_contract": allow_noncanonical_contract,
-        "code": CodeIdentity(code_commit, code_tree, code_clean),
-    }
-
-
-def _cube_process_play_game(game_id: str) -> CubeSelfPlayGameRecord:
-    if _PROCESS_MODEL is None:
-        raise RuntimeError("Cube self-play process worker is not initialized")
-    evaluator = GoldenCubeNeuralEvaluator(_PROCESS_MODEL, device=str(_PROCESS_CONFIG["device"]))
-    runner = CubeSelfPlayRunner(
-        _PROCESS_MODEL,
-        run_id=str(_PROCESS_CONFIG["run_id"]),
-        profile_id=str(_PROCESS_CONFIG["profile_id"]),
-        profile_fingerprint=str(_PROCESS_CONFIG["profile_fingerprint"]),
-        model_checkpoint_label=str(_PROCESS_CONFIG["label"]),
-        checkpoint_artifact_hash=str(_PROCESS_CONFIG["artifact"]),
-        master_seed=int(_PROCESS_CONFIG["master_seed"]),
-        chunk_id=str(_PROCESS_CONFIG["chunk_id"]),
-        contract=CubeSelfPlaySearchContract(**_PROCESS_CONFIG["contract"]),  # type: ignore[arg-type]
-        allow_noncanonical_contract=bool(_PROCESS_CONFIG["allow_noncanonical_contract"]),
-        code_identity=_PROCESS_CONFIG["code"],  # type: ignore[arg-type]
-        evaluator=evaluator,
-    )
-    return runner.play_game(game_id)
-
-
 def run_cube_selfplay_games(
     model: nn.Module,
     game_ids: Sequence[str],
@@ -697,52 +630,50 @@ def run_cube_selfplay_games(
     checkpoint_artifact_hash: str,
     master_seed: int,
     chunk_id: str = "default",
-    code_identity: CodeIdentity,
-    checkpoint_path: str | Path | None,
-    workers: int = 1,
+    code_identity: CodeIdentity | None = None,
+    checkpoint_path: str | Path | None = None,
+    workers: int = 16,
+    active_games_per_worker: int = 4,
+    total_active_contexts: int | None = 64,
+    inference_batch_cap: int = 64,
+    inference_batch_wait_ms: float = 1.0,
     device: str | torch.device = "cpu",
     contract: CubeSelfPlaySearchContract = DEFAULT_CUBE_SELFPLAY_CONTRACT,
     allow_noncanonical_contract: bool = False,
+    inference_telemetry: MutableMapping[str, object] | None = None,
+    execution_activity: MutableMapping[str, object] | None = None,
 ) -> tuple[CubeSelfPlayGameRecord, ...]:
-    ordered = tuple(sorted(str(game_id) for game_id in game_ids))
-    if len(ordered) != len(set(ordered)) or workers <= 0:
-        raise ValueError("Cube self-play game IDs must be unique and workers positive")
-    if workers == 1:
-        evaluator = GoldenCubeNeuralEvaluator(model, device=device)
-        runner = CubeSelfPlayRunner(
-            model,
-            run_id=run_id,
-            profile_id=profile_id,
-            profile_fingerprint=profile_fingerprint,
-            model_checkpoint_label=model_checkpoint_label,
-            checkpoint_artifact_hash=checkpoint_artifact_hash,
-            master_seed=master_seed,
-            chunk_id=chunk_id,
-            contract=contract,
-            allow_noncanonical_contract=allow_noncanonical_contract,
-            code_identity=code_identity,
-            device=device,
-            evaluator=evaluator,
-        )
-        return tuple(runner.play_game(game_id) for game_id in ordered)
-    if checkpoint_path is None:
-        raise ValueError("Process Cube self-play requires an immutable checkpoint path")
-    with ProcessPoolExecutor(
-        max_workers=int(workers),
-        mp_context=importlib.import_module("multiprocessing").get_context(
-            "fork" if torch.device(device).type == "cpu" else "spawn"
-        ),
-        initializer=_cube_process_worker_init,
-        initargs=(
-            str(checkpoint_path), cube_model_hash(model), run_id, profile_id,
-            profile_fingerprint, model_checkpoint_label, checkpoint_artifact_hash,
-            master_seed, chunk_id, code_identity.git_commit_sha, code_identity.git_tree_sha,
-            code_identity.working_tree_clean, str(device), asdict(contract),
-            allow_noncanonical_contract,
-        ),
-    ) as pool:
-        records = tuple(pool.map(_cube_process_play_game, ordered))
-    return records
+    """Run Cube self-play through the universal shared execution rails.
+
+    ``checkpoint_path`` remains accepted for callers and provenance, but the
+    current path deliberately keeps the one model instance in the parent
+    inference owner instead of loading model replicas in workers.
+    """
+    from .cube_selfplay import run_cube_selfplay_games_shared
+
+    return run_cube_selfplay_games_shared(
+        model,
+        game_ids,
+        run_id=run_id,
+        profile_id=profile_id,
+        profile_fingerprint=profile_fingerprint,
+        model_checkpoint_label=model_checkpoint_label,
+        checkpoint_artifact_hash=checkpoint_artifact_hash,
+        master_seed=master_seed,
+        chunk_id=chunk_id,
+        code_identity=code_identity,
+        checkpoint_path=checkpoint_path,
+        workers=workers,
+        active_games_per_worker=active_games_per_worker,
+        total_active_contexts=total_active_contexts,
+        inference_batch_cap=inference_batch_cap,
+        inference_batch_wait_ms=inference_batch_wait_ms,
+        device=device,
+        contract=contract,
+        allow_noncanonical_contract=allow_noncanonical_contract,
+        inference_telemetry=inference_telemetry,
+        execution_activity=execution_activity,
+    )
 
 
 def cube_compare_selfplay_evidence(
