@@ -103,7 +103,8 @@ The generic engine reports wall time, games/sec, moves/sec, NN rows/sec, forward
 ```text
 base SHA: 1b775d15659286b8d6de6506a190dc23a1818b28
 branch: codex/stage5-cube-shared-rails
-final SHA: pending commit
+implementation commit: 1cd7397
+final branch SHA: determined after publication
 PR: pending push
 CI run: pending final push
 ```
