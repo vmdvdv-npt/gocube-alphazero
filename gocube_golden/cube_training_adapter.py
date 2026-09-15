@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 import copy
+import importlib
 import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-import torch
+torch = importlib.import_module("torch")
 
 from training_engine import (
     CheckpointContext,

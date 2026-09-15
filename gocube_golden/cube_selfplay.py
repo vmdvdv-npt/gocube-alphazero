@@ -8,12 +8,13 @@ transport, central batching and fail-closed lifecycle handling.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib
 import math
 import random
 import time
 from typing import Any, Mapping, MutableMapping, Sequence
 
-import torch
+torch = importlib.import_module("torch")
 
 from .cube_neural import (
     CUBE_ACTION_COUNT,
