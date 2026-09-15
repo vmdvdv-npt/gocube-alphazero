@@ -11,6 +11,10 @@ import time
 from typing import Any, Mapping, MutableMapping, Sequence
 
 from .neural import model_hash
+from .execution_reference import (
+    assess_legion_torus9_selfplay_execution,
+    compare_legion_torus9_selfplay_performance,
+)
 from .provenance import CodeIdentity, capture_code_identity, derive_seed
 from .search import Evaluation
 from .selfplay_engine import (
@@ -375,6 +379,8 @@ def run_torus9_selfplay_games(
     total_active_contexts: int | None = None,
     inference_telemetry: MutableMapping[str, object] | None = None,
     execution_activity: MutableMapping[str, object] | None = None,
+    execution_override_reason: str | None = None,
+    execution_reference_interactive: bool | None = None,
 ) -> tuple[_t9.Torus9SelfPlayGameRecord, ...]:
     if workers <= 0 or len(set(game_ids)) != len(game_ids):
         raise ValueError("Torus9 self-play workers/game IDs are invalid")
@@ -403,6 +409,29 @@ def run_torus9_selfplay_games(
     if coalescing and batch_cap <= 1:
         raise ValueError("Coalesced Torus9 self-play requires batch_cap > 1")
     wait_ms = float(inference_batch_wait_ms) if coalescing else 0.0
+    execution_reference = assess_legion_torus9_selfplay_execution(
+        games=len(ids),
+        workers=int(workers),
+        active_games_per_worker=active_games,
+        total_active_contexts=total_active_contexts,
+        batch_cap=batch_cap,
+        wait_ms=wait_ms,
+        coalescing=coalescing,
+        shared_memory=True,
+        central_inference_owner="parent",
+        device=str(torch.device(device)),
+        execution_override_reason=execution_override_reason,
+        interactive=execution_reference_interactive,
+    )
+    reference_fields = {
+        "execution_reference_status": execution_reference.status,
+        "execution_override_reason": execution_reference.override_reason,
+        "execution_reference": execution_reference.as_dict(),
+    }
+    if inference_telemetry is not None:
+        inference_telemetry.update(reference_fields)
+    if execution_activity is not None:
+        execution_activity.update(reference_fields)
     start_method = "spawn" if torch.device(device).type == "cuda" else "fork"
     engine = SelfPlayEngine(
         SelfPlayEngineConfig(
@@ -432,6 +461,22 @@ def run_torus9_selfplay_games(
         active_games_per_worker=active_games,
         total_active_contexts=total_active_contexts,
     )
+    engine_wall_time = float(raw_telemetry.get("wall_time_sec", 0.0))
+    engine_moves = sum(
+        len(record.final_action_trace)
+        for record in records
+        if isinstance(record, _t9.Torus9SelfPlayGameRecord)
+    )
+    performance_reference = compare_legion_torus9_selfplay_performance(
+        games=len(ids),
+        effective_context_ceiling=execution_reference.effective_context_ceiling,
+        moves_per_sec=(engine_moves / engine_wall_time if engine_wall_time else 0.0),
+        mean_batch_rows=float(raw_telemetry.get("mean_inference_batch_rows", 0.0)),
+        p95_batch_rows=float(raw_telemetry.get("p95_inference_batch_rows", 0.0)),
+        max_batch_rows=int(raw_telemetry.get("max_inference_batch_rows", 0)),
+    )
+    raw_telemetry.update(reference_fields)
+    raw_telemetry["performance_reference"] = performance_reference
 
     compatibility_inference = {
         "mode": "central-process-batched" if coalescing else "central-process-uncoalesced",
@@ -458,8 +503,11 @@ def run_torus9_selfplay_games(
     }
     if inference_telemetry is not None:
         inference_telemetry.update(compatibility_inference)
+        inference_telemetry["performance_reference"] = performance_reference
     if execution_activity is not None:
         execution_activity.update(compatibility_execution)
+        execution_activity.update(reference_fields)
+        execution_activity["performance_reference"] = performance_reference
     typed_records: list[_t9.Torus9SelfPlayGameRecord] = []
     for record in records:
         if not isinstance(record, _t9.Torus9SelfPlayGameRecord):

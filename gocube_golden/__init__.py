@@ -31,6 +31,17 @@ from .cube_training import (
     run_cube_selfplay_games,
 )
 from .cube_training_adapter import CubeTrainingAdapter, run_cube_training_iteration
+from .execution_reference import (
+    LEGION_SELFPLAY_PERFORMANCE_DEGRADED_DELTA_PCT,
+    LEGION_TORUS9_SELFPLAY_PERFORMANCE_REFERENCE,
+    LEGION_TORUS9_SELFPLAY_UNDERFILLED_REFERENCE,
+    LegionSelfPlayExecutionAssessment,
+    LegionSelfPlayPerformanceReference,
+    assess_legion_torus9_selfplay_execution,
+    compare_legion_torus9_selfplay_performance,
+    effective_active_context_ceiling,
+    format_legion_selfplay_advisory,
+)
 from .neural import GoldenGraphNetV1, build_observation, model_hash
 from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
 from .result import Winner

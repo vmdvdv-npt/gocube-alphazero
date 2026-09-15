@@ -95,6 +95,10 @@ def test_empty_batch_still_crosses_the_selfplay_engine_boundary():
     assert records == ()
     assert inference["batch_cap"] == 16
     assert inference["wait_ms"] == 6.0
+    assert inference["execution_reference_status"] == "non_recommended"
+    assert inference["execution_override_reason"] is None
+    assert inference["execution_reference"]["effective_context_ceiling"] == 0
+    assert inference["performance_reference"]["status"] == "NOT_COMPARABLE_UNDERFILLED"
     assert execution["configured_workers"] == 16
     assert execution["games_requested"] == 0
 

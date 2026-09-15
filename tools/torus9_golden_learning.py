@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from gocube_golden.provenance import capture_code_identity, derive_seed, file_sha256
+from gocube_golden.execution_reference import compare_legion_torus9_selfplay_performance
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
     Torus9SelfPlaySearchContract,
@@ -243,6 +244,21 @@ def _iteration_record(
     total_moves = int(sum(plies))
     runtime = _runtime_telemetry(wall_time=selfplay_wall, cpu_before=cpu_before, inference=inference_telemetry)
     inference_telemetry.update(runtime)
+    reference_assessment = inference_telemetry.get("execution_reference")
+    effective_context_ceiling = (
+        int(reference_assessment["effective_context_ceiling"])
+        if isinstance(reference_assessment, dict)
+        and "effective_context_ceiling" in reference_assessment
+        else 0
+    )
+    inference_telemetry["performance_reference"] = compare_legion_torus9_selfplay_performance(
+        games=len(records),
+        effective_context_ceiling=effective_context_ceiling,
+        moves_per_sec=total_moves / selfplay_wall if selfplay_wall else 0.0,
+        mean_batch_rows=float(inference_telemetry.get("mean_inference_batch_rows", 0.0)),
+        p95_batch_rows=float(inference_telemetry.get("p95_inference_batch_rows", 0.0)),
+        max_batch_rows=int(inference_telemetry.get("max_inference_batch_rows", 0)),
+    )
     return {
         "iteration": iteration,
         "label": f"M{iteration}",
@@ -264,6 +280,8 @@ def _iteration_record(
         "moves_per_sec": total_moves / selfplay_wall if selfplay_wall else 0.0,
         "positions_per_hour": fresh_positions * 3600.0 / selfplay_wall if selfplay_wall else 0.0,
         "execution": execution,
+        "execution_reference_status": inference_telemetry.get("execution_reference_status"),
+        "execution_override_reason": inference_telemetry.get("execution_override_reason"),
         "inference": inference_telemetry,
         "training": train_metrics,
         "checkpoint": checkpoint,
