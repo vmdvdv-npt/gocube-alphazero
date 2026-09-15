@@ -15,6 +15,13 @@ from typing import Mapping
 TORUS_SIZES = (9, 13, 19)
 CUBE_FACES = ("front", "back", "left", "right", "top", "bottom")
 
+# Stable stone labels used by the pinned rule-reference bridge.  Rule
+# transitions remain owned by gocube_golden.katago_v3; keeping these scalar
+# labels here avoids making the topology-only bridge import the rule engine.
+BLACK = 1
+EMPTY = 0
+WHITE = 2
+
 
 @dataclass(frozen=True)
 class Topology:
@@ -169,9 +176,12 @@ def make_topology(kind: str, size: int) -> Topology:
 
 
 __all__ = [
+    "BLACK",
     "CUBE_FACES",
+    "EMPTY",
     "TORUS_SIZES",
     "Topology",
+    "WHITE",
     "cube_topology",
     "make_topology",
     "torus_topology",

@@ -92,4 +92,9 @@ jobs:
         run: tools/katago_reference/build_oracle.sh
 
       - name: Run pinned KataGo differential, bridge, and symmetry suites
-        run: python -m pytest -q -m katago_reference
+        run: >-
+          python -m pytest -q
+          tests/test_gocube_katago_reference_random.py
+          tests/test_gocube_katago_reference_rect.py
+          tests/test_gocube_topology_reference_bridge.py
+          tests/test_gocube_topology_symmetry_rules.py
