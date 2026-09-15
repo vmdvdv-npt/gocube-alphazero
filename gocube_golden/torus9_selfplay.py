@@ -1,8 +1,7 @@
 """Torus9 scientific adapter for the universal process SelfPlayEngine.
 
-The adapter owns Torus9 observation/model/search/game-record semantics.  The
-engine owns only execution.  No legacy Coach/SelfPlayAgent/NNetWrapper path is
-used here.
+The adapter owns Torus9 observation/model/search/game-record semantics. The
+engine owns only execution; retired training paths are not used here.
 """
 from __future__ import annotations
 
