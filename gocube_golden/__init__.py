@@ -301,6 +301,7 @@ from .torus9_contract import (
     TORUS9_CURRENT_BLOCKS,
     TORUS9_CURRENT_DIRICHLET_ALPHA,
     TORUS9_CURRENT_TARGET_FINGERPRINT,
+    TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     current_torus9_profile_fingerprint,
     current_torus9_selfplay_contract_fingerprint,
     load_torus9_current_profile,

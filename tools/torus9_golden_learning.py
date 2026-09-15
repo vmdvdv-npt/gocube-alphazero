@@ -41,6 +41,7 @@ from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
     TORUS9_CURRENT_TRAINING_MASTER_SEED,
     TORUS9_CURRENT_TARGET_FINGERPRINT,
+    TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     TORUS9_WORKERS,
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
@@ -48,7 +49,7 @@ from gocube_golden.torus9_contract import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "e7b088be4ad743f089d7895c867f4f28990019ed"
+BASE_COMMIT = TORUS9_GOLDEN_LINEAGE_BASE_COMMIT
 ACTIVE_NAMESPACE = ROOT / "runs" / "torus9-golden-v3-active"
 DEFAULT_RUN_ID = "torus9-golden-v3-20260913-run01"
 
@@ -92,7 +93,6 @@ def _profile_comparison(profile: dict[str, object]) -> dict[str, object]:
     replay = profile["replay"]
     checked = {
         "komi": profile["rules"]["komi"],  # type: ignore[index]
-        "legacy_komi_sentinel": profile["rules"]["legacy_komi_sentinel"],  # type: ignore[index]
         "network": f"{network['hidden']}×{network['blocks']}",  # type: ignore[index]
         "ownership": network["ownership"],  # type: ignore[index]
         "score": network["score"],  # type: ignore[index]
@@ -635,7 +635,6 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "score": True,
             "explicit_symmetry_augmentation": False,
             "komi": 0.5,
-            "legacy_komi_sentinel": 7.5,
         },
     }
     write_json(root / "final-report.json", report)

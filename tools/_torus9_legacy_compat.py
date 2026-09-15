@@ -12,6 +12,7 @@ from gocube_golden.torus9 import (
     torus9_checkpoint_metadata,
     torus9_save_checkpoint,
 )
+from gocube_golden.torus9_contract import TORUS9_GOLDEN_LINEAGE_BASE_COMMIT
 
 
 def checkpoint(
@@ -30,7 +31,7 @@ def checkpoint(
     optimizer_updates: int,
     samples_consumed: int,
     device: str,
-    base_commit: str = "e7b088be4ad743f089d7895c867f4f28990019ed",
+    base_commit: str = TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
 ) -> dict[str, object]:
     metadata = torus9_checkpoint_metadata(
         model=model,

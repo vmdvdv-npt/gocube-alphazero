@@ -44,13 +44,13 @@ from .torus9_contract import (
     TORUS9_POINT_COUNT,
     TORUS9_ROLLING_GENERATIONS,
     TORUS9_TARGET_CONTRACT_ID,
+    TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     current_torus9_selfplay_contract_fingerprint,
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
 )
 
 
-STAGE3_BASE_COMMIT = "e7b088be4ad743f089d7895c867f4f28990019ed"
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -190,7 +190,7 @@ class Torus9TrainingAdapter:
         profile: Mapping[str, object] | None = None,
         *,
         code_identity: CodeIdentity | None = None,
-        base_commit: str = STAGE3_BASE_COMMIT,
+        base_commit: str = TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     ) -> None:
         self.profile = (
             load_torus9_current_profile()

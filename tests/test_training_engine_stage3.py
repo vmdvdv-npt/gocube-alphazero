@@ -17,8 +17,10 @@ from gocube_golden.torus9_training import (
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_PROFILE_ID,
     TORUS9_CURRENT_TARGET_FINGERPRINT,
+    TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     load_torus9_current_profile,
 )
+from tools.torus9_golden_learning import _profile_comparison
 
 
 @dataclass
@@ -175,6 +177,7 @@ def test_current_adapter_is_profile_locked_and_uses_explicit_state():
     adapter = Torus9TrainingAdapter(profile=profile)
     assert adapter.profile_identity["profile_id"] == TORUS9_CURRENT_PROFILE_ID
     assert adapter.target_identity["fingerprint"] == TORUS9_CURRENT_TARGET_FINGERPRINT
+    assert adapter.base_commit == TORUS9_GOLDEN_LINEAGE_BASE_COMMIT
     model = Torus9CurrentGraphNet()
     state = adapter.create_state(model, run_id="state-test")
     assert state.model is model
@@ -188,3 +191,9 @@ def test_current_adapter_rejects_non_current_profile():
     profile["profile_id"] = "retired-profile"
     with pytest.raises(ValueError, match="current profile"):
         Torus9TrainingAdapter(profile=profile)
+
+
+def test_current_launcher_profile_comparison_uses_canonical_komi():
+    comparison = _profile_comparison(load_torus9_current_profile())
+    assert comparison["checked"]["komi"] == 0.5
+    assert "legacy_komi_sentinel" not in comparison["checked"]

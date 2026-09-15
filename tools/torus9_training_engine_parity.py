@@ -194,16 +194,23 @@ def reproduce(*, device: str = "cuda") -> dict[str, object]:
         }
         metadata_keys = (
             "checkpoint_schema_version",
+            "checkpoint_label",
+            "run_id",
+            "parent_or_source_run_identity",
+            "base_commit",
             "profile_id",
             "profile_fingerprint",
+            "rules_profile_id",
+            "target_contract_id",
+            "target_contract_version",
             "target_fingerprint",
+            "selfplay_contract_id",
+            "selfplay_contract_fingerprint",
             "architecture_id",
             "komi",
             "optimizer_updates",
             "train_samples_consumed",
             "adam_step",
-            "replay_generations",
-            "replay_row_count",
         )
         metadata_parity = {
             key: {
@@ -212,10 +219,15 @@ def reproduce(*, device: str = "cuda") -> dict[str, object]:
             }
             for key in metadata_keys
         }
+        metadata_exact = all(
+            values["reproduced"] == values["canonical"]
+            for values in metadata_parity.values()
+        )
+        canonical_metadata = _json(M17_PATH.with_suffix(".metadata.json"))
         model_parity = {
-            "expected_model_hash": _json(M17_PATH.with_suffix(".metadata.json"))["model_hash"],
+            "expected_model_hash": canonical_metadata["model_hash"],
             "reproduced_model_hash": reproduced_metadata["model_hash"],
-            "model_hash_equal": reproduced_metadata["model_hash"] == _json(M17_PATH.with_suffix(".metadata.json"))["model_hash"],
+            "model_hash_equal": reproduced_metadata["model_hash"] == canonical_metadata["model_hash"],
             "max_parameter_abs_delta": model_delta,
         }
         optimizer_parity = _optimizer_parity(reproduced_optimizer, canonical_optimizer)
@@ -232,11 +244,14 @@ def reproduce(*, device: str = "cuda") -> dict[str, object]:
             "samples_consumed": result.training_metrics["samples_consumed"],
             "expected_m17_model_hash": _json(M17_PATH.with_suffix(".metadata.json"))["model_hash"],
             "reproduced_m17_model_hash": reproduced_metadata["model_hash"],
+            "canonical_base_commit": canonical_metadata["base_commit"],
+            "reproduced_base_commit": reproduced_metadata["base_commit"],
             "model_parity": "PASS" if model_parity["model_hash_equal"] else "FAIL",
             "optimizer_parity": optimizer_parity,
             "replay_parity": replay_parity,
             "training_parity": training_parity,
             "checkpoint_metadata_parity": metadata_parity,
+            "checkpoint_metadata_exact": metadata_exact,
             "canonical_m17_mutated": False,
             "m18_created": False,
             "komi": TORUS9_KOMI,
@@ -244,7 +259,12 @@ def reproduce(*, device: str = "cuda") -> dict[str, object]:
             "target_fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT,
             "historical_validation_scope": "full semantic validation of training-visible rolling generations; older evicted fresh artifacts reconstructed and compared exactly",
         }
-        if not model_parity["model_hash_equal"] or not replay_parity["fresh_order"] or not replay_parity["rolling_order"]:
+        if (
+            not model_parity["model_hash_equal"]
+            or not replay_parity["fresh_order"]
+            or not replay_parity["rolling_order"]
+            or not metadata_exact
+        ):
             raise AssertionError(json.dumps(report, indent=2, sort_keys=True))
         return report
 

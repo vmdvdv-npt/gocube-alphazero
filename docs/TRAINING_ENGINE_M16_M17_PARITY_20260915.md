@@ -12,6 +12,8 @@ canonical run namespace was not written.
 | source checkpoint | M16 |
 | source model hash | `sha256:4d4df8572d04b0f383261d69e7aeac3825fbffc294a2310d00e20e35801ade26` |
 | source optimizer step | 1280 |
+| canonical Golden base commit | `53946d0c84fca5a6f81a387bfd399ea62e34b088` |
+| reproduced M17 base commit | `53946d0c84fca5a6f81a387bfd399ea62e34b088` |
 | fresh generation | 17 |
 | fresh positions | 6424 |
 | rolling replay positions | 20000 |
@@ -26,6 +28,7 @@ canonical run namespace was not written.
 - Fresh replay: **PASS** — 6424 rows, exact ordering and file SHA `sha256:fe75ea13055e6765f78970d7c950ae930d37920735883c2c3281e7fcc90b4377`.
 - Rolling replay: **PASS** — 20000 rows, exact ordering and replay fingerprint `sha256:aac53717c0459973f6e707e76e6a73664df3ae049ae9e8a16d677f25e805f40f`.
 - Sampling: **PASS** — source counts `M15=1574`, `M16=1877`, `M17=1669`; all 80 batches are size 64.
+- Metadata lineage: **PASS** — exact equality for `base_commit`, parent identity, self-play contract, profile, target, checkpoint label, and run identity.
 - Canonical M17 mutation: **NO**.
 - M18 created: **NO**.
 
