@@ -25,6 +25,11 @@ class CheckpointNotFound(IntegrationError):
     http_status = 404
 
 
+class CheckpointCatalogCollision(IntegrationError):
+    code = "checkpoint_catalog_collision"
+    http_status = 422
+
+
 class CheckpointMetadataInvalid(IntegrationError):
     code = "checkpoint_metadata_invalid"
     http_status = 422

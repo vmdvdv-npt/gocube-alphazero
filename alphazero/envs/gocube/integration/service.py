@@ -25,6 +25,31 @@ PROTOCOL_VERSION = 1
 
 
 def _compatible(a: CheckpointDescriptor, b: CheckpointDescriptor) -> bool:
+    a_backend = getattr(a, "backend_kind", "legacy_nnet")
+    b_backend = getattr(b, "backend_kind", "legacy_nnet")
+    if a_backend != b_backend:
+        return False
+    if a_backend == "golden":
+        # Display fields are intentionally not enough for Golden compatibility:
+        # a same-looking board can still have a different scientific topology,
+        # rules, observation or target contract.
+        return all(
+            getattr(a, field, None) == getattr(b, field, None)
+            for field in (
+                "checkpoint_format",
+                "topology",
+                "size",
+                "rule_set",
+                "terminal_adjudicator",
+                "profile_id",
+                "profile_fingerprint",
+                "architecture_id",
+                "rules_fingerprint",
+                "observation_fingerprint",
+                "target_fingerprint",
+                "komi",
+            )
+        )
     if not (
         a.topology == b.topology
         and a.size == b.size
@@ -115,8 +140,15 @@ class GoCubeAlphaZeroService:
         if white is None:
             raise CheckpointNotFound(f"Unknown checkpoint: {white_id}")
         if not _compatible(black, white):
+            if getattr(black, "backend_kind", "legacy_nnet") != getattr(white, "backend_kind", "legacy_nnet"):
+                raise CheckpointIncompatible(
+                    f"Golden/legacy mixed game is not supported: "
+                    f"black={getattr(black, 'backend_kind', 'legacy_nnet')!r}, "
+                    f"white={getattr(white, 'backend_kind', 'legacy_nnet')!r}"
+                )
             raise CheckpointIncompatible(
-                f"Checkpoints {black_id} and {white_id} do not share topology/size/rules/komi/adjudicator"
+                f"Checkpoints {black_id} and {white_id} do not share their exact "
+                "topology/rules/model/search contract"
             )
         return black, white, sims
 
