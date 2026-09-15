@@ -111,8 +111,7 @@ it does not change the Golden scientific profile or authorize M18.
 ```text
 base: 6541598248c581c1da7a4ca8ff9d514da82f6a01 (PR #101 merge)
 branch: stage2/selfplay-engine-process-central-inference
-implementation SHA: 8950650134f159b80ca27f070b5f0fea28649a2e
-benchmark/fix SHA: ac631d0
+implementation/review-fix SHA: e4f7db4a2ee1d637681b2b7d09f719a549b430ca
 PR: https://github.com/vmdvdv-npt/gocube-alphazero/pull/102
-CI for ac631d0: pass
+CI for e4f7db4: pass (run 34957361392)
 ```
