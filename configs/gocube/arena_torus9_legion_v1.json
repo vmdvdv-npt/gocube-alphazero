@@ -4,14 +4,14 @@
   "execution_only": true,
   "scientific_semantics": "resolved by the Torus9 profile; this file does not change them",
   "workers": 16,
-  "games_per_worker": 4,
-  "configured_context_capacity": 64,
+  "games_per_worker": 12,
+  "configured_context_capacity": 192,
   "central_model_owner": "parent",
   "device": "cuda",
   "shared_memory": true,
   "worker_local_inference_batch_wait_ms": 0.0,
   "inference_batch_rows": 64,
-  "inference_batch_wait_ms": 1.0,
+  "inference_batch_wait_ms": 4.0,
   "master_seed": 202609131004,
   "strict_production": true,
   "performance_gate": {
@@ -24,11 +24,16 @@
   "selection_basis": {
     "date": "2026-09-16",
     "winner_among_measured_variants": [
-      "cap64-wait1",
-      "cap64-wait2",
-      "cap32-wait1"
+      "fixed-seed-stageB-c12-w4-g192",
+      "fixed-seed-repeat2-top-c12-w4-g192",
+      "fixed-seed-final-confirm-c12-w4-g256"
     ],
-    "criterion": "highest measured moves_per_sec while preserving 64 observed contexts and zero technical games",
-    "note": "The fixed-seed local benchmark retained PERFORMANCE_DEGRADED because host-observed mean batch and aggregate effective CPU were below hard gates; strict production must fail closed until the host satisfies them."
+    "criterion": "highest sustained games_per_hour and moves_per_sec with mean batch >=16, zero technical games, full observed contexts, and strict-gate confirmation",
+    "confirmed_games_per_hour": 1003.4180715717063,
+    "confirmed_moves_per_sec": 24.119705446536468,
+    "confirmed_mean_inference_batch_rows": 36.96699534374144,
+    "confirmed_effective_cpu_cores": 8.119060854922122,
+    "confirmed_status": "PASS",
+    "note": "The 256-game confirmation and second 192-game repeat passed strict gates. The first 192-game finalist was retained as a variance observation; its throughput was higher but effective CPU was 7.92, so the selected contract remains fail-closed."
   }
 }
