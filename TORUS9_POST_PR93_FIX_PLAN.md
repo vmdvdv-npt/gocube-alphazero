@@ -4,6 +4,11 @@ Date: 2026-09-14
 
 Scope: plan only. This audit branch must not implement the fixes below. M18 stays blocked until all P0 gates pass.
 
+> Historical / retired plan. Do not use this document as the current Torus 9×9
+> Arena or training entrypoint. Its provisional Arena settings are preserved
+> only as historical planning evidence; use `tools/arena.py` and the current
+> Golden standard-64/high-volume presets instead.
+
 ## P0 — mandatory before M18
 
 ### P0.1 Restore process-level self-play MCTS with one central GPU inference owner

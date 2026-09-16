@@ -1,5 +1,10 @@
 # Torus 9x9 WDL + ownership A/B
 
+> Historical / retired evaluation evidence. Do not use the Arena settings in
+> this report as a current Torus 9×9 entrypoint; current strength comparisons
+> use the Golden standard-64 contract, while high-volume settings are
+> performance-only.
+
 This controlled experiment starts from the merged PR88 tree and the stable
 `torus9-stable-learning-20260913-v1 / M8` checkpoint. It compares two branches
 for exactly two fixed training rounds at `komi=0.5`:

@@ -86,7 +86,7 @@ LEGION_TORUS9_SELFPLAY_UNDERFILLED_REFERENCE = {
     "p50_batch_rows": 8.0,
     "p95_batch_rows": 24.0,
     "max_batch_rows": 30,
-    "description": "Known Stage 7 underfilled 32-game workload",
+    "description": "Known historical underfilled 32-game workload",
 }
 
 

@@ -3,6 +3,14 @@
 Date: 2026-09-16  
 Scope: execution-only Torus9 Arena tuning after the lane/concurrency repair.
 
+> Any Stage 7 baseline mentioned below is historical / retired validation
+> evidence. Do not invoke the removed Stage 7 harness; use the standalone
+> `tools/arena.py` implementation and the current Golden presets.
+
+This performance benchmark does not define checkpoint strength methodology:
+strength comparisons use the current standard-64 Arena contract, while the
+high-volume preset below is execution-only.
+
 ## Decision
 
 The single production Arena preset is now:
