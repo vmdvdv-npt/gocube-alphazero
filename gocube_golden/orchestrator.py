@@ -23,6 +23,7 @@ import sys
 import time
 from typing import Any, Mapping, Sequence
 
+from .artifact_catalog import ArtifactCatalog, ARTIFACT_CATALOG_SCHEMA
 from .run_storage import active_lineage_dir, create_lineage
 
 
@@ -315,6 +316,7 @@ class RunPaths:
     final_md: Path
     metrics: Path
     generations: Path
+    artifact_catalog: Path
 
     @classmethod
     def for_lineage(cls, topology: str, lineage_id: str) -> "RunPaths":
@@ -337,6 +339,7 @@ class RunPaths:
             final_md=root / "reports" / "final-report.md",
             metrics=root / "metrics",
             generations=root / "runtime" / "generations",
+            artifact_catalog=root / "runtime" / "artifact-catalog.json",
         )
 
 
@@ -491,6 +494,10 @@ class ProductionTrainingOrchestrator:
                 "last_committed_generation": 0,
                 "arena_generations": [],
                 "runtime_state": "CREATED",
+                "artifact_catalog": {
+                    "schema": ARTIFACT_CATALOG_SCHEMA,
+                    "path": "runtime/artifact-catalog.json",
+                },
             },
         }
         create_lineage(
@@ -500,6 +507,18 @@ class ProductionTrainingOrchestrator:
             extra_directories=("runtime", "control", "reports"),
         )
         self._ensure_layout()
+        catalog = ArtifactCatalog.initialize(
+            self.paths.artifact_catalog,
+            lineage_id=self.lineage_id,
+            root=self.paths.root,
+        )
+        manifest = read_json(self.paths.manifest)
+        orchestrator = dict(manifest["orchestrator"])  # type: ignore[arg-type]
+        catalog_record = dict(orchestrator["artifact_catalog"])  # type: ignore[arg-type]
+        catalog_record["fingerprint"] = catalog.fingerprint
+        orchestrator["artifact_catalog"] = catalog_record
+        manifest["orchestrator"] = orchestrator
+        atomic_write_json(self.paths.manifest, manifest)
         state = {
             "schema": ORCHESTRATOR_SCHEMA,
             "lineage_id": self.lineage_id,
@@ -516,7 +535,7 @@ class ProductionTrainingOrchestrator:
         atomic_write_json(self.paths.runtime_state, state)
         self.events.emit("INFO", "Created training lineage", lineage_id=self.lineage_id)
 
-    def _load_manifest(self) -> dict[str, object]:
+    def _load_manifest(self, *, expected_catalog_fingerprint: str | None = None) -> dict[str, object]:
         manifest = read_json(self.paths.manifest)
         if manifest.get("lineage_id") != self.lineage_id or manifest.get("topology") != self.spec.topology:
             raise ValueError("Lineage manifest identity does not match requested run")
@@ -529,6 +548,19 @@ class ProductionTrainingOrchestrator:
             raise ValueError("Lineage manifest lacks orchestrator state")
         if orchestrator.get("profile_fingerprint") != self.spec.profile_fingerprint:
             raise ValueError("Canonical profile fingerprint drift on resume")
+        catalog_record = orchestrator.get("artifact_catalog")
+        if isinstance(catalog_record, Mapping):
+            catalog = ArtifactCatalog.load(
+                self.paths.artifact_catalog,
+                root=self.paths.root,
+            )
+            recorded_fingerprint = (
+                expected_catalog_fingerprint
+                if expected_catalog_fingerprint is not None
+                else catalog_record.get("fingerprint")
+            )
+            if recorded_fingerprint != catalog.fingerprint:
+                raise ValueError("Committed artifact catalog fingerprint drift")
         return manifest
 
     def _state(self) -> dict[str, object]:
@@ -605,15 +637,26 @@ class ProductionTrainingOrchestrator:
     def _arena_result_path(self, generation: int) -> Path:
         return self.paths.root / "arena" / f"generation-{generation:04d}" / "result.json"
 
-    def _checkpoint_hashes(self) -> dict[str, str]:
-        checkpoint_root = self.paths.root / "checkpoints"
-        if not checkpoint_root.exists():
-            return {}
-        return {
-            str(path.relative_to(self.paths.root)): sha256_file(path)
-            for path in sorted(checkpoint_root.rglob("*"))
-            if path.is_file() and not path.name.startswith(".")
+    def _record_generation_artifacts(
+        self,
+        generation: int,
+        result: Mapping[str, object],
+        transaction_path: Path,
+    ) -> str:
+        artifacts = result.get("artifacts")
+        if not isinstance(artifacts, list):
+            raise ValueError("Generation result artifacts are required for catalog commit")
+        catalog = ArtifactCatalog.load(
+            self.paths.artifact_catalog,
+            root=self.paths.root,
+        )
+        transaction = {
+            "path": str(transaction_path.relative_to(self.paths.root)),
+            "sha256": sha256_file(transaction_path),
+            "size_bytes": transaction_path.stat().st_size,
+            "status": "COMMITTED",
         }
+        return catalog.register_generation(generation, artifacts, transaction=transaction)
 
     def _validate_artifact(self, item: Mapping[str, object]) -> tuple[str, str]:
         raw_path = str(item.get("path", ""))
@@ -977,8 +1020,15 @@ class ProductionTrainingOrchestrator:
                         deltas[name] = {"first": first, "last": last, "delta": last - first}
         return {"status": "OK", "generations": len(rows), "deltas": deltas}
 
-    def _update_manifest(self, *, committed_generation: int, arena_generation: int | None = None) -> None:
-        manifest = self._load_manifest()
+    def _update_manifest(
+        self,
+        *,
+        committed_generation: int,
+        arena_generation: int | None = None,
+        artifact_hashes: Mapping[str, object] | None = None,
+        catalog_fingerprint: str | None = None,
+    ) -> None:
+        manifest = self._load_manifest(expected_catalog_fingerprint=catalog_fingerprint)
         orchestrator = dict(manifest["orchestrator"])  # type: ignore[arg-type]
         orchestrator["last_committed_generation"] = int(committed_generation)
         orchestrator["runtime_state"] = self._state().get("state")
@@ -987,8 +1037,19 @@ class ProductionTrainingOrchestrator:
             arena_generations.append(int(arena_generation))
             arena_generations.sort()
         orchestrator["arena_generations"] = arena_generations
+        if catalog_fingerprint is not None:
+            catalog_record = dict(orchestrator.get("artifact_catalog", {}))
+            catalog_record["schema"] = ARTIFACT_CATALOG_SCHEMA
+            catalog_record["path"] = "runtime/artifact-catalog.json"
+            catalog_record["fingerprint"] = str(catalog_fingerprint)
+            orchestrator["artifact_catalog"] = catalog_record
         manifest["orchestrator"] = orchestrator
-        manifest["checkpoint_hashes"] = self._checkpoint_hashes()
+        checkpoint_hashes = dict(manifest.get("checkpoint_hashes", {}))
+        if artifact_hashes is not None:
+            for path, digest in artifact_hashes.items():
+                if str(path).startswith("checkpoints/"):
+                    checkpoint_hashes[str(path)] = str(digest)
+        manifest["checkpoint_hashes"] = checkpoint_hashes
         atomic_write_json(self.paths.manifest, manifest)
 
     def _render_report(self, *, final: bool = False) -> None:
@@ -1017,6 +1078,12 @@ class ProductionTrainingOrchestrator:
         ]
         if isinstance(orchestrator, Mapping):
             lines.append(f"- Arena generations: `{orchestrator.get('arena_generations', [])}`")
+            catalog_record = orchestrator.get("artifact_catalog")
+            if isinstance(catalog_record, Mapping):
+                lines.append(
+                    f"- Artifact catalog: `{catalog_record.get('path')}`"
+                    f" ({catalog_record.get('fingerprint')})"
+                )
         if latest_warning is not None:
             lines.append(f"- Latest warning: `{latest_warning.get('at')}` — {latest_warning.get('message')}")
         lines.extend(["", "## Learning velocity", "", "```json", json.dumps(learning, indent=2, sort_keys=True), "```", ""])
@@ -1039,6 +1106,12 @@ class ProductionTrainingOrchestrator:
                 "metric_history": history,
                 "generation_metrics": [row for row in history if row.get("kind") == "generation"],
                 "arena_metrics": [row for row in history if row.get("kind") == "arena"],
+                "artifact_catalog": (
+                    dict(orchestrator.get("artifact_catalog", {}))
+                    if isinstance(orchestrator, Mapping)
+                    and isinstance(orchestrator.get("artifact_catalog"), Mapping)
+                    else None
+                ),
                 "finished_at": utc_now(),
             }
             atomic_write_json(self.paths.final_json, final_payload)
@@ -1126,8 +1199,17 @@ class ProductionTrainingOrchestrator:
             }
         )
         atomic_write_json(tx_path, tx)
+        catalog_fingerprint = self._record_generation_artifacts(
+            generation,
+            result,
+            tx_path,
+        )
         self._write_state(last_committed_generation=generation, active_phase="commit")
-        self._update_manifest(committed_generation=generation)
+        self._update_manifest(
+            committed_generation=generation,
+            artifact_hashes=result["validated_artifact_hashes"],
+            catalog_fingerprint=catalog_fingerprint,
+        )
         self.events.emit("INFO", "Generation committed", generation=generation)
         if isinstance(metrics, Mapping):
             self._check_performance(generation, metrics)
