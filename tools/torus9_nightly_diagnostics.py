@@ -825,7 +825,7 @@ def run_cadence(run_id: str) -> dict[str, object]:
             "cumulative_games_per_arm": 384,
             "cumulative_optimizer_steps_per_arm": 480,
             "batch_size": TORUS9_BATCH_SIZE,
-            "formula": "optimizer steps = 2.5 × games per iteration; sample draws = steps × batch size",
+            "formula": "optimizer steps = 1.25 × games per iteration; sample draws = steps × batch size",
         },
         "arms": reports,
         "arena_strength_comparison": "pending; run the arena command after all three arms complete",
@@ -917,7 +917,10 @@ def run_arena_phase(run_id: str) -> dict[str, object]:
             master_seed=ARENA_SEED,
             config=config,
         )
-        technical = int(summary.get("technical_games", 0))
+        arena_telemetry = summary.get("telemetry")
+        if not isinstance(arena_telemetry, Mapping):
+            raise ValueError(f"Arena telemetry is missing for {candidate_key} vs {reference_key}")
+        technical = int(arena_telemetry.get("technical_games", 0))
         wld = summary.get("W/L/D", [0, 0, 0])
         if not isinstance(wld, list) or len(wld) != 3:
             raise ValueError(f"Malformed Arena result for {candidate_key} vs {reference_key}")
@@ -928,7 +931,11 @@ def run_arena_phase(run_id: str) -> dict[str, object]:
             "W/L/D": [int(value) for value in wld],
             "technical_games": technical,
             "candidate_score": (int(wld[0]) + 0.5 * int(wld[2])) / 64.0,
-            "wall_time_sec": summary.get("telemetry", {}).get("wall_time_sec") if isinstance(summary.get("telemetry"), Mapping) else None,
+            "wall_time_sec": arena_telemetry.get("wall_time_sec"),
+            "performance_status": arena_telemetry.get("performance_status"),
+            "performance_failures": arena_telemetry.get("performance_failures", []),
+            "mean_inference_batch_rows": arena_telemetry.get("mean_inference_batch_rows"),
+            "effective_cpu_cores": arena_telemetry.get("effective_cpu_cores"),
             "execution": summary.get("execution"),
             "scientific_status": "PASS" if technical == 0 else "FAIL",
             "summary": str(output / "summary.json"),
@@ -972,6 +979,40 @@ def run_arena_phase(run_id: str) -> dict[str, object]:
         "technical_outcomes_policy": "fail-closed / excluded from W/L/D",
         "high_volume_arena_preset_used": False,
     }
+    _write(root / "arena-standard-64-report.json", report)
+    _write(root / "arena-standard-64-report.md", _render_arena(report))
+    return report
+
+
+def refresh_arena_report(run_id: str) -> dict[str, object]:
+    """Refresh derived Arena telemetry/status without rerunning the matches."""
+    root = NIGHT_ROOT / "cadence" / run_id
+    report = _read_json(root / "arena-standard-64-report.json")
+    pairings = report.get("pairings")
+    if not isinstance(pairings, list) or len(pairings) != 3:
+        raise ValueError("Arena report is incomplete; all three pairings are required")
+    refreshed: list[dict[str, object]] = []
+    for row in pairings:
+        summary_path = Path(str(row["summary"]))
+        summary = _read_json(summary_path)
+        telemetry = summary.get("telemetry")
+        if not isinstance(telemetry, Mapping):
+            raise ValueError(f"Arena telemetry is missing: {summary_path}")
+        technical = int(telemetry.get("technical_games", 0))
+        updated = dict(row)
+        updated.update({
+            "technical_games": technical,
+            "wall_time_sec": telemetry.get("wall_time_sec"),
+            "performance_status": telemetry.get("performance_status"),
+            "performance_failures": telemetry.get("performance_failures", []),
+            "mean_inference_batch_rows": telemetry.get("mean_inference_batch_rows"),
+            "effective_cpu_cores": telemetry.get("effective_cpu_cores"),
+            "scientific_status": "PASS" if technical == 0 else "FAIL",
+        })
+        refreshed.append(updated)
+    report["pairings"] = refreshed
+    report["scientific_status"] = "PASS" if all(row["scientific_status"] == "PASS" for row in refreshed) else "FAIL"
+    report["winner_eligibility"] = "eligible" if report["scientific_status"] == "PASS" else "not eligible"
     _write(root / "arena-standard-64-report.json", report)
     _write(root / "arena-standard-64-report.md", _render_arena(report))
     return report
@@ -1032,6 +1073,19 @@ def run_phase_c(run_id: str) -> dict[str, object]:
             execution_reference_interactive=False,
         )
         wall = time.perf_counter() - started
+        if len(records) != winner or {record.game_id for record in records} != set(ids):
+            raise ValueError(f"Phase C {label} returned an unexpected game set")
+        for record in records:
+            record.validate()
+            if record.technical_termination is not None:
+                raise ValueError(f"Technical Phase C game is not allowed: {record.game_id}")
+        if contexts == 64:
+            if telemetry.get("execution_reference_status") != "validated_recommended":
+                raise ValueError("Phase C current variant did not use the validated execution preset")
+            if int(telemetry.get("target_active_contexts", 0)) != 64:
+                raise ValueError("Phase C current variant did not reach 64 active contexts")
+        if sum(record.nn_evaluations for record in records) != int(telemetry.get("total_rows", -1)):
+            raise ValueError(f"Phase C inference rows were lost or duplicated for {label}")
         path = phase_root / label
         path.mkdir(parents=True, exist_ok=True)
         write_jsonl(path / "games.jsonl", [record.to_dict() for record in records])
@@ -1213,8 +1267,8 @@ def generate_final_report(run_id: str) -> dict[str, object]:
         "E_phase_c": phase_c,
         "F_final_golden": {
             "games_per_iteration": arena["winner_games_per_iteration"],
-            "optimizer_steps_per_iteration": int(arena["winner_games_per_iteration"]) * 5 // 2,
-            "sample_exposures_per_iteration": int(arena["winner_games_per_iteration"]) * 5 // 2 * TORUS9_BATCH_SIZE,
+            "optimizer_steps_per_iteration": int(arena["winner_games_per_iteration"]) * 5 // 4,
+            "sample_exposures_per_iteration": int(arena["winner_games_per_iteration"]) * 5 // 4 * TORUS9_BATCH_SIZE,
             "execution": dict(EXECUTION),
             "arena_strength_execution": dict(ARENA_STANDARD_64),
             "scientific_preset_changed": False,
@@ -1366,7 +1420,7 @@ def build_parser():
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("phase-a", "cadence", "refresh-cadence", "arena", "phase-c", "report", "all"))
+    parser.add_argument("command", choices=("phase-a", "cadence", "refresh-cadence", "arena", "refresh-arena", "phase-c", "report", "all"))
     parser.add_argument("--run-id", default="torus9-nightly-20260916-run01")
     return parser
 
@@ -1381,6 +1435,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = refresh_cadence_report(args.run_id)
     elif args.command == "arena":
         result = run_arena_phase(args.run_id)
+    elif args.command == "refresh-arena":
+        result = refresh_arena_report(args.run_id)
     elif args.command == "phase-c":
         result = run_phase_c(args.run_id)
     elif args.command == "report":
