@@ -1271,6 +1271,7 @@ def generate_final_report(run_id: str) -> dict[str, object]:
             "sample_exposures_per_iteration": int(arena["winner_games_per_iteration"]) * 5 // 4 * TORUS9_BATCH_SIZE,
             "execution": dict(EXECUTION),
             "arena_strength_execution": dict(ARENA_STANDARD_64),
+            "arena_strength_policy": "Use the current Golden standard-64 Arena contract for every 64/128/192 arm; high-volume 16×12 / 192-context / wait4 is performance-only and excluded.",
             "scientific_preset_changed": False,
             "golden_update_eligibility": "pending final human-reviewed Sheet write; this tool never edits the Sheet",
         },
@@ -1369,13 +1370,14 @@ def _render_arena(report: Mapping[str, object]) -> str:
     lines = [
         "# Torus9 standard-64 Arena cadence comparison",
         "",
-        "Execution is identical for every pairing: 64 games, 16×4, 64 contexts, cap64, wait1ms, 64 simulations, paired frozen starts/color swap, komi0.5.",
+        "Execution is identical for every pairing: 64 games, 32 paired starts, 16×4, 64 contexts, cap64, wait1ms, 64 simulations, cpuct1.25, FPU0, root noise OFF, temperature0, fast search OFF, resign OFF, frozen starts/color swap, deterministic tie-break, komi0.5.",
+        "The high-volume 16×12 / 192-context / wait4 preset is not used for this strength comparison; technical outcomes are fail-closed and excluded from W/L/D.",
         "",
-        "| Candidate | Reference | W/L/D | Technical | Status |",
-        "|---:|---:|---|---:|---|",
+        "| Candidate | Reference | W/L/D | Technical | Scientific | Performance |",
+        "|---:|---:|---|---:|---|---|",
     ]
     for row in report["pairings"]:  # type: ignore[index]
-        lines.append(f"| {row['candidate']} | {row['reference']} | {row['W/L/D']} | {row['technical_games']} | {row['scientific_status']} |")
+        lines.append(f"| {row['candidate']} | {row['reference']} | {row['W/L/D']} | {row['technical_games']} | {row['scientific_status']} | {row.get('performance_status', 'N/A')} |")
     lines.extend(["", f"Decision: **{report['decision']}**, winner `{report['winner_games_per_iteration']}` games/iteration."])
     return "\n".join(lines) + "\n"
 
