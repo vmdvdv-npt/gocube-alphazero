@@ -85,6 +85,8 @@ Current Legion execution defaults:
 - up to 4 active games per worker;
 - one parent CUDA inference owner;
 - balanced initial lane fill with a shared global task-replenishment queue;
+- canonical `SequentialPUCTSession` per independent lane; no virtual loss and no
+  same-tree parallelism;
 - global inference batch cap 64 rows;
 - 1 ms central pre-forward coalescing window;
 - zero worker-local batching wait (worker requests enter the broker immediately).
@@ -125,8 +127,9 @@ Old Torus9 Arena executors remain frozen solely for reproduction. They are not
 public production APIs and require `--allow-frozen-arena` through their
 historical wrappers.
 
-`Torus9BatchedPUCT` remains an internal Torus9 search primitive used by the
-Torus9 profile. It is not an Arena executor.
+The current Torus9 profile uses the canonical `SequentialPUCTSession` frontend
+over the shared Golden PUCT core. Retired `Torus9BatchedPUCT` code is not part
+of the current Arena execution path.
 
 ## Non-regression rule
 

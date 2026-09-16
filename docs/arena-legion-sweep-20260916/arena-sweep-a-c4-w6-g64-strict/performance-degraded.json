@@ -1,0 +1,126 @@
+{
+  "observed": {
+    "active_contexts": {
+      "current": 0,
+      "max": 64,
+      "mean": 35.55555555555556,
+      "p50": 36.0,
+      "p95": 64.0
+    },
+    "effective_cpu_cores": 4.679307873129127,
+    "mean_inference_batch_rows": 14.131719662027022,
+    "observed_unique_lane_ids_per_worker": {
+      "0": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "10": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "11": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "12": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "13": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "14": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "15": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "2": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "4": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "5": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "6": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "7": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "8": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "9": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "steady_state_active_contexts": {
+      "max": 64.0,
+      "mean": 64.0,
+      "min": 64,
+      "p50": 64.0,
+      "p95": 64.0
+    },
+    "technical_games": 0
+  },
+  "reasons": [
+    "mean_inference_batch_rows",
+    "effective_cpu_cores"
+  ],
+  "run_id": "torus9-arena-20260915T225741Z",
+  "status": "PERFORMANCE_DEGRADED",
+  "summary": "/tmp/arena-sweep-a-c4-w6-g64-strict/summary.json"
+}

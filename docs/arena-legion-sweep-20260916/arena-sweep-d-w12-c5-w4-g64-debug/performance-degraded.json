@@ -1,0 +1,114 @@
+{
+  "observed": {
+    "active_contexts": {
+      "current": 0,
+      "max": 60,
+      "mean": 34.25714285714286,
+      "p50": 35.0,
+      "p95": 60.0
+    },
+    "effective_cpu_cores": 4.945837886038804,
+    "mean_inference_batch_rows": 13.3734935105068,
+    "observed_unique_lane_ids_per_worker": {
+      "0": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "1": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "10": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "11": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "2": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "3": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "4": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "5": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "6": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "7": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "8": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "9": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "steady_state_active_contexts": {
+      "max": 60.0,
+      "mean": 59.80952380952381,
+      "min": 59,
+      "p50": 60.0,
+      "p95": 60.0
+    },
+    "technical_games": 0
+  },
+  "reasons": [
+    "mean_inference_batch_rows",
+    "effective_cpu_cores"
+  ],
+  "run_id": "torus9-arena-20260916T002535Z",
+  "status": "PERFORMANCE_DEGRADED",
+  "summary": "/tmp/arena-sweep-d-w12-c5-w4-g64-debug/summary.json"
+}

@@ -241,16 +241,31 @@ class HardwareTelemetry:
                     for item in gpus
                     if isinstance(item, dict) and isinstance(item.get("gpu_memory_used_mib"), (int, float))
                 ]
+                temperature_values = [
+                    float(item["gpu_temperature_c"])
+                    for item in gpus
+                    if isinstance(item, dict) and isinstance(item.get("gpu_temperature_c"), (int, float))
+                ]
+                power_values = [
+                    float(item["gpu_power_w"])
+                    for item in gpus
+                    if isinstance(item, dict) and isinstance(item.get("gpu_power_w"), (int, float))
+                ]
                 if util_values:
                     by_phase[phase]["gpu_util_percent"].append(max(util_values))
                 if memory_values:
                     by_phase[phase]["gpu_memory_used_mib"].append(sum(memory_values))
+                if temperature_values:
+                    by_phase[phase]["gpu_temperature_c"].append(max(temperature_values))
+                if power_values:
+                    by_phase[phase]["gpu_power_w"].append(sum(power_values))
 
         phases: dict[str, object] = {}
         for phase, metrics in sorted(by_phase.items()):
             phases[phase] = {
                 key: {
                     "mean": statistics.fmean(values) if values else None,
+                    "p50": _percentile(values, 0.50),
                     "p95": _percentile(values, 0.95),
                     "max": max(values) if values else None,
                     "samples": len(values),
