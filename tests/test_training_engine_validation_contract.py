@@ -14,6 +14,7 @@ class _CountingAdapter:
 
     def __init__(self) -> None:
         self.validate_calls = 0
+        self.construction_only_calls = 0
 
     def validate_state(self, state: TrainingState) -> None:
         assert isinstance(state.rolling_replay, list)
@@ -23,6 +24,12 @@ class _CountingAdapter:
         for row in rows:
             self.validate_sample(row)
         return rows
+
+    def build_samples_for_replay(
+        self, records: Sequence[object]
+    ) -> Sequence[Mapping[str, object]]:
+        self.construction_only_calls += 1
+        raise AssertionError("TrainingEngine must not use construction-only capability yet")
 
     def validate_sample(self, sample: Mapping[str, object]) -> None:
         self.validate_calls += 1
@@ -135,6 +142,7 @@ def test_record_built_samples_are_not_revalidated_by_engine(tmp_path: Path) -> N
     # update_replay immediately before replay mutation. The generic engine
     # must not add duplicate full passes between those adapter boundaries.
     assert adapter.validate_calls == 2
+    assert adapter.construction_only_calls == 0
     assert result.fresh_positions == 1
     assert result.summary["iteration"] == 1
 

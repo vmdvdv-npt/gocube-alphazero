@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import gocube_golden as g
 from gocube_golden import torus9_monolith as _core
 from gocube_golden.result import result_from_terminal
@@ -112,3 +114,69 @@ def test_adapter_fused_auxiliary_build_removes_repeated_terminal_scoring(monkeyp
     # Ownership and score are computed once per side, not once per replay row.
     # For four rows the legacy composed builder performs eight terminal scores.
     assert counts["score_terminal"] == 4
+
+
+def test_construction_only_api_preserves_public_validated_contract(monkeypatch) -> None:
+    record = _four_ply_double_pass_record()
+    adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+    calls = {"count": 0}
+    original = adapter.validate_sample
+
+    def counted(sample):
+        calls["count"] += 1
+        return original(sample)
+
+    monkeypatch.setattr(adapter, "validate_sample", counted)
+    constructed = tuple(adapter.build_samples_for_replay((record,)))
+    assert calls["count"] == 0
+
+    validated = tuple(adapter.build_samples((record,)))
+    assert calls["count"] == len(validated) == 4
+    assert constructed == validated
+
+
+def test_validation_cache_is_bound_to_replay_row_content() -> None:
+    record = _four_ply_double_pass_record()
+    adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+    rows = adapter.build_samples((record,))
+    stamped = adapter.stamp_samples(rows, 1)
+    replay = g.Torus9RollingReplay()
+    adapter.update_replay(replay, 1, stamped)
+
+    # The cache contains this deterministic row ID, but changing semantic
+    # content must invalidate the cache hit and force full validation.
+    replay.rows[0]["pi"] = [0.0] * TORUS9_ACTION_COUNT
+    with pytest.raises(ValueError, match="policy target"):
+        adapter.validate_replay(adapter.replay_rows(replay))
+
+
+def test_update_replay_rejects_noncanonical_id_before_mutation() -> None:
+    record = _four_ply_double_pass_record()
+    adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+    rows = adapter.build_samples((record,))
+    stamped = [dict(row) for row in adapter.stamp_samples(rows, 1)]
+    stamped[0]["replay_row_id"] = "non-canonical-but-non-empty"
+    replay = g.Torus9RollingReplay()
+
+    with pytest.raises(ValueError, match="row ID is not deterministic"):
+        adapter.update_replay(replay, 1, stamped)
+
+    assert replay.rows == ()
+    assert replay.last_generation == 0
+    assert adapter._validated_sample_fingerprints == {}
+
+
+def test_failed_batch_does_not_populate_validation_cache_or_mutate_replay() -> None:
+    record = _four_ply_double_pass_record()
+    adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+    rows = adapter.build_samples((record,))
+    stamped = [dict(row) for row in adapter.stamp_samples(rows, 1)]
+    stamped[-1]["pi"] = [0.0] * TORUS9_ACTION_COUNT
+    replay = g.Torus9RollingReplay()
+
+    with pytest.raises(ValueError, match="policy target"):
+        adapter.update_replay(replay, 1, stamped)
+
+    assert replay.rows == ()
+    assert replay.last_generation == 0
+    assert adapter._validated_sample_fingerprints == {}
