@@ -452,6 +452,47 @@ def _render_report(report: Mapping[str, object]) -> str:
     return "\n".join(lines)
 
 
+def _render_failure_report(report: Mapping[str, object]) -> str:
+    results = report.get("results", {})
+    lines = [
+        "# Torus9 9×9 controlled `inference_batch_wait_ms` benchmark — STOPPED",
+        "",
+        f"Run: `{report['run_id']}`; commit `{report['commit']}`.",
+        "",
+        f"**STOP — {report['failure']}**",
+        "",
+        "No performance winner or Golden preset recommendation is valid because the correctness/parity gate failed.",
+        "",
+        "## Completed before STOP",
+        "",
+        "| wait | wall | moves | moves/s | games/h | mean batch | p95 batch | CPU | GPU | technical |",
+        "| ---: | ---: | ----: | ------: | ------: | ---------: | --------: | --: | --: | --------: |",
+    ]
+    if isinstance(results, Mapping):
+        hardware = report.get("hardware_telemetry", {})
+        for variant_id, row in results.items():
+            if not isinstance(row, Mapping):
+                continue
+            telemetry = row.get("telemetry", {})
+            if not isinstance(telemetry, Mapping):
+                continue
+            hw = _hardware_variant_summary(hardware if isinstance(hardware, Mapping) else {}, str(variant_id))
+            gpu = hw.get("gpu_util_percent", {})
+            gpu_mean = gpu.get("mean") if isinstance(gpu, Mapping) else None
+            lines.append(
+                f"| {float(row['wait_ms']):g} ms | {float(row['wall_time_sec']):.3f}s | {row['total_moves']} | {float(row['moves_per_sec']):.3f} | {float(row['games_per_hour']):.1f} | {float(telemetry.get('mean_inference_batch_rows', 0.0)):.3f} | {float(telemetry.get('p95_inference_batch_rows', 0.0)):.3f} | {float(telemetry.get('process_tree_effective_cpu_cores', 0.0)):.3f} | {gpu_mean if gpu_mean is not None else 'N/A'} | {row['technical_games']} ({row['completed_games']}/{row['games_requested']}) |"
+            )
+    lines.extend([
+        "",
+        f"Variant order reached before STOP: `{', '.join(report.get('variant_order', []))}`.",
+        f"Parity artifact: `{report['parity']}`.",
+        "",
+        "The remaining variants were intentionally not run after the first normalized-result divergence.",
+        "",
+    ])
+    return "\n".join(lines)
+
+
 def run_benchmark(run_id: str = DEFAULT_RUN_ID) -> dict[str, object]:
     spec = _read_spec()
     run_id = _safe_run_id(run_id)
@@ -577,6 +618,30 @@ def run_benchmark(run_id: str = DEFAULT_RUN_ID) -> dict[str, object]:
         return report
     except BaseException as exc:
         hardware.stop()
+        failure_report = {
+            "schema": "torus9-controlled-wait-benchmark-report-v1",
+            "run_id": run_id,
+            "status": "STOPPED",
+            "benchmark_status": "FAILED",
+            "failure": f"{type(exc).__name__}: {exc}",
+            "commit": code.git_commit_sha,
+            "git_tree": code.git_tree_sha,
+            "profile_id": TORUS9_CURRENT_PROFILE_ID,
+            "profile_fingerprint": profile_fp,
+            "checkpoint": reference,
+            "master_seed": master_seed,
+            "game_ids": {"count": len(game_ids), "first": game_ids[0], "last": game_ids[-1], "all": list(game_ids)},
+            "variant_order": executed_order,
+            "frozen_execution": dict(execution),
+            "scientific_contract": dict(profile["self_play"]),
+            "checkpoint_reference_only": True,
+            "parity": parity,
+            "hardware_telemetry": hardware.summary(),
+            "results": results,
+            "storage": {"canonical_path": str(root.relative_to(ROOT)), "contains_checkpoint_copies": False},
+        }
+        _atomic_write(root / "report.json", failure_report)
+        _atomic_write_text(root / "report.md", _render_failure_report(failure_report))
         manifest.update({"status": "ARCHIVED", "benchmark_status": "FAILED", "failure": f"{type(exc).__name__}: {exc}", "variant_order": executed_order, "semantic_parity": parity.get("status", "UNKNOWN")})
         _atomic_write(root / "manifest.json", manifest)
         raise
