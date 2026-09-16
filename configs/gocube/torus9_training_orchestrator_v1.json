@@ -1,0 +1,147 @@
+{
+  "arena": {
+    "command": [
+      ".venv/bin/python",
+      "tools/torus9_orchestrator_driver.py",
+      "arena",
+      "--generation",
+      "{generation}",
+      "--device",
+      "cuda",
+      "--reference-gap",
+      "5"
+    ],
+    "every_generations": 5,
+    "preset_fingerprint": "sha256:d39645f34e47637ffe48b3fa5330a4aac90d6d7f4172c62ed6aa059dec84d175",
+    "required": true,
+    "startset_fingerprint": "sha256:5d26cc29130a80e7bf7673eb1bb97a501205d636d06e03063b1571804386f4cb"
+  },
+  "execution": {
+    "generation_command": [
+      ".venv/bin/python",
+      "tools/torus9_orchestrator_driver.py",
+      "generation",
+      "--generation",
+      "{generation}",
+      "--device",
+      "cuda",
+      "--workers",
+      "16",
+      "--active-games-per-worker",
+      "4",
+      "--total-active-contexts",
+      "64",
+      "--batch-cap",
+      "64",
+      "--wait-ms",
+      "1"
+    ],
+    "generation_resume_command": [
+      ".venv/bin/python",
+      "tools/torus9_orchestrator_driver.py",
+      "generation",
+      "--generation",
+      "{generation}",
+      "--device",
+      "cuda",
+      "--workers",
+      "16",
+      "--active-games-per-worker",
+      "4",
+      "--total-active-contexts",
+      "64",
+      "--batch-cap",
+      "64",
+      "--wait-ms",
+      "1",
+      "--resume"
+    ]
+  },
+  "expected_profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
+  "health": {
+    "heartbeat_critical_seconds": 900,
+    "heartbeat_warning_seconds": 180,
+    "min_disk_free_gb_critical": 5,
+    "min_disk_free_gb_warning": 15,
+    "min_ram_free_gb_critical": 0.5,
+    "min_ram_free_gb_warning": 2,
+    "poll_seconds": 10
+  },
+  "learning": {
+    "metrics": [
+      "loss.policy",
+      "loss.value",
+      "loss.ownership",
+      "loss.score",
+      "loss.total",
+      "learning.mean_parameter_delta",
+      "learning.mean_gradient_norm",
+      "learning.optimizer_updates_total",
+      "learning.samples_consumed_total",
+      "moves_per_sec"
+    ],
+    "stall_checks": [
+      {
+        "direction": "increase",
+        "kind": "generation",
+        "metric": "learning.optimizer_updates_total",
+        "minimum_delta": 160,
+        "policy": "fail-closed",
+        "window": 3
+      },
+      {
+        "direction": "increase",
+        "kind": "generation",
+        "metric": "learning.samples_consumed_total",
+        "minimum_delta": 10240,
+        "policy": "fail-closed",
+        "window": 3
+      }
+    ]
+  },
+  "performance": {
+    "checks": [
+      {
+        "baseline": 21.09873,
+        "fail_ratio": 0.7,
+        "metric": "moves_per_sec",
+        "policy": "fail-closed",
+        "warning_ratio": 0.85
+      },
+      {
+        "baseline": 13.255,
+        "fail_ratio": 0.5,
+        "metric": "inference.mean_batch_rows",
+        "policy": "warning",
+        "warning_ratio": 0.75
+      }
+    ]
+  },
+  "profile_path": "configs/gocube/torus9_golden_current_v3.json",
+  "required_arena_metrics": [
+    "games",
+    "win_rate",
+    "games_per_hour",
+    "moves_per_sec",
+    "inference_mean_batch_rows"
+  ],
+  "required_generation_metrics": [
+    "games",
+    "games_per_hour",
+    "moves",
+    "moves_per_sec",
+    "selfplay_time_sec",
+    "training_time_sec",
+    "optimizer_updates_per_sec",
+    "inference.mean_batch_rows",
+    "learning.optimizer_updates_total",
+    "learning.samples_consumed_total"
+  ],
+  "schema": "gocube-production-training-orchestrator-v1",
+  "soft_stop": {
+    "default_minutes": 60,
+    "maximum_minutes": 100,
+    "minimum_minutes": 30
+  },
+  "topology": "torus9"
+}
