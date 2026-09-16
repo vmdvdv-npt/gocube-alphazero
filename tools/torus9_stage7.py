@@ -697,17 +697,18 @@ def _resume_boundary(run_dir: Path) -> dict[str, object]:
     generation = _committed_generation(run_dir)
     if generation != 3:
         raise ValueError(f"Resume test boundary must be clean M3, found M{generation}")
+    checkpoint_path = run_dir / "checkpoints" / "M3.pt"
     metadata_path = run_dir / "checkpoints" / "M3.metadata.json"
     rolling = run_dir / "replay" / "rolling-after-03.jsonl"
     return {
         "run_id": run_dir.name,
         "boundary": "M3",
-        "checkpoint_sha256": file_sha256(metadata_path.with_suffix(".pt")),
+        "checkpoint_sha256": file_sha256(checkpoint_path),
         "metadata_sha256": file_sha256(metadata_path),
-        "optimizer_updates": _metadata(metadata_path.with_suffix(".pt")).get("optimizer_updates"),
-        "adam_step": _metadata(metadata_path.with_suffix(".pt")).get("adam_step"),
+        "optimizer_updates": _metadata(checkpoint_path).get("optimizer_updates"),
+        "adam_step": _metadata(checkpoint_path).get("adam_step"),
         "replay_sha256": file_sha256(rolling),
-        "replay_fingerprint": _metadata(metadata_path.with_suffix(".pt")).get("replay_fingerprint"),
+        "replay_fingerprint": _metadata(checkpoint_path).get("replay_fingerprint"),
         "replay_rows": len(_read_jsonl(rolling)),
         "published": True,
     }
