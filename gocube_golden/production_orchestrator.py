@@ -211,8 +211,30 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
             if isinstance(errors, list) and errors:
                 raise CriticalHealthError(f"driver reported runtime error: {errors[-1]}")
 
+    @staticmethod
+    def _process_group_exists(process_group: int) -> bool:
+        try:
+            os.killpg(int(process_group), 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def _wait_for_process_group_exit(self, process_group: int, timeout: float) -> bool:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while self._process_group_exists(process_group):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return False
+            time.sleep(min(0.01, remaining))
+        return True
+
     def _terminate_child_group(self, process: subprocess.Popen[bytes] | subprocess.Popen[str], *, reason: str) -> None:
-        if process.poll() is not None:
+        process_group = int(process.pid)
+        direct_running = process.poll() is None
+        group_alive = self._process_group_exists(process_group)
+        if not direct_running and not group_alive:
             return
         self.events.emit(
             "CRITICAL",
@@ -220,25 +242,36 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
             pid=process.pid,
             reason=reason,
         )
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=self.supervision.critical_child_grace_seconds)
-            return
-        except subprocess.TimeoutExpired:
-            pass
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=10.0)
-        except subprocess.TimeoutExpired as exc:
+        if group_alive:
+            try:
+                os.killpg(process_group, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            try:
+                process.wait(timeout=self.supervision.critical_child_grace_seconds)
+            except subprocess.TimeoutExpired:
+                pass
+        group_gone = self._wait_for_process_group_exit(
+            process_group,
+            self.supervision.critical_child_grace_seconds,
+        )
+        if not group_gone:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            try:
+                process.wait(timeout=10.0)
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"child process {process.pid} survived scoped fail-closed termination"
+                ) from exc
+        if not self._wait_for_process_group_exit(process_group, 10.0):
             raise RuntimeError(
-                f"child process group {process.pid} survived scoped fail-closed termination"
-            ) from exc
+                f"child process group {process_group} survived scoped fail-closed termination"
+            )
 
     def _run_child(self, command: Sequence[str], *, generation: int, resume: bool, phase: str) -> int:
         from .orchestrator import _render_command
@@ -304,7 +337,14 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
                         )
                 time.sleep(self.spec.health.poll_seconds)
         finally:
-            self.active_child_path.unlink(missing_ok=True)
+            try:
+                if process.poll() is None or self._process_group_exists(process.pid):
+                    self._terminate_child_group(
+                        process,
+                        reason="supervisor monitor exited before child process group was fully reaped",
+                    )
+            finally:
+                self.active_child_path.unlink(missing_ok=True)
 
     def _run_generation(self, generation: int) -> None:
         tx_path = self._generation_tx_path(generation)
