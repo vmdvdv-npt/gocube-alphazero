@@ -2,14 +2,24 @@ from __future__ import annotations
 
 from tools.torus9_wait_benchmark import (
     BASE_VARIANT_IDS,
+    _correctness_gate,
     _decision,
     _read_spec,
     _shuffled_base_order,
 )
 
 
-def _row(wait_ms: float, moves_per_sec: float) -> dict[str, object]:
-    return {"wait_ms": wait_ms, "moves_per_sec": moves_per_sec, "wall_time_sec": 100.0, "normalized_game_digests": {}}
+def _row(wait_ms: float, moves_per_sec: float, *, digest: str = "same", numerical_status: str = "PASS") -> dict[str, object]:
+    return {
+        "wait_ms": wait_ms,
+        "moves_per_sec": moves_per_sec,
+        "wall_time_sec": 100.0,
+        "games_requested": 64,
+        "completed_games": 64,
+        "technical_games": 0,
+        "normalized_game_digests": {"game-0000": digest},
+        "numerical_divergence": {"status": numerical_status},
+    }
 
 
 def test_run_spec_freezes_the_controlled_wait_matrix():
@@ -53,3 +63,28 @@ def test_decision_runs_zero_wait_only_after_large_first_gain():
     assert result["wait_0_ran"] is True
     assert result["winner_id"] == "wait-0.0ms"
     assert result["recommendation"] == "RECOMMEND GOLDEN WAIT = 0 ms"
+
+
+def test_correctness_gate_allows_non_bit_exact_digest_with_bounded_fp32_variance():
+    baseline = _row(2.0, 100.0, digest="baseline")
+    current = _row(0.5, 100.0, digest="batch-shape-variant")
+    gate = _correctness_gate(
+        {"wait-0.5ms": current},
+        baseline_id="wait-2.0ms",
+        baseline_result=baseline,
+    )
+    assert gate["status"] == "PASS"
+    assert gate["bit_exact_equality_required"] is False
+    assert gate["digest_comparison_advisory"]["status"] == "EXPECTED_VARIANCE_ALLOWED"
+
+
+def test_correctness_gate_fails_unexplained_numerical_divergence():
+    baseline = _row(2.0, 100.0)
+    current = _row(1.0, 100.0, numerical_status="FAIL")
+    gate = _correctness_gate(
+        {"wait-1.0ms": current},
+        baseline_id="wait-2.0ms",
+        baseline_result=baseline,
+    )
+    assert gate["status"] == "FAIL"
+    assert gate["numerical_gate"]["status"] == "FAIL"
