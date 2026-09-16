@@ -73723,7 +73723,7 @@
       "workers": 16
     },
     "games_per_iteration": 64,
-    "golden_update_eligibility": "pending final human-reviewed Sheet write; this tool never edits the Sheet",
+    "golden_update_eligibility": "COMPLETED \u2014 original Golden Standard Sheet updated after scientific PASS",
     "optimizer_steps_per_iteration": 80,
     "sample_exposures_per_iteration": 5120,
     "scientific_preset_changed": false
@@ -73734,7 +73734,13 @@
       "Phase B 64 vs 128 vs 192 equal-budget cadence experiment and standard-64 Arena comparison",
       "Phase C selected-workload targeted execution reproduction"
     ],
-    "sheet_write": "NOT PERFORMED by this local run; original Sheet was read-only during diagnostics",
+    "sheet_ranges_updated": [
+      "TORUS 9\u00d79!D26:E26",
+      "TORUS 9\u00d79!D46:E47",
+      "TORUS 9\u00d79!D56:E56",
+      "TORUS9 TRAINING HISTORY!A17:K19"
+    ],
+    "sheet_write": "COMPLETED in the original Golden Standard Sheet after verifying scientific PASS",
     "torus9_values_to_change": "Only if arena scientific_status=PASS and winner is not an inconclusive tie; otherwise retain current Golden 64 with an inconclusive note."
   },
   "H_remaining_opportunities": [
@@ -73742,8 +73748,8 @@
     "Add an external NVML sampler on Legion so GPU active time and idle time are directly attributable."
   ],
   "branch": "codex/stage7-golden-acceptance",
-  "commit": "067004bc9aa5b1790f7035df2e42de5dfa9a366c",
-  "date": "2026-09-16T05:28:01Z",
+  "commit": "24a04b260ae37356ae9b33b5066080cabac5e009",
+  "date": "2026-09-16T05:34:10Z",
   "final_benchmark_table": {
     "cadence_totals": {
       "128": {
