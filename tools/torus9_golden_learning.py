@@ -9,6 +9,7 @@ namespace with an empty replay.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import math
 import os
@@ -25,6 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from gocube_golden.provenance import capture_code_identity, derive_seed, file_sha256
+from gocube_golden.run_storage import create_lineage
 from gocube_golden.execution_reference import compare_legion_torus9_selfplay_performance
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
@@ -53,7 +55,6 @@ from gocube_golden.torus9_contract import (
 
 
 BASE_COMMIT = TORUS9_GOLDEN_LINEAGE_BASE_COMMIT
-ACTIVE_NAMESPACE = ROOT / "runs" / "torus9-golden-v3-active"
 DEFAULT_RUN_ID = "torus9-golden-v3-20260913-run01"
 
 
@@ -378,16 +379,26 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("Current Torus 9×9 Golden Standard is fixed to 16 workers")
     if str(args.device).startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("Current Torus 9×9 run requested CUDA but CUDA is unavailable")
-    root = ACTIVE_NAMESPACE / args.run_id
-    if root.exists():
-        raise FileExistsError(f"Active Torus 9×9 run namespace already exists; refusing automatic resume: {root}")
-    root.mkdir(parents=True)
-    for name in ("checkpoints", "selfplay", "replay", "training"):
-        (root / name).mkdir()
-
     code = capture_code_identity(ROOT)
     profile_fp = current_torus9_profile_fingerprint(profile)
     comparison = _profile_comparison(profile)
+    created_at = datetime.now(timezone.utc).isoformat()
+    root = create_lineage(
+        "torus9",
+        args.run_id,
+        manifest={
+            "manifest_schema": "torus9-golden-current-v3-run-v1",
+            "lineage_id": args.run_id,
+            "topology": "torus9",
+            "status": "ACTIVE",
+            "parent_checkpoint": None,
+            "git_commit": code.git_commit_sha,
+            "config_fingerprint": profile_fp,
+            "created_at": created_at,
+            "checkpoint_hashes": {},
+        },
+        extra_directories=("selfplay", "replay", "training"),
+    )
     resolved_config = dict(profile)
     resolved_config["runtime"] = {
         "device": str(args.device),
@@ -426,6 +437,14 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     }
     manifest = {
         "manifest_schema": "torus9-golden-current-v3-run-v1",
+        "lineage_id": args.run_id,
+        "topology": "torus9",
+        "status": "ACTIVE",
+        "parent_checkpoint": None,
+        "git_commit": code.git_commit_sha,
+        "config_fingerprint": profile_fp,
+        "created_at": created_at,
+        "checkpoint_hashes": {"checkpoints/M0.pt": file_sha256(m0_path)},
         "run_id": args.run_id,
         "active_namespace": str(root),
         "base_commit": BASE_COMMIT,
@@ -545,8 +564,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         }
         write_json(root / "final-report.json", report)
         write_json(ROOT / "docs" / "TORUS9_GOLDEN_CURRENT_V3_LEARNING_20260913.json", report)
-        manifest["status"] = "INCONCLUSIVE"
+        manifest["status"] = "ACTIVE"
         manifest["result"] = "INCONCLUSIVE"
+        manifest["checkpoint_hashes"] = {
+            str(path.relative_to(root)): file_sha256(path)
+            for path in sorted((root / "checkpoints").glob("*.pt"))
+        }
         manifest["sweep_selection_m1_m7"] = selection
         write_json(root / "manifest.json", manifest)
         return report
@@ -687,7 +710,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     report["artifacts"] = {"run_root": str(root), "run_report": str(root / "final-report.json"), "docs_json": str(docs_json), "docs_markdown": str(docs_md)}
     write_json(root / "final-report.json", report)
     write_json(docs_json, report)
-    manifest["status"] = "COMPLETED"
+    manifest["status"] = "ACTIVE"
+    manifest["result"] = status
+    manifest["checkpoint_hashes"] = {
+        str(path.relative_to(root)): file_sha256(path)
+        for path in sorted((root / "checkpoints").glob("*.pt"))
+    }
     manifest["m8"] = {"checkpoint": str(checkpoint_path), "model_hash": checkpoint_metadata["model_hash"]}
     manifest["result"] = status
     manifest["sweep_winner"] = selection.get("winner")

@@ -7,6 +7,8 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
+from gocube_golden.run_storage import RUNS_ROOT
+
 from .errors import IntegrationError, InvalidRequest
 from .service import GoCubeAlphaZeroService, PROTOCOL_VERSION
 
@@ -153,7 +155,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Local GoCube AlphaZero integration service")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--checkpoint-dir", default="checkpoint")
+    parser.add_argument("--checkpoint-dir", default=str(RUNS_ROOT))
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument(
         "--allow-origin",

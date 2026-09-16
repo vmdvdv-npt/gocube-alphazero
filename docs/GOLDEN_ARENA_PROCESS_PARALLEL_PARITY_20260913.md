@@ -69,7 +69,7 @@ parallel wall time.
 ```bash
 PYTHONPATH=. .venv/bin/python tools/torus_golden_process_arena.py \
   --workers 16 \
-  --output-dir runs/golden-arena-process-parallel/torus-golden-arena-process-parity-20260913-final
+  --output-dir runs/torus9/evaluations/golden-arena-process-parallel/torus-golden-arena-process-parity-20260913-final
 ```
 
 The complete machine-readable result is tracked at

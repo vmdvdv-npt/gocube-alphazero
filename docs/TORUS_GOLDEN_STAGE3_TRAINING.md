@@ -42,7 +42,7 @@ coalescing disabled, and sequential PUCT inside each game. Replay rows are
 sorted by `(game_id, ply)` after the chunk completes. No batched inference,
 parallel MCTS, fast search, or worker-derived randomness is enabled.
 
-Canonical artifacts are written beneath `runs/torus-golden-stage3/<run_id>/`
+Canonical artifacts are written beneath `runs/torus9/archive/<run_id>/`
 and are intentionally ignored by Git. The final report records checkpoint
 lineage, parameter/model/artifact hashes, self-play provenance, optimizer
 metrics, pre-generated Arena starts, Arena checkpoint loads, and one of the

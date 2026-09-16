@@ -14,15 +14,15 @@ The launcher is intentionally for generated AI self-play games and replay/diagno
 
 1. resolves the repository root, so it works regardless of the shell's current directory;
 2. uses the repository's existing `.venv/bin/python` directly, so manual virtualenv activation is not required;
-3. verifies that the local `checkpoint/` directory exists;
-4. idempotently registers the two known legacy runs when they are present:
+3. scans the canonical `runs/` tree for supported Golden checkpoint metadata;
+4. idempotently registers the two known legacy profiles when their canonical artifacts are present:
    - `gocube-cube4-stage4-v1` — Cube 4×4, Chinese rules, komi 7.5;
    - `torus-9x9-30iter` — Torus 9×9, Chinese rules, komi 7.5;
 5. leaves compatible existing manifests unchanged and refuses to overwrite an incompatible manifest;
 6. fails clearly if `127.0.0.1:8765` is already occupied instead of silently starting another service;
 7. runs the existing Protocol V1 service on `http://127.0.0.1:8765` with `device=auto`.
 
-New training runs already write their own GoCube manifest, so they do not need to be added to the legacy bootstrap list.
+New training runs already write their own GoCube manifest inside their lineage directory, so they do not need to be added to the legacy bootstrap list.
 
 Once the launcher is running, use GoCube's Development Workspace to generate and replay games. Repeated test games should be generated from the UI; `curl`, manual checkpoint IDs, JSON payloads, and repeated manifest registration are not part of the normal workflow.
 

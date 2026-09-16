@@ -213,7 +213,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:79f1686b6230033967bbe26ea87fdfbedfba9744583f19fd57dc4e390ab485d1",
           "model_hash": "sha256:c4436056193427cc89be558ff71eedffa13ababf4f6973a4fe8aed07e55c44a3",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M1b.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M1b.pt"
         },
         "child_cpu_time_sec": 547.883178,
         "child_cpu_utilization_percent": 1204.4379045667777,
@@ -565,7 +565,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:c88f93c1e905e5266e77f9e4d8f9bc5ab5c5c9e6480abfa6cf48f752b900417a",
           "model_hash": "sha256:0f1b46c361f71cac01ecb1b79558463c0a4a83e4f82c3078c06a50bae70b343d",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M2b.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M2b.pt"
         },
         "child_cpu_time_sec": 1051.919909,
         "child_cpu_utilization_percent": 1368.827446572651,
@@ -1167,7 +1167,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:eee06e8b1a51037935a41f5f227db491dba8e7c2e83fab2a1b90ca268924e557",
           "model_hash": "sha256:92de4b4e037a7e69481b202a793fc462dd700dab58378035a02dbb1db9b35fb2",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M3b.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M3b.pt"
         },
         "child_cpu_time_sec": 711.8895850000001,
         "child_cpu_utilization_percent": 1225.1623526060807,
@@ -1579,7 +1579,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:422dd2c50e7b932193fc736a83e278ed5f9eea10f6d8371a36109cef66a61dbb",
           "model_hash": "sha256:660b9ed5b7297a94cb584b347f390b0e7a55458201185845725ef0d564205f2a",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M4b.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M4b.pt"
         },
         "child_cpu_time_sec": 677.7419770000001,
         "child_cpu_utilization_percent": 1246.6814158449042,
@@ -1981,7 +1981,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:f15e9e7a4fab2952e007970dc5e9e6e731140fa1ba68d3bcee083fdadf596552",
           "model_hash": "sha256:2353b1dee6a8832649f3398a795e32e5ebe695d4b7f1e6a49e4d2383bc2d9f20",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M5b.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/bringup/checkpoints/M5b.pt"
         },
         "child_cpu_time_sec": 623.883754,
         "child_cpu_utilization_percent": 1398.265261221113,
@@ -2484,7 +2484,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:4f559474e7c65724291b5cb57e678e3f9ea4f4240e6f08797ce6e7a96b268c30",
           "model_hash": "sha256:2f95e8a1877d380194f890da777e343fc80778ccf677b3d2023a8a36083eea8a",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M1.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M1.pt"
         },
         "child_cpu_time_sec": 1589.0548360000003,
         "child_cpu_utilization_percent": 1352.9116387250808,
@@ -3356,7 +3356,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:9dcc1e329907d32b6d064d5a59ce3c121d88af51dfe2d799adb2c796e427fd6b",
           "model_hash": "sha256:1c03181a423b770853d719a925306793e6e0fbefb06441131cc702735dc74d76",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M2.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M2.pt"
         },
         "child_cpu_time_sec": 2305.1955659999994,
         "child_cpu_utilization_percent": 1426.6515219696544,
@@ -4548,7 +4548,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:46017071823466d83be206908966150cf871ed053a05c0591fab568b9cd03015",
           "model_hash": "sha256:9b3e73c82499496ed54e2be5a632f54c4811841f4b4aaedf584a1e0021a9d343",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M3.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M3.pt"
         },
         "child_cpu_time_sec": 692.3193680000004,
         "child_cpu_utilization_percent": 1465.4924834360306,
@@ -4900,7 +4900,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:1f9715f499e19229720f1ed833a22f2cbcb4af29c77de891d2f883ed869bc8fa",
           "model_hash": "sha256:9402e69db341df66db4b6a2d59a1357ca3e90ae41dc2772262ed97c7109b85c9",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M4.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M4.pt"
         },
         "child_cpu_time_sec": 795.3502879999996,
         "child_cpu_utilization_percent": 1176.0639993657248,
@@ -5382,7 +5382,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:8313d25d4109334d336794f850268f2abc259eab5f112bf338835850fb5eb84b",
           "model_hash": "sha256:2b61d6382ed12768f6e87d29aa933677393c512ebc70f1d6393d1a196c9df437",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M5.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M5.pt"
         },
         "child_cpu_time_sec": 1606.6078870000001,
         "child_cpu_utilization_percent": 1384.3972414659875,
@@ -6214,7 +6214,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:75d01912f8f99ba2d66a6c0233e585b242fc7e0ace8915642d9ea0351c82e8b7",
           "model_hash": "sha256:82a6152f0015c74759e20b1959b9e7455e8b99b54c30cc5166a3bcc7526f1a7e",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M6.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M6.pt"
         },
         "child_cpu_time_sec": 2198.7359269999997,
         "child_cpu_utilization_percent": 1390.2274599242567,
@@ -7426,7 +7426,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:de0ee0b59284ab0a188f47496656ed66a052f09ba2f7c850c8df1f0e872e1b91",
           "model_hash": "sha256:c339367b3cbbff0ec81676f6727a12848396220c5619b1cd53389adfe8666450",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M7.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M7.pt"
         },
         "child_cpu_time_sec": 1254.826167000001,
         "child_cpu_utilization_percent": 1429.179539268633,
@@ -8058,7 +8058,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:c5e0336c06f3681b2fe73f5e768c57eeadd69cba1f813a2d9a64c7af47cccbe6",
           "model_hash": "sha256:6a3d29316f3733e97f1df03436d5f68c1ca02cf8e8162c11853f6d598dfc695a",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M8.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M8.pt"
         },
         "child_cpu_time_sec": 2243.7717589999993,
         "child_cpu_utilization_percent": 1483.5637002419035,
@@ -11570,7 +11570,7 @@
     "checkpoint": {
       "artifact_sha256": "sha256:43f966a469de1f0a28676dd6439d95cf625c2f7d9c61d3acec7916a6e570d22c",
       "model_hash": "sha256:e0669f46f1309c00cba3fd551133437e207139ba8083bd903106396bd8c2d074",
-      "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/preflight/M0-preflight.pt"
+      "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/preflight/M0-preflight.pt"
     },
     "games": 16,
     "games_per_hour": 3259.7447786925964,
@@ -11755,36 +11755,36 @@
   },
   "profile_fingerprint": "sha256:f16f58288b1e8902ce589d3a62ee04532941440ffbb53cd16282fdf5605950aa",
   "representative_traces": {
-    "M4-vs-M0-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M0-game-01.json",
-    "M4-vs-M0-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M0-game-02.json",
-    "M4-vs-M0-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M0-game-03.json",
-    "M4-vs-M0-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M0-game-04.json",
-    "M4-vs-M1-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M1-game-01.json",
-    "M4-vs-M1-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M1-game-02.json",
-    "M4-vs-M1-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M1-game-03.json",
-    "M4-vs-M1-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M1-game-04.json",
-    "M8-vs-M0-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M0-game-01.json",
-    "M8-vs-M0-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M0-game-02.json",
-    "M8-vs-M0-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M0-game-03.json",
-    "M8-vs-M0-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M0-game-04.json",
-    "M8-vs-M1-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M1-game-01.json",
-    "M8-vs-M1-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M1-game-02.json",
-    "M8-vs-M1-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M1-game-03.json",
-    "M8-vs-M1-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M1-game-04.json",
-    "M8-vs-M4-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M4-game-01.json",
-    "M8-vs-M4-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M4-game-02.json",
-    "M8-vs-M4-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M4-game-03.json",
-    "M8-vs-M4-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M4-game-04.json",
-    "M8-vs-M7-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M7-game-01.json",
-    "M8-vs-M7-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M7-game-02.json",
-    "M8-vs-M7-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M7-game-03.json",
-    "M8-vs-M7-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M7-game-04.json",
-    "selfplay-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-01.json",
-    "selfplay-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-02.json",
-    "selfplay-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-03.json",
-    "selfplay-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-04.json",
-    "selfplay-05.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-05.json",
-    "selfplay-06.json": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-06.json"
+    "M4-vs-M0-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M0-game-01.json",
+    "M4-vs-M0-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M0-game-02.json",
+    "M4-vs-M0-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M0-game-03.json",
+    "M4-vs-M0-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M0-game-04.json",
+    "M4-vs-M1-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M1-game-01.json",
+    "M4-vs-M1-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M1-game-02.json",
+    "M4-vs-M1-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M1-game-03.json",
+    "M4-vs-M1-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M4-vs-M1-game-04.json",
+    "M8-vs-M0-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M0-game-01.json",
+    "M8-vs-M0-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M0-game-02.json",
+    "M8-vs-M0-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M0-game-03.json",
+    "M8-vs-M0-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M0-game-04.json",
+    "M8-vs-M1-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M1-game-01.json",
+    "M8-vs-M1-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M1-game-02.json",
+    "M8-vs-M1-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M1-game-03.json",
+    "M8-vs-M1-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M1-game-04.json",
+    "M8-vs-M4-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M4-game-01.json",
+    "M8-vs-M4-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M4-game-02.json",
+    "M8-vs-M4-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M4-game-03.json",
+    "M8-vs-M4-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M4-game-04.json",
+    "M8-vs-M7-game-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M7-game-01.json",
+    "M8-vs-M7-game-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M7-game-02.json",
+    "M8-vs-M7-game-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M7-game-03.json",
+    "M8-vs-M7-game-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/M8-vs-M7-game-04.json",
+    "selfplay-01.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-01.json",
+    "selfplay-02.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-02.json",
+    "selfplay-03.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-03.json",
+    "selfplay-04.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-04.json",
+    "selfplay-05.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-05.json",
+    "selfplay-06.json": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/representative-traces/selfplay-06.json"
   },
   "run_contract": {
     "batch_size": 64,

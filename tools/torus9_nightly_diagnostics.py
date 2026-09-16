@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Evidence-first Torus9 self-play, training, and cadence experiment.
 
-This tool is intentionally separate from the canonical Golden launcher.  It
-creates disposable run namespaces under ``runs/torus9-nightly-20260916`` and
-never writes the historical M17 run or creates M18.  The cadence arms use the
+This tool is intentionally separate from the canonical Golden launcher. It
+creates one lineage directory per arm under ``runs/torus9/active`` and one
+evaluation directory under ``runs/torus9/evaluations``. It never writes the
+historical M17 run or creates M18. The cadence arms use the
 same current scientific profile and execution preset, while changing only the
 number of games and the proportionally normalized Adam work:
 
@@ -18,6 +19,7 @@ Arena preset is deliberately not used here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -41,6 +43,7 @@ from gocube_golden.provenance import (
     derive_seed,
     file_sha256,
 )
+from gocube_golden.run_storage import active_lineage_dir, create_lineage, evaluation_dir
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
     Torus9SelfPlayGameRecord,
@@ -77,8 +80,8 @@ from tools.arena_profiles import get_profile
 from training_engine import value_fingerprint
 
 
-NIGHT_ROOT = ROOT / "runs" / "torus9-nightly-20260916"
-CANONICAL_RUN = ROOT / "runs" / "torus9-golden-v3-active" / "torus9-golden-v3-20260914-run03"
+NIGHT_ACTIVE_ROOT = ROOT / "runs" / "torus9" / "active"
+CANONICAL_RUN = active_lineage_dir("torus9", "torus9-golden-v3-20260914-run03")
 ARENA_SEED = 202609131005
 BEFORE_MOVES_PER_SEC = 20.931
 
@@ -596,8 +599,15 @@ def _run_dir_manifest(
     profile_fp: str,
     arm: CadenceArm | None,
     m0: Mapping[str, object],
+    created_at: str,
 ) -> dict[str, object]:
-    return {
+    manifest = _lineage_manifest_seed(
+        run_id=run_id,
+        code=code,
+        profile_fp=profile_fp,
+        created_at=created_at,
+    )
+    manifest.update({
         "schema": "torus9-nightly-diagnostics-v1",
         "run_id": run_id,
         "run_dir": str(run_dir),
@@ -618,17 +628,48 @@ def _run_dir_manifest(
         "profile_snapshot": dict(profile),
         "cadence_arm": arm.as_dict() if arm else None,
         "m0": dict(m0),
-        "status": "initialized",
+        "result_status": "initialized",
+        "checkpoint_hashes": {"checkpoints/M0.pt": m0["checkpoint_sha256"]},
+    })
+    return manifest
+
+
+def _lineage_manifest_seed(
+    *,
+    run_id: str,
+    code: CodeIdentity,
+    profile_fp: str,
+    created_at: str,
+) -> dict[str, object]:
+    """Return the required passport written before any training work starts."""
+    return {
+        "manifest_schema": "torus9-nightly-diagnostics-v1",
+        "lineage_id": run_id,
+        "topology": "torus9",
+        "status": "ACTIVE",
+        "parent_checkpoint": None,
+        "git_commit": code.git_commit_sha,
+        "config_fingerprint": profile_fp,
+        "created_at": created_at,
+        "checkpoint_hashes": {},
     }
 
 
 def run_phase_a(run_id: str) -> dict[str, object]:
-    run_dir = NIGHT_ROOT / "phase-a" / run_id
-    _prepare_empty(run_dir)
-    for name in ("checkpoints", "selfplay", "replay", "training", "timing"):
-        (run_dir / name).mkdir()
     code = capture_code_identity(ROOT)
     profile, profile_fp, contract = _profile_contract()
+    created_at = datetime.now(timezone.utc).isoformat()
+    run_dir = create_lineage(
+        "torus9",
+        run_id,
+        manifest=_lineage_manifest_seed(
+            run_id=run_id,
+            code=code,
+            profile_fp=profile_fp,
+            created_at=created_at,
+        ),
+        extra_directories=("selfplay", "replay", "training", "timing"),
+    )
     load_started = time.perf_counter()
     state, adapter, m0_path, m0 = _new_model_state(
         run_id=run_id,
@@ -644,6 +685,7 @@ def run_phase_a(run_id: str) -> dict[str, object]:
         profile_fp=profile_fp,
         arm=CADENCE_ARMS[0],
         m0=m0,
+        created_at=created_at,
     )
     manifest["phase"] = "A — current 64-game production reproduction"
     manifest["model_initialization_and_loading_wall_time_sec"] = model_load_wall
@@ -704,12 +746,21 @@ def run_phase_a(run_id: str) -> dict[str, object]:
 
 
 def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
-    run_dir = NIGHT_ROOT / "cadence" / run_id / f"arm-{arm.games}"
-    _prepare_empty(run_dir)
-    for name in ("checkpoints", "selfplay", "replay", "training", "timing"):
-        (run_dir / name).mkdir()
+    lineage_id = f"{run_id}-arm-{arm.games}"
     code = capture_code_identity(ROOT)
     profile, profile_fp, contract = _profile_contract()
+    created_at = datetime.now(timezone.utc).isoformat()
+    run_dir = create_lineage(
+        "torus9",
+        lineage_id,
+        manifest=_lineage_manifest_seed(
+            run_id=lineage_id,
+            code=code,
+            profile_fp=profile_fp,
+            created_at=created_at,
+        ),
+        extra_directories=("selfplay", "replay", "training", "timing"),
+    )
     adapter = CadenceTrainingAdapter(
         optimizer_steps=arm.optimizer_steps,
         profile=profile,
@@ -717,7 +768,7 @@ def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
         base_commit=TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     )
     state, adapter, m0_path, m0 = _new_model_state(
-        run_id=f"{run_id}-arm-{arm.games}",
+        run_id=lineage_id,
         run_dir=run_dir,
         code=code,
         adapter=adapter,
@@ -730,6 +781,7 @@ def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
         profile_fp=profile_fp,
         arm=arm,
         m0=m0,
+        created_at=created_at,
     )
     manifest["phase"] = "B — equal-budget games/iteration cadence experiment"
     _write(run_dir / "manifest.json", manifest)
@@ -753,7 +805,7 @@ def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
         rows.append(row)
         source_checkpoint = run_dir / "checkpoints" / f"M{generation}.pt"
         manifest["last_generation"] = generation
-        manifest["status"] = "running"
+        manifest["result_status"] = "running"
         _write(run_dir / "manifest.json", manifest)
     wall = time.perf_counter() - started
     final = rows[-1]
@@ -804,7 +856,8 @@ def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
         ) else "FAIL",
     }
     manifest["last_generation"] = arm.iterations
-    manifest["status"] = report["status"]
+    manifest["result_status"] = report["status"]
+    manifest["status"] = "ACTIVE"
     manifest["report"] = str(run_dir / "cadence-arm-report.json")
     _write(run_dir / "manifest.json", manifest)
     _write(run_dir / "cadence-arm-report.json", report)
@@ -813,7 +866,7 @@ def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
 
 
 def run_cadence(run_id: str) -> dict[str, object]:
-    root = NIGHT_ROOT / "cadence" / run_id
+    root = evaluation_dir("torus9", f"{run_id}-cadence")
     _prepare_empty(root)
     reports = [run_cadence_arm(run_id, arm) for arm in CADENCE_ARMS]
     report = {
@@ -838,7 +891,7 @@ def run_cadence(run_id: str) -> dict[str, object]:
 
 def refresh_cadence_report(run_id: str) -> dict[str, object]:
     """Recompute derived cadence status without rerunning hardware work."""
-    root = NIGHT_ROOT / "cadence" / run_id
+    root = evaluation_dir("torus9", f"{run_id}-cadence")
     reports: list[dict[str, object]] = []
     for arm in CADENCE_ARMS:
         arm_dir = root / f"arm-{arm.games}"
@@ -874,7 +927,7 @@ def refresh_cadence_report(run_id: str) -> dict[str, object]:
 
 
 def run_arena_phase(run_id: str) -> dict[str, object]:
-    root = NIGHT_ROOT / "cadence" / run_id
+    root = evaluation_dir("torus9", f"{run_id}-cadence")
     cadence = _read_json(root / "cadence-experiment-report.json")
     arms = cadence.get("arms")
     if not isinstance(arms, list) or len(arms) != 3:
@@ -986,7 +1039,7 @@ def run_arena_phase(run_id: str) -> dict[str, object]:
 
 def refresh_arena_report(run_id: str) -> dict[str, object]:
     """Refresh derived Arena telemetry/status without rerunning the matches."""
-    root = NIGHT_ROOT / "cadence" / run_id
+    root = evaluation_dir("torus9", f"{run_id}-cadence")
     report = _read_json(root / "arena-standard-64-report.json")
     pairings = report.get("pairings")
     if not isinstance(pairings, list) or len(pairings) != 3:
@@ -1019,7 +1072,7 @@ def refresh_arena_report(run_id: str) -> dict[str, object]:
 
 
 def run_phase_c(run_id: str) -> dict[str, object]:
-    root = NIGHT_ROOT / "cadence" / run_id
+    root = evaluation_dir("torus9", f"{run_id}-cadence")
     cadence = _read_json(root / "cadence-experiment-report.json")
     arena = _read_json(root / "arena-standard-64-report.json")
     winner = int(arena["winner_games_per_iteration"])
@@ -1185,8 +1238,8 @@ def _causal_bottleneck(row: Mapping[str, object], timing: Mapping[str, object]) 
 
 
 def generate_final_report(run_id: str) -> dict[str, object]:
-    root = NIGHT_ROOT / "cadence" / run_id
-    phase_a_candidates = sorted((NIGHT_ROOT / "phase-a").glob("*/phase-a-report.json"))
+    root = evaluation_dir("torus9", f"{run_id}-cadence")
+    phase_a_candidates = sorted(NIGHT_ACTIVE_ROOT.glob(f"{run_id}*/phase-a-report.json"))
     phase_a = _read_json(phase_a_candidates[-1]) if phase_a_candidates else None
     cadence = _read_json(root / "cadence-experiment-report.json")
     arena = _read_json(root / "arena-standard-64-report.json")

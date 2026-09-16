@@ -30,7 +30,7 @@
     },
     "artifact_sha256": "sha256:a811ebac6cf21b369528379ca1e63293a3d536d522fc4fc8017bce649b631ef0",
     "model_hash": "sha256:f71ee1d742c8c8eeb719276c703c690f73eb103941291214943e359d5ef4e8d8",
-    "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03/checkpoints/M10.pt"
+    "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M10.pt"
   },
   "comparison": "fixed-seed-repeat2-top-c12-w4-g192",
   "games": "/tmp/arena-sweep-repeat-top-c12-w4-g192-strict/games.jsonl",
@@ -66,7 +66,7 @@
     },
     "artifact_sha256": "sha256:4b0bde834de658d6e5bebf3c584d7951843b58df209f95df52a8824a3bf8e6f2",
     "model_hash": "sha256:9d0c591464c729eb8fff880bd1b719aa4ed78d76b6bb85d62f7adf8106e04bd1",
-    "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03/checkpoints/M5.pt"
+    "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M5.pt"
   },
   "run_id": "torus9-arena-20260916T003057Z",
   "schema_version": 2,

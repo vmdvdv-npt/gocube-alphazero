@@ -22,8 +22,8 @@ Delta is `PR112 after - PR110 before`; negative is faster for wall-clock metrics
 
 The after run used the exact PR110 Phase A final run identity so derived game and training seeds remained unchanged:
 
-- Before: `runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/`
-- After: `runs/torus9-pr112-repro-20260916-exact3/phase-a/torus9-nightly-20260916-phase-a-final/`
+- Before: `runs/torus9/archive/torus9-nightly-20260916-phase-a-final/`
+- After: `runs/torus9/archive/torus9-pr112-repro-20260916-exact3/`
 - After commit: `0c41727619b3ba3d06d802b4ee735f5f52511d5a` (PR112 merge)
 - Profile fingerprint: `sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775`
 - Rules fingerprint: `sha256:e0fd15c82d42a63ca05c3b6fb3ae02deb938543e1e06483ecfeab275dc98a39e`
@@ -114,17 +114,17 @@ Occupancy caveat retained from PR110: `mean_active_contexts = 32.25196850393701`
 
 Before raw artifacts:
 
-- `runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/phase-a-report.json`
-- `runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/timing/M01.json`
+- `runs/torus9/archive/torus9-nightly-20260916-phase-a-final/phase-a-report.json`
+- `runs/torus9/archive/torus9-nightly-20260916-phase-a-final/timing/M01.json`
 
 After raw artifacts:
 
-- `runs/torus9-pr112-repro-20260916-exact3/phase-a/torus9-nightly-20260916-phase-a-final/manifest.json` — SHA-256 `c3a7525a5a040294aee6983141aef337fcba88bedfc9377a20d63e68830ec6f6`
-- `runs/torus9-pr112-repro-20260916-exact3/phase-a/torus9-nightly-20260916-phase-a-final/phase-a-report.json` — SHA-256 `e9d981992bc8f795a11e15246eecc273b1691fc1fb03b3631e1e2cb12a588a77`
-- `runs/torus9-pr112-repro-20260916-exact3/phase-a/torus9-nightly-20260916-phase-a-final/timing/M01.json` — SHA-256 `b073b2303145b4bcd39c48bfbd82d78068e2b8f8138e5265767d1260f454b427`
-- `runs/torus9-pr112-repro-20260916-exact3/phase-a/torus9-nightly-20260916-phase-a-final/selfplay/M01-games.jsonl` — SHA-256 `7e496e5f9c8ae57ba861373137c934874b637489cd9e23889650ec67f94db4ea`
-- `runs/torus9-pr112-repro-20260916-exact3/phase-a/torus9-nightly-20260916-phase-a-final/replay/iter-01-fresh.jsonl` — SHA-256 `2b2615ee09545f165d0842a472b95b209ad68ab761360118d54454018a36f418`
-- `runs/torus9-pr112-repro-20260916-exact3/phase-a/torus9-nightly-20260916-phase-a-final/checkpoints/M1.metadata.json` — SHA-256 `5c9958f4d598fb9d5403f672131d042d6e8218703ee32c30773cab6cee0ce65a`
-- `runs/torus9-pr112-repro-20260916-exact3/phase-a/torus9-nightly-20260916-phase-a-final/checkpoints/M1.pt` — SHA-256 `b2001d956642c79e40977308b0550c710d618bfb48c1813c430a4da901e5f986`
+- `runs/torus9/archive/torus9-pr112-repro-20260916-exact3/manifest.json` — SHA-256 `7c05986e509b176ab5bc64cf5daa48e9fbec1524a948ae5f82f7dd3af4549c4c`
+- `runs/torus9/archive/torus9-pr112-repro-20260916-exact3/phase-a-report.json` — SHA-256 `5ad1cc70231c00792f70e074d1750dc82db5cbb62601137c1f4ad79c7613210e`
+- `runs/torus9/archive/torus9-pr112-repro-20260916-exact3/timing/M01.json` — SHA-256 `b073b2303145b4bcd39c48bfbd82d78068e2b8f8138e5265767d1260f454b427`
+- `runs/torus9/archive/torus9-pr112-repro-20260916-exact3/selfplay/M01-games.jsonl` — SHA-256 `7e496e5f9c8ae57ba861373137c934874b637489cd9e23889650ec67f94db4ea`
+- `runs/torus9/archive/torus9-pr112-repro-20260916-exact3/replay/iter-01-fresh.jsonl` — SHA-256 `2b2615ee09545f165d0842a472b95b209ad68ab761360118d54454018a36f418`
+- `runs/torus9/archive/torus9-pr112-repro-20260916-exact3/checkpoints/M1.metadata.json` — SHA-256 `5c9958f4d598fb9d5403f672131d042d6e8218703ee32c30773cab6cee0ce65a`
+- `runs/torus9/archive/torus9-pr112-repro-20260916-exact3/checkpoints/M1.pt` — SHA-256 `b2001d956642c79e40977308b0550c710d618bfb48c1813c430a4da901e5f986`
 
 PR110 interpretation reference: `docs/TORUS9_PR110_PIPELINE_FORENSICS_20260916.md`.

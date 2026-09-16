@@ -43,7 +43,7 @@ games for each of the eight M2 checkpoints under the proven stochastic
 self-play protocol and are labelled `self-play first-move estimate`.
 
 The complete machine-readable evidence is written to the run directory under
-`runs/torus5-aux-heads/` (ignored runtime artifacts). The final committed
+`runs/torus5/archive/` (ignored runtime artifacts). The final committed
 machine and human reports are copied to:
 
 * `docs/TORUS5_AUX_HEADS_NIGHT_AB_20260913.json`

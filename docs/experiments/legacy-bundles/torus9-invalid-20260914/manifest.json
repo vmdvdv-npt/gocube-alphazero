@@ -1,0 +1,22 @@
+{
+  "checkpoint_hashes": {
+    "torus9-golden-v3-20260913-run01/checkpoints/M0.pt": "sha256:212d109d0d7058bb2249ea40ba01f38f6baacbac7907e584ff143535a1dc2800",
+    "torus9-golden-v3-20260914-run02/checkpoints/M0.pt": "sha256:fde16d6bee5ed9e5b55aee69c919eb4a637bf82eab37cce9d44fdd2aa144fa3b"
+  },
+  "config_fingerprint": "unknown",
+  "created_at": "2026-09-13T21:04:05.558157+00:00",
+  "git_commit": "unknown",
+  "legacy_status": "ARCHIVE",
+  "lineage_id": "torus9-invalid-20260914",
+  "parent_checkpoint": null,
+  "status": "ARCHIVED",
+  "storage": {
+    "canonical_path": "runs/torus9/archive/torus9-invalid-20260914",
+    "legacy_manifest": "manifest.json",
+    "migrated_from": [
+      "runs/archive/torus9-invalid-20260914"
+    ],
+    "migrated_on": "2026-09-16"
+  },
+  "topology": "torus9"
+}

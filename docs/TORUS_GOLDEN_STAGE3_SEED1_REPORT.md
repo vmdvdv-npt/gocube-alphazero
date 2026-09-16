@@ -89,5 +89,5 @@ M0, but the primary pre-declared comparison M4 vs M1 is exactly neutral, so
 Stage 3 does not claim a positive learning proof.
 
 Canonical artifact directory:
-`runs/torus-golden-stage3/torus-golden-stage3-seed1-v5/`
+`runs/torus9/archive/torus-golden-stage3-seed1-v5/`
 

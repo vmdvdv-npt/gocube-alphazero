@@ -1,0 +1,16 @@
+{
+  "manifest_schema": "torus9-invalid-run-archive-v1",
+  "reason": "M0→M1 stopped after aggregate process-tree diagnostics: forced CPU device with CUDA idle; baseline path invalid for Legion performance sweep; run02 stopped before M1 so runtime device could be fixed in the launcher manifest contract",
+  "deletion_performed": false,
+  "automatic_discovery": false,
+  "moved_runs": [
+    {
+      "source": "torus9-golden-v3-active/torus9-golden-v3-20260913-run01",
+      "archive": "archive/torus9-invalid-20260914/torus9-golden-v3-20260913-run01"
+    },
+    {
+      "source": "torus9-golden-v3-active/torus9-golden-v3-20260914-run02",
+      "archive": "archive/torus9-invalid-20260914/torus9-golden-v3-20260914-run02"
+    }
+  ]
+}

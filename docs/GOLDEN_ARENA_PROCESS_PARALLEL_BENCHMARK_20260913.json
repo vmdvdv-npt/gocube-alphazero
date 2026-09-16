@@ -20,7 +20,7 @@
     "git_tree": "0fe36fdbfad2be4b75f7e77f542ddf8e27defe57",
     "git_worktree_clean": true,
     "checkpoint_identity": "torus-golden-stage4-seed2-parity-v8",
-    "frozen_run": "runs/torus-golden-stage4/torus-golden-stage4-seed2-parity-v8",
+    "frozen_run": "runs/torus9/archive/torus-golden-stage4-seed2-parity-v8",
     "training_run": false
   },
   "checkpoint_artifacts": {

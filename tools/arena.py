@@ -37,6 +37,7 @@ from tools.arena_engine import (
     run_arena as run_engine,
 )
 from tools.arena_profiles import available_profiles, detect_profile, get_profile
+from gocube_golden.run_storage import evaluation_dir, evaluations_root, topology_for_profile
 
 
 def _resolve_profile(profile_name: str, candidate: Path):
@@ -47,10 +48,23 @@ def _resolve_profile(profile_name: str, candidate: Path):
 
 def _default_output(profile_id: str, candidate: Path, reference: Path) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return (
-        Path("arena-results")
-        / f"{profile_id}-{candidate.stem}-vs-{reference.stem}-{stamp}"
+    return evaluation_dir(
+        topology_for_profile(profile_id),
+        f"{profile_id}-{candidate.stem}-vs-{reference.stem}-{stamp}",
     )
+
+
+def _canonical_evaluation_output(profile_id: str, output_dir: Path) -> Path:
+    output_dir = Path(output_dir).resolve()
+    root = evaluations_root(topology_for_profile(profile_id)).resolve()
+    try:
+        output_dir.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            "Arena output must be inside the canonical runs/<topology>/evaluations tree: "
+            f"{output_dir}"
+        ) from exc
+    return output_dir
 
 
 def run_arena(
@@ -58,7 +72,7 @@ def run_arena(
     candidate_path: Path,
     reference_path: Path | None = None,
     profile_name: str = "auto",
-    output_dir: Path,
+    output_dir: Path | None = None,
     candidate_label: str | None = None,
     reference_label: str | None = None,
     run_id: str | None = None,
@@ -72,6 +86,11 @@ def run_arena(
 ) -> dict[str, object]:
     """Resolve one profile and invoke the one universal Arena engine."""
     profile = _resolve_profile(profile_name, candidate_path)
+    reference_path = reference_path or candidate_path
+    output_dir = _canonical_evaluation_output(
+        profile.profile_id,
+        output_dir or _default_output(profile.profile_id, candidate_path, reference_path),
+    )
     return run_engine(
         profile=profile,
         candidate_path=candidate_path,
@@ -146,6 +165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.candidate,
         reference,
     )
+    output = _canonical_evaluation_output(profile.profile_id, output)
     config = ArenaExecutionConfig(
         games=args.games,
         workers=args.workers,

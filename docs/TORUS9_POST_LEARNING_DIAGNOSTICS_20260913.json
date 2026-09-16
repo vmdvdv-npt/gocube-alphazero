@@ -1099,7 +1099,7 @@
       "technical_games_are_excluded_from_draw_loss": true
     },
     "baseline_anchor_merge_commit": "88b1803cf179c6fa93f2e9610963eeed931d09b1",
-    "checkpoint_artifact_path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M8.pt",
+    "checkpoint_artifact_path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M8.pt",
     "checkpoint_artifact_sha256": "sha256:a0e54de1e4370979d8447867113c9594817638dab3816634ef3722e6103529d0",
     "checkpoint_label": "M8",
     "fixed_at": "2026-09-13",
@@ -32682,7 +32682,7 @@
         "state_id": "ARENA-07-ply-500"
       }
     ],
-    "fixed_corpus_path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/post-learning-diagnostics/fixed-corpus.jsonl",
+    "fixed_corpus_path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/post-learning-diagnostics/fixed-corpus.jsonl",
     "fixed_corpus_sha256": "sha256:7b92de2f4e130550eeaf9971cc4842995f84a0ca0ce82295ea02c697edccd481",
     "fpu": 0.0,
     "noise": "OFF",

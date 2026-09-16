@@ -68,7 +68,8 @@ machine-readable `gocube-b-experiment-contract.json` containing:
 - both effective configs, their diff, and the allowed semantic difference
   paths.
 
-Every training namespace publishes `data/<run>/training-progress.json`. Its
+Every training lineage publishes
+`runs/<topology>/active/<lineage-id>/data/training-progress.json`. Its
 canonical cumulative counters are self-play games completed, positions
 generated, saved replay samples, newly accepted samples, optimizer steps, and
 optimizer examples seen. The same counters are recorded per iteration and in

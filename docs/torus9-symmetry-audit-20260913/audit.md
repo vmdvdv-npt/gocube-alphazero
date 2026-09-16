@@ -6,8 +6,8 @@ This report is diagnostic-only. No self-play, two-iteration A/B, or Arena games 
 
 ## Scope and provenance
 
-- Frozen checkpoint: `/home/codex/projects/gocube-alphazero/runs/torus9-alpha-score-ab/torus9-alpha-score-ab-20260913-v1/arms/B/checkpoints/M12-B.pt` (M12-B, `sha256:2ba14fc38a7944dbe1d505f849e02a7acb18f0386518a07c2e03f6320b8df3ae`).
-- Immutable corpus: `/home/codex/projects/gocube-alphazero/runs/torus9-alpha-score-ab/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/replay.jsonl` (5987 replay rows).
+- Frozen checkpoint: `/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-alpha-score-ab-20260913/torus9-alpha-score-ab-20260913-v1/arms/B/checkpoints/M12-B.pt` (M12-B, `sha256:2ba14fc38a7944dbe1d505f849e02a7acb18f0386518a07c2e03f6320b8df3ae`).
+- Immutable corpus: `/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-alpha-score-ab-20260913/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/replay.jsonl` (5987 replay rows).
 - Selected real states: 8; selected training batch: 64 rows.
 - Parent semantics: Torus 9x9, WDL + ownership, komi 0.5, alpha 0.11, score OFF, 8 blocks / hidden 64.
 

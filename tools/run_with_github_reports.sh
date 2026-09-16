@@ -10,11 +10,12 @@ Environment variables:
   GOCUBE_REPORT_BRANCH       remote report branch (default: training-reports)
   GOCUBE_REPORT_WORKTREE     dedicated report worktree path
                              (default: ~/.cache/gocube-alphazero-training-reports)
-  GOCUBE_REPORT_DIR          local full-log root (default: training_reports)
+  GOCUBE_TOPOLOGY             storage topology (default: cube4)
+  GOCUBE_LINEAGE_DIR          canonical lineage directory override
   GOCUBE_REPORT_POLL_SECONDS report poll interval (default: 15)
   GOCUBE_REPORT_TAIL_LINES   console lines published to GitHub (default: 2000)
 
-If training_reports/RUN_NAME/publish/ exists, every regular file below that
+If runs/<topology>/active/RUN_NAME/reports/publish/ exists, every regular file below that
 folder is also mirrored into reports/RUN_NAME/ on the reports branch. Changes
 there trigger a sync while the wrapped command is still running.
 USAGE
@@ -48,14 +49,16 @@ cd "$REPO_ROOT"
 
 REPORT_BRANCH=${GOCUBE_REPORT_BRANCH:-training-reports}
 REPORT_WORKTREE=${GOCUBE_REPORT_WORKTREE:-$HOME/.cache/gocube-alphazero-training-reports}
-REPORT_ROOT=${GOCUBE_REPORT_DIR:-training_reports}
+GOCUBE_TOPOLOGY=${GOCUBE_TOPOLOGY:-cube4}
+LINEAGE_ROOT=${GOCUBE_LINEAGE_DIR:-runs/$GOCUBE_TOPOLOGY/active/$RUN_NAME}
+REPORT_ROOT=${GOCUBE_REPORT_DIR:-$LINEAGE_ROOT/reports}
 POLL_SECONDS=${GOCUBE_REPORT_POLL_SECONDS:-15}
 TAIL_LINES=${GOCUBE_REPORT_TAIL_LINES:-2000}
 RUN_DIR="$REPORT_ROOT/$RUN_NAME"
 LOG_FILE="$RUN_DIR/console.log"
 MD_FILE="$RUN_DIR/run.md"
 PUBLISH_DIR="$RUN_DIR/publish"
-MANIFEST_ROOT="data/$RUN_NAME/records"
+MANIFEST_ROOT="$LINEAGE_ROOT/data/records"
 DEST_REL="reports/$RUN_NAME"
 
 mkdir -p "$RUN_DIR"

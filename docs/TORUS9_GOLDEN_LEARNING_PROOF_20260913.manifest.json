@@ -106,5 +106,5 @@
     "full_failure": "tests/test_gocube_s1_replay_audit.py::test_persisted_replay_audit_is_read_only_and_reports_all_current_records; existing data contains 8208 fork records while the test asserts zero",
     "independent_artifact_audit": "PASS: 64 evaluation starts; all self-play/replay counts match; all M1-M8 checkpoints load; Arena game counts and fail-closed flags match"
   },
-  "run_root": "runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3"
+  "run_root": "runs/torus9/archive/torus9-golden-learning-proof-20260913-v3"
 }

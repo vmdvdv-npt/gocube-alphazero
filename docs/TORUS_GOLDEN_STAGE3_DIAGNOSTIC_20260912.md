@@ -1,7 +1,7 @@
 # Golden Torus Stage 3 diagnostic
 
 This is a retrospective diagnosis of the immutable canonical run
-`runs/torus-golden-stage3/torus-golden-stage3-seed1-v5/`. It does not rewrite
+`runs/torus9/archive/torus-golden-stage3-seed1-v5/`. It does not rewrite
 the historical Stage 3 verdict (`LEARNING NOT DEMONSTRATED`) and does not
 modify any Stage 3 checkpoint, replay, Arena record, or original report.
 

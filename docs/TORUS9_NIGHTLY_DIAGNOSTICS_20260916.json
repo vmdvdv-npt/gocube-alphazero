@@ -254,7 +254,7 @@
           "input_model_hash": null,
           "komi": 0.5,
           "maximum_replay_positions": 20000,
-          "metadata_path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/checkpoints/M1.metadata.json",
+          "metadata_path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-nightly-20260916-phase-a-final/checkpoints/M1.metadata.json",
           "model_hash": "sha256:d6406daf9dfc7d3f97fdfd1f5cb4c9680d9307d827ce69d1e6c984ee37037478",
           "model_init_seed": 202609131001,
           "model_initialization_seed": 202609131001,
@@ -384,7 +384,7 @@
           "ownership_loss_enabled": true,
           "parent_checkpoint_identity": null,
           "parent_or_source_run_identity": "torus9-nightly-20260916-phase-a-final",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/checkpoints/M1.pt",
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-nightly-20260916-phase-a-final/checkpoints/M1.pt",
           "point_id_order_identity": "row-major-yx:point_id=y*width+x",
           "profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
           "profile_id": "gocube-torus9-golden-v3",
@@ -566,7 +566,7 @@
         "source_checkpoint": {
           "artifact_sha256": "sha256:905caca31fc34b9abc166bde8779dbdc937f4fa31517e8d2e3eca039b44ecb52",
           "model_hash": "sha256:e11d31217e8cecf89294405203c6ef62372f3478c68b9cc7a2f1666e10c2c285",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/checkpoints/M0.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-nightly-20260916-phase-a-final/checkpoints/M0.pt"
         },
         "timing": {
           "iteration_wall_time_until_publication_sec": 273.7382405200042,
@@ -25349,7 +25349,7 @@
         "profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
         "profile_id": "gocube-torus9-golden-v3"
       },
-      "run_dir": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final",
+      "run_dir": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-nightly-20260916-phase-a-final",
       "run_id": "torus9-nightly-20260916-phase-a-final",
       "schema": "torus9-phase-a-report-v1",
       "wait_accounting": {
@@ -25664,7 +25664,7 @@
         "input_model_hash": null,
         "komi": 0.5,
         "maximum_replay_positions": 20000,
-        "metadata_path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/checkpoints/M1.metadata.json",
+        "metadata_path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-nightly-20260916-phase-a-final/checkpoints/M1.metadata.json",
         "model_hash": "sha256:d6406daf9dfc7d3f97fdfd1f5cb4c9680d9307d827ce69d1e6c984ee37037478",
         "model_init_seed": 202609131001,
         "model_initialization_seed": 202609131001,
@@ -25794,7 +25794,7 @@
         "ownership_loss_enabled": true,
         "parent_checkpoint_identity": null,
         "parent_or_source_run_identity": "torus9-nightly-20260916-phase-a-final",
-        "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/checkpoints/M1.pt",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-nightly-20260916-phase-a-final/checkpoints/M1.pt",
         "point_id_order_identity": "row-major-yx:point_id=y*width+x",
         "profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
         "profile_id": "gocube-torus9-golden-v3",
@@ -25976,7 +25976,7 @@
       "source_checkpoint": {
         "artifact_sha256": "sha256:905caca31fc34b9abc166bde8779dbdc937f4fa31517e8d2e3eca039b44ecb52",
         "model_hash": "sha256:e11d31217e8cecf89294405203c6ef62372f3478c68b9cc7a2f1666e10c2c285",
-        "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final/checkpoints/M0.pt"
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-nightly-20260916-phase-a-final/checkpoints/M0.pt"
       },
       "timing": {
         "iteration_wall_time_until_publication_sec": 273.7382405200042,
@@ -50759,7 +50759,7 @@
       "profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
       "profile_id": "gocube-torus9-golden-v3"
     },
-    "run_dir": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/phase-a/torus9-nightly-20260916-phase-a-final",
+    "run_dir": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-nightly-20260916-phase-a-final",
     "run_id": "torus9-nightly-20260916-phase-a-final",
     "schema": "torus9-phase-a-report-v1",
     "wait_accounting": {
@@ -50870,7 +50870,7 @@
             "workers": 16
           },
           "mean_inference_batch_rows": 4.771389843956626,
-          "output_dir": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arena-standard-64/64-vs-128",
+          "output_dir": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/arena-standard-64/64-vs-128",
           "performance_failures": [
             "mean_inference_batch_rows",
             "effective_cpu_cores"
@@ -50878,7 +50878,7 @@
           "performance_status": "PERFORMANCE_DEGRADED",
           "reference": "128",
           "scientific_status": "PASS",
-          "summary": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arena-standard-64/64-vs-128/summary.json",
+          "summary": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/arena-standard-64/64-vs-128/summary.json",
           "technical_games": 0,
           "wall_time_sec": 837.2174140490097
         },
@@ -50900,7 +50900,7 @@
             "workers": 16
           },
           "mean_inference_batch_rows": 6.113593500652836,
-          "output_dir": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arena-standard-64/64-vs-192",
+          "output_dir": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/arena-standard-64/64-vs-192",
           "performance_failures": [
             "mean_inference_batch_rows",
             "effective_cpu_cores"
@@ -50908,7 +50908,7 @@
           "performance_status": "PERFORMANCE_DEGRADED",
           "reference": "192",
           "scientific_status": "PASS",
-          "summary": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arena-standard-64/64-vs-192/summary.json",
+          "summary": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/arena-standard-64/64-vs-192/summary.json",
           "technical_games": 0,
           "wall_time_sec": 567.9370016100002
         },
@@ -50930,7 +50930,7 @@
             "workers": 16
           },
           "mean_inference_batch_rows": 6.022736136026831,
-          "output_dir": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arena-standard-64/128-vs-192",
+          "output_dir": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/arena-standard-64/128-vs-192",
           "performance_failures": [
             "mean_inference_batch_rows",
             "effective_cpu_cores"
@@ -50938,7 +50938,7 @@
           "performance_status": "PERFORMANCE_DEGRADED",
           "reference": "192",
           "scientific_status": "PASS",
-          "summary": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arena-standard-64/128-vs-192/summary.json",
+          "summary": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/arena-standard-64/128-vs-192/summary.json",
           "technical_games": 0,
           "wall_time_sec": 562.4317882230098
         }
@@ -50968,7 +50968,7 @@
         "final_checkpoint": {
           "artifact_sha256": "sha256:379a3824ddc5ca4ee3fa7c5c745b45e24189f29169d494118a867140da49b8d6",
           "model_hash": "sha256:ca7f97e323369f7cb62226ecf71d512277e7090a0b152d067d1c80c66bbd6c72",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M6.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M6.pt"
         },
         "games_per_iteration": 64,
         "iterations": 6,
@@ -50982,7 +50982,7 @@
         "final_checkpoint": {
           "artifact_sha256": "sha256:e8133c9ce95aa6bec9599640578a3b2f40dcf07d2dfde5671b5e148ca00ccbb4",
           "model_hash": "sha256:021f59714eaef79bc0e2b67e12557cf9e00c89cf0e79af33fb2e6db3ced9c101",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-128/checkpoints/M3.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-128/checkpoints/M3.pt"
         },
         "games_per_iteration": 128,
         "iterations": 3,
@@ -50996,7 +50996,7 @@
         "final_checkpoint": {
           "artifact_sha256": "sha256:b165e526ed1a13c5dd2c955d5a3568a31349f7dffe7211dfc378ed43d5231194",
           "model_hash": "sha256:97f2832c1d2293bbfe5bfb67cf60d0c1c6cc22e724ebd40b773569b23367f8cb",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-192/checkpoints/M2.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-192/checkpoints/M2.pt"
         },
         "games_per_iteration": 192,
         "iterations": 2,
@@ -51038,7 +51038,7 @@
     "phase_c_training_change": false,
     "run_id": "torus9-nightly-20260916",
     "schema": "torus9-phase-c-report-v1",
-    "selected_checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M6.pt",
+    "selected_checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M6.pt",
     "selected_execution": {
       "active_games_per_worker": 4,
       "central_inference_owner": "parent",
@@ -51054,7 +51054,7 @@
     "variants": [
       {
         "artifacts": {
-          "games": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/phase-c/selected-current-64-contexts/games.jsonl"
+          "games": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/phase-c/selected-current-64-contexts/games.jsonl"
         },
         "contexts": 64,
         "execution_override_reason": null,
@@ -73756,7 +73756,7 @@
         "final_checkpoint": {
           "artifact_sha256": "sha256:e8133c9ce95aa6bec9599640578a3b2f40dcf07d2dfde5671b5e148ca00ccbb4",
           "model_hash": "sha256:021f59714eaef79bc0e2b67e12557cf9e00c89cf0e79af33fb2e6db3ced9c101",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-128/checkpoints/M3.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-128/checkpoints/M3.pt"
         },
         "games_per_hour": 655.3160215268899,
         "optimizer_updates_per_hour": 819.1450269086124,
@@ -73766,7 +73766,7 @@
         "final_checkpoint": {
           "artifact_sha256": "sha256:b165e526ed1a13c5dd2c955d5a3568a31349f7dffe7211dfc378ed43d5231194",
           "model_hash": "sha256:97f2832c1d2293bbfe5bfb67cf60d0c1c6cc22e724ebd40b773569b23367f8cb",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-192/checkpoints/M2.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-192/checkpoints/M2.pt"
         },
         "games_per_hour": 743.3304866839541,
         "optimizer_updates_per_hour": 929.1631083549426,
@@ -73776,7 +73776,7 @@
         "final_checkpoint": {
           "artifact_sha256": "sha256:379a3824ddc5ca4ee3fa7c5c745b45e24189f29169d494118a867140da49b8d6",
           "model_hash": "sha256:ca7f97e323369f7cb62226ecf71d512277e7090a0b152d067d1c80c66bbd6c72",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M6.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M6.pt"
         },
         "games_per_hour": 557.1442639979317,
         "optimizer_updates_per_hour": 696.4303299974147,
@@ -73786,7 +73786,7 @@
     "per_iteration": [
       {
         "arm": 64,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M1.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M1.pt",
         "games": 64,
         "iteration": 1,
         "moves_per_sec": 24.62620194727447,
@@ -73798,7 +73798,7 @@
       },
       {
         "arm": 64,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M2.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M2.pt",
         "games": 64,
         "iteration": 2,
         "moves_per_sec": 25.00156501801979,
@@ -73810,7 +73810,7 @@
       },
       {
         "arm": 64,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M3.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M3.pt",
         "games": 64,
         "iteration": 3,
         "moves_per_sec": 28.985990295276686,
@@ -73822,7 +73822,7 @@
       },
       {
         "arm": 64,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M4.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M4.pt",
         "games": 64,
         "iteration": 4,
         "moves_per_sec": 28.948561909654433,
@@ -73834,7 +73834,7 @@
       },
       {
         "arm": 64,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M5.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M5.pt",
         "games": 64,
         "iteration": 5,
         "moves_per_sec": 28.996194661012765,
@@ -73846,7 +73846,7 @@
       },
       {
         "arm": 64,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-64/checkpoints/M6.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-64/checkpoints/M6.pt",
         "games": 64,
         "iteration": 6,
         "moves_per_sec": 27.214075804183665,
@@ -73858,7 +73858,7 @@
       },
       {
         "arm": 128,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-128/checkpoints/M1.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-128/checkpoints/M1.pt",
         "games": 128,
         "iteration": 1,
         "moves_per_sec": 28.304666166260308,
@@ -73870,7 +73870,7 @@
       },
       {
         "arm": 128,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-128/checkpoints/M2.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-128/checkpoints/M2.pt",
         "games": 128,
         "iteration": 2,
         "moves_per_sec": 29.914029358921724,
@@ -73882,7 +73882,7 @@
       },
       {
         "arm": 128,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-128/checkpoints/M3.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-128/checkpoints/M3.pt",
         "games": 128,
         "iteration": 3,
         "moves_per_sec": 28.580549837400255,
@@ -73894,7 +73894,7 @@
       },
       {
         "arm": 192,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-192/checkpoints/M1.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-192/checkpoints/M1.pt",
         "games": 192,
         "iteration": 1,
         "moves_per_sec": 29.899129224250057,
@@ -73906,7 +73906,7 @@
       },
       {
         "arm": 192,
-        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-192/checkpoints/M2.pt",
+        "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/arm-192/checkpoints/M2.pt",
         "games": 192,
         "iteration": 2,
         "moves_per_sec": 31.002015335531436,
@@ -73937,8 +73937,8 @@
     "xlsx_used": false
   },
   "raw_evidence": {
-    "arena_report": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arena-standard-64-report.json",
-    "cadence_report": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/cadence-experiment-report.json",
+    "arena_report": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/arena-standard-64-report.json",
+    "cadence_report": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/cadence-experiment-report.json",
     "commands": [
       ".venv/bin/python tools/torus9_nightly_diagnostics.py phase-a --run-id torus9-nightly-20260916-phase-a",
       ".venv/bin/python tools/torus9_nightly_diagnostics.py cadence --run-id torus9-nightly-20260916",
@@ -73946,8 +73946,8 @@
       ".venv/bin/python tools/torus9_nightly_diagnostics.py phase-c --run-id torus9-nightly-20260916",
       ".venv/bin/python tools/torus9_nightly_diagnostics.py report --run-id torus9-nightly-20260916"
     ],
-    "per_iteration_timing": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/arm-*/timing/M*.json",
-    "phase_c_report": "/home/codex/projects/gocube-alphazero/runs/torus9-nightly-20260916/cadence/torus9-nightly-20260916/phase-c/phase-c-report.json"
+    "per_iteration_timing": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/arm-*/timing/M*.json",
+    "phase_c_report": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-nightly-20260916-cadence/phase-c/phase-c-report.json"
   },
   "run_id": "torus9-nightly-20260916",
   "schema": "torus9-nightly-final-report-v1"
