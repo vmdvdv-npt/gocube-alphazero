@@ -11,5 +11,8 @@ training_reports/
 # Local Arena execution outputs.
 /arena-results/
 
+# Local experiment and reproduction artifacts.
+/artifacts/
+
 # Local offline komi re-evaluation artifacts; canonical calibration docs are tracked separately.
 /docs/torus9-komi-reeval-20260913/
