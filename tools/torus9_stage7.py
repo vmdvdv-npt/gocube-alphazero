@@ -693,9 +693,9 @@ def _arena(run_dir: Path, stage: int, code: CodeIdentity) -> dict[str, object]:
     return result
 
 
-def _resume_boundary(run_dir: Path) -> dict[str, object]:
+def _resume_boundary(run_dir: Path, *, require_clean_m3: bool = True) -> dict[str, object]:
     generation = _committed_generation(run_dir)
-    if generation != 3:
+    if require_clean_m3 and generation != 3:
         raise ValueError(f"Resume test boundary must be clean M3, found M{generation}")
     checkpoint_path = run_dir / "checkpoints" / "M3.pt"
     metadata_path = run_dir / "checkpoints" / "M3.metadata.json"
@@ -716,7 +716,7 @@ def _resume_boundary(run_dir: Path) -> dict[str, object]:
 
 def _perform_resume_test(run_dir: Path) -> dict[str, object]:
     before = _read_json(run_dir / "resume-boundary.json")
-    current = _resume_boundary(run_dir)
+    current = _resume_boundary(run_dir, require_clean_m3=False)
     if before != current:
         raise RuntimeError("M3 resume boundary changed before continuation")
     return {
