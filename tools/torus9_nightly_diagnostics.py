@@ -51,8 +51,8 @@ from gocube_golden.torus9 import (
     torus9_load_checkpoint,
     torus9_model_from_metadata,
     write_json,
-    write_jsonl,
 )
+from gocube_golden.torus9_serialization import write_torus9_game_records_jsonl
 from gocube_golden.torus9_contract import (
     TORUS9_BATCH_SIZE,
     TORUS9_CURRENT_MODEL_INIT_SEED,
@@ -519,7 +519,7 @@ def _run_generation(
 
     games_path = run_dir / "selfplay" / f"M{generation:02d}-games.jsonl"
     serialize_started = time.perf_counter()
-    write_jsonl(games_path, [record.to_dict() for record in records])
+    write_torus9_game_records_jsonl(games_path, records)
     selfplay_serialization_wall = time.perf_counter() - serialize_started
 
     diagnostic_sink: MutableMapping[str, object] = {}
