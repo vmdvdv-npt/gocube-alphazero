@@ -1,0 +1,59 @@
+{
+  "schema": "gocube-production-run-spec-v2",
+  "topology": "<topology>",
+  "profile_path": "<repo-relative-json-profile>",
+  "expected_profile_fingerprint": "<sha256:...>",
+  "generation": {
+    "command": [".venv/bin/python", "tools/<profile-run-driver>.py", "generation", "--generation", "{generation}"],
+    "resume_command": [".venv/bin/python", "tools/<profile-run-driver>.py", "generation", "--generation", "{generation}", "--resume"],
+    "driver_config": {
+      "games": "<required-by-task>",
+      "device": "<required-by-task>",
+      "workers": "<required-by-task>",
+      "active_games_per_worker": "<required-by-task>",
+      "total_active_contexts": "<required-by-task>",
+      "inference_batch_cap": "<required-by-task>",
+      "inference_batch_wait_ms": "<required-by-task>",
+      "coalescing": "<required-by-task>",
+      "heartbeat_interval_seconds": "<required-by-task>",
+      "model_init_seed": "<required-by-task>",
+      "selfplay_master_seed": "<required-by-task>",
+      "training_master_seed": "<required-by-task>"
+    }
+  },
+  "arena": {
+    "enabled": "<required-by-task>",
+    "required": "<required-by-task>",
+    "every_generations": "<required-by-task>",
+    "command": [".venv/bin/python", "tools/<profile-run-driver>.py", "arena", "--generation", "{generation}"],
+    "driver_config": {
+      "reference_gap": "<required-by-task>",
+      "games": "<required-by-task>",
+      "master_seed": "<required-by-task>",
+      "heartbeat_interval_seconds": "<required-by-task>",
+      "execution": {
+        "workers": "<required-by-task>",
+        "games_per_worker": "<required-by-task>",
+        "inference_batch_rows": "<required-by-task>",
+        "inference_batch_wait_ms": "<required-by-task>",
+        "device": "<required-by-task>",
+        "strict_production": "<required-by-task>"
+      }
+    },
+    "startset": {"master_seed": "<required-by-task>", "pairs": "<required-by-task>"}
+  },
+  "health": {
+    "poll_seconds": "<required-by-task>",
+    "heartbeat_warning_seconds": "<required-by-task>",
+    "heartbeat_critical_seconds": "<required-by-task>",
+    "min_disk_free_gb_warning": "<required-by-task>",
+    "min_disk_free_gb_critical": "<required-by-task>",
+    "min_ram_free_gb_warning": "<required-by-task>",
+    "min_ram_free_gb_critical": "<required-by-task>"
+  },
+  "soft_stop": {"default_minutes": "<required-by-task>", "minimum_minutes": "<required-by-task>", "maximum_minutes": "<required-by-task>"},
+  "performance": {"checks": []},
+  "learning": {"metrics": [], "stall_checks": []},
+  "required_generation_metrics": [],
+  "required_arena_metrics": []
+}
