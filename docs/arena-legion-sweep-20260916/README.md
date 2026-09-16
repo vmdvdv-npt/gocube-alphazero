@@ -1,8 +1,8 @@
 # Raw Arena Legion sweep artifacts
 
 These directories are the raw outputs of the final fixed-seed Arena sweep on
-2026-09-16. They are intentionally kept separate from the read-only Stage 7
-baseline. Full runs contain `summary.json`, `manifest.json`, `games.jsonl`,
+2026-09-16. Any Stage 7 baseline referenced by these artifacts is historical /
+retired evidence; the Stage 7 harness is not a current entrypoint. Full runs contain `summary.json`, `manifest.json`, `games.jsonl`,
 and `hardware-telemetry.jsonl`; early-gate diagnostics also contain
 `performance-degraded.json`.
 
