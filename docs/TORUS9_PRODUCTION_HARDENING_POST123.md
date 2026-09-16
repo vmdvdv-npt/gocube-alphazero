@@ -38,6 +38,27 @@ different lineage.
 - Added regression coverage for profile drift, heartbeat progress and stalls,
   catalog mutation/complexity, and telemetry resolver/error cases.
 
+## Follow-up commit recovery
+
+The generation transaction is the durable commit journal.  On explicit
+recovery, the orchestrator now completes an interrupted tail of the commit
+idempotently:
+
+- a `COMMITTED` transaction without a catalog generation re-validates and
+  publishes only that generation's result identities;
+- an existing catalog generation is checked against the transaction identity,
+  artifact set, and bounded file identities;
+- runtime state and manifest catalog/checkpoint records are then advanced
+  together, leaving the lineage in `RECOVERY_REQUIRED` until the operator
+  explicitly runs `resume`.
+
+This covers both process-stop windows: after the transaction write and after
+catalog/state writes but before the manifest write.  Regression tests inject
+both stops and verify that the same lineage resumes at the next generation;
+an unexplained catalog mutation remains fail-closed.  The child process-group
+teardown and self-play worker cleanup from PR #124, along with the stabilized
+soft-stop timing test from PR #125, are included in the combined branch.
+
 ## Verification
 
 ```text
@@ -122,4 +143,3 @@ closed on observed mean batch size `7.19`. Its heavy data was removed only
 after a required discarded-run record was written. The subsequent code-pin
 attempts were also recorded and discarded; they provide evidence that dirty
 trees and commit drift are rejected before production work starts.
-

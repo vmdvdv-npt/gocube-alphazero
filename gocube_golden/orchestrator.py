@@ -535,6 +535,220 @@ class ProductionTrainingOrchestrator:
         atomic_write_json(self.paths.runtime_state, state)
         self.events.emit("INFO", "Created training lineage", lineage_id=self.lineage_id)
 
+    def _recover_interrupted_commit(self) -> bool:
+        """Finish a durable generation commit whose tail writes were interrupted.
+
+        A generation transaction is written as ``COMMITTED`` only after its
+        result has been validated.  The catalog and manifest are then updated
+        in separate atomic writes, so a process can die with a valid committed
+        transaction and catalog but an older manifest.  Recovery treats the
+        transaction plus catalog identities as the commit journal and makes
+        the remaining state/manifest writes idempotently.
+
+        The method deliberately verifies only the affected generations.  It
+        never turns recovery into a scan or rehash of the whole lineage, but
+        it does fail closed when the journal, catalog, or published result do
+        not agree.
+        """
+        manifest = read_json(self.paths.manifest)
+        orchestrator = manifest.get("orchestrator")
+        if not isinstance(orchestrator, Mapping):
+            return False
+        catalog_record = orchestrator.get("artifact_catalog")
+        if not isinstance(catalog_record, Mapping):
+            return False
+        catalog = ArtifactCatalog.load(
+            self.paths.artifact_catalog,
+            root=self.paths.root,
+        )
+        try:
+            manifest_generation = int(orchestrator.get("last_committed_generation", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Manifest committed generation is malformed") from exc
+
+        committed: list[tuple[int, Path, dict[str, object]]] = []
+        if self.paths.generations.is_dir():
+            transaction_paths = sorted(self.paths.generations.glob("generation-????.json"))
+        else:
+            transaction_paths = []
+        for transaction_path in transaction_paths:
+            transaction = read_json(transaction_path)
+            if transaction.get("status") != "COMMITTED":
+                continue
+            try:
+                generation = int(transaction.get("generation", -1))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Committed generation transaction is malformed: {transaction_path}"
+                ) from exc
+            if generation <= manifest_generation:
+                continue
+            if transaction.get("schema") != ORCHESTRATOR_SCHEMA:
+                raise ValueError(
+                    f"Committed generation transaction schema mismatch: {transaction_path}"
+                )
+            if transaction.get("profile_fingerprint") != self.spec.profile_fingerprint:
+                raise ValueError(
+                    f"Committed generation transaction profile mismatch: {transaction_path}"
+                )
+            artifact_hashes = transaction.get("artifact_hashes")
+            if not isinstance(artifact_hashes, Mapping) or not artifact_hashes:
+                raise ValueError(
+                    f"Committed generation transaction has no artifact identities: {transaction_path}"
+                )
+            normalized: dict[str, object] = {}
+            for raw_path, raw_digest in artifact_hashes.items():
+                relative = _safe_relative_path(
+                    str(raw_path), label="committed transaction artifact path"
+                ).as_posix()
+                digest = str(raw_digest)
+                if not digest.startswith("sha256:") or len(digest) != len("sha256:") + 64:
+                    raise ValueError(
+                        f"Committed transaction artifact SHA is malformed: {relative}"
+                    )
+                if relative in normalized:
+                    raise ValueError(
+                        f"Committed transaction contains duplicate artifact path: {relative}"
+                    )
+                normalized[relative] = digest
+            committed.append((generation, transaction_path, {**transaction, "artifact_hashes": normalized}))
+
+        committed.sort(key=lambda item: item[0])
+        recovered_generations = {generation for generation, _path, _tx in committed}
+        raw_generations = catalog.payload.get("generations")
+        if not isinstance(raw_generations, Mapping):
+            raise ValueError("Artifact catalog generations are malformed")
+        for raw_generation in raw_generations:
+            try:
+                catalog_generation = int(raw_generation)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Artifact catalog generation key is malformed") from exc
+            if catalog_generation > manifest_generation and catalog_generation not in recovered_generations:
+                raise ValueError(
+                    "Artifact catalog has an unjournaled generation that cannot be recovered"
+                )
+
+        for generation, transaction_path, transaction in committed:
+            expected_hashes = transaction["artifact_hashes"]
+            assert isinstance(expected_hashes, Mapping)
+            generations = catalog.payload.get("generations")
+            assert isinstance(generations, Mapping)
+            generation_record = generations.get(str(generation))
+            if generation_record is None:
+                # The process may have died after the transaction write but
+                # before catalog registration.  Re-validate this one result
+                # and publish its already-declared identities idempotently.
+                result = self._validate_generation_result(generation)
+                validated = result.get("validated_artifact_hashes")
+                if not isinstance(validated, Mapping):
+                    raise ValueError(
+                        f"Committed generation {generation} has no validated artifact identities"
+                    )
+                normalized_validated = {
+                    _safe_relative_path(
+                        str(path), label="validated artifact path"
+                    ).as_posix(): str(digest)
+                    for path, digest in validated.items()
+                }
+                if normalized_validated != dict(expected_hashes):
+                    raise ValueError(
+                        f"Committed generation {generation} transaction/result artifact drift"
+                    )
+                self._record_generation_artifacts(generation, result, transaction_path)
+                catalog = ArtifactCatalog.load(
+                    self.paths.artifact_catalog,
+                    root=self.paths.root,
+                )
+                generation_record = catalog.payload.get("generations", {}).get(str(generation))
+            if not isinstance(generation_record, Mapping):
+                raise ValueError(f"Artifact catalog record is malformed for generation {generation}")
+            if int(generation_record.get("generation", -1)) != generation:
+                raise ValueError(f"Artifact catalog generation identity mismatch: {generation}")
+            artifact_paths = generation_record.get("artifact_paths")
+            if not isinstance(artifact_paths, list):
+                raise ValueError(f"Artifact catalog paths are malformed for generation {generation}")
+            normalized_paths = {
+                _safe_relative_path(
+                    str(path), label="catalog generation artifact path"
+                ).as_posix()
+                for path in artifact_paths
+            }
+            if normalized_paths != set(expected_hashes):
+                raise ValueError(f"Artifact catalog artifact set drift for generation {generation}")
+            catalog_transaction = generation_record.get("transaction")
+            if not isinstance(catalog_transaction, Mapping):
+                raise ValueError(f"Artifact catalog transaction is missing for generation {generation}")
+            expected_transaction_path = transaction_path.relative_to(self.paths.root).as_posix()
+            if (
+                catalog_transaction.get("path") != expected_transaction_path
+                or catalog_transaction.get("status") != "COMMITTED"
+                or catalog_transaction.get("sha256") != sha256_file(transaction_path)
+                or int(catalog_transaction.get("size_bytes", -1)) != transaction_path.stat().st_size
+            ):
+                raise ValueError(f"Artifact catalog transaction drift for generation {generation}")
+            for path, digest in expected_hashes.items():
+                identity = catalog.identity(path)
+                if identity.get("sha256") != digest:
+                    raise ValueError(f"Artifact catalog identity drift for generation {generation}: {path}")
+            catalog.verify(tuple(sorted(expected_hashes)))
+
+        if not committed:
+            # There is no durable commit journal that explains the catalog
+            # change.  Leave the original strict drift error to the caller.
+            return False
+
+        latest_generation = max(
+            [manifest_generation, *(generation for generation, _path, _tx in committed)]
+        )
+        expected_generations = set(range(manifest_generation + 1, latest_generation + 1))
+        if recovered_generations != expected_generations:
+            raise ValueError("Committed generation journal has a gap and cannot be recovered")
+        current_state = self._state()
+        try:
+            state_generation = int(current_state.get("last_committed_generation", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Runtime committed generation is malformed") from exc
+        if state_generation > latest_generation:
+            raise ValueError("Runtime state is ahead of the recoverable committed generation")
+        state = self._write_state(
+            state="RECOVERY_REQUIRED",
+            last_committed_generation=latest_generation,
+            active_generation=None,
+            active_phase=None,
+            pid=None,
+            error=(
+                "Recovered interrupted generation commit; explicit resume is required "
+                f"for generations {', '.join(str(generation) for generation, _path, _tx in committed)}"
+            ),
+        )
+        recovered_manifest = read_json(self.paths.manifest)
+        recovered_orchestrator = recovered_manifest.get("orchestrator")
+        if not isinstance(recovered_orchestrator, dict):
+            raise ValueError("Lineage manifest lacks orchestrator state during commit recovery")
+        recovered_orchestrator["last_committed_generation"] = latest_generation
+        recovered_orchestrator["runtime_state"] = state.get("state")
+        recovered_catalog_record = dict(recovered_orchestrator.get("artifact_catalog", {}))
+        recovered_catalog_record["schema"] = ARTIFACT_CATALOG_SCHEMA
+        recovered_catalog_record["path"] = "runtime/artifact-catalog.json"
+        recovered_catalog_record["fingerprint"] = catalog.fingerprint
+        recovered_orchestrator["artifact_catalog"] = recovered_catalog_record
+        recovered_manifest["orchestrator"] = recovered_orchestrator
+        checkpoint_hashes = dict(recovered_manifest.get("checkpoint_hashes", {}))
+        for _generation, _transaction_path, transaction in committed:
+            artifact_hashes = transaction["artifact_hashes"]
+            assert isinstance(artifact_hashes, Mapping)
+            for path, digest in artifact_hashes.items():
+                if str(path).startswith("checkpoints/"):
+                    checkpoint_hashes[str(path)] = str(digest)
+        recovered_manifest["checkpoint_hashes"] = checkpoint_hashes
+        atomic_write_json(self.paths.manifest, recovered_manifest)
+        self.events.emit(
+            "WARNING",
+            "Recovered interrupted generation commit; explicit resume is required",
+            generations=sorted(recovered_generations),
+        )
+        return True
+
     def _load_manifest(self, *, expected_catalog_fingerprint: str | None = None) -> dict[str, object]:
         manifest = read_json(self.paths.manifest)
         if manifest.get("lineage_id") != self.lineage_id or manifest.get("topology") != self.spec.topology:
@@ -589,6 +803,7 @@ class ProductionTrainingOrchestrator:
 
     def prepare_resume(self) -> None:
         """Explicitly reopen the same lineage after a safe/recoverable stop."""
+        self._recover_interrupted_commit()
         self._load_manifest()
         state = self._state()
         current = str(state.get("state"))
@@ -1219,9 +1434,10 @@ class ProductionTrainingOrchestrator:
         self._render_report()
 
     def run(self, *, max_generations: int | None = None) -> None:
-        self._load_manifest()
         self._ensure_layout()
         with RunLock(self.paths.lock):
+            self._recover_interrupted_commit()
+            self._load_manifest()
             previous_handlers: dict[int, object] = {}
             def _soft_signal(signum: int, _frame: object) -> None:
                 if not self.paths.stop_request.exists():

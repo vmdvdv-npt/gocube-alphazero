@@ -225,6 +225,71 @@ def test_nonzero_child_gets_bounded_automatic_resume(tmp_path: Path, monkeypatch
     assert "bounded automatic resume scheduled" in events
 
 
+def test_resume_finishes_commit_after_transaction_before_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    run = _run(tmp_path, monkeypatch, arena_every=9)
+    run.create()
+    run._write_state(state="RUNNING", pid=12345, active_phase="startup")
+    original_record = run._record_generation_artifacts
+
+    def stop_before_catalog(*_args, **_kwargs):
+        raise RuntimeError("injected stop before catalog write")
+
+    monkeypatch.setattr(run, "_record_generation_artifacts", stop_before_catalog)
+    with pytest.raises(RuntimeError, match="injected stop before catalog write"):
+        run._run_generation(1)
+    monkeypatch.setattr(run, "_record_generation_artifacts", original_record)
+
+    transaction = json.loads(run._generation_tx_path(1).read_text(encoding="utf-8"))
+    assert transaction["status"] == "COMMITTED"
+    assert json.loads(run.paths.manifest.read_text(encoding="utf-8"))["orchestrator"][
+        "last_committed_generation"
+    ] == 0
+
+    run.prepare_resume()
+    status = run.status()
+    assert status["state"] == "CREATED"
+    assert status["last_committed_generation"] == 1
+    assert json.loads(run.paths.artifact_catalog.read_text(encoding="utf-8"))["generations"]["1"]
+    run.run(max_generations=2)
+    assert run.status()["last_committed_generation"] == 2
+
+
+def test_resume_finishes_commit_after_catalog_before_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    run = _run(tmp_path, monkeypatch, arena_every=9)
+    run.create()
+    run._write_state(state="RUNNING", pid=12345, active_phase="startup")
+    original_update = run._update_manifest
+
+    def stop_before_manifest(*_args, **_kwargs):
+        raise RuntimeError("injected stop before manifest write")
+
+    monkeypatch.setattr(run, "_update_manifest", stop_before_manifest)
+    with pytest.raises(RuntimeError, match="injected stop before manifest write"):
+        run._run_generation(1)
+    monkeypatch.setattr(run, "_update_manifest", original_update)
+
+    transaction = json.loads(run._generation_tx_path(1).read_text(encoding="utf-8"))
+    catalog = json.loads(run.paths.artifact_catalog.read_text(encoding="utf-8"))
+    manifest = json.loads(run.paths.manifest.read_text(encoding="utf-8"))
+    assert transaction["status"] == "COMMITTED"
+    assert "1" in catalog["generations"]
+    assert manifest["orchestrator"]["last_committed_generation"] == 0
+
+    run.prepare_resume()
+    status = run.status()
+    assert status["state"] == "CREATED"
+    assert status["last_committed_generation"] == 1
+    recovered_manifest = json.loads(run.paths.manifest.read_text(encoding="utf-8"))
+    assert (
+        recovered_manifest["orchestrator"]["artifact_catalog"]["fingerprint"]
+        == catalog["catalog_fingerprint"]
+    )
+
+
 def test_stale_progress_is_fail_closed_and_scoped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run = _run(tmp_path, monkeypatch, behavior="stall", arena_every=9, restarts=0)
     run.create()
