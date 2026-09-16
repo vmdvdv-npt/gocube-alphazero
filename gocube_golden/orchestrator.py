@@ -803,22 +803,24 @@ class ProductionTrainingOrchestrator:
 
     def prepare_resume(self) -> None:
         """Explicitly reopen the same lineage after a safe/recoverable stop."""
-        self._recover_interrupted_commit()
-        self._load_manifest()
-        state = self._state()
-        current = str(state.get("state"))
-        if current not in RESUMABLE_STOP_STATES and current != "CREATED":
-            raise RuntimeError(f"Lineage is not in an explicit-resume state: {current}")
-        self.paths.stop_request.unlink(missing_ok=True)
-        self._write_state(
-            state="CREATED",
-            active_generation=None,
-            active_phase=None,
-            pid=None,
-            stop_requested=False,
-            error=None,
-        )
-        self.events.emit("INFO", "Lineage explicitly prepared for resume", previous_state=current)
+        self._ensure_layout()
+        with RunLock(self.paths.lock):
+            self._recover_interrupted_commit()
+            self._load_manifest()
+            state = self._state()
+            current = str(state.get("state"))
+            if current not in RESUMABLE_STOP_STATES and current != "CREATED":
+                raise RuntimeError(f"Lineage is not in an explicit-resume state: {current}")
+            self.paths.stop_request.unlink(missing_ok=True)
+            self._write_state(
+                state="CREATED",
+                active_generation=None,
+                active_phase=None,
+                pid=None,
+                stop_requested=False,
+                error=None,
+            )
+            self.events.emit("INFO", "Lineage explicitly prepared for resume", previous_state=current)
 
     def request_soft_stop(self, minutes: int | None = None, *, reason: str = "operator") -> dict[str, object]:
         # Never let a mistyped `stop` command create a manifest-less ghost run.

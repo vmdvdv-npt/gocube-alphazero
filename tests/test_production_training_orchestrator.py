@@ -290,6 +290,37 @@ def test_resume_finishes_commit_after_catalog_before_manifest(
     )
 
 
+def test_resume_refuses_live_supervisor_before_commit_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    run = _run(tmp_path, monkeypatch, arena_every=9)
+    run.create()
+    run._write_state(state="RUNNING", pid=12345, active_phase="startup")
+    original_update = run._update_manifest
+
+    def stop_before_manifest(*_args, **_kwargs):
+        raise RuntimeError("injected stop before manifest write")
+
+    monkeypatch.setattr(run, "_update_manifest", stop_before_manifest)
+    with pytest.raises(RuntimeError, match="injected stop before manifest write"):
+        run._run_generation(1)
+    monkeypatch.setattr(run, "_update_manifest", original_update)
+
+    before_state = json.loads(run.paths.runtime_state.read_text(encoding="utf-8"))
+    before_manifest = json.loads(run.paths.manifest.read_text(encoding="utf-8"))
+    assert before_state["state"] == "RUNNING"
+    assert before_manifest["orchestrator"]["last_committed_generation"] == 0
+
+    with legacy_orchestrator.RunLock(run.paths.lock):
+        with pytest.raises(RuntimeError, match="active orchestrator lock"):
+            run.prepare_resume()
+
+    after_state = json.loads(run.paths.runtime_state.read_text(encoding="utf-8"))
+    after_manifest = json.loads(run.paths.manifest.read_text(encoding="utf-8"))
+    assert after_state["state"] == "RUNNING"
+    assert after_manifest["orchestrator"]["last_committed_generation"] == 0
+
+
 def test_stale_progress_is_fail_closed_and_scoped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run = _run(tmp_path, monkeypatch, behavior="stall", arena_every=9, restarts=0)
     run.create()

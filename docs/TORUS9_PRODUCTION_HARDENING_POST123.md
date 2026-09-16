@@ -58,6 +58,9 @@ both stops and verify that the same lineage resumes at the next generation;
 an unexplained catalog mutation remains fail-closed.  The child process-group
 teardown and self-play worker cleanup from PR #124, along with the stabilized
 soft-stop timing test from PR #125, are included in the combined branch.
+`prepare_resume` acquires the lineage `RunLock` before recovery, so a resume
+request made while a supervisor is alive fails without changing its `RUNNING`
+state or manifest.
 
 ## Verification
 
