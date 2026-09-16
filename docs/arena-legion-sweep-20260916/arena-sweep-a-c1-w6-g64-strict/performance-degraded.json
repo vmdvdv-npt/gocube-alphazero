@@ -1,0 +1,61 @@
+{
+  "expected_active_contexts": 16,
+  "forwards_observed": 638,
+  "observed_peak_active_contexts": 16,
+  "observed_unique_lane_ids_per_worker": {
+    "0": [
+      0
+    ],
+    "1": [
+      0
+    ],
+    "10": [
+      0
+    ],
+    "11": [
+      0
+    ],
+    "12": [
+      0
+    ],
+    "13": [
+      0
+    ],
+    "14": [
+      0
+    ],
+    "15": [
+      0
+    ],
+    "2": [
+      0
+    ],
+    "3": [
+      0
+    ],
+    "4": [
+      0
+    ],
+    "5": [
+      0
+    ],
+    "6": [
+      0
+    ],
+    "7": [
+      0
+    ],
+    "8": [
+      0
+    ],
+    "9": [
+      0
+    ]
+  },
+  "reason": [
+    "mean_inference_batch_rows"
+  ],
+  "recent_mean_inference_batch_rows": 7.46875,
+  "status": "PERFORMANCE_DEGRADED",
+  "wall_time_sec": 5.003098215995124
+}

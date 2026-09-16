@@ -24,15 +24,33 @@ from typing import Any, Mapping, Protocol, Sequence
 
 import torch
 
+_MODULE_IMPORT_STARTED_AT = time.perf_counter()
 CANONICAL_ARENA_ENGINE = "process-central-inference-v1"
-DEFAULT_GAMES = 64
+DEFAULT_GAMES = 192
 DEFAULT_WORKERS = 16
-DEFAULT_GAMES_PER_WORKER = 4
+DEFAULT_GAMES_PER_WORKER = 12
 DEFAULT_INFERENCE_BATCH_ROWS = 64
-DEFAULT_INFERENCE_BATCH_WAIT_MS = 1.0
-DEFAULT_MASTER_SEED = 20260914
+DEFAULT_INFERENCE_BATCH_WAIT_MS = 4.0
+DEFAULT_MASTER_SEED = 202609131004
 MIN_MEAN_INFERENCE_BATCH_ROWS = 16.0
 MIN_EFFECTIVE_CPU_CORES = 8.0
+
+
+def _expected_lane_ids_by_worker(
+    initial_task_counts: Sequence[int], games_per_worker: int
+) -> dict[int, tuple[int, ...]]:
+    """Return the lanes a workload can actually fill on each worker.
+
+    ``games_per_worker`` is a capacity, not a promise that every lane can be
+    occupied when the requested workload is smaller than the global capacity.
+    The initial round-robin task allocation is the authoritative expectation
+    for the early and final lane-occupancy checks.
+    """
+    capacity = int(games_per_worker)
+    return {
+        worker_id: tuple(range(min(capacity, max(0, int(task_count)))))
+        for worker_id, task_count in enumerate(initial_task_counts)
+    }
 
 
 @dataclass(frozen=True)
@@ -46,6 +64,9 @@ class ArenaExecutionConfig:
     strict_production: bool = True
     min_mean_inference_batch_rows: float = MIN_MEAN_INFERENCE_BATCH_ROWS
     min_effective_cpu_cores: float = MIN_EFFECTIVE_CPU_CORES
+    early_gate_enabled: bool = True
+    early_gate_min_forwards: int = 128
+    early_gate_min_wall_sec: float = 5.0
 
     def validate_base(self) -> None:
         if self.games <= 0 or self.games % 2:
@@ -56,6 +77,8 @@ class ArenaExecutionConfig:
             raise ValueError("Arena inference batching settings are invalid")
         if self.inference_batch_rows < self.games_per_worker:
             raise ValueError("inference_batch_rows must cover at least one worker request")
+        if self.early_gate_min_forwards <= 0 or self.early_gate_min_wall_sec < 0.0:
+            raise ValueError("Arena early performance gate settings are invalid")
 
 
 @dataclass(frozen=True)
@@ -123,14 +146,109 @@ class ArenaProfile(Protocol):
 
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    temporary.replace(path)
 
 
 def _write_jsonl(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
-    path.write_text(
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    temporary.write_text(
         "".join(json.dumps(dict(row), sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
     )
+    temporary.replace(path)
+
+
+class _ProcessTreeCpuSampler:
+    """Low-overhead effective-core sampler for the Arena process tree.
+
+    This is diagnostic only.  It reads cumulative user/system CPU ticks from
+    ``/proc`` and never participates in scheduling or correctness decisions.
+    """
+
+    def __init__(self, pids: Sequence[int], interval_s: float = 1.0) -> None:
+        self.pids = tuple(sorted({int(pid) for pid in pids if int(pid) > 0}))
+        self.interval_s = float(interval_s)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._samples: list[float] = []
+        self._previous: tuple[float, float] | None = None
+        try:
+            self._clock_ticks = float(os.sysconf("SC_CLK_TCK"))
+        except (AttributeError, OSError, ValueError):
+            self._clock_ticks = 100.0
+
+    def _cpu_seconds(self) -> float | None:
+        total_ticks = 0
+        observed = False
+        for pid in self.pids:
+            try:
+                raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+                command_end = raw.rfind(")")
+                fields = raw[command_end + 2 :].split()
+                if len(fields) < 13:
+                    continue
+                total_ticks += int(fields[11]) + int(fields[12])
+                observed = True
+            except (OSError, ValueError, IndexError):
+                continue
+        return total_ticks / self._clock_ticks if observed else None
+
+    def _record(self) -> None:
+        now = time.perf_counter()
+        cpu_seconds = self._cpu_seconds()
+        if cpu_seconds is not None and self._previous is not None:
+            previous_at, previous_cpu = self._previous
+            elapsed = now - previous_at
+            if elapsed > 0.0:
+                self._samples.append(max(0.0, cpu_seconds - previous_cpu) / elapsed)
+        if cpu_seconds is not None:
+            self._previous = (now, cpu_seconds)
+
+    def _run(self) -> None:
+        self._record()
+        while not self._stop.wait(self.interval_s):
+            self._record()
+        self._record()
+
+    def start(self) -> "_ProcessTreeCpuSampler":
+        if self._thread is None:
+            self._thread = threading.Thread(
+                target=self._run,
+                name="arena-process-tree-cpu",
+                daemon=True,
+            )
+            self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        if self._thread is None:
+            return
+        self._stop.set()
+        self._thread.join(timeout=max(2.0, self.interval_s * 3.0))
+        self._thread = None
+
+    def summary(self) -> dict[str, object]:
+        if not self._samples:
+            return {
+                "average_effective_cores": None,
+                "p50_effective_cores": None,
+                "p95_effective_cores": None,
+                "peak_effective_cores": None,
+                "samples": 0,
+                "source": "procfs aggregate user+system CPU ticks",
+            }
+        return {
+            "average_effective_cores": statistics.fmean(self._samples),
+            "p50_effective_cores": _percentile_float(self._samples, 0.50),
+            "p95_effective_cores": _percentile_float(self._samples, 0.95),
+            "peak_effective_cores": max(self._samples),
+            "samples": len(self._samples),
+            "source": "procfs aggregate user+system CPU ticks",
+        }
 
 
 def _assert_expected_identity(
@@ -176,6 +294,17 @@ def _numeric_summary(values: Sequence[float | int]) -> dict[str, float | int]:
     }
 
 
+def _percentile_float(values: Sequence[float], fraction: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(float(value) for value in values)
+    index = min(
+        len(ordered) - 1,
+        max(0, math.ceil(fraction * len(ordered)) - 1),
+    )
+    return ordered[index]
+
+
 def _batch_summary(values: Sequence[int]) -> dict[str, float | int]:
     """Return the standard batch telemetry shape for one model."""
     return {
@@ -184,6 +313,7 @@ def _batch_summary(values: Sequence[int]) -> dict[str, float | int]:
         "mean_batch_rows": statistics.mean(values) if values else 0.0,
         "p50_batch_rows": _percentile(values, 0.50),
         "p95_batch_rows": _percentile(values, 0.95),
+        "p99_batch_rows": _percentile(values, 0.99),
         "max_batch_rows": max(values, default=0),
     }
 
@@ -340,6 +470,7 @@ class _ArenaBrokerIngress:
         self.control_pending = control_pending
         self._stop = threading.Event()
         self._error: BaseException | None = None
+        self.first_inference_received_at: float | None = None
         self._thread = threading.Thread(
             target=self._run,
             name="arena-broker-ingress",
@@ -361,6 +492,8 @@ class _ArenaBrokerIngress:
                 broker_received_at = time.perf_counter()
                 if message.get("kind") == "inference":
                     broker_message = dict(message)
+                    if self.first_inference_received_at is None:
+                        self.first_inference_received_at = broker_received_at
                     worker_enqueued_at = broker_message.get(
                         "worker_enqueued_at",
                         broker_message.get("enqueued_at"),
@@ -478,13 +611,68 @@ def run_arena(
     expected_reference_artifact_sha256: str | None = None,
 ) -> dict[str, object]:
     """Run the single production Arena engine with one game-specific profile."""
-    config.validate_base()
-    profile.validate_execution_config(config)
+    process_started_at = time.perf_counter()
+    startup_phases: dict[str, dict[str, float]] = {}
+    diagnostic_output_dir: Path | None = None
 
-    candidate_path = candidate_path.resolve()
-    reference_path = (reference_path or candidate_path).resolve()
-    candidate = profile.load_identity(candidate_path)
-    reference = profile.load_identity(reference_path)
+    def measure_startup_phase(name: str, callback: Any) -> Any:
+        phase_started_at = time.perf_counter()
+        try:
+            result = callback()
+        except BaseException as exc:
+            phase_finished_at = time.perf_counter()
+            startup_phases[name] = {
+                "start_sec": phase_started_at - process_started_at,
+                "end_sec": phase_finished_at - process_started_at,
+                "duration_sec": phase_finished_at - phase_started_at,
+            }
+            if diagnostic_output_dir is not None:
+                try:
+                    _write_json(
+                        diagnostic_output_dir / "startup-failure.json",
+                        {
+                            "status": "STARTUP_FAILED",
+                            "failed_phase": name,
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "startup_timing": {"phases": startup_phases},
+                        },
+                    )
+                except Exception:
+                    pass
+            raise
+        phase_finished_at = time.perf_counter()
+        startup_phases[name] = {
+            "start_sec": phase_started_at - process_started_at,
+            "end_sec": phase_finished_at - process_started_at,
+            "duration_sec": phase_finished_at - phase_started_at,
+        }
+        return result
+
+    measure_startup_phase(
+        "config_profile_resolution",
+        lambda: (config.validate_base(), profile.validate_execution_config(config)),
+    )
+
+    candidate_path, reference_path = measure_startup_phase(
+        "checkpoint_discovery",
+        lambda: (candidate_path.resolve(), (reference_path or candidate_path).resolve()),
+    )
+    output_dir = output_dir.resolve()
+    if any(
+        (output_dir / name).exists()
+        for name in ("manifest.json", "games.jsonl", "summary.json")
+    ):
+        raise FileExistsError(f"Arena output directory already contains a run: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    diagnostic_output_dir = output_dir
+    candidate = measure_startup_phase(
+        "candidate_metadata_read_and_hash",
+        lambda: profile.load_identity(candidate_path),
+    )
+    reference = measure_startup_phase(
+        "reference_metadata_read_and_hash",
+        lambda: profile.load_identity(reference_path),
+    )
     _assert_expected_identity(
         candidate,
         expected_model_hash=expected_candidate_model_hash,
@@ -508,114 +696,184 @@ def run_arena(
     run_id = run_id or (
         f"{profile.run_id_prefix}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     )
-    output_dir = output_dir.resolve()
-    if any(
-        (output_dir / name).exists()
-        for name in ("manifest.json", "games.jsonl", "summary.json")
-    ):
-        raise FileExistsError(f"Arena output directory already contains a run: {output_dir}")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    tasks, pairs = profile.build_tasks(
-        run_id=run_id,
-        comparison=comparison,
-        candidate=candidate,
-        reference=reference,
-        master_seed=master_seed,
-        games=config.games,
-        workers=config.workers,
+    tasks, pairs = measure_startup_phase(
+        "task_corpus_construction",
+        lambda: profile.build_tasks(
+            run_id=run_id,
+            comparison=comparison,
+            candidate=candidate,
+            reference=reference,
+            master_seed=master_seed,
+            games=config.games,
+            workers=config.workers,
+        ),
     )
     if len(tasks) != config.games:
         raise RuntimeError(
             f"Arena profile {profile.profile_id!r} produced {len(tasks)} tasks "
             f"for requested games={config.games}"
         )
-    candidate_model = profile.load_parent_model(candidate, device)
-    reference_model = (
-        candidate_model
-        if reference.model_hash == candidate.model_hash
-        and reference.architecture_config == candidate.architecture_config
-        else profile.load_parent_model(reference, device)
+    if device.type == "cuda":
+        measure_startup_phase("cuda_context_init", torch.cuda.init)
+    candidate_model = measure_startup_phase(
+        "candidate_model_construction_and_state_dict_load",
+        lambda: profile.load_parent_model(candidate, device),
     )
+    if reference.model_hash == candidate.model_hash and reference.architecture_config == candidate.architecture_config:
+        reference_model = candidate_model
+        startup_phases["reference_model_reuse"] = {
+            "start_sec": time.perf_counter() - process_started_at,
+            "end_sec": time.perf_counter() - process_started_at,
+            "duration_sec": 0.0,
+        }
+    else:
+        reference_model = measure_startup_phase(
+            "reference_model_construction_and_state_dict_load",
+            lambda: profile.load_parent_model(reference, device),
+        )
     models_by_hash = {
         candidate.model_hash: candidate_model,
         reference.model_hash: reference_model,
     }
 
-    ctx = __import__("multiprocessing").get_context("spawn")
-    request_queue = ctx.Queue()
-    global_task_queue = ctx.Queue()
-    initial_task_queues = [ctx.Queue() for _ in range(config.workers)]
-    initial_task_counts = [0 for _ in range(config.workers)]
-    for task in tasks:
-        target_worker = int(task["worker_id"]) % config.workers
-        if initial_task_counts[target_worker] < config.games_per_worker:
-            initial_task_queues[target_worker].put(task)
-            initial_task_counts[target_worker] += 1
-        else:
-            global_task_queue.put(task)
-    worker_task_queues = [
-        _WorkerTaskQueue(initial_task_queues[worker_id], global_task_queue)
-        for worker_id in range(config.workers)
-    ]
-    response_queues = [
-        [ctx.Queue() for _ in range(config.games_per_worker)]
-        for _ in range(config.workers)
-    ]
-    start_event = ctx.Event()
+    warmup_input = torch.zeros(
+        (1, *profile.observation_shape), dtype=torch.float32
+    )
+    measure_startup_phase(
+        "candidate_model_warmup",
+        lambda: profile.infer_batch(candidate_model, warmup_input, device),
+    )
+    if reference_model is not candidate_model:
+        measure_startup_phase(
+            "reference_model_warmup",
+            lambda: profile.infer_batch(reference_model, warmup_input, device),
+        )
 
-    shared_inputs = [
-        torch.empty(
-            (config.games_per_worker, *profile.observation_shape),
-            dtype=torch.float32,
-        ).share_memory_()
-        for _ in range(config.workers)
-    ]
-    shared_policy = [
-        torch.empty(
-            (config.games_per_worker, profile.policy_size),
-            dtype=torch.float32,
-        ).share_memory_()
-        for _ in range(config.workers)
-    ]
-    shared_wdl = [
-        torch.empty(
-            (config.games_per_worker, profile.wdl_size),
-            dtype=torch.float32,
-        ).share_memory_()
-        for _ in range(config.workers)
-    ]
+    ctx = __import__("multiprocessing").get_context("spawn")
+    def allocate_runtime() -> tuple[Any, ...]:
+        request_queue = ctx.Queue()
+        global_task_queue = ctx.Queue()
+        initial_task_queues = [ctx.Queue() for _ in range(config.workers)]
+        initial_task_counts = [0 for _ in range(config.workers)]
+        for task in tasks:
+            target_worker = int(task["worker_id"]) % config.workers
+            if initial_task_counts[target_worker] < config.games_per_worker:
+                initial_task_queues[target_worker].put(task)
+                initial_task_counts[target_worker] += 1
+            else:
+                global_task_queue.put(task)
+        worker_task_queues = [
+            _WorkerTaskQueue(initial_task_queues[worker_id], global_task_queue)
+            for worker_id in range(config.workers)
+        ]
+        response_queues = [
+            [ctx.Queue() for _ in range(config.games_per_worker)]
+            for _ in range(config.workers)
+        ]
+        start_event = ctx.Event()
+        shared_inputs = [
+            torch.empty(
+                (config.games_per_worker, *profile.observation_shape),
+                dtype=torch.float32,
+            ).share_memory_()
+            for _ in range(config.workers)
+        ]
+        shared_policy = [
+            torch.empty(
+                (config.games_per_worker, profile.policy_size),
+                dtype=torch.float32,
+            ).share_memory_()
+            for _ in range(config.workers)
+        ]
+        shared_wdl = [
+            torch.empty(
+                (config.games_per_worker, profile.wdl_size),
+                dtype=torch.float32,
+            ).share_memory_()
+            for _ in range(config.workers)
+        ]
+        return (
+            request_queue,
+            global_task_queue,
+            initial_task_counts,
+            worker_task_queues,
+            response_queues,
+            shared_inputs,
+            shared_policy,
+            shared_wdl,
+            start_event,
+        )
+
+    (
+        request_queue,
+        global_task_queue,
+        initial_task_counts,
+        worker_task_queues,
+        response_queues,
+        shared_inputs,
+        shared_policy,
+        shared_wdl,
+        start_event,
+    ) = measure_startup_phase("shared_memory_and_queue_creation", allocate_runtime)
 
     processes = []
-    for worker_id in range(config.workers):
-        process = ctx.Process(
-            target=_worker_bootstrap,
-            args=(
-                profile.profile_id,
-                worker_id,
-                worker_task_queues[worker_id],
-                config.games_per_worker,
-                # Batching is exclusively broker-owned.  Keep this explicit
-                # in the process ABI so a local timed window cannot return.
-                0.0,
-                candidate.model_hash,
-                reference.model_hash,
-                shared_inputs[worker_id],
-                shared_policy[worker_id],
-                shared_wdl[worker_id],
-                request_queue,
-                response_queues[worker_id],
-                start_event,
-            ),
-            name=f"{profile.worker_process_prefix}-{worker_id:02d}",
+    process_spawn_started_at = time.perf_counter()
+    try:
+        for worker_id in range(config.workers):
+            process = ctx.Process(
+                target=_worker_bootstrap,
+                args=(
+                    profile.profile_id,
+                    worker_id,
+                    worker_task_queues[worker_id],
+                    config.games_per_worker,
+                    # Batching is exclusively broker-owned.  Keep this explicit
+                    # in the process ABI so a local timed window cannot return.
+                    0.0,
+                    candidate.model_hash,
+                    reference.model_hash,
+                    shared_inputs[worker_id],
+                    shared_policy[worker_id],
+                    shared_wdl[worker_id],
+                    request_queue,
+                    response_queues[worker_id],
+                    start_event,
+                ),
+                name=f"{profile.worker_process_prefix}-{worker_id:02d}",
+            )
+            process.start()
+            processes.append(process)
+    except BaseException:
+        _terminate(processes)
+        raise
+    startup_phases["process_spawn"] = {
+        "start_sec": process_spawn_started_at - process_started_at,
+        "end_sec": time.perf_counter() - process_started_at,
+        "duration_sec": time.perf_counter() - process_spawn_started_at,
+    }
+
+    hardware_sampler = None
+    hardware_summary: dict[str, object] = {"samples": 0, "phases": {}}
+    process_tree_sampler: _ProcessTreeCpuSampler | None = None
+    process_tree_summary: dict[str, object] = {}
+    try:
+        from tools.hardware_telemetry import HardwareTelemetry
+
+        hardware_sampler = HardwareTelemetry(
+            output_dir / "hardware-telemetry.jsonl", interval_s=1.0
         )
-        process.start()
-        processes.append(process)
+        hardware_sampler.set_phase("ARENA")
+        hardware_sampler.start()
+    except Exception:
+        # Hardware sampling is diagnostic only and must never change Arena
+        # correctness or fail-closed result handling.
+        hardware_sampler = None
 
     ready: dict[int, Mapping[str, object]] = {}
     startup_deadline = time.monotonic() + 60.0
     ingress: _ArenaBrokerIngress | None = None
     try:
+        ready_barrier_started_at = time.perf_counter()
         while len(ready) < config.workers:
             remaining = startup_deadline - time.monotonic()
             if remaining <= 0.0:
@@ -632,13 +890,24 @@ def run_arena(
                     )
                 continue
             if message.get("kind") == "ready":
-                ready[int(message["worker_id"])] = message
+                worker_id = int(message["worker_id"])
+                expected_lane_ids = list(range(config.games_per_worker))
+                if list(message.get("observed_lane_ids", ())) != expected_lane_ids:
+                    raise RuntimeError(
+                        f"Arena worker {worker_id} did not expose all configured lanes"
+                    )
+                ready[worker_id] = message
             elif message.get("kind") == "error":
                 raise RuntimeError(f"Arena worker startup failed: {message}")
             else:
                 raise RuntimeError(
                     f"Unexpected Arena message before startup barrier: {message}"
                 )
+        startup_phases["all_workers_ready_barrier"] = {
+            "start_sec": ready_barrier_started_at - process_started_at,
+            "end_sec": time.perf_counter() - process_started_at,
+            "duration_sec": time.perf_counter() - ready_barrier_started_at,
+        }
 
         worker_pids = [int(ready[index]["pid"]) for index in sorted(ready)]
         if len(set(worker_pids)) != config.workers:
@@ -649,6 +918,10 @@ def run_arena(
             raise RuntimeError("CUDA initialized inside an Arena search worker")
 
         started = time.perf_counter()
+        parent_cpu_started = time.process_time()
+        process_tree_sampler = _ProcessTreeCpuSampler(
+            [os.getpid(), *worker_pids], interval_s=1.0
+        ).start()
         done: dict[int, Mapping[str, object]] = {}
         records: list[dict[str, object]] = []
         batch_rows: list[int] = []
@@ -657,14 +930,63 @@ def run_arena(
         broker_queue_wait_ms: list[float] = []
         broker_collection_wait_ms: list[float] = []
         end_to_end_inference_ms: list[float] = []
+        inference_request_count = 0
+        h2d_ms: list[float] = []
+        model_forward_ms: list[float] = []
+        d2h_ms: list[float] = []
         batch_worker_counts: list[int] = []
+        dispatch_reasons: dict[str, int] = {
+            "cap_reached": 0,
+            "deadline_reached": 0,
+            "queue_drained": 0,
+            "shutdown_tail": 0,
+        }
+        rows_pending_at_dispatch: list[int] = []
         cap_hits = 0
         inference_started = time.perf_counter()
-        model_hashes = tuple(models_by_hash)
         model_hash_by_role = {
             "candidate": candidate.model_hash,
             "reference": reference.model_hash,
         }
+        model_hashes = tuple(dict.fromkeys(models_by_hash))
+        configured_context_capacity = config.workers * config.games_per_worker
+        initial_game_count = sum(initial_task_counts)
+        expected_lane_ids_by_worker = _expected_lane_ids_by_worker(
+            initial_task_counts,
+            config.games_per_worker,
+        )
+        active_contexts_current = 0
+        active_context_last_at = started
+        active_context_samples: list[int] = []
+        active_context_durations: dict[int, float] = {
+            count: 0.0 for count in range(configured_context_capacity + 1)
+        }
+        per_worker_active: dict[int, int] = {
+            worker_id: 0 for worker_id in range(config.workers)
+        }
+        per_worker_last_at: dict[int, float] = {
+            worker_id: started for worker_id in range(config.workers)
+        }
+        per_worker_active_durations: dict[int, dict[int, float]] = {
+            worker_id: {
+                count: 0.0 for count in range(config.games_per_worker + 1)
+            }
+            for worker_id in range(config.workers)
+        }
+        activity_lane_ids_by_worker: dict[int, set[int]] = {
+            worker_id: set() for worker_id in range(config.workers)
+        }
+        activity_events = 0
+        started_games = 0
+        lane_replenishments = 0
+        peak_active_contexts = 0
+        steady_state_started_at: float | None = None
+        pending_empty_at: float | None = None
+        steady_state_samples: list[int] = []
+        first_worker_request_at: float | None = None
+        first_cuda_forward_at: float | None = None
+        first_completed_move_at: float | None = None
+        first_completed_game_at: float | None = None
         scheduler = _ModelAwareBatchScheduler(
             model_hashes,
             cap=config.inference_batch_rows,
@@ -706,12 +1028,77 @@ def run_arena(
             for model_hash, rows in scheduler.pending_rows_by_model().items():
                 pending_depth_by_model[model_hash].append(rows)
 
+        def _activity_timestamp(message: Mapping[str, object]) -> float:
+            value = float(message.get("at", time.perf_counter()))
+            return max(value, active_context_last_at)
+
+        def record_activity(message: Mapping[str, object]) -> None:
+            nonlocal active_contexts_current
+            nonlocal active_context_last_at
+            nonlocal activity_events
+            nonlocal first_completed_move_at
+            nonlocal first_completed_game_at
+            nonlocal lane_replenishments
+            nonlocal peak_active_contexts
+            nonlocal pending_empty_at
+            nonlocal started_games
+            nonlocal steady_state_started_at
+            at = _activity_timestamp(message)
+            elapsed = max(0.0, at - active_context_last_at)
+            active_context_durations[active_contexts_current] += elapsed
+            for worker_id, count in per_worker_active.items():
+                per_worker_active_durations[worker_id][count] += max(
+                    0.0, at - per_worker_last_at[worker_id]
+                )
+                per_worker_last_at[worker_id] = at
+            active_context_last_at = at
+            activity_events += 1
+            event = str(message.get("event", ""))
+            worker_id = int(message.get("worker_id", -1))
+            lane_id = int(message.get("lane_id", -1))
+            if worker_id in activity_lane_ids_by_worker and lane_id >= 0:
+                activity_lane_ids_by_worker[worker_id].add(lane_id)
+            if event == "game_started":
+                started_games += 1
+                if started_games > initial_game_count:
+                    lane_replenishments += 1
+                if started_games >= config.games and pending_empty_at is None:
+                    pending_empty_at = at
+                active_contexts_current += 1
+                if worker_id in per_worker_active:
+                    per_worker_active[worker_id] += 1
+                peak_active_contexts = max(peak_active_contexts, active_contexts_current)
+                if active_contexts_current >= min(config.games, configured_context_capacity):
+                    if steady_state_started_at is None:
+                        steady_state_started_at = at
+            elif event == "game_completed":
+                active_contexts_current = max(0, active_contexts_current - 1)
+                if worker_id in per_worker_active:
+                    per_worker_active[worker_id] = max(
+                        0, per_worker_active[worker_id] - 1
+                    )
+                if first_completed_game_at is None:
+                    first_completed_game_at = at
+            elif event == "move_completed" and first_completed_move_at is None:
+                first_completed_move_at = at
+            active_context_samples.append(active_contexts_current)
+            if (
+                steady_state_started_at is not None
+                and (pending_empty_at is None or at <= pending_empty_at)
+            ):
+                steady_state_samples.append(active_contexts_current)
+
         def handle_non_inference(message: Mapping[str, object]) -> None:
             kind = message.get("kind")
             if kind == "done":
                 wid = int(message["worker_id"])
                 done[wid] = message
+                activity_lane_ids_by_worker[wid].update(
+                    int(lane_id) for lane_id in message.get("used_lane_ids", ())
+                )
                 records.extend(dict(row) for row in message.get("records", ()))
+            elif kind == "activity":
+                record_activity(message)
             elif kind == "error":
                 raise RuntimeError(
                     f"Arena worker {message.get('worker_id')} failed: "
@@ -722,8 +1109,24 @@ def run_arena(
 
         def dispatch_model_batch(model_hash: str) -> None:
             nonlocal cap_hits
+            nonlocal inference_request_count
+            nonlocal first_worker_request_at
+            nonlocal first_cuda_forward_at
+            with scheduler.condition:
+                queue_before_dispatch = scheduler.queues[model_hash].rows
+                queue_first_received = scheduler.queues[model_hash].first_broker_received_at
+            if queue_before_dispatch >= config.inference_batch_rows:
+                dispatch_reasons["cap_reached"] += 1
+            elif queue_first_received is not None:
+                dispatch_reasons["deadline_reached"] += 1
+            else:
+                dispatch_reasons["queue_drained"] += 1
+            rows_pending_at_dispatch.append(queue_before_dispatch)
             requests, first_broker_received_at = scheduler.pop_batch(model_hash)
+            inference_request_count += len(requests)
             dispatch_started = time.perf_counter()
+            if first_worker_request_at is None:
+                first_worker_request_at = dispatch_started
             collection_wait_ms_by_model[model_hash].append(
                 max(0.0, dispatch_started - first_broker_received_at) * 1000.0
             )
@@ -753,8 +1156,21 @@ def run_arena(
                     segment.setdefault(
                         "broker_received_at", request["broker_received_at"]
                     )
+                    segment.setdefault("model_role", request["model_role"])
+                    segment.setdefault("model_hash", request["model_hash"])
+                    segment.setdefault("generation", request["generation"])
+                    segment.setdefault("ticket", request["ticket"])
+                    segment.setdefault("worker_id", request["worker_id"])
+                    segment.setdefault("lane_id", request["lane_id"])
                     segments.append(segment)
             for request in requests:
+                role = str(request.get("model_role", ""))
+                if role not in model_hash_by_role:
+                    raise RuntimeError("Arena inference request has an unknown model role")
+                if model_hash_by_role[role] != model_hash:
+                    raise RuntimeError("Arena inference request model role/hash mismatch")
+                if "generation" not in request or "ticket" not in request:
+                    raise RuntimeError("Arena inference request lost ticket generation")
                 broker_received_at = float(request["broker_received_at"])
                 worker_enqueued_at = float(request["worker_enqueued_at"])
                 wait_ms = max(0.0, dispatch_started - broker_received_at) * 1000.0
@@ -778,10 +1194,22 @@ def run_arena(
                 dim=0,
             )
             forward_started = time.perf_counter()
+            if first_cuda_forward_at is None:
+                first_cuda_forward_at = forward_started
             try:
                 policy, wdl = profile.infer_batch(model, cpu_batch, device)
             finally:
                 forward_finished = time.perf_counter()
+            timing = getattr(profile, "last_infer_timing", {})
+            if isinstance(timing, Mapping):
+                for values, key in (
+                    (h2d_ms, "h2d_ms"),
+                    (model_forward_ms, "forward_ms"),
+                    (d2h_ms, "d2h_ms"),
+                ):
+                    value = timing.get(key)
+                    if isinstance(value, (int, float)):
+                        values.append(float(value))
             model_forward_time_sec[model_hash].append(
                 forward_finished - forward_started
             )
@@ -799,7 +1227,13 @@ def run_arena(
                 )
                 response_queues[wid][lane_id].put(
                     {
+                        "worker_id": wid,
+                        "lane_id": lane_id,
                         "ticket": int(segment["ticket"]),
+                        "generation": int(segment["generation"]),
+                        "game_id": str(segment.get("game_id", "")),
+                        "model_role": str(segment["model_role"]),
+                        "model_hash": str(segment["model_hash"]),
                         "error": None,
                         "worker_enqueued_at": segment["worker_enqueued_at"],
                         "broker_received_at": segment["broker_received_at"],
@@ -829,8 +1263,73 @@ def run_arena(
                 cap_hits += 1
             record_pending_depth()
 
+        early_gate_checked = False
+
+        def check_early_performance_gate() -> None:
+            nonlocal early_gate_checked
+            if early_gate_checked or not config.strict_production or not config.early_gate_enabled:
+                return
+            if len(batch_rows) < config.early_gate_min_forwards:
+                return
+            elapsed = time.perf_counter() - started
+            if elapsed < config.early_gate_min_wall_sec:
+                return
+            early_gate_checked = True
+            expected_active = min(config.games, configured_context_capacity)
+            recent = batch_rows[-config.early_gate_min_forwards:]
+            observed_lanes = all(
+                set(expected_lane_ids_by_worker[worker_id]).issubset(
+                    activity_lane_ids_by_worker[worker_id]
+                )
+                for worker_id in range(config.workers)
+            )
+            failures: list[str] = []
+            if peak_active_contexts < expected_active:
+                failures.append("active_contexts")
+            if not observed_lanes:
+                failures.append("lane_occupancy")
+            if statistics.mean(recent) < config.min_mean_inference_batch_rows:
+                failures.append("mean_inference_batch_rows")
+            if failures:
+                _write_json(
+                    output_dir / "performance-degraded.json",
+                    {
+                        "status": "PERFORMANCE_DEGRADED",
+                        "reason": failures,
+                        "observed_peak_active_contexts": peak_active_contexts,
+                        "expected_active_contexts": expected_active,
+                        "observed_unique_lane_ids_per_worker": {
+                            str(worker_id): sorted(lanes)
+                            for worker_id, lanes in activity_lane_ids_by_worker.items()
+                        },
+                        "expected_unique_lane_ids_per_worker": {
+                            str(worker_id): list(lanes)
+                            for worker_id, lanes in expected_lane_ids_by_worker.items()
+                        },
+                        "recent_mean_inference_batch_rows": statistics.mean(recent),
+                        "forwards_observed": len(batch_rows),
+                        "wall_time_sec": elapsed,
+                    },
+                )
+                raise RuntimeError(
+                    "PERFORMANCE_DEGRADED early Arena execution gate: "
+                    + ", ".join(failures)
+                )
+
+        broker_started_at = time.perf_counter()
         ingress.start()
+        startup_phases["broker_start"] = {
+            "start_sec": broker_started_at - process_started_at,
+            "end_sec": time.perf_counter() - process_started_at,
+            "duration_sec": time.perf_counter() - broker_started_at,
+        }
+        ingress_started_at = time.perf_counter()
         start_event.set()
+        startup_phases["ingress_start"] = {
+            "start_sec": ingress_started_at - process_started_at,
+            "end_sec": time.perf_counter() - process_started_at,
+            "duration_sec": time.perf_counter() - ingress_started_at,
+        }
         while len(done) < config.workers:
             ingress.raise_if_failed()
             dead = [
@@ -861,6 +1360,7 @@ def run_arena(
                 continue
             if ready_model is not None:
                 dispatch_model_batch(ready_model)
+                check_early_performance_gate()
                 continue
 
         wall_time = time.perf_counter() - started
@@ -874,6 +1374,12 @@ def run_arena(
         start_event.set()
         if ingress is not None:
             ingress.stop()
+        if hardware_sampler is not None:
+            hardware_sampler.stop()
+            hardware_summary = hardware_sampler.summary()
+        if process_tree_sampler is not None:
+            process_tree_sampler.stop()
+            process_tree_summary = process_tree_sampler.summary()
 
     for process in processes:
         process.join(timeout=15.0)
@@ -888,6 +1394,35 @@ def run_arena(
     ]
     if bad_exit:
         raise RuntimeError(f"Arena worker process exit failures: {bad_exit}")
+
+    while control_pending:
+        handle_non_inference(control_pending.popleft())
+
+    activity_end_at = max(time.perf_counter(), active_context_last_at)
+    activity_elapsed = max(0.0, activity_end_at - active_context_last_at)
+    active_context_durations[active_contexts_current] += activity_elapsed
+    for worker_id, count in per_worker_active.items():
+        per_worker_active_durations[worker_id][count] += max(
+            0.0, activity_end_at - per_worker_last_at[worker_id]
+        )
+
+    active_context_summary = _numeric_summary(active_context_samples)
+    steady_samples = steady_state_samples or active_context_samples
+    steady_state_summary = _numeric_summary(steady_samples)
+
+    def _duration_fractions(values: Mapping[int, float]) -> dict[str, float]:
+        total = sum(float(value) for value in values.values())
+        return {
+            str(key): (float(value) / total if total > 0.0 else 0.0)
+            for key, value in sorted(values.items())
+        }
+
+    worker_active_distribution = {
+        str(worker_id): _duration_fractions(values)
+        for worker_id, values in per_worker_active_durations.items()
+    }
+    global_active_distribution = _duration_fractions(active_context_durations)
+    parent_cpu_seconds = max(0.0, time.process_time() - parent_cpu_started)
 
     records.sort(key=lambda row: str(row["game_id"]))
     _write_jsonl(output_dir / "games.jsonl", records)
@@ -957,6 +1492,48 @@ def run_arena(
         for values in model_forward_time_sec.values()
         for value in values
     ]
+    process_tree_cpu_seconds = sum(worker_cpu_seconds) + parent_cpu_seconds
+    process_tree_effective_cpu_cores = (
+        process_tree_cpu_seconds / wall_time if wall_time else 0.0
+    )
+    workers_per_batch_summary = _numeric_summary(batch_worker_counts)
+    hardware_phase = {}
+    if isinstance(hardware_summary.get("phases"), Mapping):
+        hardware_phase = hardware_summary["phases"].get("ARENA", {})  # type: ignore[assignment]
+
+    def _hardware_metric(name: str) -> Mapping[str, object]:
+        value = hardware_phase.get(name, {}) if isinstance(hardware_phase, Mapping) else {}
+        return dict(value) if isinstance(value, Mapping) else {}
+
+    gpu_utilization = _hardware_metric("gpu_util_percent")
+    gpu_memory = _hardware_metric("gpu_memory_used_mib")
+    gpu_temperature = _hardware_metric("gpu_temperature_c")
+    gpu_power = _hardware_metric("gpu_power_w")
+
+    def _instant_phase(name: str, at: float | None) -> None:
+        if at is None:
+            return
+        startup_phases[name] = {
+            "start_sec": at - process_started_at,
+            "end_sec": at - process_started_at,
+            "duration_sec": 0.0,
+        }
+
+    if ingress is not None and ingress.first_inference_received_at is not None:
+        first_worker_request_at = (
+            ingress.first_inference_received_at
+            if first_worker_request_at is None
+            else min(first_worker_request_at, ingress.first_inference_received_at)
+        )
+    _instant_phase("first_worker_request", first_worker_request_at)
+    _instant_phase("first_cuda_forward", first_cuda_forward_at)
+    _instant_phase("first_completed_move", first_completed_move_at)
+    _instant_phase("first_completed_game", first_completed_game_at)
+    startup_phases["process_exit_after_gameplay"] = {
+        "start_sec": process_started_at - process_started_at,
+        "end_sec": time.perf_counter() - process_started_at,
+        "duration_sec": time.perf_counter() - process_started_at,
+    }
     total_moves = sum(
         len(row.get("action_trace", ()))
         for row in records
@@ -969,7 +1546,53 @@ def run_arena(
         "worker_pids": worker_pids,
         "worker_processes_requested": config.workers,
         "worker_processes_observed": len(set(worker_pids)),
-        "games_per_worker_lane_capacity": config.games_per_worker,
+        "configured_workers": config.workers,
+        "observed_worker_pids": worker_pids,
+        "configured_games_per_worker": config.games_per_worker,
+        "configured_context_capacity": configured_context_capacity,
+        "observed_unique_lane_ids_per_worker": {
+            str(worker_id): sorted(lane_ids)
+            for worker_id, lane_ids in activity_lane_ids_by_worker.items()
+        },
+        "expected_unique_lane_ids_per_worker": {
+            str(worker_id): list(lane_ids)
+            for worker_id, lane_ids in expected_lane_ids_by_worker.items()
+        },
+        "active_contexts": {
+            "current": active_contexts_current,
+            "mean": active_context_summary["mean"],
+            "p50": active_context_summary["p50"],
+            "p95": active_context_summary["p95"],
+            "max": peak_active_contexts,
+        },
+        "steady_state_active_contexts": {
+            "mean": steady_state_summary["mean"],
+            "p50": steady_state_summary["p50"],
+            "p95": steady_state_summary["p95"],
+            "min": min(steady_samples, default=0),
+            "max": steady_state_summary["max"],
+        },
+        "per_worker_active_context_distribution": worker_active_distribution,
+        "lane_occupancy": {
+            "global_active_contexts": global_active_distribution,
+            "by_worker_active_contexts": worker_active_distribution,
+        },
+        "peak_contexts_global": peak_active_contexts,
+        "number_of_lane_replenishments": lane_replenishments,
+        "activity_event_count": activity_events,
+        "global_task_replenishment": lane_replenishments > 0,
+        "tail_phase": {
+            "pending_empty_at_sec": (
+                pending_empty_at - process_started_at
+                if pending_empty_at is not None
+                else None
+            ),
+            "steady_state_started_at_sec": (
+                steady_state_started_at - process_started_at
+                if steady_state_started_at is not None
+                else None
+            ),
+        },
         "aggregate_worker_cpu_seconds": sum(worker_cpu_seconds),
         "effective_cpu_cores": effective_cpu_cores,
         "effective_cpu_pct_of_requested": (
@@ -986,6 +1609,11 @@ def run_arena(
         "worker_lane_wall_time_seconds": worker_lane_wall_seconds,
         "worker_blocked_on_inference_time": _numeric_summary(worker_blocked_seconds),
         "worker_cpu_active_time": _numeric_summary(worker_cpu_seconds),
+        "worker_runnable_cpu_time": _numeric_summary(worker_cpu_seconds),
+        "worker_inference_blocked_time": _numeric_summary(worker_blocked_seconds),
+        "worker_queue_blocked_time": _numeric_summary(
+            [float(done[index].get("queue_blocked_seconds", 0.0)) for index in sorted(done)]
+        ),
         "worker_inference_wait_fraction_by_worker": [
             blocked / lane_wall if lane_wall else 0.0
             for blocked, lane_wall in zip(
@@ -1004,6 +1632,7 @@ def run_arena(
             bool(done[index]["cuda_initialized"]) for index in sorted(done)
         ],
         "inference_forward_calls": len(batch_rows),
+        "inference_requests": inference_request_count,
         "inference_rows": sum(batch_rows),
         "inference_rows_per_sec": (
             sum(batch_rows) / inference_wall if inference_wall else 0.0
@@ -1011,6 +1640,7 @@ def run_arena(
         "mean_inference_batch_rows": mean_batch,
         "p50_inference_batch_rows": _percentile(batch_rows, 0.50),
         "p95_inference_batch_rows": _percentile(batch_rows, 0.95),
+        "p99_inference_batch_rows": _percentile(batch_rows, 0.99),
         "max_inference_batch_rows": max(batch_rows, default=0),
         "inference_batch_rows_cap": config.inference_batch_rows,
         "inference_batch_wait_ms": config.inference_batch_wait_ms,
@@ -1018,6 +1648,9 @@ def run_arena(
         "batch_aggregation_scope": "cross_process",
         "batch_cap_hits": cap_hits,
         "batch_cap_hit_rate": cap_hits / len(batch_rows) if batch_rows else 0.0,
+        "rows_pending_at_dispatch": _numeric_summary(rows_pending_at_dispatch),
+        "dispatch_reason": dispatch_reasons,
+        "dispatch_reason_counts": dispatch_reasons,
         "cross_worker_inference_calls": cross_worker_calls,
         "cross_worker_inference_call_rate": (
             cross_worker_calls / len(batch_worker_counts)
@@ -1027,6 +1660,7 @@ def run_arena(
         "mean_workers_per_inference_call": (
             statistics.mean(batch_worker_counts) if batch_worker_counts else 0.0
         ),
+        "workers_per_inference_call": workers_per_batch_summary,
         "queue_wait_ms_mean": (
             statistics.mean(queue_wait_ms) if queue_wait_ms else 0.0
         ),
@@ -1059,6 +1693,17 @@ def run_arena(
         },
         "model_aware_batching": True,
         "inference_by_model": inference_by_model,
+        "inference": {
+            "requests": inference_request_count,
+            "rows": sum(batch_rows),
+            "forward_calls": len(batch_rows),
+            "batch_rows": _batch_summary(batch_rows),
+            "workers_per_batch": workers_per_batch_summary,
+            "rows_pending_at_dispatch": _numeric_summary(rows_pending_at_dispatch),
+            "dispatch_reason_counts": dict(dispatch_reasons),
+            "candidate_reference_isolation": True,
+            "by_model_role": inference_by_model,
+        },
         "candidate_forward_calls": int(_model_metric("forward_calls", "candidate")),
         "candidate_inference_rows": int(_model_metric("rows", "candidate")),
         "candidate_mean_inference_batch_rows": float(
@@ -1069,6 +1714,9 @@ def run_arena(
         ),
         "candidate_p95_inference_batch_rows": int(
             _model_metric("p95_batch_rows", "candidate")
+        ),
+        "candidate_p99_inference_batch_rows": int(
+            _model_metric("p99_batch_rows", "candidate")
         ),
         "candidate_max_inference_batch_rows": int(
             _model_metric("max_batch_rows", "candidate")
@@ -1084,6 +1732,9 @@ def run_arena(
         "reference_p95_inference_batch_rows": int(
             _model_metric("p95_batch_rows", "reference")
         ),
+        "reference_p99_inference_batch_rows": int(
+            _model_metric("p99_batch_rows", "reference")
+        ),
         "reference_max_inference_batch_rows": int(
             _model_metric("max_batch_rows", "reference")
         ),
@@ -1097,6 +1748,9 @@ def run_arena(
             for role, model_hash in model_hash_by_role.items()
         },
         "model_forward_time_ms": _numeric_summary(all_forward_time_ms),
+        "h2d_ms": _numeric_summary(h2d_ms),
+        "model_forward_ms": _numeric_summary(model_forward_ms),
+        "d2h_ms": _numeric_summary(d2h_ms),
         "model_forward_time_ms_by_model": {
             role: _numeric_summary(
                 [value * 1000.0 for value in model_forward_time_sec[model_hash]]
@@ -1104,6 +1758,38 @@ def run_arena(
             for role, model_hash in model_hash_by_role.items()
         },
         "wall_time_sec": wall_time,
+        "startup_wall_time_sec": started - process_started_at,
+        "process_wall_time_sec": time.perf_counter() - process_started_at,
+        "startup_timing": {
+            "module_import_to_process_start_sec": max(
+                0.0, process_started_at - _MODULE_IMPORT_STARTED_AT
+            ),
+            "phases": startup_phases,
+            "worker_ready_timestamps": {
+                str(worker_id): ready[worker_id].get("ready_at")
+                for worker_id in sorted(ready)
+            },
+        },
+        "hardware_telemetry": hardware_summary,
+        "process_tree_cpu": process_tree_summary or {
+            "average_effective_cores": process_tree_effective_cpu_cores,
+            "p50_effective_cores": None,
+            "p95_effective_cores": None,
+            "peak_effective_cores": None,
+            "samples": 0,
+            "source": "aggregate worker and parent process CPU; interval sampler unavailable",
+        },
+        "gpu": {
+            "utilization_percent": gpu_utilization,
+            "memory_used_mib": gpu_memory,
+            "temperature_c": gpu_temperature,
+            "power_w": gpu_power,
+        },
+        "gpu_utilization_average": gpu_utilization.get("mean"),
+        "gpu_utilization_p50": gpu_utilization.get("p50"),
+        "gpu_utilization_p95": gpu_utilization.get("p95"),
+        "gpu_utilization_peak": gpu_utilization.get("max"),
+        "gpu_memory_used_mib": gpu_memory.get("mean"),
         "moves": total_moves,
         "moves_per_sec": total_moves / wall_time if wall_time else 0.0,
         "games_per_hour": (
@@ -1115,14 +1801,27 @@ def run_arena(
     performance_failures: list[str] = []
     if len(set(worker_pids)) != config.workers:
         performance_failures.append("worker_pid_count")
+    lane_contract_observed = all(
+        set(expected_lane_ids_by_worker[worker_id]).issubset(
+            activity_lane_ids_by_worker[worker_id]
+        )
+        for worker_id in range(config.workers)
+    )
+    if not lane_contract_observed:
+        performance_failures.append("lane_occupancy")
+    if peak_active_contexts < min(config.games, configured_context_capacity):
+        performance_failures.append("active_contexts")
     if any(telemetry["worker_cuda_initialized_after_run"]):
         performance_failures.append("cuda_in_worker")
     if mean_batch < config.min_mean_inference_batch_rows:
         performance_failures.append("mean_inference_batch_rows")
-    if effective_cpu_cores < config.min_effective_cpu_cores:
-        performance_failures.append("effective_cpu_cores")
     if int(summary["technical_games"]) != 0:
         performance_failures.append("technical_games")
+    telemetry["effective_cpu_cores_target"] = config.min_effective_cpu_cores
+    telemetry["effective_cpu_cores_target_met"] = (
+        effective_cpu_cores >= config.min_effective_cpu_cores
+    )
+    telemetry["effective_cpu_cores_role"] = "diagnostic_only"
     telemetry["performance_status"] = (
         "PASS" if not performance_failures else "PERFORMANCE_DEGRADED"
     )
@@ -1151,6 +1850,30 @@ def run_arena(
         }
     )
     _write_json(output_dir / "summary.json", summary)
+    if performance_failures:
+        _write_json(
+            output_dir / "performance-degraded.json",
+            {
+                "status": "PERFORMANCE_DEGRADED",
+                "run_id": run_id,
+                "reasons": performance_failures,
+                "observed": {
+                    "active_contexts": telemetry["active_contexts"],
+                    "steady_state_active_contexts": telemetry[
+                        "steady_state_active_contexts"
+                    ],
+                    "observed_unique_lane_ids_per_worker": telemetry[
+                        "observed_unique_lane_ids_per_worker"
+                    ],
+                    "mean_inference_batch_rows": telemetry[
+                        "mean_inference_batch_rows"
+                    ],
+                    "effective_cpu_cores": telemetry["effective_cpu_cores"],
+                    "technical_games": telemetry["technical_games"],
+                },
+                "summary": str(output_dir / "summary.json"),
+            },
+        )
 
     def _identity_payload(identity: CheckpointIdentity) -> dict[str, object]:
         return {

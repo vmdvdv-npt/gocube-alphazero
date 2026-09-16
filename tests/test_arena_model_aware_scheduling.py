@@ -4,6 +4,7 @@ from collections import deque
 from queue import Queue
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,9 @@ from tools.arena_engine import (
     _WorkerTaskQueue,
 )
 from tools.arena_profiles.torus9 import _WorkerInferenceAggregator
+from tools.arena_profiles import torus9 as torus9_profile
+from gocube_golden.search import SearchEvaluationRequest, SearchResult
+from gocube_golden.state import BLACK
 
 
 def _request(model_hash: str, rows: int, enqueued_at: float) -> dict[str, object]:
@@ -157,3 +161,148 @@ def test_broker_ingress_accepts_requests_during_a_slow_forward_and_preserves_tim
             dispatcher.join(timeout=1.0)
         ingress.stop()
     assert not dispatch_error
+
+
+def test_arena_worker_interleaves_blocked_lanes_and_replenishes(monkeypatch):
+    """A delayed response in one lane must not serialize the other lanes."""
+
+    class FakeState:
+        side_to_move = BLACK
+        is_terminal = False
+        stones = ()
+
+    class FakeSession:
+        def __init__(self, *_args, **_kwargs):
+            self.waiting = True
+
+        def advance(self):
+            if self.waiting:
+                return SearchEvaluationRequest(FakeState(), object())
+            return SearchResult(
+                action=0,
+                legal_actions=(0,),
+                root_visits=(1,),
+                pi=(1.0,),
+                simulations=1,
+                evaluator_calls=1,
+            )
+
+        def resume(self, _evaluation):
+            self.waiting = False
+
+    def fake_apply_action(_state, _action):
+        return SimpleNamespace(after=SimpleNamespace(is_terminal=True, stones=()))
+
+    def fake_finish(game):
+        return {"game_id": str(game.task["game_id"]), "action_trace": game.trace}
+
+    monkeypatch.setattr(torus9_profile, "SequentialPUCTSession", FakeSession)
+    monkeypatch.setattr(torus9_profile, "apply_action", fake_apply_action)
+    monkeypatch.setattr(
+        torus9_profile,
+        "result_from_terminal",
+        lambda _state: SimpleNamespace(winner=SimpleNamespace(value="DRAW")),
+    )
+    monkeypatch.setattr(torus9_profile, "_finish_game", fake_finish)
+    monkeypatch.setattr(
+        torus9_profile,
+        "build_torus9_observation",
+        lambda _state, legal_context=None: torus9_profile.torch.zeros((6, 81)),
+    )
+    monkeypatch.setattr(
+        torus9_profile,
+        "_make_game",
+        lambda task: torus9_profile._WorkerGame(
+            task=task,
+            state=FakeState(),
+            trace=[],
+            ply=0,
+            started_at=time.perf_counter(),
+        ),
+    )
+
+    tasks = Queue()
+    for index in range(4):
+        tasks.put({"game_id": f"game-{index}", "state": None, "game_seed": index, "candidate_black": True})
+    requests = Queue()
+    responses = [Queue(), Queue()]
+    input_slot = torus9_profile.torch.zeros((2, 6, 81))
+    policy_slot = torus9_profile.torch.zeros((2, 82))
+    wdl_slot = torus9_profile.torch.zeros((2, 3))
+    start_event = threading.Event()
+    start_event.set()
+    seen: list[dict[str, object]] = []
+    events: list[dict[str, object]] = []
+    stop_broker = threading.Event()
+
+    def broker() -> None:
+        while not stop_broker.is_set():
+            try:
+                message = requests.get(timeout=0.05)
+            except Exception:
+                continue
+            if message.get("kind") == "inference":
+                seen.append(message)
+                def respond(message=message) -> None:
+                    policy_slot[int(message["lane_id"])].fill_(1.0)
+                    wdl_slot[int(message["lane_id"])].fill_(1.0)
+                    responses[int(message["lane_id"])].put(
+                        {
+                            "worker_id": 0,
+                            "lane_id": int(message["lane_id"]),
+                            "ticket": int(message["ticket"]),
+                            "generation": int(message["generation"]),
+                            "game_id": message["game_id"],
+                            "model_role": message["model_role"],
+                            "model_hash": message["model_hash"],
+                            "error": None,
+                        }
+                    )
+
+                if int(message["lane_id"]) == 0:
+                    threading.Timer(0.05, respond).start()
+                else:
+                    respond()
+            elif message.get("kind") == "done":
+                events.append(message)
+                return
+            else:
+                events.append(message)
+
+    broker_thread = threading.Thread(target=broker)
+    worker_thread = threading.Thread(
+        target=torus9_profile.PROFILE.worker_main,
+        args=(
+            0,
+            tasks,
+            2,
+            0.0,
+            "candidate-hash",
+            "reference-hash",
+            input_slot,
+            policy_slot,
+            wdl_slot,
+            requests,
+            responses,
+            start_event,
+        ),
+    )
+    broker_thread.start()
+    worker_thread.start()
+    worker_thread.join(timeout=3.0)
+    stop_broker.set()
+    broker_thread.join(timeout=1.0)
+
+    assert not worker_thread.is_alive()
+    assert len(seen) == 4
+    assert {int(message["lane_id"]) for message in seen} == {0, 1}
+    assert [message["game_id"] for message in seen[:2]] == ["game-0", "game-1"]
+    completed = [
+        int(message["lane_id"])
+        for message in events
+        if message.get("kind") == "activity" and message.get("event") == "game_completed"
+    ]
+    assert completed[0] == 1
+    done = next(message for message in events if message.get("kind") == "done")
+    assert done["used_lane_ids"] == [0, 1]
+    assert done["lane_replenishments"] == 2

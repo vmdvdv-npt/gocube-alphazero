@@ -5,6 +5,10 @@ Examples:
     .venv/bin/python tools/arena.py --candidate path/to/M14.pt
     .venv/bin/python tools/arena.py --profile torus9 --candidate A.pt --reference B.pt
 
+The default production workload is the Legion high-volume preset (192 games,
+16 workers, 12 contexts per worker).  For the standard-64 comparison use
+explicit workload overrides, including ``--games 64 --games-per-worker 4``.
+
 With no --reference, the candidate plays itself. With --profile auto (default),
 the game profile is resolved from checkpoint metadata.
 """
