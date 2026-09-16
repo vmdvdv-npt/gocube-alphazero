@@ -764,7 +764,13 @@ def _generation_metrics(
         timing.update(dict(selfplay_timing))
     training_timing = training.get("phase_timing")
     if isinstance(training_timing, Mapping):
-        timing["training"] = dict(training_timing)
+        normalized_training_timing = dict(training_timing)
+        # Keep the canonical phase timing name alongside the historical
+        # adapter name so required-metric paths remain stable across reports.
+        normalized_training_timing.setdefault(
+            "training_wall_time_sec", training_wall
+        )
+        timing["training"] = normalized_training_timing
     metrics.update(
         {
             "training_time_sec": training_wall,
