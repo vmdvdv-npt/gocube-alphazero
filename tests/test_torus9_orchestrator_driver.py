@@ -7,72 +7,43 @@ import threading
 
 import pytest
 
-from gocube_golden.orchestrator import OrchestratorSpec
-from gocube_golden.execution_reference import LEGION_TORUS9_SELFPLAY_PERFORMANCE_REFERENCE
-import tools.torus9_orchestrator_driver as driver
+import tools.torus9_orchestrator_driver as legacy_driver
+import tools.torus9_run_driver as run_driver
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC_PATH = ROOT / "configs" / "gocube" / "torus9_training_orchestrator_v1.json"
 
 
-def _spec_payload() -> dict[str, object]:
-    payload = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
-    assert isinstance(payload, dict)
-    return payload
+def test_no_checked_in_torus9_execution_policy_preset():
+    assert not (ROOT / "configs" / "gocube" / "torus9_training_orchestrator_v1.json").exists()
 
 
-def test_torus9_orchestrator_spec_is_concrete_and_current():
-    payload = _spec_payload()
-    rendered = json.dumps(payload, sort_keys=True)
-    assert "<" not in rendered and "profile-arena-driver" not in rendered
-    assert payload["topology"] == "torus9"
-    assert payload["expected_profile_fingerprint"] == (
-        "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775"
-    )
-    assert payload["arena"]["every_generations"] == 5
-    assert payload["arena"]["preset_fingerprint"] == driver.PERIODIC_ARENA_PRESET_FINGERPRINT
-    assert payload["arena"]["startset_fingerprint"] == driver.PERIODIC_ARENA_STARTSET_FINGERPRINT
-    spec = OrchestratorSpec.load(SPEC_PATH, repo_root=ROOT)
-    assert spec.topology == "torus9"
-    assert spec.arena_required is True
-
-
-def test_torus9_orchestrator_generation_command_pins_validated_legion_selfplay():
-    payload = _spec_payload()
-    argv = payload["execution"]["generation_command"]
-    values = {
-        argv[index]: argv[index + 1]
-        for index in range(len(argv) - 1)
-        if argv[index].startswith("--")
+def test_active_torus9_driver_does_not_expose_legion_execution_cli_defaults():
+    parser = run_driver.build_parser()
+    generation = parser.parse_args(["generation", "--generation", "1"])
+    assert vars(generation) == {
+        "command": "generation",
+        "generation": 1,
+        "resume": False,
+        "func": run_driver.run_generation,
     }
-    reference = LEGION_TORUS9_SELFPLAY_PERFORMANCE_REFERENCE
-    assert int(values["--workers"]) == reference.recommended_workers
-    assert int(values["--active-games-per-worker"]) == reference.recommended_active_games_per_worker
-    assert int(values["--total-active-contexts"]) == reference.recommended_total_active_contexts
-    assert int(values["--batch-cap"]) == reference.recommended_batch_cap
-    assert float(values["--wait-ms"]) == reference.recommended_wait_ms
-    assert values["--device"] == "cuda"
-
-
-def test_torus9_orchestrator_monitors_neural_training_speed_fail_closed():
-    payload = _spec_payload()
-    checks = {
-        str(item["metric"]): item
-        for item in payload["performance"]["checks"]
+    arena = parser.parse_args(["arena", "--generation", "3"])
+    assert vars(arena) == {
+        "command": "arena",
+        "generation": 3,
+        "func": run_driver.run_arena,
     }
-    training_speed = checks["optimizer_updates_per_sec"]
-    assert float(training_speed["baseline"]) == pytest.approx(80.0 / 6.439437859)
-    assert training_speed["warning_ratio"] == 0.85
-    assert training_speed["fail_ratio"] == 0.7
-    assert training_speed["policy"] == "fail-closed"
+
+
+def test_active_torus9_driver_has_no_embedded_periodic_arena_preset():
+    assert not hasattr(run_driver, "PERIODIC_ARENA_PRESET")
+    assert not hasattr(run_driver, "PERIODIC_ARENA_STARTSET")
+    assert not hasattr(run_driver, "LEGION_TORUS9_SELFPLAY_PERFORMANCE_REFERENCE")
 
 
 def test_cube_is_not_claimed_as_a_current_orchestrator_driver():
-    payload = _spec_payload()
-    commands = payload["execution"]["generation_command"] + payload["arena"]["command"]
-    assert "tools/torus9_orchestrator_driver.py" in commands
-    assert all("cube" not in token.lower() for token in commands)
+    assert run_driver.__name__ == "tools.torus9_run_driver"
+    assert "cube" not in run_driver.__doc__.lower()
 
 
 def test_atomic_json_is_safe_for_concurrent_heartbeat_writers(tmp_path: Path):
@@ -82,7 +53,7 @@ def test_atomic_json_is_safe_for_concurrent_heartbeat_writers(tmp_path: Path):
     def write(worker: int) -> None:
         try:
             for iteration in range(50):
-                driver._atomic_json(
+                legacy_driver._atomic_json(
                     path,
                     {"worker": worker, "iteration": iteration},
                 )
@@ -108,7 +79,7 @@ def test_lineage_git_commit_drift_fails_closed(tmp_path: Path, monkeypatch: pyte
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        driver,
+        legacy_driver,
         "capture_code_identity",
         lambda _root: SimpleNamespace(
             git_commit_sha="b" * 40,
@@ -117,7 +88,7 @@ def test_lineage_git_commit_drift_fails_closed(tmp_path: Path, monkeypatch: pyte
         ),
     )
     with pytest.raises(ValueError, match="git commit drift"):
-        driver._validate_code_pin(tmp_path)
+        legacy_driver._validate_code_pin(tmp_path)
 
 
 def test_lineage_git_commit_pin_accepts_same_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -131,5 +102,5 @@ def test_lineage_git_commit_pin_accepts_same_head(tmp_path: Path, monkeypatch: p
         git_tree_sha="c" * 40,
         working_tree_clean=True,
     )
-    monkeypatch.setattr(driver, "capture_code_identity", lambda _root: identity)
-    assert driver._validate_code_pin(tmp_path) is identity
+    monkeypatch.setattr(legacy_driver, "capture_code_identity", lambda _root: identity)
+    assert legacy_driver._validate_code_pin(tmp_path) is identity
