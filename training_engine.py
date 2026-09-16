@@ -184,6 +184,22 @@ class TrainingAdapter(Protocol):
     def sync_state(self, state: TrainingState) -> None: ...
 
 
+class ReplayConstructionAdapter(Protocol):
+    """Optional record-construction capability without full row validation.
+
+    This capability is deliberately separate from :class:`TrainingAdapter`:
+    ``build_samples`` keeps its public contract that record-derived rows are
+    already semantically validated.  A future optimized engine path may use
+    ``build_samples_for_replay`` only when it immediately stamps those rows
+    and routes the entire batch through ``update_replay``, which remains the
+    authoritative validate-all-before-mutation boundary.
+    """
+
+    def build_samples_for_replay(
+        self, records: Sequence[object]
+    ) -> Sequence[Mapping[str, object]]: ...
+
+
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_jsonable(value), indent=2, sort_keys=True) + "\n", encoding="utf-8")

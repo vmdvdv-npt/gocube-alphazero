@@ -202,8 +202,10 @@ class Torus9TrainingAdapter:
         self.base_commit = str(base_commit)
         self.training_profile = self.profile["training"]
         self.replay_profile = self.profile["replay"]
-        self._validated_sample_ids: set[str] = set()
-        self._validated_sample_objects: set[int] = set()
+        # Cache validation only when both deterministic row identity and the
+        # complete canonical row content still match.  replay_row_id alone is
+        # not a semantic cache key because replay rows are mutable mappings.
+        self._validated_sample_fingerprints: dict[str, str] = {}
         self._diagnostic_timing: MutableMapping[str, object] | None = None
         self.target_identity = {
             "contract_id": TORUS9_TARGET_CONTRACT_ID,
@@ -403,7 +405,9 @@ class Torus9TrainingAdapter:
         if _adam_step(state.optimizer) != int(state.optimizer_updates):
             raise ValueError("Current Torus9 Adam step does not match training clock")
 
-    def build_samples(self, records: Sequence[object]) -> Sequence[Mapping[str, object]]:
+    def _build_samples(
+        self, records: Sequence[object], *, validate_rows: bool
+    ) -> Sequence[Mapping[str, object]]:
         ordered = sorted(tuple(records), key=lambda record: str(getattr(record, "game_id", "")))
         samples: list[Mapping[str, object]] = []
         for record in ordered:
@@ -455,11 +459,28 @@ class Torus9TrainingAdapter:
                 row["score_target"] = score_by_side[side]
                 row["score_target_contract_id"] = _core.TORUS9_SCORE_TARGET_CONTRACT_ID
                 row["score_target_normalization"] = _core.TORUS9_SCORE_TARGET_NORMALIZATION
-                self.validate_sample(row)
+                if validate_rows:
+                    self.validate_sample(row)
             samples.extend(rows)
         return tuple(samples)
 
-    def validate_sample(self, sample: Mapping[str, object]) -> None:
+    def build_samples(self, records: Sequence[object]) -> Sequence[Mapping[str, object]]:
+        """Build and fully semantic-validate record-derived replay rows."""
+        return self._build_samples(records, validate_rows=True)
+
+    def build_samples_for_replay(
+        self, records: Sequence[object]
+    ) -> Sequence[Mapping[str, object]]:
+        """Construct rows for the trusted replay-mutation path.
+
+        Returned rows are intentionally not fully semantic-validated here.
+        ``TrainingEngine`` does not consume this capability yet; any future
+        caller must stamp the rows and route the whole batch through
+        ``update_replay`` before replay mutation.
+        """
+        return self._build_samples(records, validate_rows=False)
+
+    def _validate_sample_semantics(self, sample: Mapping[str, object]) -> None:
         if sample.get("run_id") is None or sample.get("game_id") is None:
             raise ValueError("Current Torus9 replay sample provenance is incomplete")
         _core.validate_torus9_replay_sample(
@@ -470,10 +491,31 @@ class Torus9TrainingAdapter:
             raise ValueError("Current Torus9 training requires ownership and score targets")
         if sample.get("score_target_normalization") != 81.5:
             raise ValueError("Current Torus9 score target normalization drift")
+
+    def _remember_validated_sample(self, sample: Mapping[str, object]) -> None:
         row_id = sample.get("replay_row_id")
         if row_id is not None:
-            self._validated_sample_ids.add(str(row_id))
-            self._validated_sample_objects.add(id(sample))
+            self._validated_sample_fingerprints[str(row_id)] = value_fingerprint(sample)
+
+    def validate_sample(self, sample: Mapping[str, object]) -> None:
+        self._validate_sample_semantics(sample)
+        self._remember_validated_sample(sample)
+
+    @staticmethod
+    def _expected_replay_row_id(
+        generation: int, sample: Mapping[str, object], position: int
+    ) -> str:
+        return f"M{int(generation)}:{sample.get('game_id')}:{sample.get('ply')}:{int(position)}"
+
+    def _validate_stamped_sample_identity(
+        self, sample: Mapping[str, object], generation: int, position: int
+    ) -> None:
+        generation = int(generation)
+        if sample.get("source_generation") is None or int(sample["source_generation"]) != generation:
+            raise ValueError("Replay sample source generation disagrees with iteration")
+        expected = self._expected_replay_row_id(generation, sample, position)
+        if str(sample.get("replay_row_id", "")) != expected:
+            raise ValueError("Current Torus9 replay row ID is not deterministic")
 
     def stamp_samples(
         self, samples: Sequence[Mapping[str, object]], generation: int
@@ -484,12 +526,10 @@ class Torus9TrainingAdapter:
             row = dict(sample)
             if row.get("source_generation") is not None and int(row["source_generation"]) != generation:
                 raise ValueError("Replay sample source generation disagrees with iteration")
-            if row.get("replay_row_id") is not None:
-                expected = f"M{generation}:{row.get('game_id')}:{row.get('ply')}:{position}"
-                if str(row["replay_row_id"]) != expected:
-                    raise ValueError("Current Torus9 replay row ID is not deterministic")
-            else:
-                row["replay_row_id"] = f"M{generation}:{row.get('game_id')}:{row.get('ply')}:{position}"
+            expected = self._expected_replay_row_id(generation, row, position)
+            if row.get("replay_row_id") is not None and str(row["replay_row_id"]) != expected:
+                raise ValueError("Current Torus9 replay row ID is not deterministic")
+            row["replay_row_id"] = expected
             row["source_generation"] = generation
             stamped.append(row)
         return tuple(stamped)
@@ -500,9 +540,19 @@ class Torus9TrainingAdapter:
         generation: int,
         samples: Sequence[Mapping[str, object]],
     ) -> Mapping[str, object]:
+        generation = int(generation)
+        # Identity/provenance is part of the authoritative mutation boundary,
+        # not merely a promise made by stamp_samples. Validate the entire batch
+        # before replay state changes.
+        for position, sample in enumerate(samples):
+            self._validate_stamped_sample_identity(sample, generation, position)
         for sample in samples:
-            self.validate_sample(sample)
-        return replay.append_generation(int(generation), samples)
+            self._validate_sample_semantics(sample)
+        metrics = replay.append_generation(generation, samples)
+        # Cache only after the whole batch validated and mutation succeeded.
+        for sample in samples:
+            self._remember_validated_sample(sample)
+        return metrics
 
     def replay_rows(self, replay: Torus9RollingReplay) -> Sequence[Mapping[str, object]]:
         return tuple(dict(row) for row in replay.rows)
@@ -527,7 +577,9 @@ class Torus9TrainingAdapter:
                 raise ValueError("Current Torus9 replay target fingerprint drift")
             if row.get("ownership_target") is None or row.get("score_target") is None:
                 raise ValueError("Current Torus9 replay auxiliary target is missing")
-            if id(row) not in self._validated_sample_objects and row_id not in self._validated_sample_ids:
+            cached_fingerprint = self._validated_sample_fingerprints.get(row_id)
+            current_fingerprint = value_fingerprint(row)
+            if cached_fingerprint != current_fingerprint:
                 self.validate_sample(row)
             previous_generation = generation
             row_ids.add(row_id)
