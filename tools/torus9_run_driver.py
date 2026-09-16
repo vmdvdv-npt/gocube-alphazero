@@ -540,22 +540,80 @@ def _prepare_state(
             timing["replay_validation_mode"] = "initial-empty"
         return adapter, state, m0
 
-    previous_checkpoint = root / "checkpoints" / f"M{generation - 1}.pt"
-    previous_replay = root / "replay" / f"rolling-after-{generation - 1:02d}.jsonl"
-    if not previous_checkpoint.is_file() or not previous_replay.is_file():
+    local_checkpoint = root / "checkpoints" / f"M{generation - 1}.pt"
+    local_replay = root / "replay" / f"rolling-after-{generation - 1:02d}.jsonl"
+    previous_checkpoint = local_checkpoint
+    previous_replay = local_replay
+    parent_reference: Mapping[str, object] | None = None
+    manifest = _read_json(root / "manifest.json")
+    candidate = manifest.get("parent_checkpoint")
+    if candidate is not None:
+        if not isinstance(candidate, Mapping):
+            raise ValueError("Parent checkpoint reference must be an object")
+        try:
+            parent_generation = int(candidate.get("generation", -1))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Parent checkpoint generation is malformed") from exc
+        if parent_generation == generation - 1:
+            parent_reference = candidate
+
+    if parent_reference is not None:
+        parent_checkpoint_value = candidate.get("path")
+        parent_replay_value = candidate.get("replay_path")
+        if not parent_checkpoint_value or not parent_replay_value:
+            raise ValueError("Parent checkpoint reference must include path and replay_path")
+        previous_checkpoint = Path(str(parent_checkpoint_value)).resolve()
+        previous_replay = Path(str(parent_replay_value)).resolve()
+        parent_reference = candidate
+        if not previous_checkpoint.is_file() or not previous_replay.is_file():
+            raise FileNotFoundError("Referenced parent checkpoint or replay is missing")
+        expected_checkpoint_sha = str(
+            candidate.get("artifact_sha256") or candidate.get("sha256") or ""
+        )
+        if expected_checkpoint_sha and file_sha256(previous_checkpoint) != expected_checkpoint_sha:
+            raise ValueError("Referenced parent checkpoint SHA-256 mismatch")
+        expected_metadata_sha = str(candidate.get("metadata_sha256") or "")
+        metadata_path = previous_checkpoint.with_suffix(".metadata.json")
+        if expected_metadata_sha and file_sha256(metadata_path) != expected_metadata_sha:
+            raise ValueError("Referenced parent checkpoint metadata SHA-256 mismatch")
+        expected_replay_sha = str(candidate.get("replay_sha256") or "")
+        if expected_replay_sha and file_sha256(previous_replay) != expected_replay_sha:
+            raise ValueError("Referenced parent replay SHA-256 mismatch")
+    elif not local_checkpoint.is_file() or not local_replay.is_file():
+        if isinstance(candidate, Mapping):
+            raise ValueError(
+                "Parent checkpoint is not the immediately preceding generation: "
+                f"parent=M{int(candidate.get('generation', -1))}, requested=M{generation}"
+            )
         raise FileNotFoundError(
             f"Cannot start M{generation}; previous committed checkpoint/replay is missing"
         )
-    previous_summary = root / f"iter-{generation - 1:02d}-summary.json"
+    previous_summary = (
+        root / f"iter-{generation - 1:02d}-summary.json"
+        if parent_reference is None
+        else None
+    )
     evictions = 0
-    if previous_summary.is_file():
+    if previous_summary is not None and previous_summary.is_file():
         replay_metrics = _read_json(previous_summary).get("replay")
         if isinstance(replay_metrics, Mapping):
             evictions = int(replay_metrics.get("total_evictions", 0))
+    if parent_reference is not None:
+        evictions = int(parent_reference.get("total_evictions", 0))
     load_timing = timing if isinstance(timing, dict) else None
     replay_identity: Mapping[str, object] | None = None
     catalog_path = root / "runtime" / "artifact-catalog.json"
-    if catalog_path.is_file():
+    if parent_reference is not None:
+        replay_identity = {
+            "sha256": parent_reference.get("replay_sha256"),
+            "size_bytes": previous_replay.stat().st_size,
+            "row_count": parent_reference.get("replay_row_count"),
+            "canonical_replay_fingerprint": parent_reference.get("replay_fingerprint"),
+            "validation_schema": parent_reference.get(
+                "replay_validation_schema", ARTIFACT_VALIDATION_SCHEMA
+            ),
+        }
+    elif catalog_path.is_file():
         catalog = ArtifactCatalog.load(catalog_path, root=root)
         replay_identity = catalog.identity(_relative(root, previous_replay))
     restore_started = time.perf_counter()
@@ -892,10 +950,6 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
         interval=float(config["heartbeat_interval_seconds"]),
     ) as heartbeat:
         manifest = _read_json(root / "manifest.json")
-        if args.generation == 1 and manifest.get("parent_checkpoint") is not None:
-            raise ValueError(
-                "Current Torus9 adapter supports fresh M0 lineages only; it will not discard a cross-lineage parent state"
-            )
         if marker.is_file():
             heartbeat.advance("recover-published-generation")
             summary = _read_json(root / f"iter-{args.generation:02d}-summary.json")
@@ -1044,7 +1098,7 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
                 "training",
                 args.generation,
             ),
-            completed_games=args.generation * games,
+            completed_games=int(state.completed_games) + games,
             code_identity=code,
             device=str(config["device"]),
             adapter=adapter,

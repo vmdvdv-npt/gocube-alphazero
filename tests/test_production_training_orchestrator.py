@@ -203,6 +203,27 @@ def test_fake_cube_runs_through_same_generic_supervisor(tmp_path: Path, monkeypa
     assert (run.paths.root / "arena" / "generation-0002" / "result.json").is_file()
 
 
+def test_reference_parent_sets_generation_origin_and_arena_cadence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    run = _run(tmp_path, monkeypatch, arena_every=10)
+    run.create(
+        parent_checkpoint={
+            "lineage_id": "historical-lineage",
+            "label": "M17",
+            "generation": 17,
+            "path": "/reference/M17.pt",
+        }
+    )
+    state = json.loads(run.paths.runtime_state.read_text(encoding="utf-8"))
+    manifest = json.loads(run.paths.manifest.read_text(encoding="utf-8"))
+    assert state["generation_origin"] == 17
+    assert state["last_committed_generation"] == 17
+    assert manifest["orchestrator"]["generation_origin"] == 17
+    assert not run._arena_due(20)
+    assert run._arena_due(27)
+
+
 def test_soft_stop_after_generation_does_not_start_new_arena(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run = _run(tmp_path, monkeypatch, behavior="request-stop", arena_every=2)
     run.create()
