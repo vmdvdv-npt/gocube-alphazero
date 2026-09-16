@@ -1,0 +1,34 @@
+{
+  "schema": "torus9-controlled-wait-benchmark-v1",
+  "topology": "torus9",
+  "checkpoint": {
+    "catalog_id": "torus9-golden-v3-20260914-run03@17",
+    "label": "M17",
+    "expected_model_sha256": "sha256:2b0d04c735874f4667712bc859db54560feefb3ad6cb5d2e3c769dd80f0c0ff5"
+  },
+  "workload": {
+    "games": 64,
+    "game_id_prefix": "torus9-wait-benchmark-game",
+    "master_seed_source": "current_profile.seeds.selfplay_master_seed"
+  },
+  "execution": {
+    "workers": 16,
+    "active_games_per_worker": 4,
+    "total_active_contexts": 64,
+    "inference_batch_cap": 64,
+    "coalescing": true,
+    "central_model_owner": "parent",
+    "shared_memory": true,
+    "device": "cuda"
+  },
+  "variants": [
+    {"id": "wait-0.5ms", "wait_ms": 0.5},
+    {"id": "wait-1.0ms", "wait_ms": 1.0},
+    {"id": "wait-2.0ms", "wait_ms": 2.0}
+  ],
+  "variant_order_seed": 202609160001,
+  "conditional_zero_wait": {
+    "run_only_if_first_0_5_vs_1_0_improvement_pct": ">5",
+    "repeat_if_first_improvement_pct": "3..5"
+  }
+}
