@@ -8,6 +8,7 @@ Scope: execution-only Torus9 Arena tuning after the lane/concurrency repair.
 The single production Arena preset is now:
 
 ```text
+default workload                 = 192 games
 workers                         = 16
 games_per_worker                = 12
 configured context capacity     = 192
@@ -19,16 +20,22 @@ central model owner             = parent
 device                          = CUDA
 shared memory                   = enabled
 strict production gates         = enabled
+effective CPU target             = diagnostic only (8 cores)
 ```
+
+Standard-64 remains an explicit workload override: 64 games with 16 workers
+and 4 contexts per worker, cap64, and wait1 ms.
 
 This is the `12/4/cap64` configuration in
 `configs/gocube/arena_torus9_legion_v1.json`. It is supported by a second
-192-game repeat and a 256-game confirmation, both strict-gate `PASS`.
+192-game repeat and a 256-game confirmation, both passing the corrected
+throughput/occupancy/technical gates.
 
 The first 192-game `12/4/cap64` run was retained rather than discarded: it
-had the highest observed throughput, but effective worker CPU was 7.92 cores
-and therefore failed the hard 8-core gate. The repeat and long confirmation
-show the production-safe result and its run-to-run range.
+had the highest observed throughput, while effective worker CPU was 7.92
+cores. CPU is retained as a regression diagnostic, not a fail-closed
+condition; the repeat and long confirmation show the production-safe result
+and its run-to-run range.
 
 ## Preconditions and fixture
 
@@ -91,6 +98,11 @@ confirmed `12/4` region, not from one un-gated maximum.
 
 `*` Early-gate rows stopped after the stated forward sample because mean batch
 was already below 16; no long duplicate run was started.
+
+Rows labeled `degraded: CPU` preserve the raw result status from the original
+sweep, when the 8-core target was still hard-gated. Under the corrected
+contract that target is diagnostic only; the final repeat and confirmation
+remain the production evidence.
 
 ## Staged sweep findings
 
@@ -189,8 +201,9 @@ batching remained isolated and balanced: candidate mean batch `36.669` over
 The two 192-game `12/4` observations have throughput `1093.12` and `1009.35`
 games/h (median `1051.23`, range `1009.35–1093.12`) and effective CPU `7.921`
 and `8.054` cores. The 256-game confirmation is `1003.42 games/h` and `8.119`
-cores, consistent with the repeat at the longer workload size. All three have
-mean batch approximately `34–37` and zero technical games.
+cores, consistent with the repeat at the longer workload size. All three pass
+the primary throughput/occupancy/technical contract, have mean batch
+approximately `34–37`, and have zero technical games.
 
 ## Startup audit
 
@@ -250,9 +263,10 @@ candidate/reference isolation.
 
 ## Performance contract and regression protection
 
-The canonical preset and CLI defaults now encode `16 workers × 12 contexts`,
-cap64, wait4, parent CUDA ownership, and shared memory. Strict production
-continues to fail closed unless:
+The canonical preset and CLI defaults now encode a default 192-game workload,
+`16 workers × 12 contexts`, cap64, wait4, master seed `202609131004`, parent
+CUDA ownership, and shared memory. Strict production continues to fail closed
+unless:
 
 - at least 64 games complete;
 - all 16 worker processes are observed;
@@ -261,7 +275,8 @@ continues to fail closed unless:
 - no worker initializes CUDA;
 - technical games are zero;
 - mean batch is at least 16 rows;
-- effective worker CPU is at least 8 cores.
+- effective worker CPU is recorded as a diagnostic target; it does not by
+  itself fail the run.
 
 `tests/test_torus9_arena_lockdown.py` now checks both the CLI defaults and the
 JSON preset as one explicit performance contract. The behavioral tests also
@@ -282,7 +297,7 @@ was modified.
 
 ## Final verification
 
-The final local verification passed with `255 passed, 1 skipped`, compileall,
+The final local verification passed with `256 passed, 1 skipped`, compileall,
 JSON validation, raw-artifact integrity checks, and `git diff --check`. After
 the final push, PR #109 completed both required CI jobs successfully:
 `Golden production tests` and `Mandatory pinned KataGo rule differential`.

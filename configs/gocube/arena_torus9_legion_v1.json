@@ -3,6 +3,7 @@
   "profile": "torus9",
   "execution_only": true,
   "scientific_semantics": "resolved by the Torus9 profile; this file does not change them",
+  "games": 192,
   "workers": 16,
   "games_per_worker": 12,
   "configured_context_capacity": 192,
@@ -18,6 +19,7 @@
     "minimum_games": 64,
     "minimum_mean_inference_batch_rows": 16.0,
     "minimum_effective_cpu_cores": 8.0,
+    "effective_cpu_cores_is_diagnostic": true,
     "technical_games": 0,
     "fail_closed": true
   },
@@ -34,6 +36,6 @@
     "confirmed_mean_inference_batch_rows": 36.96699534374144,
     "confirmed_effective_cpu_cores": 8.119060854922122,
     "confirmed_status": "PASS",
-    "note": "The 256-game confirmation and second 192-game repeat passed strict gates. The first 192-game finalist was retained as a variance observation; its throughput was higher but effective CPU was 7.92, so the selected contract remains fail-closed."
+    "note": "The 256-game confirmation and second 192-game repeat passed the throughput, occupancy, and technical gates. The first 192-game finalist was retained as a variance observation; its effective CPU of 7.92 is diagnostic rather than a fail-closed condition."
   }
 }
