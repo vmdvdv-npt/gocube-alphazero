@@ -18,7 +18,7 @@ from queue import Empty, Queue
 import random
 import threading
 import time
-from typing import Any, Mapping, MutableMapping, Sequence
+from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 torch = importlib.import_module("torch")
 nn = torch.nn
@@ -1208,6 +1208,7 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
         seed: int,
         validate_samples: bool = True,
         timing: MutableMapping[str, object] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> dict[str, object]:
         self.assert_optimizer_continuity()
         count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
@@ -1307,6 +1308,11 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
                 "adam_step_after": step_after,
                 "learning_rate": float(self.optimizer.param_groups[0]["lr"]),
             })
+            if progress_callback is not None:
+                progress_callback(
+                    int(update_index + 1),
+                    int(self.optimizer_steps_per_iteration),
+                )
         if timing is not None:
             timing.update({
                 "timing_clock": "perf_counter wall time",

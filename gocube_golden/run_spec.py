@@ -78,11 +78,20 @@ def _resolve_profile(
     if repo_root.resolve() not in profile_path.parents:
         raise ValueError("profile_path escapes repository root")
     profile = read_json(profile_path)
-    actual = str(
-        profile.get("profile_fingerprint")
-        or profile.get("content_fingerprint")
-        or sha256_file(profile_path)
-    )
+    if profile.get("profile_id") == "gocube-torus9-golden-v3":
+        # Torus9 has a machine-checked scientific contract.  Resolve it here
+        # as well as in the child driver so a stale embedded fingerprint cannot
+        # make an invalid one-shot run-spec look acceptable.
+        from .torus9_contract import load_torus9_current_profile
+
+        profile = load_torus9_current_profile(profile_path)
+        actual = str(profile["profile_fingerprint"])
+    else:
+        actual = str(
+            profile.get("profile_fingerprint")
+            or profile.get("content_fingerprint")
+            or sha256_file(profile_path)
+        )
     expected = str(payload.get("expected_profile_fingerprint", "")).strip()
     if not expected:
         raise ValueError(
@@ -387,8 +396,12 @@ class StrictProductionTrainingOrchestrator(UniversalProductionTrainingOrchestrat
         manifest["config_fingerprint"] = self.strict_run_spec.fingerprint
         atomic_write_json(self.paths.manifest, manifest)
 
-    def _load_manifest(self) -> dict[str, object]:
-        manifest = super()._load_manifest()
+    def _load_manifest(
+        self, *, expected_catalog_fingerprint: str | None = None
+    ) -> dict[str, object]:
+        manifest = super()._load_manifest(
+            expected_catalog_fingerprint=expected_catalog_fingerprint
+        )
         if not self.saved_run_spec_path.is_file():
             raise ValueError("Immutable lineage run-spec is missing")
         persisted = read_json(self.saved_run_spec_path)

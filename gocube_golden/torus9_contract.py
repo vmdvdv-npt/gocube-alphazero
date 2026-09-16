@@ -167,9 +167,10 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
         if not condition:
             raise ValueError(message)
 
-    require(profile.get("profile_id") == TORUS9_CURRENT_PROFILE_ID, "Current Torus 9×9 profile id drift")
+    require(profile.get("profile_id") == TORUS9_CURRENT_PROFILE_ID, "current profile: Torus 9×9 profile id drift")
     require(profile.get("schema_version") == TORUS9_CURRENT_SCHEMA_VERSION, "Current Torus 9×9 schema drift")
     topology = profile.get("topology", {})
+    require(isinstance(topology, Mapping), "Current Torus topology section is malformed")
     require(topology.get("topology_id") == TORUS_9X9.topology_id, "Current Torus 9×9 topology drift")
     require(topology.get("width") == 9 and topology.get("height") == 9, "Current Torus 9×9 dimensions drift")
     require(topology.get("point_count") == TORUS9_POINT_COUNT, "Current Torus 9×9 point count drift")
@@ -177,6 +178,7 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(topology.get("fingerprint") == TORUS_9X9.fingerprint, "Current Torus topology fingerprint drift")
 
     rules = profile.get("rules", {})
+    require(isinstance(rules, Mapping), "Current Torus rules section is malformed")
     require(rules.get("profile_id") == RULES_PROFILE_ID, "Current Torus rules profile drift")
     require(rules.get("fingerprint") == TORUS9_RULES_FINGERPRINT, "Current Torus rules fingerprint drift")
     require(rules.get("komi") == TORUS9_KOMI, "Current Torus komi must be exactly 0.5")
@@ -187,6 +189,7 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(rules.get("benson_auto_ending") is False, "Current automatic-ending setting drift")
 
     observation = profile.get("observation", {})
+    require(isinstance(observation, Mapping), "Current Torus observation section is malformed")
     require(observation.get("shape") == [6, TORUS9_POINT_COUNT], "Current observation shape drift")
     require(observation.get("action_count") == TORUS9_ACTION_COUNT, "Current action count drift")
     require(observation.get("pass_index") == TORUS9_PASS_INDEX, "Current PASS index drift")
@@ -197,6 +200,7 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(observation.get("fingerprint") == TORUS9_OBSERVATION_FINGERPRINT, "Current observation fingerprint drift")
 
     target = profile.get("target", {})
+    require(isinstance(target, Mapping), "Current Torus target section is malformed")
     require(target.get("contract_id") == TORUS9_TARGET_CONTRACT_ID, "Current target contract drift")
     require(target.get("value_vector") == ["WIN", "DRAW", "LOSS"], "Current WDL vector drift")
     require(target.get("perspective") == "side-to-move", "Current WDL perspective drift")
@@ -206,6 +210,7 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(target.get("fingerprint") == TORUS9_CURRENT_TARGET_FINGERPRINT, "Current target fingerprint drift")
 
     network = profile.get("network", {})
+    require(isinstance(network, Mapping), "Current Torus network section is malformed")
     require(network.get("architecture_id") == TORUS9_CURRENT_ARCHITECTURE_ID, "Current Torus architecture drift")
     require(network.get("hidden") == TORUS9_CURRENT_HIDDEN and network.get("blocks") == TORUS9_CURRENT_BLOCKS, "Current Torus capacity drift")
     require(network.get("input_channels") == 6 and network.get("point_count") == TORUS9_POINT_COUNT, "Current Torus input drift")
@@ -213,6 +218,7 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(network.get("explicit_symmetry_augmentation") is False, "Current symmetry augmentation must be OFF")
 
     self_play = profile.get("self_play", {})
+    require(isinstance(self_play, Mapping), "Current Torus self-play section is malformed")
     require(self_play.get("contract_id") == TORUS9_CURRENT_SELFPLAY_CONTRACT_ID, "Current self-play contract id drift")
     require(self_play.get("fingerprint") == current_torus9_selfplay_contract_fingerprint(TORUS9_CURRENT_DIRICHLET_ALPHA), "Current self-play fingerprint drift")
     require(self_play.get("games_per_iteration") == 64, "Current games/iteration drift")
@@ -225,6 +231,7 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(self_play.get("existing_batch_size") == TORUS9_BATCH_SIZE and self_play.get("komi") == TORUS9_KOMI, "Current self-play batch/komi drift")
 
     training = profile.get("training", {})
+    require(isinstance(training, Mapping), "Current Torus training section is malformed")
     require(training.get("optimizer") == "Adam" and training.get("learning_rate") == 0.001 and training.get("weight_decay") == 0.0, "Current optimizer drift")
     require(training.get("batch_size") == TORUS9_BATCH_SIZE, "Current training batch drift")
     require(training.get("optimizer_steps_per_iteration") == TORUS9_OPTIMIZER_STEPS_PER_ITERATION, "Current optimizer budget drift")
@@ -232,11 +239,13 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(training.get("lr_scheduler") is None and training.get("model_gating") is False, "Current scheduler/gating drift")
 
     replay = profile.get("replay", {})
+    require(isinstance(replay, Mapping), "Current Torus replay section is malformed")
     require(replay.get("window") == "rolling last 3 generations", "Current replay window drift")
     require(replay.get("generations") == TORUS9_ROLLING_GENERATIONS and replay.get("cap") == TORUS9_MAX_REPLAY_POSITIONS, "Current replay cap drift")
     require(replay.get("sampling") == "deterministic / reproducible", "Current replay sampling drift")
 
     execution = profile.get("execution_sweep", {})
+    require(isinstance(execution, Mapping), "Current Torus execution section is malformed")
     require(execution.get("baseline") == {"coalescing": False, "batch_cap": 1, "wait_ms": 0}, "Current baseline execution drift")
     require(
         execution.get("candidates") == [
@@ -256,6 +265,7 @@ def _validate_current_torus9_profile(profile: Mapping[str, Any]) -> None:
     require(execution.get("benchmark_games") == 0, "Separate benchmark games are forbidden")
 
     seeds = profile.get("seeds", {})
+    require(isinstance(seeds, Mapping), "Current Torus seeds section is malformed")
     for name in (
         "model_init_seed", "selfplay_master_seed", "training_master_seed",
         "arena_master_seed", "evaluation_master_seed",
@@ -283,12 +293,31 @@ def current_torus9_profile_fingerprint(profile: Mapping[str, Any]) -> str:
     return TORUS9_CURRENT_PROFILE_FINGERPRINT
 
 
-def load_torus9_current_profile(path: str | Path | None = None, *, verify_fingerprint: bool = True) -> dict[str, Any]:
-    profile_path = Path(path) if path is not None else Path(__file__).resolve().parents[1] / TORUS9_CURRENT_PROFILE_PATH
-    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+def validate_torus9_current_profile(
+    profile: Mapping[str, Any],
+    *,
+    verify_fingerprint: bool = True,
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Validate the actual current Torus9 profile payload.
+
+    This is the shared validation boundary for production callers.  The
+    embedded ``profile_fingerprint`` is checked only after the scientific
+    sections and their derived fingerprints have been validated; it is never
+    used as evidence that the JSON payload is canonical by itself.
+    """
+    if not isinstance(profile, Mapping):
+        raise ValueError("Current Torus 9×9 profile must be a JSON object")
     _validate_current_torus9_profile(profile)
     source = profile.get("golden_source", {})
-    snapshot_path = Path(__file__).resolve().parents[1] / str(source.get("snapshot_path", ""))
+    if not isinstance(source, Mapping):
+        raise ValueError("Current Torus Golden source section is malformed")
+    root = (
+        Path(repo_root).resolve()
+        if repo_root is not None
+        else Path(__file__).resolve().parents[1]
+    )
+    snapshot_path = root / str(source.get("snapshot_path", ""))
     if not snapshot_path.is_file():
         raise ValueError(f"Current Torus 9×9 Golden snapshot is missing: {snapshot_path}")
     snapshot_digest = "sha256:" + hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
@@ -301,4 +330,10 @@ def load_torus9_current_profile(path: str | Path | None = None, *, verify_finger
             raise ValueError(f"Current Torus 9×9 content fingerprint mismatch: {expected_content}")
         if expected_content != TORUS9_CURRENT_CONTENT_FINGERPRINT:
             raise ValueError("Current Torus 9×9 canonical content fingerprint drift")
-    return profile
+    return dict(profile)
+
+
+def load_torus9_current_profile(path: str | Path | None = None, *, verify_fingerprint: bool = True) -> dict[str, Any]:
+    profile_path = Path(path) if path is not None else Path(__file__).resolve().parents[1] / TORUS9_CURRENT_PROFILE_PATH
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    return validate_torus9_current_profile(profile, verify_fingerprint=verify_fingerprint)

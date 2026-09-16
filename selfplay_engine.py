@@ -828,6 +828,7 @@ class SelfPlayEngine:
         infer_batch: Callable[[Sequence[object]], Sequence[object]] | None,
         record_metrics: Callable[[object], Mapping[str, object]] | None = None,
         telemetry: MutableMapping[str, object] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
         shared_memory: SharedMemorySpec | None = None,
         infer_shared_batch: Callable[[Any], object] | None = None,
         worker_game_factory: Callable[[object, str, InferenceClient], object] | None = None,
@@ -1052,6 +1053,8 @@ class SelfPlayEngine:
                         metrics = record_metrics(record)
                         moves += int(metrics.get("moves", 0))
                         technical += int(bool(metrics.get("technical", False)))
+                    if progress_callback is not None:
+                        progress_callback(len(completed), len(ids))
                     assign_next(int(worker_id))
                     if len(completed) == len(ids):
                         send_stops()

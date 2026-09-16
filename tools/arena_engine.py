@@ -20,7 +20,7 @@ from queue import Empty
 import statistics
 import threading
 import time
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import torch
 
@@ -609,6 +609,7 @@ def run_arena(
     expected_candidate_artifact_sha256: str | None = None,
     expected_reference_model_hash: str | None = None,
     expected_reference_artifact_sha256: str | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, object]:
     """Run the single production Arena engine with one game-specific profile."""
     process_started_at = time.perf_counter()
@@ -978,6 +979,7 @@ def run_arena(
         }
         activity_events = 0
         started_games = 0
+        completed_games = 0
         lane_replenishments = 0
         peak_active_contexts = 0
         steady_state_started_at: float | None = None
@@ -1042,6 +1044,7 @@ def run_arena(
             nonlocal peak_active_contexts
             nonlocal pending_empty_at
             nonlocal started_games
+            nonlocal completed_games
             nonlocal steady_state_started_at
             at = _activity_timestamp(message)
             elapsed = max(0.0, at - active_context_last_at)
@@ -1072,6 +1075,9 @@ def run_arena(
                     if steady_state_started_at is None:
                         steady_state_started_at = at
             elif event == "game_completed":
+                completed_games += 1
+                if progress_callback is not None:
+                    progress_callback(completed_games, config.games)
                 active_contexts_current = max(0, active_contexts_current - 1)
                 if worker_id in per_worker_active:
                     per_worker_active[worker_id] = max(

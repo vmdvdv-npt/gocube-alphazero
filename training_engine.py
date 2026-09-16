@@ -239,6 +239,7 @@ class TrainingEngine:
         device: str | None = None,
         summary_extra: Mapping[str, object] | None = None,
         summary_builder: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
+        progress_callback: Callable[..., None] | None = None,
     ) -> TrainingIterationResult:
         selected_adapter = adapter or self.adapter
         if selected_adapter is None:
@@ -251,6 +252,9 @@ class TrainingEngine:
         if int(training_seed) <= 0:
             raise ValueError("Training seed must be a positive explicit value")
         selected_adapter.validate_state(state)
+        set_progress_callback = getattr(selected_adapter, "set_progress_callback", None)
+        if callable(set_progress_callback):
+            set_progress_callback(progress_callback)
 
         root = Path(output_dir)
         replay_dir = root / "replay"
@@ -320,6 +324,9 @@ class TrainingEngine:
                 source_samples = tuple(dict(sample) for sample in samples or ())
                 source_samples_need_validation = True
             phase_timing["sample_build_wall_time_sec"] = time.perf_counter() - phase_started
+            phase_timing["training_target_build_wall_time_sec"] = phase_timing[
+                "sample_build_wall_time_sec"
+            ]
             if not source_samples:
                 raise ValueError("Training generation produced no replay samples")
             phase_started = time.perf_counter()
@@ -334,12 +341,17 @@ class TrainingEngine:
             # expensive semantic checks without adding a failure boundary.
             phase_timing["sample_validation_and_stamping_wall_time_sec"] = time.perf_counter() - phase_started
 
-            phase_started = time.perf_counter()
+            replay_started = time.perf_counter()
             replay_metrics = dict(selected_adapter.update_replay(state.rolling_replay, generation, stamped))
+            phase_timing["replay_update_wall_time_sec"] = time.perf_counter() - replay_started
             replay_rows = tuple(selected_adapter.replay_rows(state.rolling_replay))
+            validation_started = time.perf_counter()
             selected_adapter.validate_replay(replay_rows)
             replay_fingerprint = sequence_fingerprint(replay_rows)
-            phase_timing["replay_update_and_validation_wall_time_sec"] = time.perf_counter() - phase_started
+            phase_timing["replay_validation_wall_time_sec"] = time.perf_counter() - validation_started
+            phase_timing["replay_update_and_validation_wall_time_sec"] = (
+                time.perf_counter() - replay_started
+            )
 
             train_started = time.perf_counter()
             training_metrics = dict(selected_adapter.train(state, replay_rows, int(training_seed)))
@@ -391,15 +403,33 @@ class TrainingEngine:
             phase_timing["checkpoint_metadata_prepare_wall_time_sec"] = time.perf_counter() - phase_started
 
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            phase_started = time.perf_counter()
+            serialization_started = time.perf_counter()
             _write_jsonl(fresh_tmp, stamped)
             _write_jsonl(rolling_tmp, replay_rows)
+            phase_timing["replay_serialization_wall_time_sec"] = time.perf_counter() - serialization_started
+            checkpoint_write_started = time.perf_counter()
             saved_metadata = dict(selected_adapter.save_checkpoint(checkpoint_tmp, state, metadata))
+            phase_timing["checkpoint_write_wall_time_sec"] = time.perf_counter() - checkpoint_write_started
             if not checkpoint_metadata_tmp.is_file():
                 raise RuntimeError("Training adapter did not publish checkpoint metadata sidecar")
+            reload_verification_started = time.perf_counter()
             selected_adapter.verify_checkpoint(checkpoint_tmp, state, saved_metadata)
+            phase_timing["checkpoint_reload_verification_wall_time_sec"] = (
+                time.perf_counter() - reload_verification_started
+            )
             _write_json(training_tmp, training_metrics)
-            phase_timing["checkpoint_serialization_and_verification_wall_time_sec"] = time.perf_counter() - phase_started
+            phase_timing["serialization_wall_time_sec"] = time.perf_counter() - serialization_started
+            phase_timing["checkpoint_serialization_and_verification_wall_time_sec"] = (
+                time.perf_counter() - serialization_started
+            )
+            checkpoint_artifact_hash = selected_adapter.artifact_hash(checkpoint_tmp)
+            artifact_hash_cache = {
+                "fresh_replay": selected_adapter.artifact_hash(fresh_tmp),
+                "rolling_replay": selected_adapter.artifact_hash(rolling_tmp),
+                "checkpoint": checkpoint_artifact_hash,
+                "checkpoint_metadata": selected_adapter.artifact_hash(checkpoint_metadata_tmp),
+                "training_metrics": selected_adapter.artifact_hash(training_tmp),
+            }
 
             artifacts_tmp = {
                 "fresh_replay": str(fresh_tmp),
@@ -423,8 +453,9 @@ class TrainingEngine:
                 "optimizer_updates": int(state.optimizer_updates),
                 "samples_consumed": int(state.samples_consumed),
                 "output_model_hash": saved_metadata.get("model_hash"),
+                "rolling_replay_artifact_sha256": artifact_hash_cache["rolling_replay"],
+                "rolling_replay_size_bytes": rolling_tmp.stat().st_size,
             }
-            checkpoint_artifact_hash = selected_adapter.artifact_hash(checkpoint_tmp)
             checkpoint_summary = dict(saved_metadata)
             checkpoint_summary.update({
                 "path": str(checkpoint_final),
@@ -455,15 +486,25 @@ class TrainingEngine:
                 "run_id": str(run_id),
                 "generation": generation,
                 "label": context.label,
-                "fresh_replay_sha256": selected_adapter.artifact_hash(fresh_tmp),
-                "rolling_replay_sha256": selected_adapter.artifact_hash(rolling_tmp),
+                "fresh_replay_sha256": artifact_hash_cache["fresh_replay"],
+                "rolling_replay_sha256": artifact_hash_cache["rolling_replay"],
                 "checkpoint_sha256": checkpoint_artifact_hash,
-                "checkpoint_metadata_sha256": selected_adapter.artifact_hash(checkpoint_metadata_tmp),
-                "training_metrics_sha256": selected_adapter.artifact_hash(training_tmp),
+                "checkpoint_metadata_sha256": artifact_hash_cache["checkpoint_metadata"],
+                "training_metrics_sha256": artifact_hash_cache["training_metrics"],
                 "summary_sha256": selected_adapter.artifact_hash(summary_tmp),
                 "model_hash": saved_metadata.get("model_hash"),
                 "replay_fingerprint": replay_fingerprint,
+                "replay_row_count": len(replay_rows),
+                "replay_generations": list(context.replay_generations),
+                "validation_schema": "torus9-replay-validation-v1",
             }
+            selfplay_metrics = summary.get("orchestrator_selfplay")
+            if isinstance(selfplay_metrics, Mapping):
+                selfplay_sha = selfplay_metrics.get("selfplay_artifact_sha256")
+                selfplay_path = selfplay_metrics.get("selfplay_artifact_path")
+                if selfplay_sha and selfplay_path:
+                    marker["selfplay_artifact_sha256"] = str(selfplay_sha)
+                    marker["selfplay_artifact_path"] = str(selfplay_path)
             _write_json(marker_tmp, marker)
 
             phase_started = time.perf_counter()

@@ -381,6 +381,7 @@ def run_torus9_selfplay_games(
     execution_activity: MutableMapping[str, object] | None = None,
     execution_override_reason: str | None = None,
     execution_reference_interactive: bool | None = None,
+    progress_callback: Any | None = None,
 ) -> tuple[_t9.Torus9SelfPlayGameRecord, ...]:
     if workers <= 0 or len(set(game_ids)) != len(game_ids):
         raise ValueError("Torus9 self-play workers/game IDs are invalid")
@@ -455,6 +456,7 @@ def run_torus9_selfplay_games(
         infer_batch=None,
         record_metrics=adapter.record_metrics,
         telemetry=raw_telemetry,
+        progress_callback=progress_callback,
         shared_memory=adapter.shared_memory,
         infer_shared_batch=adapter.infer_shared_batch,
         worker_game_factory=adapter.worker_game_factory,

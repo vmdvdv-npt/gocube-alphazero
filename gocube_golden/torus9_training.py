@@ -15,7 +15,8 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Any, Mapping, MutableMapping, Sequence
+import time
+from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 from training_engine import (
     CheckpointContext,
@@ -48,7 +49,9 @@ from .torus9_contract import (
     current_torus9_selfplay_contract_fingerprint,
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
+    validate_torus9_current_profile,
 )
+from .artifact_catalog import ARTIFACT_VALIDATION_SCHEMA
 
 
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -96,6 +99,32 @@ def _read_jsonl(path: Path) -> tuple[dict[str, object], ...]:
                 raise ValueError(f"Replay row {line_number} is not an object: {path}")
             rows.append(value)
     return tuple(rows)
+
+
+def _read_jsonl_with_identity(
+    path: Path,
+) -> tuple[tuple[dict[str, object], ...], dict[str, object]]:
+    """Parse JSONL and compute its byte identity in one sequential read."""
+    rows: list[dict[str, object]] = []
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for line_number, raw_line in enumerate(handle, 1):
+            digest.update(raw_line)
+            try:
+                line = raw_line.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"Replay row {line_number} is not UTF-8: {path}") from exc
+            if not line.strip():
+                continue
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise ValueError(f"Replay row {line_number} is not an object: {path}")
+            rows.append(value)
+    return tuple(rows), {
+        "sha256": "sha256:" + digest.hexdigest(),
+        "size_bytes": path.stat().st_size,
+        "row_count": len(rows),
+    }
 
 
 def _iter_jsonl(path: Path):
@@ -207,6 +236,7 @@ class Torus9TrainingAdapter:
         # not a semantic cache key because replay rows are mutable mappings.
         self._validated_sample_fingerprints: dict[str, str] = {}
         self._diagnostic_timing: MutableMapping[str, object] | None = None
+        self._progress_callback: Callable[..., None] | None = None
         self.target_identity = {
             "contract_id": TORUS9_TARGET_CONTRACT_ID,
             "fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT,
@@ -223,8 +253,31 @@ class Torus9TrainingAdapter:
         """
         self._diagnostic_timing = timing
 
+    def set_progress_callback(self, callback: Callable[..., None] | None) -> None:
+        """Attach optional semantic progress reporting for one generation."""
+        self._progress_callback = callback
+
+    def _report_progress(
+        self,
+        phase: str,
+        completed: int,
+        total: int,
+        unit: str,
+        subphase: str,
+    ) -> None:
+        callback = self._progress_callback
+        if callback is not None:
+            callback(
+                phase,
+                completed=int(completed),
+                total=int(total),
+                unit=str(unit),
+                subphase=str(subphase),
+            )
+
     @staticmethod
     def _validate_current_profile(profile: Mapping[str, object]) -> None:
+        validate_torus9_current_profile(profile)
         if profile.get("profile_id") != TORUS9_CURRENT_PROFILE_ID:
             raise ValueError("Current Torus9 training requires the current profile")
         if profile.get("profile_fingerprint") != current_torus9_profile_fingerprint(profile):
@@ -410,7 +463,7 @@ class Torus9TrainingAdapter:
     ) -> Sequence[Mapping[str, object]]:
         ordered = sorted(tuple(records), key=lambda record: str(getattr(record, "game_id", "")))
         samples: list[Mapping[str, object]] = []
-        for record in ordered:
+        for record_index, record in enumerate(ordered, 1):
             validate = getattr(record, "validate", None)
             if not callable(validate):
                 raise ValueError("Current Torus9 training accepts validated Self-play game records only")
@@ -426,6 +479,13 @@ class Torus9TrainingAdapter:
                 # Technical records remain validated and excluded exactly as
                 # before; only the normal record path avoids duplicate work.
                 validate()
+                self._report_progress(
+                    "replay",
+                    record_index,
+                    max(1, len(ordered)),
+                    "games",
+                    "target-build",
+                )
                 continue
 
             # The legacy ownership+score helper composes three builders.  That
@@ -462,6 +522,13 @@ class Torus9TrainingAdapter:
                 if validate_rows:
                     self.validate_sample(row)
             samples.extend(rows)
+            self._report_progress(
+                "replay",
+                record_index,
+                max(1, len(ordered)),
+                "games",
+                "target-build",
+            )
         return tuple(samples)
 
     def build_samples(self, records: Sequence[object]) -> Sequence[Mapping[str, object]]:
@@ -546,8 +613,17 @@ class Torus9TrainingAdapter:
         # before replay state changes.
         for position, sample in enumerate(samples):
             self._validate_stamped_sample_identity(sample, generation, position)
-        for sample in samples:
+        total = len(samples)
+        for position, sample in enumerate(samples, 1):
             self._validate_sample_semantics(sample)
+            if position == total or position % 256 == 0:
+                self._report_progress(
+                    "replay",
+                    position,
+                    max(1, total),
+                    "rows",
+                    "validation",
+                )
         metrics = replay.append_generation(generation, samples)
         # Cache only after the whole batch validated and mutation succeeded.
         for sample in samples:
@@ -596,6 +672,16 @@ class Torus9TrainingAdapter:
         trainer = state.adapter_state
         count = TORUS9_BATCH_SIZE * TORUS9_OPTIMIZER_STEPS_PER_ITERATION
         indices = trainer._sample_indices(len(rows), seed=int(seed), count=count)
+
+        def training_progress(completed: int, total: int) -> None:
+            self._report_progress(
+                "training",
+                completed,
+                total,
+                "optimizer_steps",
+                "optimizer",
+            )
+
         metrics = dict(
             trainer.train_fixed_budget(
                 rows,
@@ -605,6 +691,7 @@ class Torus9TrainingAdapter:
                 # boundary; the core keeps its default validation for legacy
                 # direct callers while avoiding a third O(replay) pass here.
                 validate_samples=False,
+                progress_callback=training_progress,
             )
         )
         if self._diagnostic_timing is not None:
@@ -824,6 +911,8 @@ class Torus9TrainingAdapter:
         device: str = "cpu",
         allow_reference: bool = False,
         total_evictions: int = 0,
+        replay_artifact_identity: Mapping[str, object] | None = None,
+        load_timing: MutableMapping[str, object] | None = None,
     ) -> TrainingState:
         checkpoint_path = Path(checkpoint_path)
         metadata_path = checkpoint_path.with_suffix(".metadata.json")
@@ -859,18 +948,60 @@ class Torus9TrainingAdapter:
         trainer.samples_consumed = int(metadata["train_samples_consumed"])
         if _adam_step(trainer.optimizer) != trainer.update_count:
             raise ValueError("Current Torus9 resume optimizer step mismatch")
-        rows = _read_jsonl(Path(replay_path))
+        replay_path = Path(replay_path)
+        replay_started = time.perf_counter()
+        rows, replay_digest = _read_jsonl_with_identity(replay_path)
+        if load_timing is not None:
+            load_timing["replay_file_load_wall_time_sec"] = time.perf_counter() - replay_started
+        replay_fingerprint: str | None = None
+        if replay_artifact_identity is not None:
+            expected_sha = str(
+                replay_artifact_identity.get("sha256")
+                or replay_artifact_identity.get("artifact_sha256")
+                or ""
+            )
+            if expected_sha and expected_sha != replay_digest["sha256"]:
+                raise ValueError("Current Torus9 replay artifact SHA-256 mismatch")
+            expected_size = replay_artifact_identity.get("size_bytes")
+            if expected_size is not None and int(expected_size) != int(replay_digest["size_bytes"]):
+                raise ValueError("Current Torus9 replay artifact size mismatch")
+            expected_rows = replay_artifact_identity.get("row_count")
+            if expected_rows is not None and int(expected_rows) != len(rows):
+                raise ValueError("Current Torus9 replay artifact row count mismatch")
+            expected_schema = replay_artifact_identity.get("validation_schema")
+            if expected_schema not in (None, ARTIFACT_VALIDATION_SCHEMA):
+                raise ValueError("Current Torus9 replay validation schema mismatch")
+            expected_content = replay_artifact_identity.get("canonical_replay_fingerprint")
+            if expected_content is not None:
+                replay_fingerprint = str(expected_content)
+                # The catalog binds the canonical row fingerprint to the
+                # already-verified immutable file SHA.  Recomputing the
+                # canonical fingerprint here would be a second full replay
+                # pass during every continuation/reload.
         replay = Torus9RollingReplay.from_persisted_rows(
             rows,
             generations=int(self.replay_profile["generations"]),  # type: ignore[index]
             maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
             total_evictions=int(total_evictions),
         )
-        self.validate_replay(rows)
+        validation_started = time.perf_counter()
+        if replay_artifact_identity is None:
+            self.validate_replay(rows)
+        else:
+            # The catalog identity proves that this exact immutable artifact
+            # passed the complete semantic validator at commit time. Populate
+            # the existing row-content cache so the post-append structural
+            # check does not repeat deep validation for historical rows.
+            for row in rows:
+                self._remember_validated_sample(row)
+        if load_timing is not None:
+            load_timing["replay_validation_wall_time_sec"] = time.perf_counter() - validation_started
         if len(rows) != int(metadata["valid_replay_positions"]):
             raise ValueError("Current Torus9 resume replay position count mismatch")
         if not allow_reference:
-            if sequence_fingerprint(rows) != metadata.get("replay_fingerprint"):
+            if replay_fingerprint is None:
+                replay_fingerprint = sequence_fingerprint(rows)
+            if replay_fingerprint != metadata.get("replay_fingerprint"):
                 raise ValueError("Current Torus9 resume replay fingerprint mismatch")
             if int(metadata.get("replay_row_count", -1)) != len(rows):
                 raise ValueError("Current Torus9 resume replay row count mismatch")

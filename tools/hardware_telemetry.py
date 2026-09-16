@@ -21,6 +21,10 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
+import shutil
+
+
+WSL_NVIDIA_SMI_PATH = "/usr/lib/wsl/lib/nvidia-smi"
 
 
 def _read_cpu_ticks() -> tuple[int, int] | None:
@@ -62,10 +66,42 @@ def _read_memory() -> dict[str, float]:
     }
 
 
-def _read_nvidia_smi() -> list[dict[str, float | int]]:
+def resolve_nvidia_smi() -> tuple[str | None, str]:
+    """Resolve nvidia-smi using the production WSL precedence order.
+
+    An explicit override is authoritative: if it is present but unusable we
+    report that fact instead of silently falling through to another binary.
+    """
+    override = os.environ.get("GOCUBE_NVIDIA_SMI")
+    if override is not None:
+        candidate = Path(override).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate), "env_override"
+        return None, "override_missing_or_not_executable"
+    path = shutil.which("nvidia-smi")
+    if path:
+        return path, "path"
+    candidate = Path(WSL_NVIDIA_SMI_PATH)
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return str(candidate), "wsl_fallback"
+    return None, "not_found"
+
+
+def _query_nvidia_smi() -> tuple[list[dict[str, object]], dict[str, object]]:
+    command_path, resolution = resolve_nvidia_smi()
+    if command_path is None:
+        status = "nvidia_smi_missing"
+        if resolution == "override_missing_or_not_executable":
+            status = "override_unavailable"
+        return [], {
+            "status": status,
+            "resolver": resolution,
+            "path": None,
+            "error": f"nvidia-smi resolver status: {resolution}",
+        }
     command = [
-        "nvidia-smi",
-        "--query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
+        command_path,
+        "--query-gpu=index,name,utilization.gpu,memory.used,memory.free,memory.total,temperature.gpu,power.draw",
         "--format=csv,noheader,nounits",
     ]
     try:
@@ -73,38 +109,73 @@ def _read_nvidia_smi() -> list[dict[str, float | int]]:
             command,
             text=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             timeout=2.0,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
-        return []
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], {
+            "status": "command_failed",
+            "resolver": resolution,
+            "path": command_path,
+            "error": str(exc),
+        }
     if result.returncode != 0:
-        return []
-    rows: list[dict[str, float | int]] = []
+        stderr = str(result.stderr or "").strip()
+        return [], {
+            "status": "command_failed",
+            "resolver": resolution,
+            "path": command_path,
+            "error": stderr or f"nvidia-smi exited with {result.returncode}",
+        }
+    rows: list[dict[str, object]] = []
+    malformed = 0
     for raw in result.stdout.splitlines():
         parts = [part.strip() for part in raw.split(",")]
-        if len(parts) != 6:
+        if not raw.strip():
+            continue
+        if len(parts) != 8:
+            malformed += 1
             continue
         try:
             index = int(parts[0])
-            util = float(parts[1])
-            used = float(parts[2])
-            total = float(parts[3])
-            temp = float(parts[4])
-            power = float(parts[5])
+            name = parts[1]
+            util = float(parts[2])
+            used = float(parts[3])
+            free = float(parts[4])
+            total = float(parts[5])
+            temp = float(parts[6])
+            power = float(parts[7])
         except ValueError:
+            malformed += 1
             continue
         rows.append(
             {
                 "index": index,
+                "name": name,
                 "gpu_util_percent": util,
                 "gpu_memory_used_mib": used,
+                "gpu_memory_free_mib": free,
                 "gpu_memory_total_mib": total,
                 "gpu_temperature_c": temp,
                 "gpu_power_w": power,
             }
         )
+    if not rows:
+        status = "parse_failed" if malformed else "gpu_not_found"
+    else:
+        status = "parse_failed" if malformed else "ok"
+    return rows, {
+        "status": status,
+        "resolver": resolution,
+        "path": command_path,
+        "error": f"ignored {malformed} malformed nvidia-smi row(s)" if malformed else None,
+    }
+
+
+def _read_nvidia_smi() -> list[dict[str, object]]:
+    """Compatibility wrapper returning only the parsed GPU rows."""
+    rows, _status = _query_nvidia_smi()
     return rows
 
 
@@ -197,7 +268,13 @@ class HardwareTelemetry:
                 sample["cpu_util_percent"] = 100.0 * (1.0 - idle_delta / total_delta)
         self._previous_cpu = current
         sample.update(_read_memory())
-        sample["gpus"] = _read_nvidia_smi()
+        gpus, gpu_status = _query_nvidia_smi()
+        sample["gpus"] = gpus
+        sample["gpu_telemetry_status"] = gpu_status["status"]
+        sample["gpu_telemetry_resolver"] = gpu_status["resolver"]
+        sample["nvidia_smi_path"] = gpu_status["path"]
+        if gpu_status.get("error"):
+            sample["gpu_telemetry_error"] = gpu_status["error"]
         return sample
 
     def _run(self) -> None:
@@ -217,12 +294,16 @@ class HardwareTelemetry:
         by_phase: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
         sample_count = 0
         gpu_samples = 0
+        gpu_statuses: dict[str, int] = defaultdict(int)
+        gpu_resolvers: dict[str, int] = defaultdict(int)
         for line in self.path.read_text(encoding="utf-8").splitlines():
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
             sample_count += 1
+            gpu_statuses[str(row.get("gpu_telemetry_status", "unknown"))] += 1
+            gpu_resolvers[str(row.get("gpu_telemetry_resolver", "unknown"))] += 1
             phase = str(row.get("phase", "UNKNOWN"))
             for key in ("cpu_util_percent", "ram_used_gib", "ram_used_percent", "loadavg_1m"):
                 value = row.get(key)
@@ -275,6 +356,8 @@ class HardwareTelemetry:
         return {
             "samples": sample_count,
             "gpu_samples": gpu_samples,
+            "gpu_telemetry_statuses": dict(sorted(gpu_statuses.items())),
+            "gpu_telemetry_resolvers": dict(sorted(gpu_resolvers.items())),
             "phases": phases,
         }
 

@@ -421,8 +421,17 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
             }
         )
         atomic_write_json(tx_path, tx)
+        catalog_fingerprint = self._record_generation_artifacts(
+            generation,
+            result,
+            tx_path,
+        )
         self._write_state(last_committed_generation=generation, active_phase="commit")
-        self._update_manifest(committed_generation=generation)
+        self._update_manifest(
+            committed_generation=generation,
+            artifact_hashes=result["validated_artifact_hashes"],
+            catalog_fingerprint=catalog_fingerprint,
+        )
         self.events.emit("INFO", "Generation committed", generation=generation)
         if isinstance(metrics, Mapping):
             self._check_performance(generation, metrics)
@@ -535,14 +544,32 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
                 (parse_utc(str(stop["target_deadline_at"])) - datetime.now(timezone.utc)).total_seconds(),
             )
         driver = health_snapshot.get("driver_health")
+        driver_progress = (
+            driver.get("progress") if isinstance(driver, Mapping) else None
+        )
+        if not isinstance(driver_progress, Mapping) and isinstance(driver, Mapping):
+            if any(key in driver for key in ("completed", "total", "unit")):
+                driver_progress = {
+                    "completed": driver.get("completed"),
+                    "total": driver.get("total"),
+                    "unit": driver.get("unit", "units"),
+                    "subphase": driver.get("subphase"),
+                }
         status.update(
             {
                 "health": classification,
-                "progress": (
-                    driver.get("progress") if isinstance(driver, Mapping) else None
-                ),
+                "progress": driver_progress,
                 "progress_token": health_snapshot.get("driver_progress_token"),
                 "progress_age_sec": progress_age,
+                "progress_at": (
+                    driver.get("progress_at") if isinstance(driver, Mapping) else None
+                ),
+                "completed": (
+                    driver.get("completed") if isinstance(driver, Mapping) else None
+                ),
+                "total": driver.get("total") if isinstance(driver, Mapping) else None,
+                "unit": driver.get("unit") if isinstance(driver, Mapping) else None,
+                "subphase": driver.get("subphase") if isinstance(driver, Mapping) else None,
                 "driver_liveness_age_sec": liveness_age,
                 "speed": speed,
                 "last_arena_generation": arena_generations[-1] if arena_generations else None,
@@ -572,7 +599,8 @@ def format_production_status(status: Mapping[str, object]) -> str:
         completed = progress.get("completed")
         total = progress.get("total")
         unit = progress.get("unit", "units")
-        lines.append(f"Progress: {completed}/{total} {unit}")
+        suffix = f" ({progress.get('subphase')})" if progress.get("subphase") else ""
+        lines.append(f"Progress: {completed}/{total} {unit}{suffix}")
     elif status.get("progress_token") is not None:
         lines.append(f"Progress: {status.get('progress_token')}")
     progress_age = status.get("progress_age_sec")

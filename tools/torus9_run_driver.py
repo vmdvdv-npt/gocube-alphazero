@@ -26,6 +26,7 @@ if str(ROOT) not in sys.path:
 
 from gocube_golden.provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
 from gocube_golden.run_spec import StrictRunSpec, run_spec_fingerprint
+from gocube_golden.artifact_catalog import ArtifactCatalog, ARTIFACT_VALIDATION_SCHEMA
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
     Torus9SelfPlaySearchContract,
@@ -37,7 +38,9 @@ from gocube_golden.torus9 import (
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_PROFILE_ID,
     TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
+    TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
     current_torus9_profile_fingerprint,
+    load_torus9_current_profile,
 )
 from tools.arena_engine import ArenaExecutionConfig, run_arena as run_arena_engine
 from tools.arena_profiles.torus9 import PROFILE as TORUS9_ARENA_PROFILE
@@ -305,6 +308,9 @@ class _Heartbeat:
         self.progress_at = time.time()
         self.progress: dict[str, object] | None = None
         self.error: str | None = None
+        self._lock = threading.Lock()
+        self._last_write_monotonic = 0.0
+        self._minimum_write_interval = min(1.0, max(0.1, self.interval / 2.0))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -316,40 +322,68 @@ class _Heartbeat:
         completed: int | None = None,
         total: int | None = None,
         unit: str | None = None,
+        subphase: str | None = None,
     ) -> None:
-        self.phase = str(phase)
-        self.progress_token = token or self.phase
-        self.progress_at = time.time()
-        if completed is not None or total is not None:
-            self.progress = {
-                "completed": completed,
-                "total": total,
-                "unit": unit or "units",
-            }
-        else:
-            self.progress = None
-        self.write()
+        with self._lock:
+            old_phase = self.phase
+            self.phase = str(phase)
+            if completed is not None or total is not None:
+                progress_unit = unit or "units"
+                self.progress = {
+                    "completed": completed,
+                    "total": total,
+                    "unit": progress_unit,
+                }
+                if subphase is not None:
+                    self.progress["subphase"] = str(subphase)
+                default_token = f"{self.phase}:{completed}/{total} {progress_unit}"
+            else:
+                self.progress = None
+                default_token = self.phase
+            self.progress_token = str(token) if token is not None else default_token
+            self.progress_at = time.time()
+        self.write(force=old_phase != self.phase or completed == total)
 
     def fail(self, exc: BaseException) -> None:
-        self.error = f"{type(exc).__name__}: {exc}"
-        self.phase = "failed"
-        self.write()
+        with self._lock:
+            self.error = f"{type(exc).__name__}: {exc}"
+            self.phase = "failed"
+        self.write(force=True)
 
-    def write(self) -> None:
+    def write(self, *, force: bool = False) -> None:
         now = time.time()
-        payload: dict[str, object] = {
-            "schema": HEARTBEAT_SCHEMA,
-            "liveness_at": now,
-            "progress_at": self.progress_at,
-            "progress_token": self.progress_token,
-            "pid": os.getpid(),
-            "generation": self.generation,
-            "phase": self.phase,
-        }
-        if self.progress is not None:
-            payload["progress"] = dict(self.progress)
-        if self.error is not None:
-            payload["errors"] = [self.error]
+        with self._lock:
+            monotonic_now = time.monotonic()
+            if (
+                not force
+                and self._last_write_monotonic
+                and monotonic_now - self._last_write_monotonic < self._minimum_write_interval
+            ):
+                return
+            payload: dict[str, object] = {
+                "schema": HEARTBEAT_SCHEMA,
+                "liveness_at": now,
+                "progress_at": self.progress_at,
+                "progress_token": self.progress_token,
+                "pid": os.getpid(),
+                "generation": self.generation,
+                "phase": self.phase,
+            }
+            if self.progress is not None:
+                progress = dict(self.progress)
+                payload["progress"] = progress
+                # Keep the scalar form available to simple status consumers;
+                # ``progress`` remains the backwards-compatible envelope.
+                payload.update(
+                    {
+                        "completed": progress.get("completed"),
+                        "total": progress.get("total"),
+                        "unit": progress.get("unit"),
+                    }
+                )
+            if self.error is not None:
+                payload["errors"] = [self.error]
+            self._last_write_monotonic = monotonic_now
         _atomic_json(self.path, payload)
 
     def _loop(self) -> None:
@@ -396,13 +430,15 @@ def _environment(generation: int) -> tuple[Path, str, Path, str, CodeIdentity]:
 
 
 def _load_profile(profile_path: Path, expected_fingerprint: str) -> dict[str, object]:
-    profile = _read_json(profile_path)
-    if profile.get("profile_id") != TORUS9_CURRENT_PROFILE_ID:
-        raise ValueError("Torus9 production driver received a non-current scientific profile")
+    # The shared loader proves the payload, derived section fingerprints and
+    # Golden snapshot before the embedded fingerprint is consulted.  Keeping
+    # this boundary in torus9_contract avoids a second, inevitably incomplete,
+    # hand-maintained validator in the production driver.
+    profile = load_torus9_current_profile(profile_path)
     actual = current_torus9_profile_fingerprint(profile)
-    if actual != expected_fingerprint or profile.get("profile_fingerprint") != expected_fingerprint:
+    if actual != expected_fingerprint:
         raise ValueError("Torus9 canonical profile fingerprint drift")
-    return profile
+    return dict(profile)
 
 
 def _validate_scientific_bindings(
@@ -458,6 +494,7 @@ def _prepare_state(
     config: Mapping[str, object],
     device: str,
     code_identity: CodeIdentity,
+    timing: Mapping[str, object] | None = None,
 ) -> tuple[Torus9TrainingAdapter, Any, Path]:
     adapter = Torus9TrainingAdapter(
         profile=profile,
@@ -498,6 +535,9 @@ def _prepare_state(
             "model_hash": metadata["model_hash"],
             "artifact_sha256": file_sha256(m0),
         }
+        if isinstance(timing, dict):
+            timing["restore_previous_state_wall_time_sec"] = 0.0
+            timing["replay_validation_mode"] = "initial-empty"
         return adapter, state, m0
 
     previous_checkpoint = root / "checkpoints" / f"M{generation - 1}.pt"
@@ -512,12 +552,24 @@ def _prepare_state(
         replay_metrics = _read_json(previous_summary).get("replay")
         if isinstance(replay_metrics, Mapping):
             evictions = int(replay_metrics.get("total_evictions", 0))
+    load_timing = timing if isinstance(timing, dict) else None
+    replay_identity: Mapping[str, object] | None = None
+    catalog_path = root / "runtime" / "artifact-catalog.json"
+    if catalog_path.is_file():
+        catalog = ArtifactCatalog.load(catalog_path, root=root)
+        replay_identity = catalog.identity(_relative(root, previous_replay))
+    restore_started = time.perf_counter()
     state = adapter.load_state(
         previous_checkpoint,
         replay_path=previous_replay,
         device=device,
         total_evictions=evictions,
+        replay_artifact_identity=replay_identity,
+        load_timing=load_timing,
     )
+    if isinstance(load_timing, dict):
+        load_timing["restore_previous_state_wall_time_sec"] = time.perf_counter() - restore_started
+        load_timing["replay_validation_mode"] = "catalog-evidence" if replay_identity is not None else "cold-full-validation"
     return adapter, state, previous_checkpoint
 
 
@@ -566,6 +618,32 @@ def _artifact(root: Path, path: Path) -> dict[str, object]:
     }
 
 
+def _artifact_with_known_identity(
+    root: Path,
+    path: Path,
+    identity: Mapping[str, object] | None,
+    *,
+    extra: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Use a commit-record identity when the file was already hashed."""
+    if identity is None:
+        result = _artifact(root, path)
+    else:
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        size = int(identity.get("size_bytes", -1))
+        if size != path.stat().st_size:
+            raise ValueError(f"Cached artifact size mismatch: {path}")
+        result = {
+            "path": _relative(root, path),
+            "sha256": str(identity["sha256"]),
+            "size_bytes": size,
+        }
+    if extra:
+        result.update(dict(extra))
+    return result
+
+
 def _resume_state(
     *,
     root: Path,
@@ -574,14 +652,23 @@ def _resume_state(
     replay: Path,
     loaded_state: Any,
     config: Mapping[str, object],
+    artifact_identities: Mapping[str, Mapping[str, object]] | None = None,
 ) -> Path:
     path = root / "runtime" / "resume" / f"generation-{generation:04d}.json"
     payload = {
         "schema": "torus9-orchestrator-resume-v2",
         "generation": generation,
         "components": ["model", "optimizer", "replay", "generation", "rng"],
-        "checkpoint": _artifact(root, checkpoint),
-        "replay": _artifact(root, replay),
+        "checkpoint": _artifact_with_known_identity(
+            root,
+            checkpoint,
+            artifact_identities.get(_relative(root, checkpoint)) if artifact_identities else None,
+        ),
+        "replay": _artifact_with_known_identity(
+            root,
+            replay,
+            artifact_identities.get(_relative(root, replay)) if artifact_identities else None,
+        ),
         "optimizer_updates": int(loaded_state.optimizer_updates),
         "samples_consumed": int(loaded_state.samples_consumed),
         "replay_last_generation": int(loaded_state.rolling_replay.last_generation),
@@ -608,6 +695,13 @@ def _generation_metrics(
     training_wall = float(training.get("training_wall_time_sec", 0.0))
     optimizer_steps = int(training.get("optimizer_steps", 0))
     metrics = dict(selfplay_metrics)
+    timing: dict[str, object] = {}
+    selfplay_timing = selfplay_metrics.get("timing")
+    if isinstance(selfplay_timing, Mapping):
+        timing.update(dict(selfplay_timing))
+    training_timing = training.get("phase_timing")
+    if isinstance(training_timing, Mapping):
+        timing["training"] = dict(training_timing)
     metrics.update(
         {
             "training_time_sec": training_wall,
@@ -627,6 +721,7 @@ def _generation_metrics(
                 "mean_parameter_delta": float(training.get("mean_parameter_delta", 0.0)),
                 "mean_gradient_norm": float(training.get("mean_gradient_norm", 0.0)),
             },
+            "timing": timing,
         }
     )
     return metrics
@@ -645,8 +740,49 @@ def _publish_generation_result(
     summary_path = root / f"iter-{generation:02d}-summary.json"
     marker = root / f"generation-{generation:02d}.complete.json"
     selfplay_path = root / "selfplay" / f"iter-{generation:02d}-games.jsonl"
-    adapter = Torus9TrainingAdapter(profile=_read_json(Path(os.environ["AZ_PROFILE_PATH"])))
-    loaded = adapter.load_state(checkpoint, replay_path=replay, device="cpu")
+    profile_path = Path(os.environ["AZ_PROFILE_PATH"]).resolve()
+    marker_payload = _read_json(marker)
+    cached_identities: dict[str, Mapping[str, object]] = {}
+    marker_fields = {
+        "checkpoint": "checkpoint_sha256",
+        "checkpoint_metadata": "checkpoint_metadata_sha256",
+        "replay": "rolling_replay_sha256",
+        "fresh_replay": "fresh_replay_sha256",
+        "training": "training_metrics_sha256",
+        "summary": "summary_sha256",
+        "selfplay": "selfplay_artifact_sha256",
+    }
+    marker_paths = {
+        "checkpoint": checkpoint,
+        "checkpoint_metadata": checkpoint.with_suffix(".metadata.json"),
+        "replay": replay,
+        "fresh_replay": root / "replay" / f"iter-{generation:02d}-fresh.jsonl",
+        "training": root / "training" / f"iter-{generation:02d}.json",
+        "summary": summary_path,
+        "selfplay": selfplay_path,
+    }
+    for name, field in marker_fields.items():
+        path = marker_paths[name]
+        if field in marker_payload and path.is_file():
+            cached_identities[_relative(root, path)] = {
+                "sha256": marker_payload[field],
+                "size_bytes": path.stat().st_size,
+            }
+    replay_identity: dict[str, object] = {
+        **cached_identities.get(_relative(root, replay), {}),
+        "row_count": marker_payload.get("replay_row_count"),
+        "canonical_replay_fingerprint": marker_payload.get("replay_fingerprint"),
+        "validation_schema": marker_payload.get("validation_schema", ARTIFACT_VALIDATION_SCHEMA),
+    }
+    adapter = Torus9TrainingAdapter(profile=load_torus9_current_profile(profile_path))
+    reload_timing: dict[str, object] = {}
+    loaded = adapter.load_state(
+        checkpoint,
+        replay_path=replay,
+        device="cpu",
+        replay_artifact_identity=replay_identity,
+        load_timing=reload_timing,
+    )
     if int(loaded.current_generation) != generation:
         raise ValueError("Reloaded Torus9 checkpoint generation mismatch")
     resume = _resume_state(
@@ -656,28 +792,56 @@ def _publish_generation_result(
         replay=replay,
         loaded_state=loaded,
         config=config,
+        artifact_identities=cached_identities,
     )
     summary = _read_json(summary_path)
     training = summary.get("training")
     if not isinstance(training, Mapping):
         raise ValueError("Training summary is missing training metrics")
     expected_selfplay_hash = selfplay_metrics.get("selfplay_artifact_sha256")
-    if expected_selfplay_hash != file_sha256(selfplay_path):
+    cached_selfplay = cached_identities.get(_relative(root, selfplay_path))
+    if cached_selfplay is not None:
+        if expected_selfplay_hash != cached_selfplay.get("sha256"):
+            raise ValueError("Persisted self-play artifact hash disagrees with commit marker")
+        if int(cached_selfplay.get("size_bytes", -1)) != selfplay_path.stat().st_size:
+            raise ValueError("Persisted self-play artifact size disagrees with commit marker")
+    elif expected_selfplay_hash != file_sha256(selfplay_path):
+        # Backward-compatible recovery for markers produced before the
+        # self-play identity was added; new commits always take the durable
+        # identity path above.
         raise ValueError("Persisted self-play artifact hash disagrees with committed summary")
-    artifacts = [
-        _artifact(root, path)
-        for path in (
-            checkpoint,
-            checkpoint.with_suffix(".metadata.json"),
-            replay,
-            root / "replay" / f"iter-{generation:02d}-fresh.jsonl",
-            root / "training" / f"iter-{generation:02d}.json",
-            summary_path,
-            marker,
-            selfplay_path,
-            resume,
-        )
-    ]
+    artifact_paths = (
+        checkpoint,
+        checkpoint.with_suffix(".metadata.json"),
+        replay,
+        root / "replay" / f"iter-{generation:02d}-fresh.jsonl",
+        root / "training" / f"iter-{generation:02d}.json",
+        summary_path,
+        marker,
+        selfplay_path,
+        resume,
+    )
+    artifacts = []
+    for path in artifact_paths:
+        extra: Mapping[str, object] | None = None
+        if path == replay:
+            extra = {
+                "row_count": marker_payload.get("replay_row_count", len(loaded.rolling_replay.rows)),
+                "source_generations": marker_payload.get("replay_generations", []),
+                "canonical_replay_fingerprint": marker_payload.get("replay_fingerprint"),
+                "validation_schema": marker_payload.get("validation_schema", ARTIFACT_VALIDATION_SCHEMA),
+            }
+        known = cached_identities.get(_relative(root, path))
+        if path == selfplay_path and known is None:
+            known = {
+                "sha256": selfplay_metrics.get("selfplay_artifact_sha256"),
+                "size_bytes": path.stat().st_size,
+            }
+        artifacts.append(_artifact_with_known_identity(root, path, known, extra=extra))
+    if generation == 1:
+        initial_checkpoint = root / "checkpoints" / "M0.pt"
+        initial_metadata = initial_checkpoint.with_suffix(".metadata.json")
+        artifacts.extend((_artifact(root, initial_checkpoint), _artifact(root, initial_metadata)))
     payload = {
         "schema": GENERATION_RESULT_SCHEMA,
         "generation": generation,
@@ -697,7 +861,18 @@ def _publish_generation_result(
             selfplay_metrics=selfplay_metrics, training=training
         ),
     }
-    _atomic_json(Path(os.environ["AZ_GENERATION_RESULT_PATH"]), payload)
+    publication_started = time.perf_counter()
+    result_path = Path(os.environ["AZ_GENERATION_RESULT_PATH"])
+    _atomic_json(result_path, payload)
+    publication_elapsed = time.perf_counter() - publication_started
+    metrics_payload = payload.get("metrics")
+    if isinstance(metrics_payload, dict):
+        timing_payload = metrics_payload.get("timing")
+        if isinstance(timing_payload, dict):
+            timing_payload["result_publication_wall_time_sec"] = publication_elapsed
+            # The result is intentionally tiny; persist the final measured
+            # publication timing without touching replay/checkpoint artifacts.
+            _atomic_json(result_path, payload)
     return payload
 
 
@@ -742,7 +917,9 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
         elif any(path.exists() for path in _generation_paths(root, args.generation)):
             raise FileExistsError("Generation has uncommitted artifacts; use orchestrator resume")
 
-        heartbeat.advance("load-previous-state")
+        heartbeat.advance("load-previous-state", subphase="restore")
+        generation_timing: dict[str, object] = {}
+        restore_started = time.perf_counter()
         adapter, state, previous_checkpoint = _prepare_state(
             root=root,
             lineage_id=lineage_id,
@@ -751,6 +928,11 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             config=config,
             device=str(config["device"]),
             code_identity=code,
+            timing=generation_timing,
+        )
+        generation_timing.setdefault(
+            "restore_previous_state_wall_time_sec",
+            time.perf_counter() - restore_started,
         )
         games = int(config["games"])
         game_ids = [
@@ -758,7 +940,25 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             for index in range(games)
         ]
         inference: dict[str, object] = {}
-        heartbeat.advance("self-play", token=f"self-play-start-M{args.generation}", completed=0, total=games, unit="games")
+        heartbeat.advance(
+            "self-play",
+            token=f"self-play:0/{games} games",
+            completed=0,
+            total=games,
+            unit="games",
+            subphase="games",
+        )
+
+        def selfplay_progress(completed: int, total: int) -> None:
+            heartbeat.advance(
+                "self-play",
+                token=f"self-play:{completed}/{total} games",
+                completed=completed,
+                total=total,
+                unit="games",
+                subphase="games",
+            )
+
         started = time.perf_counter()
         records = run_torus9_selfplay_games(
             state.model,
@@ -781,8 +981,10 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             execution_activity=inference,
             execution_override_reason="immutable production run-spec",
             execution_reference_interactive=False,
+            progress_callback=selfplay_progress,
         )
         selfplay_wall = time.perf_counter() - started
+        generation_timing["self_play_wall_time_sec"] = selfplay_wall
         if len(records) != games or {record.game_id for record in records} != set(game_ids):
             raise RuntimeError("Torus9 self-play did not return exactly the requested game set")
         technical_games = sum(record.technical_termination is not None for record in records)
@@ -809,9 +1011,27 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             },
             "selfplay_artifact_path": _relative(root, selfplay_path),
             "selfplay_artifact_sha256": file_sha256(selfplay_path),
+            "timing": generation_timing,
         }
         heartbeat.advance("self-play-complete", completed=games, total=games, unit="games")
-        heartbeat.advance("training", token=f"training-start-M{args.generation}")
+        heartbeat.advance(
+            "replay",
+            token="replay:0/1 target-build",
+            completed=0,
+            total=1,
+            unit="phase",
+            subphase="target-build",
+        )
+        adapter.set_progress_callback(heartbeat.advance)
+        adapter.set_diagnostic_timing(generation_timing)
+        heartbeat.advance(
+            "training",
+            token=f"training:0/{TORUS9_OPTIMIZER_STEPS_PER_ITERATION} optimizer_steps",
+            completed=0,
+            total=TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+            unit="optimizer_steps",
+            subphase="optimizer",
+        )
         run_torus9_training_iteration(
             state=state,
             generation=args.generation,
@@ -829,6 +1049,15 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             device=str(config["device"]),
             adapter=adapter,
             summary_extra={"orchestrator_selfplay": selfplay_metrics},
+            progress_callback=heartbeat.advance,
+        )
+        heartbeat.advance(
+            "training",
+            token=f"training:{TORUS9_OPTIMIZER_STEPS_PER_ITERATION}/{TORUS9_OPTIMIZER_STEPS_PER_ITERATION} optimizer_steps",
+            completed=TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+            total=TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+            unit="optimizer_steps",
+            subphase="optimizer",
         )
         heartbeat.advance("reload-verification")
         payload = _publish_generation_result(
@@ -842,19 +1071,43 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
         return payload
 
 
-def _training_snapshot(root: Path) -> dict[str, str]:
-    paths: list[Path] = []
-    for directory in ("checkpoints", "replay", "training", "selfplay"):
-        base = root / directory
-        if base.is_dir():
-            paths.extend(path for path in base.rglob("*") if path.is_file())
-    paths.extend(root.glob("iter-*-summary.json"))
-    paths.extend(root.glob("generation-*.complete.json"))
-    return {
-        _relative(root, path): file_sha256(path)
-        for path in sorted({path.resolve() for path in paths})
-        if path.is_file()
-    }
+def _training_snapshot(
+    root: Path,
+    generation: int | None = None,
+    *,
+    tracked_paths: Sequence[Path] = (),
+) -> dict[str, object]:
+    """Capture bounded Arena mutation evidence.
+
+    The commit catalog already identifies immutable artifacts.  Arena only
+    snapshots its transaction metadata, runtime state, and the explicitly
+    selected candidate/reference files instead of walking all history.
+    """
+    paths = [
+        root / "manifest.json",
+        root / "runtime" / "state.json",
+    ]
+    if generation is not None:
+        paths.append(root / "runtime" / "generations" / f"generation-{generation:04d}.json")
+    paths.extend(Path(path) for path in tracked_paths)
+    snapshot: dict[str, object] = {}
+    for path in sorted({path.resolve() for path in paths}):
+        if path.is_file():
+            snapshot[_relative(root, path)] = {
+                "sha256": file_sha256(path),
+                "size_bytes": path.stat().st_size,
+            }
+    catalog_path = root / "runtime" / "artifact-catalog.json"
+    if catalog_path.is_file():
+        catalog_stat = catalog_path.stat()
+        # The catalog itself is already authenticated by its manifest
+        # fingerprint and loaded once before Arena.  Record cheap filesystem
+        # identity here without hashing its growing historical contents.
+        snapshot[_relative(root, catalog_path)] = {
+            "size_bytes": catalog_stat.st_size,
+            "mtime_ns": catalog_stat.st_mtime_ns,
+        }
+    return snapshot
 
 
 def _validate_existing_arena(
@@ -864,6 +1117,8 @@ def _validate_existing_arena(
     candidate: Path,
     reference: Path,
     config: Mapping[str, object],
+    candidate_sha256: str | None = None,
+    reference_sha256: str | None = None,
 ) -> None:
     manifest_path = output / "manifest.json"
     if not manifest_path.is_file():
@@ -872,8 +1127,10 @@ def _validate_existing_arena(
     execution = summary.get("execution")
     expected_execution = config["execution"]
     if (
-        summary.get("candidate_artifact_sha256") != file_sha256(candidate)
-        or summary.get("reference_artifact_sha256") != file_sha256(reference)
+        summary.get("candidate_artifact_sha256")
+        != (candidate_sha256 or file_sha256(candidate))
+        or summary.get("reference_artifact_sha256")
+        != (reference_sha256 or file_sha256(reference))
         or int(summary.get("games", -1)) != int(config["games"])
         or summary.get("arena_profile") != "torus9"
         or int(manifest.get("master_seed", -1)) != int(config["master_seed"])
@@ -908,6 +1165,15 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
     reference = root / "checkpoints" / f"M{reference_generation}.pt"
     if not candidate.is_file() or not reference.is_file():
         raise FileNotFoundError("Arena candidate/reference checkpoint is missing")
+    catalog_path = root / "runtime" / "artifact-catalog.json"
+    if not catalog_path.is_file():
+        raise ValueError("Torus9 Arena requires the committed artifact catalog")
+    catalog = ArtifactCatalog.load(catalog_path, root=root)
+    candidate_relative = _relative(root, candidate)
+    reference_relative = _relative(root, reference)
+    verified_artifacts = catalog.verify((candidate_relative, reference_relative))
+    candidate_sha256 = verified_artifacts[candidate_relative]
+    reference_sha256 = verified_artifacts[reference_relative]
 
     heartbeat_path = Path(os.environ["AZ_DRIVER_HEARTBEAT_PATH"])
     with _Heartbeat(
@@ -915,8 +1181,18 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
         args.generation,
         interval=float(config["heartbeat_interval_seconds"]),
     ) as heartbeat:
-        heartbeat.advance("arena-snapshot")
-        before = _training_snapshot(root)
+        heartbeat.advance(
+            "arena-snapshot",
+            completed=0,
+            total=1,
+            unit="phase",
+            subphase="snapshot",
+        )
+        before = _training_snapshot(
+            root,
+            args.generation,
+            tracked_paths=(candidate, reference),
+        )
         output = root / "arena" / f"generation-{args.generation:04d}"
         result_path = Path(os.environ["AZ_ARENA_RESULT_PATH"])
         summary_path = output / "summary.json"
@@ -939,9 +1215,29 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 candidate=candidate,
                 reference=reference,
                 config=config,
+                candidate_sha256=candidate_sha256,
+                reference_sha256=reference_sha256,
             )
         else:
-            heartbeat.advance("arena", token=f"arena-M{args.generation}-vs-M{reference_generation}")
+            heartbeat.advance(
+                "arena",
+                token=f"arena:0/{int(config['games'])} games",
+                completed=0,
+                total=int(config["games"]),
+                unit="games",
+                subphase="games",
+            )
+
+            def arena_progress(completed: int, total: int) -> None:
+                heartbeat.advance(
+                    "arena",
+                    token=f"arena:{completed}/{total} games",
+                    completed=completed,
+                    total=total,
+                    unit="games",
+                    subphase="games",
+                )
+
             arena_execution = ArenaExecutionConfig(
                 games=int(config["games"]),
                 workers=int(execution["workers"]),
@@ -967,9 +1263,21 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 comparison=f"periodic-M{args.generation}-vs-M{reference_generation}",
                 master_seed=int(config["master_seed"]),
                 config=arena_execution,
+                expected_candidate_artifact_sha256=candidate_sha256,
+                expected_reference_artifact_sha256=reference_sha256,
+                progress_callback=arena_progress,
             )
         heartbeat.advance("arena-verify")
-        after = _training_snapshot(root)
+        # Recheck the selected immutable artifacts after Arena.  Unrelated
+        # ancient files are intentionally outside this bounded operation.
+        catalog.verify((candidate_relative, reference_relative))
+        after = _training_snapshot(
+            root,
+            args.generation,
+            tracked_paths=(candidate, reference),
+        )
+        if before != after:
+            raise ValueError("Arena mutated lineage-owned training metadata or checkpoints")
         games = int(summary["games"])
         wins = int(summary["wins"])
         draws = int(summary["draws"])
@@ -983,7 +1291,7 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
             "profile_fingerprint": expected_fingerprint,
             "technical_games": int(summary["technical_games"]),
             "invalid_games": 0,
-            "training_mutated": before != after,
+            "training_mutated": False,
             "preset_fingerprint": run_spec_fingerprint(
                 _mapping(arena_block["driver_config"], "arena.driver_config")
             ),
