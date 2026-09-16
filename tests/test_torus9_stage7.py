@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import tools.torus9_stage7 as stage7
 from tools.torus9_stage7 import (
     ARENA_PAIRS,
     BOOTSTRAP_REPLICATES,
+    REFERENCE_RUN_ID,
     _bootstrap,
-    _resolve_reference,
     _safe_run_id,
     _startset,
 )
@@ -31,11 +34,20 @@ def test_stage7_frozen_startset_is_96_pairs_and_reproducible():
     assert len({row["corpus_fingerprint"] for row in first["rows"]}) == 1
 
 
-def test_stage7_reference_is_resolved_by_catalog_not_a_stage7_copy():
-    path = _resolve_reference("M17")
+def test_stage7_reference_is_resolved_by_catalog_not_a_stage7_copy(tmp_path, monkeypatch):
+    checkpoint = tmp_path / "runs" / "torus9" / "archive" / REFERENCE_RUN_ID / "checkpoints" / "M17.pt"
 
+    class FakeCatalog:
+        def get(self, key: str):
+            assert key == f"{REFERENCE_RUN_ID}@17"
+            return SimpleNamespace(path=str(checkpoint), run_name=REFERENCE_RUN_ID)
+
+    monkeypatch.setattr(stage7, "_reference_catalog", lambda: FakeCatalog())
+    path = stage7._resolve_reference("M17")
+
+    assert path == checkpoint.resolve()
     assert path.name == "M17.pt"
-    assert path.parent.parent.name == "torus9-golden-v3-20260914-run03"
+    assert path.parent.parent.name == REFERENCE_RUN_ID
     assert "stage7" not in str(path)
 
 
