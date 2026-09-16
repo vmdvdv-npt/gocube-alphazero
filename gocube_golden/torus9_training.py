@@ -410,7 +410,6 @@ class Torus9TrainingAdapter:
             validate = getattr(record, "validate", None)
             if not callable(validate):
                 raise ValueError("Current Torus9 training accepts validated Self-play game records only")
-            validate()
             if getattr(record, "profile_id", None) != TORUS9_CURRENT_PROFILE_ID:
                 raise ValueError("Current Torus9 training record profile mismatch")
             if getattr(record, "profile_fingerprint", None) != self.profile_fingerprint:
@@ -420,9 +419,42 @@ class Torus9TrainingAdapter:
             if getattr(record, "selfplay_contract_fingerprint", None) != current_torus9_selfplay_contract_fingerprint():
                 raise ValueError("Current Torus9 training record self-play fingerprint mismatch")
             if getattr(record, "technical_termination", None) is not None:
+                # Technical records remain validated and excluded exactly as
+                # before; only the normal record path avoids duplicate work.
+                validate()
                 continue
-            rows = _core.torus9_build_ownership_score_replay_samples(record)
+
+            # The legacy ownership+score helper composes three builders.  That
+            # composition replays the final trace three times, reconstructs
+            # each position state for base/ownership/score, and recomputes the
+            # same terminal score for every replay row.  Keep the proven base
+            # row builder as the single validation/observation source, then
+            # attach the two auxiliaries once from the shared terminal state.
+            rows = list(_core.torus9_build_replay_samples(record))
+            final_state = _core.torus9_state_from_identity(record.start_state)
+            for action in record.final_action_trace:
+                final_state = _core.apply_action(final_state, action).after
+            if not final_state.is_terminal:
+                raise ValueError("Torus 9×9 ownership+score replay did not reach DOUBLE_PASS")
+
+            ownership_by_side = {
+                "BLACK": tuple(_core.torus9_ownership_target(final_state, "BLACK")),
+                "WHITE": tuple(_core.torus9_ownership_target(final_state, "WHITE")),
+            }
+            score_by_side = {
+                "BLACK": _core.torus9_score_target(final_state, "BLACK"),
+                "WHITE": _core.torus9_score_target(final_state, "WHITE"),
+            }
             for row in rows:
+                side = str(row.get("side_to_move", ""))
+                if side not in ownership_by_side:
+                    raise ValueError("Current Torus9 replay side-to-move target drift")
+                row["ownership_target"] = list(ownership_by_side[side])
+                row["ownership_target_contract_id"] = _core.TORUS9_OWNERSHIP_TARGET_CONTRACT_ID
+                row["auxiliary_target_source"] = _core.TORUS9_AUXILIARY_TARGET_SOURCE
+                row["score_target"] = score_by_side[side]
+                row["score_target_contract_id"] = _core.TORUS9_SCORE_TARGET_CONTRACT_ID
+                row["score_target_normalization"] = _core.TORUS9_SCORE_TARGET_NORMALIZATION
                 self.validate_sample(row)
             samples.extend(rows)
         return tuple(samples)
