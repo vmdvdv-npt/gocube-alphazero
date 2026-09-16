@@ -279,3 +279,10 @@ artifact index is in that directory's `README.md`.
 
 No training, self-play, replay, canonical model, or Stage 7 baseline artifact
 was modified.
+
+## Final verification
+
+The final local verification passed with `255 passed, 1 skipped`, compileall,
+JSON validation, raw-artifact integrity checks, and `git diff --check`. After
+the final push, PR #109 completed both required CI jobs successfully:
+`Golden production tests` and `Mandatory pinned KataGo rule differential`.
