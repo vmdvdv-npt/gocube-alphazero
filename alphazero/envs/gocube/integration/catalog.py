@@ -4,6 +4,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from .errors import CheckpointCatalogCollision
 
@@ -216,6 +217,18 @@ class CheckpointCatalog:
             "komi": 0.5,
         }
 
+    @staticmethod
+    def _lineage_id_for_checkpoint(path: str) -> str | None:
+        """Use storage lineage identity when metadata kept a legacy run id."""
+        manifest_path = Path(path).parent.parent / "manifest.json"
+        try:
+            with manifest_path.open("r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+        except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        lineage_id = manifest.get("lineage_id") if isinstance(manifest, dict) else None
+        return lineage_id if isinstance(lineage_id, str) and lineage_id else None
+
     def _golden_descriptors(self) -> list[CheckpointDescriptor]:
         descriptors: list[CheckpointDescriptor] = []
         candidates: list[str] = []
@@ -239,6 +252,9 @@ class CheckpointCatalog:
             identity = self._validate_golden_metadata(self._golden_metadata(metadata_path))
             if identity is None:
                 continue
+            lineage_id = self._lineage_id_for_checkpoint(path)
+            if lineage_id is not None:
+                identity["run_name"] = lineage_id
             filename_match = _GOLDEN_CHECKPOINT_RE.fullmatch(os.path.basename(path))
             if filename_match is None or identity["iteration"] != int(filename_match.group(1)):
                 continue

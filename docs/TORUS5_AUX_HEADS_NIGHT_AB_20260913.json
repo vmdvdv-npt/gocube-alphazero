@@ -139,7 +139,7 @@
       }
     ],
     "rejected_candidates": 1,
-    "source": "/home/codex/projects/gocube-alphazero/runs/torus-golden-stage4/torus-golden-stage4-seed2-v4",
+    "source": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus-golden-stage4-seed2-v4",
     "start_fingerprints": [
       "sha256:2db74c944f98a4355e22a99f869802f3772ab12ae1573d9edc19f38533f73482",
       "sha256:a2eae635ced12e609c2031fd5fac5efc6639be86ca3d0bcbfd19fbfaca75b2bd",
@@ -280,10 +280,10 @@
       "technical": 0
     },
     "checkpoints": [
-      "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/smoke/wdl.pt",
-      "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/smoke/wdl_ownership.pt",
-      "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/smoke/wdl_score.pt",
-      "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/smoke/wdl_ownership_score.pt"
+      "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/smoke/wdl.pt",
+      "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/smoke/wdl_ownership.pt",
+      "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/smoke/wdl_score.pt",
+      "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/smoke/wdl_ownership_score.pt"
     ],
     "selfplay": {
       "audit": {
@@ -13513,7 +13513,7 @@
             "optimizer_updates": 33,
             "parent_checkpoint_label": "sha256:c7f79a0e4f5c774e1c7965fe95f77bfe451f8600d0f6894fcc01df832ef56c71",
             "parent_or_source_run_identity": "sha256:c7f79a0e4f5c774e1c7965fe95f77bfe451f8600d0f6894fcc01df832ef56c71",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl/checkpoints/wdl-M1.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl/checkpoints/wdl-M1.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -13940,7 +13940,7 @@
             "optimizer_updates": 60,
             "parent_checkpoint_label": "sha256:f79a792a5098b561f0c03bb34b9b0c5e0b1008e8a8297426302f62d2c93c082d",
             "parent_or_source_run_identity": "sha256:f79a792a5098b561f0c03bb34b9b0c5e0b1008e8a8297426302f62d2c93c082d",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl/checkpoints/wdl-M2.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl/checkpoints/wdl-M2.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -13965,7 +13965,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:c5a04e626a57255a2a2199e8049b2f4165f0252d36fdcf91cb43528191ebe9ba",
               "model_hash": "sha256:f79a792a5098b561f0c03bb34b9b0c5e0b1008e8a8297426302f62d2c93c082d",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl/checkpoints/wdl-M1.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl/checkpoints/wdl-M1.pt"
             },
             "phase": "M1",
             "training": {
@@ -14369,7 +14369,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:21a2ce9ba0ac0f59e6705273b78f52d1123bf3359117f8ef24a4f48c2bb82fce",
               "model_hash": "sha256:29cc7e845f88c31eb9892e76824b0d41b91498255bd965350dacac9ac7cd58ed",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl/checkpoints/wdl-M2.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl/checkpoints/wdl-M2.pt"
             },
             "phase": "M2",
             "training": {
@@ -15257,7 +15257,7 @@
             "optimizer_updates": 33,
             "parent_checkpoint_label": "sha256:c7f79a0e4f5c774e1c7965fe95f77bfe451f8600d0f6894fcc01df832ef56c71",
             "parent_or_source_run_identity": "sha256:c7f79a0e4f5c774e1c7965fe95f77bfe451f8600d0f6894fcc01df832ef56c71",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership/checkpoints/wdl_ownership-M1.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership/checkpoints/wdl_ownership-M1.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -15714,7 +15714,7 @@
             "optimizer_updates": 57,
             "parent_checkpoint_label": "sha256:8cad3b465cdf7c6ad87b56586616c43b4913d4f0ede4eb8ca265fb16d3ebbaf5",
             "parent_or_source_run_identity": "sha256:8cad3b465cdf7c6ad87b56586616c43b4913d4f0ede4eb8ca265fb16d3ebbaf5",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership/checkpoints/wdl_ownership-M2.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership/checkpoints/wdl_ownership-M2.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -15739,7 +15739,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:807e1258befa25c6786afb1ce35ad48a109f1f55a94cda6c352ce174b98f68bb",
               "model_hash": "sha256:8cad3b465cdf7c6ad87b56586616c43b4913d4f0ede4eb8ca265fb16d3ebbaf5",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership/checkpoints/wdl_ownership-M1.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership/checkpoints/wdl_ownership-M1.pt"
             },
             "phase": "M1",
             "training": {
@@ -16216,7 +16216,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:1541be4d928331bd86b2be79ba830e421129944ea0aaecd69d4ce99da3f4965c",
               "model_hash": "sha256:00b2f59c8cb5cbd2d1b9c26a08b26004750567be7aa27c9b03a3d31517d88a41",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership/checkpoints/wdl_ownership-M2.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership/checkpoints/wdl_ownership-M2.pt"
             },
             "phase": "M2",
             "training": {
@@ -17192,7 +17192,7 @@
             "optimizer_updates": 33,
             "parent_checkpoint_label": "sha256:c7f79a0e4f5c774e1c7965fe95f77bfe451f8600d0f6894fcc01df832ef56c71",
             "parent_or_source_run_identity": "sha256:c7f79a0e4f5c774e1c7965fe95f77bfe451f8600d0f6894fcc01df832ef56c71",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership_score/checkpoints/wdl_ownership_score-M1.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership_score/checkpoints/wdl_ownership_score-M1.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -17649,7 +17649,7 @@
             "optimizer_updates": 64,
             "parent_checkpoint_label": "sha256:a7b7c0acaf77ed126d1d6988630a015004323d128d04602f29d3cfcb992165fe",
             "parent_or_source_run_identity": "sha256:a7b7c0acaf77ed126d1d6988630a015004323d128d04602f29d3cfcb992165fe",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership_score/checkpoints/wdl_ownership_score-M2.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership_score/checkpoints/wdl_ownership_score-M2.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -17674,7 +17674,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:3092caeeb0ac47ebc6b5ed8e3d0a286d38cb6cc6e93854599e65e399bd5ad52b",
               "model_hash": "sha256:a7b7c0acaf77ed126d1d6988630a015004323d128d04602f29d3cfcb992165fe",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership_score/checkpoints/wdl_ownership_score-M1.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership_score/checkpoints/wdl_ownership_score-M1.pt"
             },
             "phase": "M1",
             "training": {
@@ -18151,7 +18151,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:f1356c199ab18f794a46c3de88e8dee62aded758903bfb400d1fcd4e80da3f2b",
               "model_hash": "sha256:9b435925ab7e50860bbd6e13461f8f319b3a2d5afcfcc5419c30b4731113bcbf",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership_score/checkpoints/wdl_ownership_score-M2.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_ownership_score/checkpoints/wdl_ownership_score-M2.pt"
             },
             "phase": "M2",
             "training": {
@@ -19218,7 +19218,7 @@
             "optimizer_updates": 33,
             "parent_checkpoint_label": "sha256:c7f79a0e4f5c774e1c7965fe95f77bfe451f8600d0f6894fcc01df832ef56c71",
             "parent_or_source_run_identity": "sha256:c7f79a0e4f5c774e1c7965fe95f77bfe451f8600d0f6894fcc01df832ef56c71",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_score/checkpoints/wdl_score-M1.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_score/checkpoints/wdl_score-M1.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -19675,7 +19675,7 @@
             "optimizer_updates": 57,
             "parent_checkpoint_label": "sha256:56787349b878d9279c00e0c08ba9e0ddcf3e7542d4a978d81701653398c32e3c",
             "parent_or_source_run_identity": "sha256:56787349b878d9279c00e0c08ba9e0ddcf3e7542d4a978d81701653398c32e3c",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_score/checkpoints/wdl_score-M2.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_score/checkpoints/wdl_score-M2.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -19700,7 +19700,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:7fa88cf91ed97f093579eeb297b35065e742dc53b27931e3eed7418b6dc77fce",
               "model_hash": "sha256:56787349b878d9279c00e0c08ba9e0ddcf3e7542d4a978d81701653398c32e3c",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_score/checkpoints/wdl_score-M1.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_score/checkpoints/wdl_score-M1.pt"
             },
             "phase": "M1",
             "training": {
@@ -20177,7 +20177,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:be8e0cdccc06d8803958b42e1d6ffe783047cba306255ceaba8b6e57023b09c1",
               "model_hash": "sha256:385142b248928f42739f96564b1dbe92b6e35fbfc67188bf6a20709bfb6bcc3f",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/wdl_score/checkpoints/wdl_score-M2.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/wdl_score/checkpoints/wdl_score-M2.pt"
             },
             "phase": "M2",
             "training": {
@@ -21098,7 +21098,7 @@
         "optimizer_updates": 0,
         "parent_checkpoint_label": null,
         "parent_or_source_run_identity": "torus5-aux-heads-night-ab-20260913",
-        "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-A/checkpoints/M0.pt",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-A/checkpoints/M0.pt",
         "point_id_order_identity": "row-major-yx:point_id=y*width+x",
         "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
         "rules_profile_id": "graph-area-v1",
@@ -28295,7 +28295,7 @@
             "optimizer_updates": 46,
             "parent_checkpoint_label": "sha256:25a69c4dd6bc7ff26bd5d131b494c5b5611ea2698961af9cc5ac61dc9b39de47",
             "parent_or_source_run_identity": "sha256:25a69c4dd6bc7ff26bd5d131b494c5b5611ea2698961af9cc5ac61dc9b39de47",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl/checkpoints/wdl-M1.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl/checkpoints/wdl-M1.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -28722,7 +28722,7 @@
             "optimizer_updates": 65,
             "parent_checkpoint_label": "sha256:7ae8c8531f8815ac31252f326c1414316d30fbb2c8c4bbd4a9cc3fcd7daac7ac",
             "parent_or_source_run_identity": "sha256:7ae8c8531f8815ac31252f326c1414316d30fbb2c8c4bbd4a9cc3fcd7daac7ac",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl/checkpoints/wdl-M2.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl/checkpoints/wdl-M2.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -28747,7 +28747,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:75a9a1182102d812ff96cd2e8a61f113065ac122a23fee1fcafd59d2bf562422",
               "model_hash": "sha256:7ae8c8531f8815ac31252f326c1414316d30fbb2c8c4bbd4a9cc3fcd7daac7ac",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl/checkpoints/wdl-M1.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl/checkpoints/wdl-M1.pt"
             },
             "phase": "M1",
             "training": {
@@ -29294,7 +29294,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:7e9838be99cb7feab3b5d1e9c5b537654cb9760f71970db4615803c051b91e4c",
               "model_hash": "sha256:ac15ef2d12352ca6cca94920573e5e2439135c98e084f5491b805bf14f0df117",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl/checkpoints/wdl-M2.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl/checkpoints/wdl-M2.pt"
             },
             "phase": "M2",
             "training": {
@@ -30237,7 +30237,7 @@
             "optimizer_updates": 46,
             "parent_checkpoint_label": "sha256:25a69c4dd6bc7ff26bd5d131b494c5b5611ea2698961af9cc5ac61dc9b39de47",
             "parent_or_source_run_identity": "sha256:25a69c4dd6bc7ff26bd5d131b494c5b5611ea2698961af9cc5ac61dc9b39de47",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership/checkpoints/wdl_ownership-M1.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership/checkpoints/wdl_ownership-M1.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -30694,7 +30694,7 @@
             "optimizer_updates": 63,
             "parent_checkpoint_label": "sha256:735be9506521c5395d152be4412171da23d3990abedc3be435be6c6fd3bcdfc1",
             "parent_or_source_run_identity": "sha256:735be9506521c5395d152be4412171da23d3990abedc3be435be6c6fd3bcdfc1",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership/checkpoints/wdl_ownership-M2.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership/checkpoints/wdl_ownership-M2.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -30719,7 +30719,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:bcbe6db5479dce7f7e8ae9d2bd57ceabe74433b0e47811a2a8acbe55a086ff41",
               "model_hash": "sha256:735be9506521c5395d152be4412171da23d3990abedc3be435be6c6fd3bcdfc1",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership/checkpoints/wdl_ownership-M1.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership/checkpoints/wdl_ownership-M1.pt"
             },
             "phase": "M1",
             "training": {
@@ -31365,7 +31365,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:ebc64e2900375f9afd3ab12de34afd073d89c2dede30bf957544f897f9448ddf",
               "model_hash": "sha256:43b81af88a08dfa11a9894aa6e864e39d30f0887dd9ccd89109fa693e53f88c5",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership/checkpoints/wdl_ownership-M2.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership/checkpoints/wdl_ownership-M2.pt"
             },
             "phase": "M2",
             "training": {
@@ -32419,7 +32419,7 @@
             "optimizer_updates": 46,
             "parent_checkpoint_label": "sha256:25a69c4dd6bc7ff26bd5d131b494c5b5611ea2698961af9cc5ac61dc9b39de47",
             "parent_or_source_run_identity": "sha256:25a69c4dd6bc7ff26bd5d131b494c5b5611ea2698961af9cc5ac61dc9b39de47",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership_score/checkpoints/wdl_ownership_score-M1.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership_score/checkpoints/wdl_ownership_score-M1.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -32876,7 +32876,7 @@
             "optimizer_updates": 61,
             "parent_checkpoint_label": "sha256:271da4bff12ea2ff49b047a1296935a0bf2c57d97d101997cdafc792a6017b9b",
             "parent_or_source_run_identity": "sha256:271da4bff12ea2ff49b047a1296935a0bf2c57d97d101997cdafc792a6017b9b",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership_score/checkpoints/wdl_ownership_score-M2.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership_score/checkpoints/wdl_ownership_score-M2.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -32901,7 +32901,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:94ef5be95430d9298b36deb3b50d6e3aae91a2b8904fb4dcbe21d091e5b9fb1a",
               "model_hash": "sha256:271da4bff12ea2ff49b047a1296935a0bf2c57d97d101997cdafc792a6017b9b",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership_score/checkpoints/wdl_ownership_score-M1.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership_score/checkpoints/wdl_ownership_score-M1.pt"
             },
             "phase": "M1",
             "training": {
@@ -33547,7 +33547,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:d11e249a0681ec4a52d06eebf2d3846600897eb426a44649c25d5d1a627fcc1b",
               "model_hash": "sha256:0203fe6403b790de2f988855e9723a36cddfe36c5ca253adb617df286918768f",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership_score/checkpoints/wdl_ownership_score-M2.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_ownership_score/checkpoints/wdl_ownership_score-M2.pt"
             },
             "phase": "M2",
             "training": {
@@ -34575,7 +34575,7 @@
             "optimizer_updates": 46,
             "parent_checkpoint_label": "sha256:25a69c4dd6bc7ff26bd5d131b494c5b5611ea2698961af9cc5ac61dc9b39de47",
             "parent_or_source_run_identity": "sha256:25a69c4dd6bc7ff26bd5d131b494c5b5611ea2698961af9cc5ac61dc9b39de47",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_score/checkpoints/wdl_score-M1.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_score/checkpoints/wdl_score-M1.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -35032,7 +35032,7 @@
             "optimizer_updates": 60,
             "parent_checkpoint_label": "sha256:f13fffb7ab4fa226465fd5746af51031d1b5b28e73d8002ac6ff8de5a43ec59d",
             "parent_or_source_run_identity": "sha256:f13fffb7ab4fa226465fd5746af51031d1b5b28e73d8002ac6ff8de5a43ec59d",
-            "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_score/checkpoints/wdl_score-M2.pt",
+            "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_score/checkpoints/wdl_score-M2.pt",
             "point_id_order_identity": "row-major-yx:point_id=y*width+x",
             "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
             "rules_profile_id": "graph-area-v1",
@@ -35057,7 +35057,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:788b2dfe62f44b325cf3c84b8975e17047ab06646567984e0ee16698c612c0e8",
               "model_hash": "sha256:f13fffb7ab4fa226465fd5746af51031d1b5b28e73d8002ac6ff8de5a43ec59d",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_score/checkpoints/wdl_score-M1.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_score/checkpoints/wdl_score-M1.pt"
             },
             "phase": "M1",
             "training": {
@@ -35703,7 +35703,7 @@
             "checkpoint": {
               "artifact_sha256": "sha256:9c31731ee3a294dc746517286ba8056ca6c7dbe38233b5cc8b4d3d5fde30a7ba",
               "model_hash": "sha256:26c7d65cd8340157a61b3c7ccddba6bd21d162f1cfa83baefc398c3f0d5ccfba",
-              "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/wdl_score/checkpoints/wdl_score-M2.pt"
+              "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/wdl_score/checkpoints/wdl_score-M2.pt"
             },
             "phase": "M2",
             "training": {
@@ -36663,7 +36663,7 @@
         "optimizer_updates": 0,
         "parent_checkpoint_label": null,
         "parent_or_source_run_identity": "torus5-aux-heads-night-ab-20260913",
-        "path": "/home/codex/projects/gocube-alphazero/runs/torus5-aux-heads/torus5-aux-heads-night-ab-20260913/seed-B/checkpoints/M0.pt",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus5/archive/torus5-aux-heads-night-ab-20260913/seed-B/checkpoints/M0.pt",
         "point_id_order_identity": "row-major-yx:point_id=y*width+x",
         "rules_fingerprint": "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842",
         "rules_profile_id": "graph-area-v1",

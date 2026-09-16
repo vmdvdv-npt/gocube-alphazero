@@ -245,7 +245,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:c85a059dd6ce66e118e50c99f85def35934ad257008bebe3d3c41e20dc2c4f22",
           "model_hash": "sha256:32b36c4011baa088251c580f2af3ee280f6e2a26705bd8069a6d77e82b5200c5",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M1.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M1.pt"
         },
         "child_cpu_time_sec": 1932.9539220000001,
         "child_cpu_utilization_percent": 1486.8361598011682,
@@ -1456,7 +1456,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:79798a267b799131607bd5d8888f2d82a0132a4b4419fb564e6720d23db89eb3",
           "model_hash": "sha256:e3d6528630b417b056b54140e282b23f4397dab50e4d099738c5cfb3eba0299d",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M2.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M2.pt"
         },
         "child_cpu_time_sec": 616.6663529999996,
         "child_cpu_utilization_percent": 1432.6048725587912,
@@ -2671,7 +2671,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:521a439bc04e20a494e57881f688fab64b2cfa3503147e9a4219b33c26e6c5fc",
           "model_hash": "sha256:19b2cffbaf75af7486d14cad3a922c66015311e86959d8de933272b16a70dc5b",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M3.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M3.pt"
         },
         "child_cpu_time_sec": 1289.025475,
         "child_cpu_utilization_percent": 1433.724323581081,
@@ -3890,7 +3890,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:3e25eee1d75f4187188746b9cd3124b3c571dabf6cd9210a935659d80da6aff2",
           "model_hash": "sha256:9ce6484d7fe0936605bb7a35c602eaf1934fa40590c804890f3ba079edb6d31d",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M4.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M4.pt"
         },
         "child_cpu_time_sec": 1941.5065730000006,
         "child_cpu_utilization_percent": 1465.512246430808,
@@ -5109,7 +5109,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:ed471fe57ecc1caf16d1c778b0ca1c0ab6986ce1b1c1f5474825b6839a027b79",
           "model_hash": "sha256:ef332d3f841658633c99872e91854b618d111c2e6e02dcf76e507daee166d7ff",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M5.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M5.pt"
         },
         "child_cpu_time_sec": 2499.4292509999996,
         "child_cpu_utilization_percent": 1457.1848741684423,
@@ -6328,7 +6328,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:61eb3b410a7db5d5c6282241f47b14b41a7893ad3e0d3800a3c7ec9950ff401a",
           "model_hash": "sha256:242223f688c21a664477077e23c1aea00076617e3fd9e763ae4dd8f60e3b7195",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M6.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M6.pt"
         },
         "child_cpu_time_sec": 2617.4421010000005,
         "child_cpu_utilization_percent": 1469.5004532295566,
@@ -7547,7 +7547,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:b489215fd308772ab904d3a1a23057db1e5da5537dc2f9b2b91b57a6757226c5",
           "model_hash": "sha256:e3dd91fb693a973caf114236fb5c68ecb7ef7cbdb9f1bbe770c70706c3de5fe4",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M7.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M7.pt"
         },
         "child_cpu_time_sec": 2992.5679920000002,
         "child_cpu_utilization_percent": 1419.785763627046,
@@ -8766,7 +8766,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:a0e54de1e4370979d8447867113c9594817638dab3816634ef3722e6103529d0",
           "model_hash": "sha256:0c2beca91354b04b26f7092c94b5c60b217c5db2d5e8cb5403a124bb39738761",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/checkpoints/M8.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/checkpoints/M8.pt"
         },
         "child_cpu_time_sec": 2117.4790909999992,
         "child_cpu_utilization_percent": 1487.2022004884682,
@@ -10372,7 +10372,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:4f559474e7c65724291b5cb57e678e3f9ea4f4240e6f08797ce6e7a96b268c30",
           "model_hash": "sha256:2f95e8a1877d380194f890da777e343fc80778ccf677b3d2023a8a36083eea8a",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M1.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M1.pt"
         },
         "child_cpu_time_sec": 1589.0548360000003,
         "child_cpu_utilization_percent": 1352.9116387250808,
@@ -11244,7 +11244,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:9dcc1e329907d32b6d064d5a59ce3c121d88af51dfe2d799adb2c796e427fd6b",
           "model_hash": "sha256:1c03181a423b770853d719a925306793e6e0fbefb06441131cc702735dc74d76",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M2.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M2.pt"
         },
         "child_cpu_time_sec": 2305.1955659999994,
         "child_cpu_utilization_percent": 1426.6515219696544,
@@ -12436,7 +12436,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:46017071823466d83be206908966150cf871ed053a05c0591fab568b9cd03015",
           "model_hash": "sha256:9b3e73c82499496ed54e2be5a632f54c4811841f4b4aaedf584a1e0021a9d343",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M3.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M3.pt"
         },
         "child_cpu_time_sec": 692.3193680000004,
         "child_cpu_utilization_percent": 1465.4924834360306,
@@ -12788,7 +12788,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:1f9715f499e19229720f1ed833a22f2cbcb4af29c77de891d2f883ed869bc8fa",
           "model_hash": "sha256:9402e69db341df66db4b6a2d59a1357ca3e90ae41dc2772262ed97c7109b85c9",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M4.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M4.pt"
         },
         "child_cpu_time_sec": 795.3502879999996,
         "child_cpu_utilization_percent": 1176.0639993657248,
@@ -13270,7 +13270,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:8313d25d4109334d336794f850268f2abc259eab5f112bf338835850fb5eb84b",
           "model_hash": "sha256:2b61d6382ed12768f6e87d29aa933677393c512ebc70f1d6393d1a196c9df437",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M5.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M5.pt"
         },
         "child_cpu_time_sec": 1606.6078870000001,
         "child_cpu_utilization_percent": 1384.3972414659875,
@@ -14102,7 +14102,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:75d01912f8f99ba2d66a6c0233e585b242fc7e0ace8915642d9ea0351c82e8b7",
           "model_hash": "sha256:82a6152f0015c74759e20b1959b9e7455e8b99b54c30cc5166a3bcc7526f1a7e",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M6.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M6.pt"
         },
         "child_cpu_time_sec": 2198.7359269999997,
         "child_cpu_utilization_percent": 1390.2274599242567,
@@ -15314,7 +15314,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:de0ee0b59284ab0a188f47496656ed66a052f09ba2f7c850c8df1f0e872e1b91",
           "model_hash": "sha256:c339367b3cbbff0ec81676f6727a12848396220c5619b1cd53389adfe8666450",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M7.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M7.pt"
         },
         "child_cpu_time_sec": 1254.826167000001,
         "child_cpu_utilization_percent": 1429.179539268633,
@@ -15946,7 +15946,7 @@
         "checkpoint": {
           "artifact_sha256": "sha256:c5e0336c06f3681b2fe73f5e768c57eeadd69cba1f813a2d9a64c7af47cccbe6",
           "model_hash": "sha256:6a3d29316f3733e97f1df03436d5f68c1ca02cf8e8162c11853f6d598dfc695a",
-          "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M8.pt"
+          "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3/canonical/checkpoints/M8.pt"
         },
         "child_cpu_time_sec": 2243.7717589999993,
         "child_cpu_utilization_percent": 1483.5637002419035,
@@ -17134,7 +17134,7 @@
         "valid_games": 64
       }
     ],
-    "path": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3",
+    "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3",
     "run_id": "torus9-golden-learning-proof-20260913-v3-canonical",
     "source_sha": "9723bb5ac8eb28d55d21d607e3673da5bd894315",
     "status": "AVAILABLE"
@@ -17213,7 +17213,7 @@
       "old_wdl_bias": -0.5725909136235714
     }
   ],
-  "old_run": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3",
+  "old_run": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3",
   "performance": {
     "average_ply": 83.66015625,
     "peak_memory_mb": 2344.6796875,
@@ -17226,7 +17226,7 @@
     "checkpoint": {
       "artifact_sha256": "sha256:cc575ff123bd603da58c6dcfdf23043817f193fca80edbfc3c666a03fc1891e6",
       "model_hash": "sha256:2b1036f1ca5feffd311e99fbcfc5c2d78cdfd28205ac7d6384c8998ae3fb7895",
-      "path": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/preflight/M0-preflight.pt"
+      "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/preflight/M0-preflight.pt"
     },
     "games": 16,
     "games_per_hour": 1833.161516668569,

@@ -98,14 +98,14 @@
       "value_head_semantics": "side-to-move:[WIN,DRAW,LOSS]"
     },
     "model_hash": "sha256:2ba14fc38a7944dbe1d505f849e02a7acb18f0386518a07c2e03f6320b8df3ae",
-    "path": "/home/codex/projects/gocube-alphazero/runs/torus9-alpha-score-ab/torus9-alpha-score-ab-20260913-v1/arms/B/checkpoints/M12-B.pt"
+    "path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-alpha-score-ab-20260913/torus9-alpha-score-ab-20260913-v1/arms/B/checkpoints/M12-B.pt"
   },
   "corpus": {
-    "games_path": "/home/codex/projects/gocube-alphazero/runs/torus9-alpha-score-ab/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/games.jsonl",
+    "games_path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-alpha-score-ab-20260913/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/games.jsonl",
     "games_sha256": "sha256:f3e7c80b1f1bb2ea1df270e785af2a49e26e1c69df37367e9dac2eff83339fec",
-    "immutable_manifest": "/home/codex/projects/gocube-alphazero/runs/torus9-alpha-score-ab/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/manifest.json",
+    "immutable_manifest": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-alpha-score-ab-20260913/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/manifest.json",
     "positions": 5987,
-    "replay_path": "/home/codex/projects/gocube-alphazero/runs/torus9-alpha-score-ab/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/replay.jsonl",
+    "replay_path": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-alpha-score-ab-20260913/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/replay.jsonl",
     "replay_sha256": "sha256:add2247b9c31ef68b7076534d50db8d79209d9492b69f9d281520afe27f260dd"
   },
   "duration_seconds": 27.017714738845825,
@@ -395,7 +395,7 @@
     "unique_transformations": 648
   },
   "training_batch": {
-    "corpus": "/home/codex/projects/gocube-alphazero/runs/torus9-alpha-score-ab/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/replay.jsonl",
+    "corpus": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-alpha-score-ab-20260913/torus9-alpha-score-ab-20260913-v1/selfplay/D12-B/replay.jsonl",
     "row_ids": [
       "D12-B-M11-B-game-0000@ply-1",
       "D12-B-M11-B-game-0001@ply-15",

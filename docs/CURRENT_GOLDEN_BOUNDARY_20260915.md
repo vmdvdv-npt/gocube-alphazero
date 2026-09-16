@@ -22,7 +22,7 @@ This document preserves the immutable scientific/dependency boundary proven by t
 | Last clean resumable boundary | M17 |
 | M18 | never started |
 
-The immutable run report remains `docs/TORUS9_GOLDEN_CURRENT_V3_M1_M17_NIGHT_RUN_20260914.md`. The physical namespace is `runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03` on Legion and remains read-only for parity/benchmark work. No M18 is created by Stage 2.
+The immutable run report remains `docs/TORUS9_GOLDEN_CURRENT_V3_M1_M17_NIGHT_RUN_20260914.md`. The physical namespace is `runs/torus9/active/torus9-golden-v3-20260914-run03` on Legion and remains read-only for parity/benchmark work. No M18 is created by Stage 2.
 
 The two fingerprints retain their original distinct roles. `36911…` is the semantic/lineage identity stored in M0→M17 metadata and required by the continuation runtime. `7e97…` is the sanitized profile content-integrity fingerprint. Stage 2 changes neither.
 

@@ -1,0 +1,203 @@
+{
+  "completed_at": "2026-09-16T11:17:21.138252+00:00",
+  "migration": "2026-09-16",
+  "mode": "execute",
+  "move_only": true,
+  "moves": [
+    {
+      "destination": "docs/experiments/legacy-bundles/torus9-legacy-20260913/manifest.json",
+      "kind": "bundle-metadata",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/manifest.json"
+    },
+    {
+      "destination": "docs/experiments/legacy-bundles/torus9-legacy-20260913/archive-manifest.json",
+      "kind": "bundle-metadata",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/archive-manifest.json"
+    },
+    {
+      "destination": "docs/experiments/legacy-bundles/torus9-invalid-20260914/manifest.json",
+      "kind": "bundle-metadata",
+      "source": "runs/torus9/archive/torus9-invalid-20260914/manifest.json"
+    },
+    {
+      "destination": "docs/experiments/legacy-bundles/torus9-invalid-20260914/archive-manifest.json",
+      "kind": "bundle-metadata",
+      "source": "runs/torus9/archive/torus9-invalid-20260914/archive-manifest.json"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-golden-v3-20260913-run01",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-invalid-20260914/torus9-golden-v3-20260913-run01"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-golden-v3-20260914-run02",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-invalid-20260914/torus9-golden-v3-20260914-run02"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-alpha-score-ab-20260913",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/torus9-alpha-score-ab"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-golden-learning-proof-20260913-v1",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v1"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-golden-learning-proof-20260913-v2",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v2"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-golden-learning-proof-20260913-v3",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-preflight-20260913",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/torus9-golden-learning-proof/torus9-preflight-20260913"
+    },
+    {
+      "destination": "runs/torus9/evaluations/torus9-komi-calibration-20260913",
+      "kind": "evaluation",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/torus9-komi-calibration-20260913"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-wdl-ownership-ab-20260913-v1",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/torus9-ownership-ab/torus9-wdl-ownership-ab-20260913-v1"
+    },
+    {
+      "destination": "runs/torus9/archive/torus9-stable-learning-20260913-v1",
+      "kind": "lineage",
+      "source": "runs/torus9/archive/torus9-legacy-20260913/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/checkpoints",
+      "kind": "lineage-checkpoints",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/checkpoint/c4-hparam-night-20260906-005747-a"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/data",
+      "kind": "lineage-data",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/data/c4-hparam-night-20260906-005747-a"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/logs",
+      "kind": "lineage-logs",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/runs/c4-hparam-night-20260906-005747-a"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/checkpoints",
+      "kind": "lineage-checkpoints",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/checkpoint/c4-hparam-night-20260906-005747-b"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/data",
+      "kind": "lineage-data",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/data/c4-hparam-night-20260906-005747-b"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/logs",
+      "kind": "lineage-logs",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/runs/c4-hparam-night-20260906-005747-b"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/checkpoints",
+      "kind": "lineage-checkpoints",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/checkpoint/c4-hparam-night-20260906-005747-c"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/data",
+      "kind": "lineage-data",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/data/c4-hparam-night-20260906-005747-c"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/logs",
+      "kind": "lineage-logs",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/runs/c4-hparam-night-20260906-005747-c"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/checkpoints",
+      "kind": "lineage-checkpoints",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/checkpoint/c4-hparam-night-20260906-005747-d"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/data",
+      "kind": "lineage-data",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/data/c4-hparam-night-20260906-005747-d"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/logs",
+      "kind": "lineage-logs",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/runs/c4-hparam-night-20260906-005747-d"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/checkpoints",
+      "kind": "lineage-checkpoints",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/checkpoint/c4-hparam-night-20260906-005747-e"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/data",
+      "kind": "lineage-data",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/data/c4-hparam-night-20260906-005747-e"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/logs",
+      "kind": "lineage-logs",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/runs/c4-hparam-night-20260906-005747-e"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/checkpoints",
+      "kind": "lineage-checkpoints",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/checkpoint/c4-hparam-night-20260906-005747-f"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/data",
+      "kind": "lineage-data",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/data/c4-hparam-night-20260906-005747-f"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/logs",
+      "kind": "lineage-logs",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/runs/c4-hparam-night-20260906-005747-f"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/checkpoints",
+      "kind": "lineage-checkpoints",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/checkpoint/c4-hparam-night-20260906-005747-g"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/data",
+      "kind": "lineage-data",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/data/c4-hparam-night-20260906-005747-g"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/logs",
+      "kind": "lineage-logs",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/runs/c4-hparam-night-20260906-005747-g"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-t001-c4-c001/checkpoints",
+      "kind": "lineage-checkpoints",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/checkpoint/c4-t001-c4-c001"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-t001-c4-c001/data",
+      "kind": "lineage-data",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/data/c4-t001-c4-c001"
+    },
+    {
+      "destination": "runs/cube4/archive/c4-t001-c4-c001/logs",
+      "kind": "lineage-logs",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/runs/c4-t001-c4-c001"
+    },
+    {
+      "destination": "runs/cube4/evaluations/komi-7.5-cube4-20260906",
+      "kind": "evaluation",
+      "source": "runs/cube4/archive/komi-7.5-cube4-20260906/training_reports/c4-hparam-night-20260906-005747"
+    }
+  ]
+}

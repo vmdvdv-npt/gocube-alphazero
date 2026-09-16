@@ -108,7 +108,7 @@ def test_pickle_artifacts_are_unsupported_and_hidden_from_catalog(tmp_path: Path
 
 M17_PATH = (
     Path(__file__).parents[2]
-    / "runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03/checkpoints/M17.pt"
+    / "runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M17.pt"
 )
 
 

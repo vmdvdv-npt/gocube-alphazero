@@ -30,10 +30,11 @@ from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_TARGET_FINGERPRINT,
     TORUS9_KOMI,
 )
+from gocube_golden.run_storage import active_lineage_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUN_ROOT = ROOT / "runs" / "torus9-golden-v3-active" / "torus9-golden-v3-20260914-run03"
+RUN_ROOT = active_lineage_dir("torus9", "torus9-golden-v3-20260914-run03")
 M16_PATH = RUN_ROOT / "checkpoints" / "M16.pt"
 M17_PATH = RUN_ROOT / "checkpoints" / "M17.pt"
 ROLLING16_PATH = RUN_ROOT / "replay" / "rolling-after-16.jsonl"

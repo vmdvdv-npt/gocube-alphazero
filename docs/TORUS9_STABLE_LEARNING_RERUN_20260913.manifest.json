@@ -4,12 +4,12 @@
   "artifacts": {
     "docs_json": "/home/codex/projects/gocube-alphazero/docs/TORUS9_STABLE_LEARNING_RERUN_20260913.json",
     "docs_markdown": "/home/codex/projects/gocube-alphazero/docs/TORUS9_STABLE_LEARNING_RERUN_20260913.md",
-    "run_report": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/final-report.json",
+    "run_report": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/final-report.json",
     "run_report_sha256": "sha256:0df8ff8874ca6b110fbb9e4f5d0dc248d802518a066c907fec83443c96f9730a"
   },
   "manifest_schema": "torus9-stable-learning-rerun-v1",
   "new_m0_fresh_initialization": true,
-  "old_run": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3",
+  "old_run": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3",
   "profile_fingerprint": "sha256:a610bc8f02d54f17929c2210bfb35768538aaef2c872241611d5cba4587b6538",
   "profile_id": "gocube-torus9-stable-learning-v2",
   "replay": {

@@ -1,0 +1,220 @@
+{
+  "completed_at": "2026-09-16T11:20:43.658655+00:00",
+  "duplicate_file_count": 42,
+  "duplicate_group_count": 6,
+  "migration": "2026-09-16",
+  "mode": "execute",
+  "move_only_at_storage_level": true,
+  "references": [
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0005.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/checkpoints/iteration-0005.pkl",
+      "sha256": "sha256:28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0005.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/checkpoints/iteration-0005.pkl",
+      "sha256": "sha256:28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0005.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/checkpoints/iteration-0005.pkl",
+      "sha256": "sha256:28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0005.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/checkpoints/iteration-0005.pkl",
+      "sha256": "sha256:28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0005.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/checkpoints/iteration-0005.pkl",
+      "sha256": "sha256:28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0005.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/checkpoints/iteration-0005.pkl",
+      "sha256": "sha256:28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0005.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/checkpoints/iteration-0005.pkl",
+      "sha256": "sha256:28c9d57c38ff6597ae8170c725b985a4db0083bf1cf5cc7e292e6af216c136b4"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0004.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/checkpoints/iteration-0004.pkl",
+      "sha256": "sha256:4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0004.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/checkpoints/iteration-0004.pkl",
+      "sha256": "sha256:4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0004.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/checkpoints/iteration-0004.pkl",
+      "sha256": "sha256:4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0004.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/checkpoints/iteration-0004.pkl",
+      "sha256": "sha256:4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0004.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/checkpoints/iteration-0004.pkl",
+      "sha256": "sha256:4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0004.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/checkpoints/iteration-0004.pkl",
+      "sha256": "sha256:4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0004.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/checkpoints/iteration-0004.pkl",
+      "sha256": "sha256:4dfd3a0967bb98a6cb150bbe137e74855323a25edd1faea51539a6fda6f9ef30"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0002.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/checkpoints/iteration-0002.pkl",
+      "sha256": "sha256:52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0002.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/checkpoints/iteration-0002.pkl",
+      "sha256": "sha256:52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0002.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/checkpoints/iteration-0002.pkl",
+      "sha256": "sha256:52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0002.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/checkpoints/iteration-0002.pkl",
+      "sha256": "sha256:52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0002.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/checkpoints/iteration-0002.pkl",
+      "sha256": "sha256:52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0002.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/checkpoints/iteration-0002.pkl",
+      "sha256": "sha256:52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0002.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/checkpoints/iteration-0002.pkl",
+      "sha256": "sha256:52c2af6340fc164ed586b9623c97feb8504a197f9d878a994193a294ce8d59b5"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0001.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/checkpoints/iteration-0001.pkl",
+      "sha256": "sha256:64cf800460f6090880c7818cbeff80123257dcd14c79689f108cc5523fb58722"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0001.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/checkpoints/iteration-0001.pkl",
+      "sha256": "sha256:64cf800460f6090880c7818cbeff80123257dcd14c79689f108cc5523fb58722"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0001.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/checkpoints/iteration-0001.pkl",
+      "sha256": "sha256:64cf800460f6090880c7818cbeff80123257dcd14c79689f108cc5523fb58722"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0001.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/checkpoints/iteration-0001.pkl",
+      "sha256": "sha256:64cf800460f6090880c7818cbeff80123257dcd14c79689f108cc5523fb58722"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0001.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/checkpoints/iteration-0001.pkl",
+      "sha256": "sha256:64cf800460f6090880c7818cbeff80123257dcd14c79689f108cc5523fb58722"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0001.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/checkpoints/iteration-0001.pkl",
+      "sha256": "sha256:64cf800460f6090880c7818cbeff80123257dcd14c79689f108cc5523fb58722"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0001.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/checkpoints/iteration-0001.pkl",
+      "sha256": "sha256:64cf800460f6090880c7818cbeff80123257dcd14c79689f108cc5523fb58722"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0003.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/checkpoints/iteration-0003.pkl",
+      "sha256": "sha256:ebe094b2705b0226abade15e03fffd620edf1691dbae6a93af2cb7680bbb7096"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0003.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/checkpoints/iteration-0003.pkl",
+      "sha256": "sha256:ebe094b2705b0226abade15e03fffd620edf1691dbae6a93af2cb7680bbb7096"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0003.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/checkpoints/iteration-0003.pkl",
+      "sha256": "sha256:ebe094b2705b0226abade15e03fffd620edf1691dbae6a93af2cb7680bbb7096"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0003.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/checkpoints/iteration-0003.pkl",
+      "sha256": "sha256:ebe094b2705b0226abade15e03fffd620edf1691dbae6a93af2cb7680bbb7096"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0003.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/checkpoints/iteration-0003.pkl",
+      "sha256": "sha256:ebe094b2705b0226abade15e03fffd620edf1691dbae6a93af2cb7680bbb7096"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0003.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/checkpoints/iteration-0003.pkl",
+      "sha256": "sha256:ebe094b2705b0226abade15e03fffd620edf1691dbae6a93af2cb7680bbb7096"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0003.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/checkpoints/iteration-0003.pkl",
+      "sha256": "sha256:ebe094b2705b0226abade15e03fffd620edf1691dbae6a93af2cb7680bbb7096"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0000.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-a/checkpoints/iteration-0000.pkl",
+      "sha256": "sha256:f98d3fe4da4210d27dcf66d37ce7bea0ae7de22449de5c670b1278f6aec59943"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0000.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-b/checkpoints/iteration-0000.pkl",
+      "sha256": "sha256:f98d3fe4da4210d27dcf66d37ce7bea0ae7de22449de5c670b1278f6aec59943"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0000.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-c/checkpoints/iteration-0000.pkl",
+      "sha256": "sha256:f98d3fe4da4210d27dcf66d37ce7bea0ae7de22449de5c670b1278f6aec59943"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0000.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-d/checkpoints/iteration-0000.pkl",
+      "sha256": "sha256:f98d3fe4da4210d27dcf66d37ce7bea0ae7de22449de5c670b1278f6aec59943"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0000.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-e/checkpoints/iteration-0000.pkl",
+      "sha256": "sha256:f98d3fe4da4210d27dcf66d37ce7bea0ae7de22449de5c670b1278f6aec59943"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0000.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-f/checkpoints/iteration-0000.pkl",
+      "sha256": "sha256:f98d3fe4da4210d27dcf66d37ce7bea0ae7de22449de5c670b1278f6aec59943"
+    },
+    {
+      "canonical_path": "runs/cube4/archive/c4-t001-c4-c001/checkpoints/iteration-0000.pkl",
+      "duplicate_path": "runs/cube4/archive/c4-hparam-night-20260906-005747-g/checkpoints/iteration-0000.pkl",
+      "sha256": "sha256:f98d3fe4da4210d27dcf66d37ce7bea0ae7de22449de5c670b1278f6aec59943"
+    }
+  ]
+}

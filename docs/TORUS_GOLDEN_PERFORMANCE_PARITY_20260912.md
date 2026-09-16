@@ -103,15 +103,15 @@ Intervals are the bounded independent start-pair mean 95% Hoeffding intervals.
 ## Artifacts and reproducibility
 
 - Machine-readable report:
-  `runs/torus-golden-stage4/torus-golden-stage4-seed2-parity-v8/final-report.json`
+  `runs/torus9/archive/torus-golden-stage4-seed2-parity-v8/final-report.json`
 - Run manifest:
-  `runs/torus-golden-stage4/torus-golden-stage4-seed2-parity-v8/manifest.json`
+  `runs/torus9/archive/torus-golden-stage4-seed2-parity-v8/manifest.json`
 - Source commit used for the canonical run:
   `958c26fc565fcef4bd1d693cc3b8b1b8524c8f5e`
 - Source tree used for the canonical run:
   `5f9f24e8301f7315e458f1f6d2ece2e1f24a3099`
 - Immutable reference artifact root:
-  `runs/torus-golden-stage4/torus-golden-stage4-seed2-v4/`
+  `runs/torus9/archive/torus-golden-stage4-seed2-v4/`
 
 The canonical parity command was:
 

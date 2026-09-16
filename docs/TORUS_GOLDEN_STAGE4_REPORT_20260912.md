@@ -77,7 +77,7 @@ On the 16-pair ablation Arena, A vs M0′ was 29/3/0 (0.9063), B vs M0′ was 31
 Source commit: `706c1bb9a7bd063fa6e9265ab64f667df75f9c66`  
 Source tree: `1ca84e1fdfed940fdcb71530f0b40580f52aca2e`  
 Selected device: CPU (fixed batch-1 benchmark; CUDA was slower in this environment)  
-Artifact root: `runs/torus-golden-stage4/torus-golden-stage4-seed2-v4/`
+Artifact root: `runs/torus9/archive/torus-golden-stage4-seed2-v4/`
 
 The run contains the frozen Evaluation V2 manifest, starts, all replay/self-play chunks, checkpoints and metadata, all Arena records and controls, ablation outputs, telemetry, and machine-readable `final-report.json`.
 

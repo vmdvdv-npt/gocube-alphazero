@@ -11,5 +11,5 @@ if [[ ! -x "$PYTHON" ]]; then
 fi
 
 exec "$PYTHON" -m alphazero.envs.gocube.integration.dev_launcher \
-  --checkpoint-dir "$ROOT/checkpoint" \
+  --checkpoint-dir "$ROOT/runs" \
   "$@"

@@ -4,8 +4,11 @@ import inspect
 import json
 from pathlib import Path
 
+import pytest
+
 import tools.arena as arena_cli
 import tools.arena_engine as arena_engine
+from gocube_golden.run_storage import evaluation_dir
 from tools.arena_profiles import available_profiles, get_profile
 from tools.arena_profiles.torus9 import Torus9ArenaProfile
 
@@ -116,6 +119,34 @@ def test_only_one_normal_arena_cli_is_advertised():
     assert defaults["inference_batch_rows"] == arena_engine.DEFAULT_INFERENCE_BATCH_ROWS
     assert defaults["inference_batch_wait_ms"] == arena_engine.DEFAULT_INFERENCE_BATCH_WAIT_MS
     assert defaults["seed"] == arena_engine.DEFAULT_MASTER_SEED
+
+
+def test_default_arena_output_uses_canonical_evaluation_tree():
+    output = arena_cli._default_output(
+        "torus9",
+        Path("candidate.pt"),
+        Path("reference.pt"),
+    )
+    assert output.parent == evaluation_dir("torus9", "placeholder").parent
+    assert "arena-results" not in output.parts
+
+
+def test_arena_rejects_explicit_output_outside_evaluation_tree(tmp_path):
+    with pytest.raises(ValueError, match="canonical runs/<topology>/evaluations"):
+        arena_cli._canonical_evaluation_output("torus9", tmp_path)
+
+
+def test_production_writers_do_not_use_legacy_root_artifact_paths():
+    root = Path(__file__).resolve().parents[2]
+    for relative in (
+        "tools/arena.py",
+        "tools/torus9_golden_learning.py",
+        "tools/torus9_nightly_diagnostics.py",
+    ):
+        source = (root / relative).read_text(encoding="utf-8")
+        assert "arena-results" not in source
+        assert "training_reports" not in source
+        assert "torus9-golden-v3-active" not in source
 
 
 def test_lane_contract_expectation_is_workload_aware():

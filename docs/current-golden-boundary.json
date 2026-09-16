@@ -166,7 +166,7 @@
     "alphazero/SelfPlayAgent.pyx": "LEGACY — REMOVE IN LATER STAGE"
   },
   "external_artifacts": {
-    "reference_run_path": "runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03",
+    "reference_run_path": "runs/torus9/active/torus9-golden-v3-20260914-run03",
     "stored_in_git": false,
     "m17_checkpoint_reloaded_in_github_ci": false,
     "reason": "Reference run weights and state are preserved on Legion but are not repository contents."

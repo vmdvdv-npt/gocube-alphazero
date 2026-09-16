@@ -2423,7 +2423,7 @@
     "checkpoint_artifact_hashes_match": true,
     "manifest_id": "torus9-golden-learning-proof-20260913-v3",
     "manifest_path": "/home/codex/projects/gocube-alphazero/docs/TORUS9_GOLDEN_LEARNING_PROOF_20260913.manifest.json",
-    "run_root": "runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3",
+    "run_root": "runs/torus9/archive/torus9-golden-learning-proof-20260913-v3",
     "source_experiment_commit": "9723bb5ac8eb28d55d21d607e3673da5bd894315"
   },
   "optimizer_and_parameter_audit": {
@@ -3076,7 +3076,7 @@
     },
     "rows": 40910
   },
-  "run_root": "/home/codex/projects/gocube-alphazero/runs/torus9-golden-learning-proof/torus9-golden-learning-proof-20260913-v3",
+  "run_root": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-golden-learning-proof-20260913-v3",
   "search_target_quality": {
     "models": {
       "0": {

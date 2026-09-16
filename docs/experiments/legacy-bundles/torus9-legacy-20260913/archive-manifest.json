@@ -1,0 +1,29 @@
+{
+  "manifest_schema": "torus9-legacy-archive-v1",
+  "runs_root": "/home/codex/projects/gocube-alphazero/runs",
+  "archive_namespace": "archive/torus9-legacy-20260913",
+  "automatic_discovery": false,
+  "deletion_performed": false,
+  "moved_runs": [
+    {
+      "source": "torus9-alpha-score-ab",
+      "archive": "archive/torus9-legacy-20260913/torus9-alpha-score-ab"
+    },
+    {
+      "source": "torus9-golden-learning-proof",
+      "archive": "archive/torus9-legacy-20260913/torus9-golden-learning-proof"
+    },
+    {
+      "source": "torus9-komi-calibration-20260913",
+      "archive": "archive/torus9-legacy-20260913/torus9-komi-calibration-20260913"
+    },
+    {
+      "source": "torus9-ownership-ab",
+      "archive": "archive/torus9-legacy-20260913/torus9-ownership-ab"
+    },
+    {
+      "source": "torus9-stable-learning-v2",
+      "archive": "archive/torus9-legacy-20260913/torus9-stable-learning-v2"
+    }
+  ]
+}

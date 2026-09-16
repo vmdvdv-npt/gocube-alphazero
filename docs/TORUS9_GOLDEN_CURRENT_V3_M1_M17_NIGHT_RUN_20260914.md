@@ -99,7 +99,7 @@ Unrelated `docs/torus9-komi-reeval-20260913/` is intentionally excluded.
 
 The complete run artifacts are preserved at:
 
-`runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03`
+`runs/torus9/active/torus9-golden-v3-20260914-run03`
 
 The final state is recorded in `continuation-state.json`, the M17 metrics in
 `iter-17-summary.json`, and the lineage in `manifest.json`.

@@ -11,7 +11,7 @@
 
 | Metric | Value |
 |---|---:|
-| M1 checkpoint | `runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03/checkpoints/M1.pt` |
+| M1 checkpoint | `runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M1.pt` |
 | Wall time | 2260.3593 s |
 | Games / technical games | 64 / 0 |
 | Total moves / moves per second | 4993 / 2.20894 |

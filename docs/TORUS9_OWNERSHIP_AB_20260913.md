@@ -47,6 +47,6 @@ canonical Golden promotion or a formal universal statistical threshold. No
 adaptive Arena extension was performed.
 
 Complete machine-readable evidence is in the ignored runtime artifact
-`runs/torus9-ownership-ab/torus9-wdl-ownership-ab-20260913-v1/final-report.json`;
+`runs/torus9/archive/torus9-wdl-ownership-ab-20260913-v1/final-report.json`;
 the compact committed summary is
 `docs/TORUS9_OWNERSHIP_AB_20260913.json`.

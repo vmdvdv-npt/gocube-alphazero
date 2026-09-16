@@ -1082,7 +1082,7 @@
       "status": "FIXED_BEFORE_RUN"
     },
     "games_declared": 128,
-    "games_path": "/home/codex/projects/gocube-alphazero/runs/torus9-komi-calibration-20260913/m8-vs-m8-paired/games.jsonl",
+    "games_path": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-komi-calibration-20260913/m8-vs-m8-paired/games.jsonl",
     "games_sha256": "sha256:1fa3588fcfc4ca0b0812115a860a4923211feb398bf444a70ee7443793971e5d",
     "independent_pairs": 64,
     "master_seed": 2026091311,
@@ -1114,7 +1114,7 @@
       "14": 8,
       "16": 8
     },
-    "starts_path": "/home/codex/projects/gocube-alphazero/runs/torus9-komi-calibration-20260913/m8-vs-m8-paired/starts.jsonl",
+    "starts_path": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/torus9-komi-calibration-20260913/m8-vs-m8-paired/starts.jsonl",
     "starts_sha256": "sha256:1b6abdec9a8e3d3bcbd62e98135ea30a0b2417fed2216770a42f778f4e8d1ee8",
     "summary": {
       "95_percent_hoeffding_interval": [
@@ -2264,12 +2264,12 @@
   },
   "report_schema": "torus9-komi-calibration-v1",
   "source": {
-    "arena_root": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1/canonical/arena",
+    "arena_root": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1/canonical/arena",
     "calibration_tool": "tools/torus9_komi_calibration.py",
     "calibration_tool_sha256": "sha256:724337fd6dfbaeb75c8425cff8320d47bdcda38a8151a9f757e71504d41ca569",
     "git_commit": "d1fd6210f6a3b7755341c0c4c832ed22cf5289d4",
     "git_tree": "a8e193a0bef2ba2b52f562eae528e5b7dfc4f33b",
-    "run_root": "/home/codex/projects/gocube-alphazero/runs/torus9-stable-learning-v2/torus9-stable-learning-20260913-v1",
+    "run_root": "/home/codex/projects/gocube-alphazero/runs/torus9/archive/torus9-stable-learning-20260913-v1",
     "worktree_clean": true
   },
   "winner_flips_at_all_512_candidate": {

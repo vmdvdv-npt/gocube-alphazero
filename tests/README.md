@@ -19,5 +19,6 @@ Useful commands:
 ```
 
 The KataGo command requires the pinned local oracle. Routine cleanup may remove
-`__pycache__/` and `.pytest_cache/`; do not remove `runs/`, `data/`, checkpoints,
-or experiment archives without an explicit retention decision.
+`__pycache__/` and `.pytest_cache/`; do not remove lineage data under `runs/` or
+global service state such as `data/.gocube-game-ids` without an explicit
+retention decision.

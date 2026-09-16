@@ -8,7 +8,7 @@
   "stop_reason": "manual checkpoint for baseline telemetry review",
   "next_transition_started": false,
   "resumable_from": "M1",
-  "m1_checkpoint": "runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03/checkpoints/M1.pt",
+  "m1_checkpoint": "runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M1.pt",
   "wall_time_sec": 2260.3593094348907,
   "games_completed": 64,
   "technical_games": 0,
