@@ -1,115 +1,155 @@
-# Production Training Orchestrator V2
+# Production Training Orchestrator V3
 
-## Purpose
+## Scope
 
-The orchestrator is a lifecycle/safety mechanism. It does **not** decide how a model should be trained or evaluated.
+V3 is the production supervisor for long AlphaZero training lineages. It is deliberately game-independent: Cube/Torus rules, topology semantics, search, model, replay and optimizer behaviour stay in scientific profiles/adapters and the existing engines.
 
-The production boundary is:
+The boundary is:
 
-`research / Golden Sheet / task specification -> one-shot run-spec -> orchestrator -> profile driver -> engines`
+`research / Golden Sheet / task specification -> immutable run-spec -> generic supervisor -> profile adapter -> SelfPlayEngine / TrainingEngine / Arena`
 
-There are no production tuning defaults in the active CLI path. A run must provide every policy-bearing value that the supervisor or driver needs. Missing values fail before lineage creation.
+The supervisor chooses no scientific or execution tuning values on its own.
 
-## Immutable one-shot run-spec
+## Immutable run-spec
 
-A new run starts with a JSON document using schema `gocube-production-run-spec-v2`.
+A new run uses schema `gocube-production-run-spec-v3`. The one-shot JSON explicitly pins:
 
-The task that launches the run owns the values in that document, including execution choices, Arena schedule/workload, health thresholds, soft-stop window, performance references, learning checks, seeds and required metrics.
+- topology and board size;
+- adapter identity and process transport;
+- scientific profile path + fingerprint;
+- self-play workload and execution parameters;
+- device and reproducibility seeds;
+- Arena enablement, cadence, mode, workload, seed, fixed startset identity and execution gates;
+- liveness/resource thresholds;
+- progress-stall thresholds and bounded restart policy;
+- soft-stop window;
+- performance baselines/thresholds;
+- learning metrics/stall rules;
+- required generation/Arena metrics.
 
-The repository does not carry a canonical production orchestrator preset with those choices.
+Missing policy is an error. There is no production fallback to Golden Sheet, Legion values, old configs or historical benchmark constants.
 
-## Create freezes policy
-
-`create`, `run`, and `start` require `--spec`.
-
-At lineage creation the complete semantic run-spec is written to:
+At creation the complete run-spec is copied once to:
 
 `runs/<topology>/active/<lineage-id>/run-spec.json`
 
-Its canonical SHA-256 fingerprint is recorded in `manifest.json` as both the lineage `config_fingerprint` and `run_spec.fingerprint`.
+Its canonical SHA-256 is stored in `manifest.json`. Resume/status/stop read only this lineage-owned copy and fail closed on drift.
 
-After creation, the source JSON passed on the command line is no longer authoritative. It may be moved or deleted.
+## Storage ownership
 
-`resume`, `status`, `stop`, and the detached supervisor discover the lineage and read only the saved `run-spec.json`. If the saved file or its manifest fingerprint changes, execution fails closed.
+One lineage uses one stable directory:
 
-This prevents a repository preset, later edit, or different command line from silently changing an existing training lineage.
+`runs/<topology>/active/<lineage-id>/`
 
-## CLI
+All lineage-owned checkpoints, self-play/replay, logs, metrics, reports and periodic same-lineage Arena evidence remain under that directory. Periodic Arena therefore writes to:
 
-New lineage:
+`runs/<topology>/active/<lineage-id>/arena/generation-NNNN/`
+
+Only comparisons between independent lineages belong under:
+
+`runs/<topology>/evaluations/<evaluation-id>/`
+
+Checkpoints are referenced, never copied between lineages.
+
+## Terminal commands
+
+Start detached and survive terminal disconnect:
 
 ```bash
-.venv/bin/python tools/training_orchestrator.py create \
-  --spec /path/to/one-shot-run.json \
-  --lineage <lineage-id>
-
 .venv/bin/python tools/training_orchestrator.py start \
-  --spec /path/to/one-shot-run.json \
+  --spec /path/to/run-spec.json \
   --lineage <lineage-id> \
   --max-generations <N>
 ```
 
-Existing lineage:
+`start` does not return success merely because `Popen` succeeded. It waits for the detached supervisor to publish a `RUNNING` heartbeat inside the explicit startup timeout. Supervisor stdout/stderr goes to:
+
+`runs/<topology>/active/<lineage-id>/logs/orchestrator-supervisor.log`
+
+Live status:
 
 ```bash
 .venv/bin/python tools/training_orchestrator.py status --lineage <lineage-id>
 .venv/bin/python tools/training_orchestrator.py status --lineage <lineage-id> --watch
+```
+
+Status includes lifecycle state, health classification, generation/phase, semantic progress token, progress age, latest speed metrics, last Arena, warning, soft-stop target and report path.
+
+Logs:
+
+```bash
+.venv/bin/python tools/training_orchestrator.py logs --lineage <lineage-id> --follow
+```
+
+Soft stop:
+
+```bash
 .venv/bin/python tools/training_orchestrator.py stop --lineage <lineage-id>
+.venv/bin/python tools/training_orchestrator.py stop --lineage <lineage-id> --minutes 60
+```
+
+The active safe unit is allowed to finish. A stop request does not start a new generation or a new Arena. If a generation committed exactly on an Arena cadence, that Arena remains pending and runs first after explicit resume.
+
+Resume:
+
+```bash
 .venv/bin/python tools/training_orchestrator.py resume --lineage <lineage-id>
 ```
 
-There is deliberately no `--spec` on resume/status/stop.
+No `--spec` is accepted for resume/status/stop; the lineage-owned immutable run-spec is authoritative.
 
-## What remains inside the orchestrator
+## Liveness versus progress
 
-The supervisor owns only mechanism:
+Driver heartbeat schema V2 separates:
 
-- lineage creation and Run Storage paths;
-- exclusive run lock;
-- durable state machine;
-- transactional generation bookkeeping;
-- subprocess supervision;
-- atomic state writes;
-- artifact/hash verification;
-- fail-closed technical-result validation;
-- heartbeat/resource observation using thresholds supplied by the run-spec;
-- performance and learning checks using rules supplied by the run-spec;
-- Arena scheduling using the cadence supplied by the run-spec;
-- safe soft-stop at generation boundaries;
-- crash/recovery bookkeeping;
-- terminal warnings/status;
-- machine- and human-readable reports.
+- `liveness_at`: process is responsive;
+- `progress_at` + `progress_token`: meaningful adapter progress advanced;
+- optional structured `progress` (`completed`, `total`, `unit`).
 
-The active production path does not choose games, workers, contexts, batch size, wait, Arena cadence, performance baseline, alert threshold, stop window, or seed.
+A process that keeps heartbeating while semantic progress is frozen is therefore detectable. Warning and critical progress ages come from the run-spec. Critical health is fail-closed: the supervisor terminates only the active child process group it owns, marks the lineage `RECOVERY_REQUIRED`, persists the reason and never uses broad `killall`/`pkill` cleanup.
 
-## Scientific profiles versus run policy
+Progress thresholds must be chosen for the slowest legitimate safe unit in the run. They are stall guards, not assumptions about expected iteration duration.
 
-A scientific profile remains a separately fingerprinted input. For Torus9 it owns game/search/training semantics such as rules, network, MCTS scientific contract, optimizer and replay semantics.
+## Fault recovery
 
-The run-spec explicitly points to the profile and pins its fingerprint. If a task needs a scientifically different profile, it must supply a different explicitly fingerprinted profile; the orchestrator must not synthesize such a change.
+Each generation is transactional. A checkpoint/replay/resume-state is validated and hashed before the generation transaction is marked committed. Partial current-generation files may be cleaned by the adapter during resume; previously committed generations are never deleted by recovery.
 
-- **profile** = what the experiment/model semantics are;
-- **run-spec** = how this particular run is scheduled, executed and monitored;
-- **orchestrator** = safe execution only.
+A non-zero generation child exit can receive a bounded number of automatic resume attempts, explicitly configured by `supervision.max_generation_restarts`. Hangs, stale progress, critical resource conditions, worker/inference fatal reports and artifact validation failures fail closed to `RECOVERY_REQUIRED` rather than looping indefinitely.
 
-## Arena
+## Performance and learning supervision
 
-`arena.every_generations` is any positive integer chosen by the run-spec. The old hard limit of 5..10 is not part of V2 production policy.
+Generation metrics may include self-play throughput, MCTS/move throughput, inference batch telemetry, training duration/updates per second, replay volume, losses, gradient norm and parameter delta. `performance.checks` compare selected metrics with an explicit baseline and warning/fail ratio.
 
-If Arena is disabled, the run-spec must say so explicitly. If enabled, command, cadence, driver config and startset identity are explicit and fingerprinted.
+`learning.metrics` and `learning.stall_checks` track whether learning is moving across generations. Arena results are independent evidence and are never treated as training data or gating state.
 
-## No policy fallback
+Reports are stored in the lineage:
 
-V2 treats absent policy as an error. Examples:
+- `reports/training-report.md` — rolling operator report;
+- `reports/final-report.json` — machine-readable final evidence;
+- `reports/final-report.md` — human-readable final summary;
+- `metrics/history.jsonl` — generation/Arena metric history;
+- `logs/orchestrator-events.jsonl` — warnings, restarts and lifecycle events.
 
-- missing `health.poll_seconds` -> error;
-- missing soft-stop default/min/max -> error;
-- missing performance `fail_ratio` -> error;
-- missing Arena cadence -> error;
-- missing Torus worker/batch/wait setting -> driver error.
+## Archive and discard
 
-An empty list is valid only when the task explicitly chooses no checks for that category.
+Archive moves the whole stopped lineage without copying:
 
-## Storage policy
+```bash
+.venv/bin/python tools/training_orchestrator.py archive --lineage <lineage-id>
+```
 
-All run-owned artifacts remain under the stable lineage directory. Cross-lineage evaluations remain under `runs/<topology>/evaluations/`. Checkpoints are referenced rather than duplicated, and all existing Run Storage and Archiving Policy rules continue to apply.
+Discard is intentionally harder and requires an exact lineage confirmation, explicit reason and useful-result statement. It refuses deletion if retained JSON artifacts reference the lineage/checkpoint hashes, writes the required short record under `docs/experiments/discarded/`, then removes the heavy lineage directory:
+
+```bash
+.venv/bin/python tools/training_orchestrator.py discard \
+  --lineage <lineage-id> \
+  --confirm-lineage <lineage-id> \
+  --reason "..." \
+  --useful-result "none"
+```
+
+## Universal adapter boundary
+
+`gocube_golden.orchestration_adapter.TrainingAdapter` defines the game-independent lifecycle surface (`prepare`, self-play, replay, train, checkpoint save/validation, Arena, metrics, report, resume, cleanup). The current production transport is process-based so long-running scientific work remains isolated from the supervisor.
+
+A fake Cube adapter is exercised in regression tests through the same generic supervisor. The supervisor itself imports no Cube/Torus engine or rules module.
