@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from gocube_golden.production_orchestrator import format_production_status
+from gocube_golden.provenance import file_sha256
+from gocube_golden.provenance import canonical_json
+from gocube_golden.artifact_catalog import ARTIFACT_VALIDATION_SCHEMA
 from gocube_golden.run_lifecycle import archive_lineage, discard_lineage
 from gocube_golden.run_spec import (
     StrictProductionTrainingOrchestrator,
@@ -50,16 +54,88 @@ def _from_lineage(
 
 def _parent_checkpoint(args: argparse.Namespace) -> dict[str, object] | None:
     values = (args.parent_lineage, args.parent_path, args.parent_sha256)
+    extensions = (args.parent_generation, args.parent_replay_path)
     if not any(values):
+        if any(value is not None for value in extensions):
+            raise SystemExit(
+                "Parent reference extensions require --parent-lineage, --parent-path and --parent-sha256"
+            )
         return None
     if not all(values):
         raise SystemExit(
             "--parent-lineage, --parent-path and --parent-sha256 must be supplied together"
         )
+    if args.parent_replay_path is None:
+        raise SystemExit("--parent-replay-path is required for a continuation parent")
+    checkpoint = Path(str(args.parent_path)).resolve()
+    if not checkpoint.is_file():
+        raise SystemExit(f"Parent checkpoint does not exist: {checkpoint}")
+    actual_checkpoint_sha256 = file_sha256(checkpoint)
+    if actual_checkpoint_sha256 != str(args.parent_sha256):
+        raise SystemExit(
+            "--parent-sha256 does not match the referenced checkpoint: "
+            f"expected {args.parent_sha256}, actual {actual_checkpoint_sha256}"
+        )
+    metadata_path = checkpoint.with_suffix(".metadata.json")
+    if not metadata_path.is_file():
+        raise SystemExit(f"Parent checkpoint metadata does not exist: {metadata_path}")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if not isinstance(metadata, dict):
+        raise SystemExit("Parent checkpoint metadata must be a JSON object")
+    label = str(metadata.get("checkpoint_label", ""))
+    inferred_generation = int(label[1:]) if label.startswith("M") and label[1:].isdigit() else None
+    generation = args.parent_generation if args.parent_generation is not None else inferred_generation
+    if generation is None or generation < 0:
+        raise SystemExit("Parent checkpoint metadata must provide an M<number> label")
+    if inferred_generation is not None and inferred_generation != generation:
+        raise SystemExit("--parent-generation disagrees with parent checkpoint label")
+    replay = Path(str(args.parent_replay_path)).resolve()
+    if not replay.is_file():
+        raise SystemExit(f"Parent replay does not exist: {replay}")
+    replay_digest = hashlib.sha256()
+    replay_rows = 0
+    try:
+        with replay.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                replay_digest.update(canonical_json(row).encode("utf-8"))
+                replay_digest.update(b"\n")
+                replay_rows += 1
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Parent replay is not valid JSONL: {replay}") from exc
+    expected_rows = metadata.get("valid_replay_positions", metadata.get("replay_row_count"))
+    if expected_rows is not None and int(expected_rows) != replay_rows:
+        raise SystemExit(
+            f"Parent replay row count mismatch: metadata={expected_rows}, file={replay_rows}"
+        )
+    source_root = replay.parent.parent
+    summary_path = source_root / f"iter-{generation:02d}-summary.json"
+    total_evictions = 0
+    if summary_path.is_file():
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        replay_summary = summary.get("replay") if isinstance(summary, dict) else None
+        if isinstance(replay_summary, dict):
+            total_evictions = int(replay_summary.get("total_evictions", 0))
     return {
         "lineage_id": args.parent_lineage,
-        "path": args.parent_path,
-        "sha256": args.parent_sha256,
+        "label": label,
+        "generation": int(generation),
+        "path": str(checkpoint),
+        "sha256": actual_checkpoint_sha256,
+        "artifact_sha256": actual_checkpoint_sha256,
+        "metadata_path": str(metadata_path),
+        "metadata_sha256": file_sha256(metadata_path),
+        "model_hash": metadata.get("model_hash"),
+        "replay_path": str(replay),
+        "replay_sha256": file_sha256(replay),
+        "replay_row_count": replay_rows,
+        "replay_fingerprint": metadata.get(
+            "replay_fingerprint", "sha256:" + replay_digest.hexdigest()
+        ),
+        "replay_validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+        "total_evictions": total_evictions,
     }
 
 
@@ -273,6 +349,8 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--parent-lineage")
         command.add_argument("--parent-path")
         command.add_argument("--parent-sha256")
+        command.add_argument("--parent-generation", type=int)
+        command.add_argument("--parent-replay-path")
 
     create = sub.add_parser("create", help="Create lineage and freeze the one-shot run spec")
     new_run(create)

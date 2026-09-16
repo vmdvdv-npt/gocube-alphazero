@@ -68,6 +68,21 @@ A failed current generation may remove only its uncommitted temporary/current-ge
 
 Generation completion is published only after checkpoint reload verification, replay/resume-state persistence and artifact SHA-256 validation. Arena snapshots training-owned artifacts before and after evaluation and must explicitly prove `training_mutated=false`.
 
+## Cross-lineage continuation
+
+A new Torus9 lineage may continue from a committed parent generation without
+copying the parent artifacts. The creation command requires the parent
+checkpoint, its SHA-256, the parent generation and the corresponding rolling
+replay artifact. The CLI also records the checkpoint metadata and replay
+identities in `manifest.json` after validating them locally.
+
+On the first child generation, the adapter loads that external checkpoint and
+rolling replay, verifies their recorded identities, and preserves the parent
+training clock and replay eviction count. Later generations use the child
+lineage's own committed artifacts. A checkpoint-only reference is rejected:
+true continuation requires the optimizer-bearing checkpoint and its matching
+rolling replay.
+
 ## Canonical implementation
 
 The former `tools/torus9_orchestrator_driver.py` duplicate has been removed. New production work has one Torus runtime entrypoint: `tools/torus9_run_driver.py` through the generic orchestrator.

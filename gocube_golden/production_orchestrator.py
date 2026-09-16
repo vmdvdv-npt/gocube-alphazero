@@ -440,9 +440,9 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
         # A soft-stop request means: finish the current safe unit, then do not
         # start another unit.  Arena remains pending and will run first on the
         # next explicit resume before more training starts.
-        if self._stop_request() is None and generation % self.spec.arena_every_generations == 0:
+        if self._stop_request() is None and self._arena_due(generation):
             self._run_arena(generation)
-        elif self._stop_request() is not None and generation % self.spec.arena_every_generations == 0:
+        elif self._stop_request() is not None and self._arena_due(generation):
             self.events.emit(
                 "INFO",
                 "Periodic Arena left pending because soft-stop was requested",
@@ -591,6 +591,7 @@ def format_production_status(status: Mapping[str, object]) -> str:
         f"Topology: {status.get('topology')}",
         f"State: {status.get('state')} / health {status.get('health', '-')}",
         f"Generation: {status.get('generation') or '-'} (committed {status.get('last_committed_generation')})",
+        f"Next generation: M{status.get('next_generation')}",
         f"Phase: {status.get('phase') or '-'}",
         f"PID: {status.get('pid') or '-'}",
     ]
@@ -613,6 +614,12 @@ def format_production_status(status: Mapping[str, object]) -> str:
         )
         lines.append(f"Speed: {rendered}")
     lines.append(f"Last Arena: {status.get('last_arena_generation') or '-'}")
+    parent = status.get("parent_checkpoint")
+    if isinstance(parent, Mapping):
+        lines.append(
+            f"Source: {parent.get('lineage_id', '-')} {parent.get('label', '')} "
+            f"({parent.get('path', '-')})"
+        )
     stop = status.get("stop_request")
     if isinstance(stop, Mapping):
         eta = status.get("safe_stop_eta_seconds")
