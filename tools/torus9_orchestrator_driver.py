@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Production Torus9 adapter for the game-independent training orchestrator.
 
-This file is intentionally Torus-specific.  It binds the generic supervisor to
-the already-canonical Torus9 SelfPlayEngine, TrainingEngine and Arena engine.
-Future Cube support belongs in another adapter; the supervisor itself must not
-need to change.
+The generic supervisor owns lifecycle and safety.  This file owns only the
+current Torus9 binding to the existing SelfPlayEngine, TrainingEngine and
+universal Arena.  Future Cube support belongs in a separate adapter.
 """
 from __future__ import annotations
 
@@ -17,7 +16,7 @@ import shutil
 import sys
 import threading
 import time
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import torch
 
@@ -26,7 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from gocube_golden.execution_reference import LEGION_TORUS9_SELFPLAY_PERFORMANCE_REFERENCE
-from gocube_golden.provenance import capture_code_identity, derive_seed, file_sha256
+from gocube_golden.provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
 from gocube_golden.run_storage import evaluation_dir
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
@@ -84,7 +83,12 @@ PERIODIC_ARENA_STARTSET = {
 
 
 def _fingerprint(value: object) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
@@ -94,16 +98,24 @@ PERIODIC_ARENA_STARTSET_FINGERPRINT = _fingerprint(PERIODIC_ARENA_STARTSET)
 
 def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-    temporary.write_text(json.dumps(dict(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    with temporary.open("rb") as handle:
+    # Heartbeat has one background writer plus synchronous phase updates.  A
+    # per-thread temp name prevents two valid atomic writes from racing on the
+    # same temporary pathname during a long run.
+    temporary = path.with_name(
+        f".{path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
+    )
+    with temporary.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(payload), indent=2, sort_keys=True) + "\n")
+        handle.flush()
         os.fsync(handle.fileno())
     temporary.replace(path)
 
 
 def _atomic_jsonl(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    temporary = path.with_name(
+        f".{path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
+    )
     with temporary.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(dict(row), sort_keys=True) + "\n")
@@ -117,6 +129,18 @@ def _read_json(path: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"Expected JSON object: {path}")
     return value
+
+
+def _validate_code_pin(root: Path) -> CodeIdentity:
+    manifest = _read_json(root / "manifest.json")
+    current = capture_code_identity(ROOT)
+    expected = str(manifest.get("git_commit", ""))
+    if expected != current.git_commit_sha:
+        raise ValueError(
+            "Training lineage git commit drift: "
+            f"manifest={expected!r} current={current.git_commit_sha!r}"
+        )
+    return current
 
 
 class _Heartbeat:
@@ -155,7 +179,11 @@ class _Heartbeat:
 
     def __enter__(self) -> "_Heartbeat":
         self.write()
-        self._thread = threading.Thread(target=self._loop, name="torus9-orchestrator-heartbeat", daemon=True)
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="torus9-orchestrator-heartbeat",
+            daemon=True,
+        )
         self._thread.start()
         return self
 
@@ -168,7 +196,7 @@ class _Heartbeat:
         self.write()
 
 
-def _environment(generation: int) -> tuple[Path, str, Path, str]:
+def _environment(generation: int) -> tuple[Path, str, Path, str, CodeIdentity]:
     env_generation = int(os.environ["AZ_GENERATION"])
     if env_generation != int(generation):
         raise ValueError("Generation argument disagrees with AZ_GENERATION")
@@ -180,11 +208,15 @@ def _environment(generation: int) -> tuple[Path, str, Path, str]:
     expected_fingerprint = os.environ["AZ_PROFILE_FINGERPRINT"]
     if not root.is_dir():
         raise ValueError(f"Lineage root does not exist: {root}")
+    canonical_parent = (ROOT / "runs" / "torus9" / "active").resolve()
     try:
-        root.relative_to(ROOT / "runs" / "torus9" / "active")
+        root.relative_to(canonical_parent)
     except ValueError as exc:
-        raise ValueError("Torus9 driver refuses a run root outside canonical active storage") from exc
-    return root, lineage_id, profile_path, expected_fingerprint
+        raise ValueError(
+            "Torus9 driver refuses a run root outside canonical active storage"
+        ) from exc
+    code = _validate_code_pin(root)
+    return root, lineage_id, profile_path, expected_fingerprint, code
 
 
 def _load_profile(profile_path: Path, expected_fingerprint: str) -> dict[str, object]:
@@ -192,7 +224,10 @@ def _load_profile(profile_path: Path, expected_fingerprint: str) -> dict[str, ob
     if profile.get("profile_id") != TORUS9_CURRENT_PROFILE_ID:
         raise ValueError("Torus9 orchestrator received a non-current profile")
     actual = current_torus9_profile_fingerprint(profile)
-    if actual != expected_fingerprint or profile.get("profile_fingerprint") != expected_fingerprint:
+    if (
+        actual != expected_fingerprint
+        or profile.get("profile_fingerprint") != expected_fingerprint
+    ):
         raise ValueError("Torus9 canonical profile fingerprint drift")
     return profile
 
@@ -201,12 +236,15 @@ def _contract(profile: Mapping[str, object]) -> Torus9SelfPlaySearchContract:
     settings = profile["self_play"]
     if not isinstance(settings, Mapping):
         raise ValueError("Torus9 self_play profile is malformed")
+    temperature_plies = settings.get("temperature_plies")
+    if not isinstance(temperature_plies, Sequence) or len(temperature_plies) != 2:
+        raise ValueError("Torus9 temperature_plies profile is malformed")
     return Torus9SelfPlaySearchContract(
         contract_id=TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
         simulations=int(settings["mcts_simulations"]),
         cpuct=float(settings["cpuct"]),
         fpu=float(settings["fpu"]),
-        temperature_until_ply=int(settings["temperature_plies"][1]),
+        temperature_until_ply=int(temperature_plies[1]),
         temperature_after=float(settings["temperature_after"]),
         dirichlet_epsilon=float(settings["dirichlet_epsilon"]),
         dirichlet_alpha=float(settings["dirichlet_alpha"]),
@@ -231,10 +269,17 @@ def _validate_execution(args: argparse.Namespace, profile: Mapping[str, object])
         "wait_ms": float(args.wait_ms),
     }
     if actual != expected:
-        raise ValueError(f"Production Torus9 execution preset drift: expected {expected}, got {actual}")
+        raise ValueError(
+            f"Production Torus9 execution preset drift: expected {expected}, got {actual}"
+        )
     self_play = profile["self_play"]
-    if not isinstance(self_play, Mapping) or int(self_play["games_per_iteration"]) != 64:
-        raise ValueError("Production Torus9 orchestrator requires exactly 64 self-play games per generation")
+    if (
+        not isinstance(self_play, Mapping)
+        or int(self_play["games_per_iteration"]) != 64
+    ):
+        raise ValueError(
+            "Production Torus9 orchestrator requires exactly 64 self-play games per generation"
+        )
     if torch.device(args.device).type != "cuda" or not torch.cuda.is_available():
         raise RuntimeError("Production Torus9 orchestrator requires CUDA")
 
@@ -252,8 +297,8 @@ def _prepare_state(
     generation: int,
     profile: Mapping[str, object],
     device: str,
-    code_identity,
-) -> tuple[Torus9TrainingAdapter, object, Path]:
+    code_identity: CodeIdentity,
+) -> tuple[Torus9TrainingAdapter, Any, Path]:
     adapter = Torus9TrainingAdapter(
         profile=profile,
         code_identity=code_identity,
@@ -367,7 +412,7 @@ def _resume_state(
     generation: int,
     checkpoint: Path,
     replay: Path,
-    loaded_state,
+    loaded_state: Any,
 ) -> Path:
     path = root / "runtime" / "resume" / f"generation-{generation:04d}.json"
     payload = {
@@ -389,7 +434,9 @@ def _resume_state(
                 "training",
                 generation,
             ),
-            "policy": "all game/search/training randomness is derived from explicit stable seeds",
+            "policy": (
+                "all game/search/training randomness is derived from explicit stable seeds"
+            ),
         },
     }
     _atomic_json(path, payload)
@@ -398,44 +445,42 @@ def _resume_state(
 
 def _generation_metrics(
     *,
-    records,
-    selfplay_wall: float,
-    inference: Mapping[str, object],
+    selfplay_metrics: Mapping[str, object],
     training: Mapping[str, object],
 ) -> dict[str, object]:
-    moves = sum(len(record.final_action_trace) for record in records)
     training_wall = float(training.get("training_wall_time_sec", 0.0))
     optimizer_steps = int(training.get("optimizer_steps", 0))
-    return {
-        "games": len(records),
-        "games_per_hour": (len(records) * 3600.0 / selfplay_wall if selfplay_wall else 0.0),
-        "moves": moves,
-        "moves_per_sec": (moves / selfplay_wall if selfplay_wall else 0.0),
-        "selfplay_time_sec": selfplay_wall,
-        "training_time_sec": training_wall,
-        "optimizer_updates_per_sec": (
-            optimizer_steps / training_wall if training_wall else 0.0
-        ),
-        "inference": {
-            "mean_batch_rows": float(inference.get("mean_batch_rows", 0.0)),
-            "p95_batch_rows": float(inference.get("p95_batch_rows", 0.0)),
-            "max_batch_rows": int(inference.get("max_batch_rows", 0)),
-            "rows_per_sec": float(inference.get("rows_per_sec", 0.0)),
-        },
-        "loss": {
-            "policy": float(training.get("mean_policy_loss", 0.0)),
-            "value": float(training.get("mean_value_loss", 0.0)),
-            "ownership": float(training.get("mean_ownership_loss", 0.0)),
-            "score": float(training.get("mean_score_loss_normalized", 0.0)),
-            "total": float(training.get("mean_total_loss", 0.0)),
-        },
-        "learning": {
-            "optimizer_updates_total": int(training.get("optimizer_updates_total", 0)),
-            "samples_consumed_total": int(training.get("samples_consumed_total", 0)),
-            "mean_parameter_delta": float(training.get("mean_parameter_delta", 0.0)),
-            "mean_gradient_norm": float(training.get("mean_gradient_norm", 0.0)),
-        },
-    }
+    metrics = dict(selfplay_metrics)
+    metrics.update(
+        {
+            "training_time_sec": training_wall,
+            "optimizer_updates_per_sec": (
+                optimizer_steps / training_wall if training_wall else 0.0
+            ),
+            "loss": {
+                "policy": float(training.get("mean_policy_loss", 0.0)),
+                "value": float(training.get("mean_value_loss", 0.0)),
+                "ownership": float(training.get("mean_ownership_loss", 0.0)),
+                "score": float(training.get("mean_score_loss_normalized", 0.0)),
+                "total": float(training.get("mean_total_loss", 0.0)),
+            },
+            "learning": {
+                "optimizer_updates_total": int(
+                    training.get("optimizer_updates_total", 0)
+                ),
+                "samples_consumed_total": int(
+                    training.get("samples_consumed_total", 0)
+                ),
+                "mean_parameter_delta": float(
+                    training.get("mean_parameter_delta", 0.0)
+                ),
+                "mean_gradient_norm": float(
+                    training.get("mean_gradient_norm", 0.0)
+                ),
+            },
+        }
+    )
+    return metrics
 
 
 def _publish_generation_result(
@@ -450,10 +495,14 @@ def _publish_generation_result(
     summary_path = root / f"iter-{generation:02d}-summary.json"
     marker = root / f"generation-{generation:02d}.complete.json"
     selfplay_path = root / "selfplay" / f"iter-{generation:02d}-games.jsonl"
-    adapter = Torus9TrainingAdapter(profile=_read_json(Path(os.environ["AZ_PROFILE_PATH"])))
+
+    adapter = Torus9TrainingAdapter(
+        profile=_read_json(Path(os.environ["AZ_PROFILE_PATH"]))
+    )
     loaded = adapter.load_state(checkpoint, replay_path=replay, device="cpu")
     if int(loaded.current_generation) != generation:
         raise ValueError("Reloaded Torus9 checkpoint generation mismatch")
+
     resume = _resume_state(
         root=root,
         generation=generation,
@@ -465,16 +514,13 @@ def _publish_generation_result(
     training = summary.get("training")
     if not isinstance(training, Mapping):
         raise ValueError("Training summary is missing training metrics")
-    metrics = _generation_metrics(
-        records=(),
-        selfplay_wall=float(selfplay_metrics["selfplay_time_sec"]),
-        inference=selfplay_metrics["inference"],
-        training=training,
-    )
-    metrics.update(dict(selfplay_metrics))
     expected_selfplay_hash = selfplay_metrics.get("selfplay_artifact_sha256")
-    if expected_selfplay_hash is not None and expected_selfplay_hash != file_sha256(selfplay_path):
-        raise ValueError("Persisted self-play artifact hash disagrees with committed generation summary")
+    actual_selfplay_hash = file_sha256(selfplay_path)
+    if expected_selfplay_hash != actual_selfplay_hash:
+        raise ValueError(
+            "Persisted self-play artifact hash disagrees with committed generation summary"
+        )
+
     artifacts = [
         _artifact(root, path)
         for path in (
@@ -504,18 +550,21 @@ def _publish_generation_result(
         "artifacts": artifacts,
         "technical_games": int(selfplay_metrics.get("technical_games", 0)),
         "invalid_games": int(selfplay_metrics.get("invalid_games", 0)),
-        "metrics": metrics,
+        "metrics": _generation_metrics(
+            selfplay_metrics=selfplay_metrics,
+            training=training,
+        ),
     }
-    result_path = Path(os.environ["AZ_GENERATION_RESULT_PATH"])
-    _atomic_json(result_path, payload)
+    _atomic_json(Path(os.environ["AZ_GENERATION_RESULT_PATH"]), payload)
     return payload
 
 
 def run_generation(args: argparse.Namespace) -> dict[str, object]:
-    root, lineage_id, profile_path, expected_fingerprint = _environment(args.generation)
+    root, lineage_id, profile_path, expected_fingerprint, code = _environment(
+        args.generation
+    )
     profile = _load_profile(profile_path, expected_fingerprint)
     _validate_execution(args, profile)
-    code = capture_code_identity(ROOT)
     heartbeat_path = Path(os.environ["AZ_DRIVER_HEARTBEAT_PATH"])
     marker = root / f"generation-{args.generation:02d}.complete.json"
 
@@ -526,12 +575,15 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
                 "Current Torus9 orchestrator driver supports fresh M0 lineages only; "
                 "it will not silently discard a cross-lineage parent checkpoint/replay state"
             )
+
         if marker.is_file():
             heartbeat.set_phase("recover-published-generation")
             summary = _read_json(root / f"iter-{args.generation:02d}-summary.json")
             persisted = summary.get("orchestrator_selfplay")
             if not isinstance(persisted, Mapping):
-                raise ValueError("Committed generation lacks orchestrator self-play metrics")
+                raise ValueError(
+                    "Committed generation lacks orchestrator self-play metrics"
+                )
             return _publish_generation_result(
                 root=root,
                 generation=args.generation,
@@ -543,8 +595,15 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             heartbeat.set_phase("cleanup-uncommitted-generation")
             _cleanup_uncommitted_generation(root, args.generation)
             Path(os.environ["AZ_GENERATION_RESULT_PATH"]).unlink(missing_ok=True)
-            (root / "runtime" / "resume" / f"generation-{args.generation:04d}.json").unlink(missing_ok=True)
-        elif any(path.exists() for path in _generation_paths(root, args.generation)):
+            (
+                root
+                / "runtime"
+                / "resume"
+                / f"generation-{args.generation:04d}.json"
+            ).unlink(missing_ok=True)
+        elif any(
+            path.exists() for path in _generation_paths(root, args.generation)
+        ):
             raise FileExistsError(
                 "Generation has uncommitted artifacts; use the orchestrator resume path"
             )
@@ -559,7 +618,10 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             code_identity=code,
         )
 
-        games = int(profile["self_play"]["games_per_iteration"])
+        self_play = profile["self_play"]
+        if not isinstance(self_play, Mapping):
+            raise ValueError("Torus9 self_play profile is malformed")
+        games = int(self_play["games_per_iteration"])
         game_ids = [
             f"{lineage_id}-generation-{args.generation:04d}-game-{index:04d}"
             for index in range(games)
@@ -588,14 +650,25 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             execution_activity=inference,
         )
         selfplay_wall = time.perf_counter() - started
-        if len(records) != games or {record.game_id for record in records} != set(game_ids):
-            raise RuntimeError("Torus9 self-play did not return exactly the requested game set")
-        technical_games = sum(record.technical_termination is not None for record in records)
+        if len(records) != games or {
+            record.game_id for record in records
+        } != set(game_ids):
+            raise RuntimeError(
+                "Torus9 self-play did not return exactly the requested game set"
+            )
+        technical_games = sum(
+            record.technical_termination is not None for record in records
+        )
         if technical_games:
-            raise RuntimeError(f"Torus9 self-play produced {technical_games} technical games")
+            raise RuntimeError(
+                f"Torus9 self-play produced {technical_games} technical games"
+            )
         for record in records:
             record.validate()
-        selfplay_path = root / "selfplay" / f"iter-{args.generation:02d}-games.jsonl"
+
+        selfplay_path = (
+            root / "selfplay" / f"iter-{args.generation:02d}-games.jsonl"
+        )
         _atomic_jsonl(selfplay_path, [record.to_dict() for record in records])
         moves = sum(len(record.final_action_trace) for record in records)
         selfplay_metrics = {
@@ -603,7 +676,9 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             "technical_games": 0,
             "invalid_games": 0,
             "moves": moves,
-            "games_per_hour": games * 3600.0 / selfplay_wall if selfplay_wall else 0.0,
+            "games_per_hour": (
+                games * 3600.0 / selfplay_wall if selfplay_wall else 0.0
+            ),
             "moves_per_sec": moves / selfplay_wall if selfplay_wall else 0.0,
             "selfplay_time_sec": selfplay_wall,
             "inference": {
@@ -647,34 +722,82 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
         return payload
 
 
-def _training_snapshot(root: Path, generation: int) -> dict[str, str]:
-    paths = list(sorted((root / "checkpoints").glob("M*.pt")))
-    paths += list(sorted((root / "checkpoints").glob("M*.metadata.json")))
-    rolling = root / "replay" / f"rolling-after-{generation:02d}.jsonl"
-    if rolling.is_file():
-        paths.append(rolling)
-    return {_relative(root, path): file_sha256(path) for path in paths if path.is_file()}
+def _training_snapshot(root: Path) -> dict[str, str]:
+    paths: list[Path] = []
+    for directory in ("checkpoints", "replay", "training", "selfplay"):
+        base = root / directory
+        if base.is_dir():
+            paths.extend(path for path in base.rglob("*") if path.is_file())
+    paths.extend(root.glob("iter-*-summary.json"))
+    paths.extend(root.glob("generation-*.complete.json"))
+    unique = sorted({path.resolve() for path in paths})
+    return {
+        _relative(root, path): file_sha256(path)
+        for path in unique
+        if path.is_file()
+    }
+
+
+def _validate_existing_arena(
+    *,
+    output: Path,
+    summary: Mapping[str, object],
+    candidate: Path,
+    reference: Path,
+) -> None:
+    manifest_path = output / "manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError("Existing periodic Arena summary has no manifest")
+    manifest = _read_json(manifest_path)
+    scientific = summary.get("scientific_contract")
+    execution = summary.get("execution")
+    expected_execution = PERIODIC_ARENA_PRESET["execution"]
+    if (
+        summary.get("candidate_artifact_sha256") != file_sha256(candidate)
+        or summary.get("reference_artifact_sha256") != file_sha256(reference)
+        or int(summary.get("games", -1)) != int(PERIODIC_ARENA_PRESET["games"])
+        or summary.get("arena_profile") != "torus9"
+        or int(manifest.get("master_seed", -1))
+        != int(PERIODIC_ARENA_PRESET["master_seed"])
+        or not isinstance(scientific, Mapping)
+        or int(scientific.get("simulations", -1))
+        != int(PERIODIC_ARENA_PRESET["simulations"])
+        or scientific.get("paired_starts_color_swap") is not True
+        or not isinstance(execution, Mapping)
+        or dict(execution) != dict(expected_execution)  # type: ignore[arg-type]
+    ):
+        raise ValueError(
+            "Existing periodic Arena output does not match requested checkpoints/preset"
+        )
 
 
 def run_arena(args: argparse.Namespace) -> dict[str, object]:
-    root, lineage_id, profile_path, expected_fingerprint = _environment(args.generation)
+    root, lineage_id, profile_path, expected_fingerprint, _code = _environment(
+        args.generation
+    )
     _load_profile(profile_path, expected_fingerprint)
     if torch.device(args.device).type != "cuda" or not torch.cuda.is_available():
         raise RuntimeError("Production Torus9 periodic Arena requires CUDA")
-    if args.reference_gap <= 0 or args.generation < args.reference_gap:
+    if args.reference_gap != 5:
+        raise ValueError("Production Torus9 periodic Arena reference gap must be 5")
+    if args.generation < args.reference_gap:
         raise ValueError("Periodic Arena generation/reference gap is invalid")
+
     reference_generation = args.generation - args.reference_gap
     candidate = root / "checkpoints" / f"M{args.generation}.pt"
     reference = root / "checkpoints" / f"M{reference_generation}.pt"
     if not candidate.is_file() or not reference.is_file():
-        raise FileNotFoundError("Periodic Arena candidate/reference checkpoint is missing")
+        raise FileNotFoundError(
+            "Periodic Arena candidate/reference checkpoint is missing"
+        )
 
     heartbeat_path = Path(os.environ["AZ_DRIVER_HEARTBEAT_PATH"])
     with _Heartbeat(heartbeat_path, args.generation) as heartbeat:
         heartbeat.set_phase("arena-snapshot")
-        before = _training_snapshot(root, args.generation)
+        before = _training_snapshot(root)
         evaluation_id = (
-            f"{lineage_id}-periodic-M{args.generation:04d}-vs-M{reference_generation:04d}"
+            f"{lineage_id}-periodic-M{args.generation:04d}"
+            f"-vs-M{reference_generation:04d}"
         )
         output = evaluation_dir("torus9", evaluation_id)
         summary_path = output / "summary.json"
@@ -683,13 +806,12 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
 
         if summary_path.is_file():
             summary = _read_json(summary_path)
-            if (
-                summary.get("candidate_artifact_sha256") != file_sha256(candidate)
-                or summary.get("reference_artifact_sha256") != file_sha256(reference)
-                or int(summary.get("games", -1)) != 64
-                or summary.get("arena_profile") != "torus9"
-            ):
-                raise ValueError("Existing periodic Arena output does not match requested checkpoints/preset")
+            _validate_existing_arena(
+                output=output,
+                summary=summary,
+                candidate=candidate,
+                reference=reference,
+            )
         else:
             heartbeat.set_phase("arena")
             config = ArenaExecutionConfig(
@@ -709,13 +831,15 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 candidate_label=f"M{args.generation}",
                 reference_label=f"M{reference_generation}",
                 run_id=evaluation_id,
-                comparison=f"periodic-M{args.generation}-vs-M{reference_generation}",
+                comparison=(
+                    f"periodic-M{args.generation}-vs-M{reference_generation}"
+                ),
                 master_seed=int(PERIODIC_ARENA_PRESET["master_seed"]),
                 config=config,
             )
 
         heartbeat.set_phase("arena-verify")
-        after = _training_snapshot(root, args.generation)
+        after = _training_snapshot(root)
         training_mutated = before != after
         games = int(summary["games"])
         wins = int(summary["wins"])
@@ -743,8 +867,12 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 "losses": int(summary["losses"]),
                 "draws": draws,
                 "win_rate": win_rate,
-                "games_per_hour": float(telemetry_map.get("games_per_hour", 0.0)),
-                "moves_per_sec": float(telemetry_map.get("moves_per_sec", 0.0)),
+                "games_per_hour": float(
+                    telemetry_map.get("games_per_hour", 0.0)
+                ),
+                "moves_per_sec": float(
+                    telemetry_map.get("moves_per_sec", 0.0)
+                ),
                 "inference_mean_batch_rows": float(
                     telemetry_map.get("mean_inference_batch_rows", 0.0)
                 ),
