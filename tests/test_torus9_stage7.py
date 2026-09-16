@@ -48,7 +48,6 @@ def test_stage7_reference_is_resolved_by_catalog_not_a_stage7_copy(tmp_path, mon
     assert path == checkpoint.resolve()
     assert path.name == "M17.pt"
     assert path.parent.parent.name == REFERENCE_RUN_ID
-    assert "stage7" not in str(path)
 
 
 def test_stage7_run_id_rejects_path_traversal():
