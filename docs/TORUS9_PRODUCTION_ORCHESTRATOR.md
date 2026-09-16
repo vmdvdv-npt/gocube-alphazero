@@ -1,91 +1,67 @@
-# Torus9 Production Orchestrator
+# Torus9 Production Orchestrator Adapter
 
-This is the current production integration for the game-independent training orchestrator. Torus 9×9 is wired now. Cube is intentionally not wired yet: when a production Cube training path exists, it should be added as a separate profile driver without changing the orchestrator core.
+## Scope
 
-## Start a Torus9 lineage
+`tools/torus9_run_driver.py` is the active Torus9 adapter for Production Training Orchestrator V2.
 
-```bash
-.venv/bin/python tools/training_orchestrator.py start \
-  --spec configs/gocube/torus9_training_orchestrator_v1.json \
-  --lineage <new-lineage-id> \
-  --max-generations <N>
-```
+It deliberately contains no preferred Legion worker count, context count, batch cap, wait, Arena workload, reference gap, seed, heartbeat interval, or performance baseline.
 
-The concrete spec is `configs/gocube/torus9_training_orchestrator_v1.json`. It pins the current canonical Torus9 profile and the validated Legion execution path rather than duplicating scientific settings inside `gocube_golden.orchestrator`.
+Those values are supplied once by the task's immutable run-spec.
 
-## Current production binding
+## Generation driver config
 
-The Torus-specific adapter is `tools/torus9_orchestrator_driver.py`. For each generation it calls the existing production paths:
+`generation.driver_config` must explicitly provide:
 
-- 64 self-play games per generation;
-- 64 MCTS simulations;
-- 16 OS workers;
-- 4 active games per worker / 64 total active contexts;
-- parent-owned CUDA inference with shared-memory transport;
-- inference batch cap 64 and 1 ms wait;
-- the existing `TrainingEngine` through `Torus9TrainingAdapter`;
-- Adam, 80 optimizer steps × batch 64;
-- rolling replay of the last 3 generations, capped at 20,000 positions.
+- `games`;
+- `device`;
+- `workers`;
+- `active_games_per_worker`;
+- `total_active_contexts`;
+- `inference_batch_cap`;
+- `inference_batch_wait_ms`;
+- `coalescing`;
+- `heartbeat_interval_seconds`;
+- `model_init_seed`;
+- `selfplay_master_seed`;
+- `training_master_seed`.
 
-The execution-only self-play values are checked against `LEGION_TORUS9_SELFPLAY_PERFORMANCE_REFERENCE` before work starts. The driver does not silently continue with an unvalidated production execution shape.
+The adapter checks only structural/runtime consistency. It does not compare values with a preferred Legion preset.
 
-## Periodic Arena
+`games` is checked against the referenced scientific profile. To change scientific workload, the task must explicitly provide a profile whose fingerprint contains that change rather than silently overriding the profile inside the orchestrator.
 
-The production spec schedules Arena every five committed generations:
+## Arena driver config
 
-```text
-M5  vs M0
-M10 vs M5
-M15 vs M10
-...
-```
+When enabled, `arena.driver_config` explicitly provides:
 
-The periodic comparison uses the existing universal Arena engine and Torus9 profile:
+- `reference_gap`;
+- `games`;
+- `master_seed`;
+- `heartbeat_interval_seconds`;
+- `execution.workers`;
+- `execution.games_per_worker`;
+- `execution.inference_batch_rows`;
+- `execution.inference_batch_wait_ms`;
+- `execution.device`;
+- `execution.strict_production`.
 
-- 64 deterministic paired games with color swap;
-- 64 simulations;
-- cpuct 1.25, FPU 0;
-- no root noise, temperature, fast search or resign;
-- 16 workers;
-- 12 game contexts per worker;
-- central inference batch cap 64, 4 ms wait;
-- CUDA, strict production mode;
-- zero technical games required.
+`arena.startset` pins `master_seed` and `pairs`; the adapter verifies `pairs == games / 2`.
 
-Full Arena artifacts are stored in the canonical cross-check location under `runs/torus9/evaluations/`. The lineage keeps the orchestrator Arena result and metrics; Arena never mutates or gates the training checkpoint implicitly.
+`strict_production` is itself a run-spec decision. When true, the underlying Torus9 Arena profile may apply its own production compatibility guards. When false, the orchestrator does not force the historical Legion preset.
 
-The orchestrator pins fingerprints for both the periodic Arena preset and its deterministic start-set contract. A retry may reuse an already-complete matching evaluation, but a mismatched result fails closed.
+Arena scientific/game semantics remain in the Torus9 Arena profile, code-pinned by the lineage Git commit. The orchestration layer does not duplicate MCTS/scoring/rules logic.
 
-## Crash and resume semantics
+## Performance gates
 
-`generation-XX.complete.json`, written by `TrainingEngine`, is the authoritative training transaction marker.
+All performance baselines and thresholds live in `performance.checks` in the run-spec. The active adapter does not import or compare against a preferred performance reference.
 
-If a process dies **before** that marker exists, the generation is uncommitted. Explicit orchestrator resume removes only known artifacts belonging to that current uncommitted generation and deterministically regenerates it from the previous committed checkpoint/replay state.
+## Resume
 
-If a process dies **after** the marker exists but before the driver result is published, resume does not train the generation twice. The driver reloads and validates the committed checkpoint and replay, validates the persisted self-play artifact referenced by the committed summary, recreates the durable resume proof, and publishes the missing driver result.
+The adapter receives the persisted lineage run-spec through `AZ_RUN_SPEC_PATH` and its manifest-pinned fingerprint through `AZ_RUN_SPEC_FINGERPRINT`.
 
-Every completed driver result includes SHA-256 validation for the checkpoint, checkpoint metadata, fresh and rolling replay, training metrics, iteration summary, completion marker, self-play record and resume-state document.
+A resumed generation therefore uses the same execution policy and seeds as the original attempt. The external source JSON used at creation is irrelevant after lineage creation.
 
-The resume-state proof covers:
+## Legacy implementation module
 
-- model;
-- optimizer;
-- replay;
-- generation number;
-- deterministic RNG/seed schedule.
+`tools/torus9_orchestrator_driver.py` remains an internal compatibility implementation for the transaction/checkpoint mechanics introduced in PR #120. V2 never invokes its CLI and overrides its old execution-policy hooks from the immutable run-spec before generation work. Periodic Arena execution is implemented directly in the V2 adapter using external run policy.
 
-Technical self-play or Arena outcomes fail closed.
-
-## Long-run protection and reporting
-
-The Torus driver maintains a durable heartbeat while self-play, training, reload verification or Arena is active. The generic supervisor additionally monitors process liveness, heartbeat staleness, disk/RAM pressure, artifact integrity, performance and training-clock progress.
-
-The production spec compares self-play speed against the validated Legion reference of 21.09873 moves/s. Below 85% is a warning; below 70% is fail-closed. Inference batch quality is also tracked against the validated mean batch reference.
-
-Learning reports include policy/value/ownership/score/total losses, parameter delta, gradient norm, optimizer update clock, sample-consumption clock and self-play speed. A stalled optimizer/sample clock is fail-closed. Model-strength evidence remains the periodic Arena rather than loss alone.
-
-## Current scope boundary
-
-The current Torus integration creates a fresh M0 lineage. A generic `--parent-*` reference is rejected by the Torus driver at M1 because silently discarding or partially reconstructing an external optimizer/replay state would violate the training contract. Cross-lineage continuation needs its own explicit migration contract before it can be enabled.
-
-Cube remains future work. The intended extension is another driver implementing the same generation/Arena result contracts after the Cube production engine is ready; it must not require Torus-specific branches in `gocube_golden.orchestrator`.
+Do not invoke the legacy driver directly for new production runs.
