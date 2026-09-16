@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 import gocube_golden as g
@@ -13,6 +15,7 @@ from gocube_golden.torus9_contract import (
     current_torus9_selfplay_contract_fingerprint,
     load_torus9_current_profile,
 )
+from training_engine import TrainingEngine
 
 
 def _one_hot_action(action: int | str) -> tuple[float, ...]:
@@ -135,6 +138,71 @@ def test_construction_only_api_preserves_public_validated_contract(monkeypatch) 
     assert constructed == validated
 
 
+def test_construction_only_api_validates_and_excludes_technical_records() -> None:
+    record = _four_ply_double_pass_record()
+    technical = replace(record, formal_result=None, technical_termination="WORKER_FAILURE")
+    adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+
+    assert adapter.build_samples_for_replay((technical,)) == ()
+
+
+def test_construction_only_api_fails_closed_on_invalid_record() -> None:
+    record = _four_ply_double_pass_record()
+    malformed = replace(record, positions=record.positions[:-1])
+    adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+
+    with pytest.raises(ValueError, match="trace length drift"):
+        adapter.build_samples_for_replay((malformed,))
+
+
+def test_torus9_records_use_one_authoritative_semantic_validation_per_row(monkeypatch, tmp_path) -> None:
+    record = _four_ply_double_pass_record()
+    calls = {"count": 0}
+    original = _core.validate_torus9_replay_sample
+
+    def counted(sample, **kwargs):
+        calls["count"] += 1
+        return original(sample, **kwargs)
+
+    monkeypatch.setattr(_core, "validate_torus9_replay_sample", counted)
+
+    old_adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+    old_rows = old_adapter.build_samples((record,))
+    old_stamped = old_adapter.stamp_samples(old_rows, 1)
+    old_replay = g.Torus9RollingReplay()
+    old_adapter.update_replay(old_replay, 1, old_stamped)
+    assert calls["count"] == len(old_stamped) * 2
+
+    calls["count"] = 0
+    new_adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+    state = new_adapter.create_state(g.Torus9CurrentGraphNet(), run_id="call-count-test")
+
+    def fake_train(state, rows, seed):
+        trainer = state.adapter_state
+        trainer.update_count = 1
+        trainer.samples_consumed = len(rows)
+        return {
+            "optimizer_steps": 1,
+            "samples_consumed": len(rows),
+            "sampled_replay_row_ids": tuple(row["replay_row_id"] for row in rows),
+        }
+
+    monkeypatch.setattr(new_adapter, "train", fake_train)
+    monkeypatch.setattr(new_adapter, "verify_checkpoint", lambda *args: None)
+    result = TrainingEngine(new_adapter).run_iteration(
+        state=state,
+        generation=1,
+        output_dir=tmp_path / "new",
+        run_id="call-count-test",
+        training_seed=1,
+        records=(record,),
+        device="cpu",
+    )
+
+    assert result.fresh_positions == len(record.positions)
+    assert calls["count"] == result.fresh_positions
+
+
 def test_validation_cache_is_bound_to_replay_row_content() -> None:
     record = _four_ply_double_pass_record()
     adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
@@ -159,6 +227,22 @@ def test_update_replay_rejects_noncanonical_id_before_mutation() -> None:
     replay = g.Torus9RollingReplay()
 
     with pytest.raises(ValueError, match="row ID is not deterministic"):
+        adapter.update_replay(replay, 1, stamped)
+
+    assert replay.rows == ()
+    assert replay.last_generation == 0
+    assert adapter._validated_sample_fingerprints == {}
+
+
+def test_update_replay_rejects_generation_mismatch_before_mutation() -> None:
+    record = _four_ply_double_pass_record()
+    adapter = g.Torus9TrainingAdapter(profile=load_torus9_current_profile())
+    rows = adapter.build_samples((record,))
+    stamped = [dict(row) for row in adapter.stamp_samples(rows, 1)]
+    stamped[0]["source_generation"] = 2
+    replay = g.Torus9RollingReplay()
+
+    with pytest.raises(ValueError, match="source generation"):
         adapter.update_replay(replay, 1, stamped)
 
     assert replay.rows == ()

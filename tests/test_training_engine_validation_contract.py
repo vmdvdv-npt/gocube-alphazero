@@ -14,7 +14,6 @@ class _CountingAdapter:
 
     def __init__(self) -> None:
         self.validate_calls = 0
-        self.construction_only_calls = 0
 
     def validate_state(self, state: TrainingState) -> None:
         assert isinstance(state.rolling_replay, list)
@@ -24,12 +23,6 @@ class _CountingAdapter:
         for row in rows:
             self.validate_sample(row)
         return rows
-
-    def build_samples_for_replay(
-        self, records: Sequence[object]
-    ) -> Sequence[Mapping[str, object]]:
-        self.construction_only_calls += 1
-        raise AssertionError("TrainingEngine must not use construction-only capability yet")
 
     def validate_sample(self, sample: Mapping[str, object]) -> None:
         self.validate_calls += 1
@@ -142,7 +135,6 @@ def test_record_built_samples_are_not_revalidated_by_engine(tmp_path: Path) -> N
     # update_replay immediately before replay mutation. The generic engine
     # must not add duplicate full passes between those adapter boundaries.
     assert adapter.validate_calls == 2
-    assert adapter.construction_only_calls == 0
     assert result.fresh_positions == 1
     assert result.summary["iteration"] == 1
 
@@ -160,4 +152,47 @@ def test_direct_samples_keep_pre_validation(tmp_path: Path) -> None:
 
     # External rows are still validated once before stamping, then the stamped
     # row is validated again by update_replay before state mutation.
+    assert adapter.validate_calls == 2
+
+
+class _ConstructionOnlyAdapter(_CountingAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.construction_only_calls = 0
+
+    def build_samples_for_replay(
+        self, records: Sequence[object]
+    ) -> Sequence[Mapping[str, object]]:
+        self.construction_only_calls += 1
+        return tuple({"record": str(record), "value": 1} for record in records)
+
+
+def test_record_construction_capability_moves_validation_to_replay_boundary(tmp_path: Path) -> None:
+    adapter = _ConstructionOnlyAdapter()
+    result = TrainingEngine(adapter).run_iteration(
+        state=_state(),
+        generation=1,
+        output_dir=tmp_path,
+        run_id="construction-only-validation",
+        training_seed=1,
+        records=("game-0",),
+    )
+
+    assert adapter.construction_only_calls == 1
+    assert adapter.validate_calls == 1
+    assert result.fresh_positions == 1
+
+
+def test_direct_samples_do_not_use_record_construction_capability(tmp_path: Path) -> None:
+    adapter = _ConstructionOnlyAdapter()
+    TrainingEngine(adapter).run_iteration(
+        state=_state(),
+        generation=1,
+        output_dir=tmp_path,
+        run_id="direct-sample-with-capability",
+        training_seed=1,
+        samples=({"record": "external", "value": 1},),
+    )
+
+    assert adapter.construction_only_calls == 0
     assert adapter.validate_calls == 2
