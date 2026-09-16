@@ -769,6 +769,8 @@ def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
         "optimizer_steps": arm.total_optimizer_steps,
         "sample_draws": arm.sample_draws * arm.iterations,
     }
+    budget_totals = {key: totals[key] for key in expected}
+    equal_budget = budget_totals == expected
     report = {
         "schema": "torus9-cadence-arm-report-v1",
         "phase": "B",
@@ -780,7 +782,7 @@ def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
         "iterations": rows,
         "totals": totals,
         "expected_totals": expected,
-        "equal_budget_status": "PASS" if totals == expected else "FAIL",
+        "equal_budget_status": "PASS" if equal_budget else "FAIL",
         "wall_time_sec": wall,
         "final_checkpoint": {
             "path": str(source_checkpoint),
@@ -795,7 +797,7 @@ def run_cadence_arm(run_id: str, arm: CadenceArm) -> dict[str, object]:
             "komi": TORUS9_KOMI,
         },
         "canonical_run_mutation": False,
-        "status": "PASS" if totals == expected and all(
+        "status": "PASS" if equal_budget and all(
             int(row["self_play"]["technical_games"]) == 0  # type: ignore[index]
             and bool(row["flow_accounting"]["unexplained_loss_or_duplication"]) is False  # type: ignore[index]
             for row in rows
@@ -829,6 +831,43 @@ def run_cadence(run_id: str) -> dict[str, object]:
         "arena_strength_comparison": "pending; run the arena command after all three arms complete",
         "status": "PASS" if all(report["status"] == "PASS" for report in reports) else "FAIL",
     }
+    _write(root / "cadence-experiment-report.json", report)
+    _write(root / "cadence-experiment-report.md", _render_cadence(report))
+    return report
+
+
+def refresh_cadence_report(run_id: str) -> dict[str, object]:
+    """Recompute derived cadence status without rerunning hardware work."""
+    root = NIGHT_ROOT / "cadence" / run_id
+    reports: list[dict[str, object]] = []
+    for arm in CADENCE_ARMS:
+        arm_dir = root / f"arm-{arm.games}"
+        report = _read_json(arm_dir / "cadence-arm-report.json")
+        totals = report.get("totals")
+        if not isinstance(totals, Mapping):
+            raise ValueError(f"Malformed cadence totals: {arm_dir}")
+        expected = {
+            "games": arm.total_games,
+            "optimizer_steps": arm.total_optimizer_steps,
+            "sample_draws": arm.sample_draws * arm.iterations,
+        }
+        equal_budget = all(int(totals.get(key, -1)) == value for key, value in expected.items())
+        iterations = report.get("iterations")
+        if not isinstance(iterations, list) or len(iterations) != arm.iterations:
+            raise ValueError(f"Incomplete cadence iterations: {arm_dir}")
+        flow_ok = all(
+            int(row["self_play"]["technical_games"]) == 0  # type: ignore[index]
+            and bool(row["flow_accounting"]["unexplained_loss_or_duplication"]) is False  # type: ignore[index]
+            for row in iterations
+        )
+        report["equal_budget_status"] = "PASS" if equal_budget else "FAIL"
+        report["status"] = "PASS" if equal_budget and flow_ok else "FAIL"
+        _write(arm_dir / "cadence-arm-report.json", report)
+        _write(arm_dir / "cadence-arm-report.md", _render_arm(report))
+        reports.append(report)
+    report = _read_json(root / "cadence-experiment-report.json")
+    report["arms"] = reports
+    report["status"] = "PASS" if all(item["status"] == "PASS" for item in reports) else "FAIL"
     _write(root / "cadence-experiment-report.json", report)
     _write(root / "cadence-experiment-report.md", _render_cadence(report))
     return report
@@ -1327,7 +1366,7 @@ def build_parser():
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("phase-a", "cadence", "arena", "phase-c", "report", "all"))
+    parser.add_argument("command", choices=("phase-a", "cadence", "refresh-cadence", "arena", "phase-c", "report", "all"))
     parser.add_argument("--run-id", default="torus9-nightly-20260916-run01")
     return parser
 
@@ -1338,6 +1377,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = run_phase_a(args.run_id)
     elif args.command == "cadence":
         result = run_cadence(args.run_id)
+    elif args.command == "refresh-cadence":
+        result = refresh_cadence_report(args.run_id)
     elif args.command == "arena":
         result = run_arena_phase(args.run_id)
     elif args.command == "phase-c":
