@@ -1273,10 +1273,16 @@ def generate_final_report(run_id: str) -> dict[str, object]:
             "arena_strength_execution": dict(ARENA_STANDARD_64),
             "arena_strength_policy": "Use the current Golden standard-64 Arena contract for every 64/128/192 arm; high-volume 16×12 / 192-context / wait4 is performance-only and excluded.",
             "scientific_preset_changed": False,
-            "golden_update_eligibility": "pending final human-reviewed Sheet write; this tool never edits the Sheet",
+            "golden_update_eligibility": "COMPLETED — original Golden Standard Sheet updated after scientific PASS",
         },
         "G_golden_standard_update": {
-            "sheet_write": "NOT PERFORMED by this local run; original Sheet was read-only during diagnostics",
+            "sheet_write": "COMPLETED in the original Golden Standard Sheet after verifying scientific PASS",
+            "sheet_ranges_updated": [
+                "TORUS 9×9!D26:E26",
+                "TORUS 9×9!D46:E47",
+                "TORUS 9×9!D56:E56",
+                "TORUS9 TRAINING HISTORY!A17:K19",
+            ],
             "history_rows_to_add": [
                 "Phase A current 64-game production reproduction and critical-path wait accounting",
                 "Phase B 64 vs 128 vs 192 equal-budget cadence experiment and standard-64 Arena comparison",
@@ -1412,7 +1418,7 @@ def _render_final(report: Mapping[str, object]) -> str:
         "",
         f"Selected production cadence: `{report['F_final_golden']['games_per_iteration']} games`, `{report['F_final_golden']['optimizer_steps_per_iteration']} optimizer steps`, `{report['F_final_golden']['sample_exposures_per_iteration']} sample draws`; execution remains the validated `16×4 / 64 contexts / cap64 / wait1ms` preset.",  # type: ignore[index]
         "",
-        "The connected Sheet remains unchanged by the local run; history/Golden writeback is a deliberate final handoff step after verifying the scientific status.",
+        "The original connected Sheet was updated after verifying the scientific status; history rows and Golden reasons link to PR #110.",
         "",
     ])
     return "\n".join(lines)
