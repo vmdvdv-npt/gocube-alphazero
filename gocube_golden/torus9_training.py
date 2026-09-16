@@ -204,11 +204,22 @@ class Torus9TrainingAdapter:
         self.replay_profile = self.profile["replay"]
         self._validated_sample_ids: set[str] = set()
         self._validated_sample_objects: set[int] = set()
+        self._diagnostic_timing: MutableMapping[str, object] | None = None
         self.target_identity = {
             "contract_id": TORUS9_TARGET_CONTRACT_ID,
             "fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT,
             "perspective": "side-to-move",
         }
+
+    def set_diagnostic_timing(
+        self, timing: MutableMapping[str, object] | None
+    ) -> None:
+        """Attach an opt-in sink for stage timing on one controlled run.
+
+        The default production path leaves this unset, so diagnostics cannot
+        alter the canonical execution contract or add synchronization.
+        """
+        self._diagnostic_timing = timing
 
     @staticmethod
     def _validate_current_profile(profile: Mapping[str, object]) -> None:
@@ -505,12 +516,15 @@ class Torus9TrainingAdapter:
             trainer.train_fixed_budget(
                 rows,
                 seed=int(seed),
+                timing=self._diagnostic_timing,
                 # New rows and persisted state are validated at the adapter
                 # boundary; the core keeps its default validation for legacy
                 # direct callers while avoiding a third O(replay) pass here.
                 validate_samples=False,
             )
         )
+        if self._diagnostic_timing is not None:
+            metrics["stage_timing"] = dict(self._diagnostic_timing)
         metrics["training_seed"] = int(seed)
         metrics["sampled_replay_row_ids"] = tuple(
             str(rows[index].get("replay_row_id", index)) for index in indices

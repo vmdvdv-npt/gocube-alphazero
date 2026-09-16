@@ -1207,6 +1207,7 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
         *,
         seed: int,
         validate_samples: bool = True,
+        timing: MutableMapping[str, object] | None = None,
     ) -> dict[str, object]:
         self.assert_optimizer_continuity()
         count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
@@ -1218,6 +1219,21 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
                     raise ValueError("Torus 9×9 score training requires ownership and score targets")
         device = next(self.model.parameters()).device
         updates: list[dict[str, object]] = []
+        stage_totals: dict[str, float] = {}
+        timing_enabled = timing is not None
+
+        def timed_stage(name: str, operation):
+            if not timing_enabled:
+                return operation()
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            started = time.perf_counter()
+            result = operation()
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            stage_totals[name] = stage_totals.get(name, 0.0) + (time.perf_counter() - started)
+            return result
+
         sampled_rows = [str(samples[index].get("replay_row_id", index)) for index in indices]
         source_counts: dict[str, int] = {}
         for index in indices:
@@ -1226,29 +1242,47 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
         self.model.train()
         for update_index in range(self.optimizer_steps_per_iteration):
             batch_indices = indices[update_index * TORUS9_BATCH_SIZE:(update_index + 1) * TORUS9_BATCH_SIZE]
-            observations = torch.tensor([samples[index]["observation"] for index in batch_indices], dtype=torch.float32, device=device)
-            policies = torch.tensor([samples[index]["pi"] for index in batch_indices], dtype=torch.float32, device=device)
-            values = torch.tensor([samples[index]["z"] for index in batch_indices], dtype=torch.float32, device=device)
-            ownership = torch.tensor([samples[index]["ownership_target"] for index in batch_indices], dtype=torch.long, device=device)
-            scores = torch.tensor([float(samples[index]["score_target"]) / TORUS9_SCORE_TARGET_NORMALIZATION for index in batch_indices], dtype=torch.float32, device=device)
-            before_parameters = {name: parameter.detach().clone() for name, parameter in self.model.named_parameters()}
+            observations, policies, values, ownership, scores = timed_stage(
+                "h2d_and_batch_construction_wall_time_sec",
+                lambda: (
+                    torch.tensor([samples[index]["observation"] for index in batch_indices], dtype=torch.float32, device=device),
+                    torch.tensor([samples[index]["pi"] for index in batch_indices], dtype=torch.float32, device=device),
+                    torch.tensor([samples[index]["z"] for index in batch_indices], dtype=torch.float32, device=device),
+                    torch.tensor([samples[index]["ownership_target"] for index in batch_indices], dtype=torch.long, device=device),
+                    torch.tensor([float(samples[index]["score_target"]) / TORUS9_SCORE_TARGET_NORMALIZATION for index in batch_indices], dtype=torch.float32, device=device),
+                ),
+            )
+            before_parameters = timed_stage(
+                "parameter_snapshot_wall_time_sec",
+                lambda: {name: parameter.detach().clone() for name, parameter in self.model.named_parameters()},
+            )
             step_before = self.assert_optimizer_continuity()
-            policy_logits, value_logits, ownership_logits, score_logits = self.model.forward_auxiliary(observations)
-            policy_loss = -(policies * F.log_softmax(policy_logits, dim=1)).sum(dim=1).mean()
-            value_loss = -(values * F.log_softmax(value_logits, dim=1)).sum(dim=1).mean()
-            ownership_loss = F.cross_entropy(ownership_logits.reshape(-1, 3), ownership.reshape(-1))
-            score_loss = F.mse_loss(score_logits, scores)
+            policy_logits, value_logits, ownership_logits, score_logits = timed_stage(
+                "forward_wall_time_sec",
+                lambda: self.model.forward_auxiliary(observations),
+            )
+            policy_loss, value_loss, ownership_loss, score_loss = timed_stage(
+                "loss_wall_time_sec",
+                lambda: (
+                    -(policies * F.log_softmax(policy_logits, dim=1)).sum(dim=1).mean(),
+                    -(values * F.log_softmax(value_logits, dim=1)).sum(dim=1).mean(),
+                    F.cross_entropy(ownership_logits.reshape(-1, 3), ownership.reshape(-1)),
+                    F.mse_loss(score_logits, scores),
+                ),
+            )
             score_weight = 1.0 if self.score_loss_enabled else 0.0
             total_loss = policy_loss + value_loss + ownership_loss + score_weight * score_loss
             if not bool(torch.isfinite(total_loss)):
                 raise FloatingPointError("Torus 9×9 score training produced non-finite loss")
-            self.optimizer.zero_grad(set_to_none=True)
-            total_loss.backward()
+            timed_stage(
+                "backward_wall_time_sec",
+                lambda: (self.optimizer.zero_grad(set_to_none=True), total_loss.backward()),
+            )
             gradients = [parameter.grad.detach() for parameter in self.model.parameters() if parameter.grad is not None]
             grad_norm = torch.sqrt(sum(torch.sum(gradient.float() ** 2) for gradient in gradients)) if gradients else torch.tensor(0.0)
             if not bool(torch.isfinite(torch.as_tensor(grad_norm))):
                 raise FloatingPointError("Torus 9×9 score training produced non-finite gradient")
-            self.optimizer.step()
+            timed_stage("optimizer_wall_time_sec", self.optimizer.step)
             if any(not bool(torch.isfinite(parameter).all()) for parameter in self.model.parameters()):
                 raise FloatingPointError("Torus 9×9 score training produced non-finite parameter")
             self.update_count += 1
@@ -1272,6 +1306,13 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
                 "adam_step_before": step_before,
                 "adam_step_after": step_after,
                 "learning_rate": float(self.optimizer.param_groups[0]["lr"]),
+            })
+        if timing is not None:
+            timing.update({
+                "timing_clock": "perf_counter wall time",
+                "cuda_synchronized": bool(device.type == "cuda"),
+                "optimizer_steps": self.optimizer_steps_per_iteration,
+                **stage_totals,
             })
         unique_rows = len(set(sampled_rows))
         return {

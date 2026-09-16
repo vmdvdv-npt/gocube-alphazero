@@ -945,6 +945,7 @@ class SelfPlayEngine:
                     pids.add(int(process.pid))
             service.start()
             service_started = True
+            startup_wall_time = max(0.0, time.perf_counter() - wall_started)
         except BaseException:
             self._terminate(processes)
             if service_started:
@@ -1064,6 +1065,7 @@ class SelfPlayEngine:
                 pass
             raise
 
+        teardown_started = time.perf_counter()
         for process in processes:
             process.join(timeout=self.config.worker_join_timeout_s)
             if process.is_alive() or process.exitcode != 0:
@@ -1083,6 +1085,7 @@ class SelfPlayEngine:
             elif event and event[0] == "worker_stopped" and len(event) >= 4:
                 worker_process_cpu[int(event[2])] = float(event[3])
         service.stop()
+        teardown_wall_time = max(0.0, time.perf_counter() - teardown_started)
 
         wall_s = max(0.0, time.perf_counter() - wall_started)
         parent_cpu_seconds = max(0.0, time.process_time() - parent_cpu_started)
@@ -1135,6 +1138,8 @@ class SelfPlayEngine:
             "games_per_sec": len(result) / wall_s if wall_s > 0 else 0.0,
             "moves_per_sec": moves / wall_s if wall_s > 0 else 0.0,
             "wall_time_sec": wall_s,
+            "startup_wall_time_sec": startup_wall_time,
+            "teardown_wall_time_sec": teardown_wall_time,
             "result_order": list(ids),
             "process_start_method": self.config.process_start_method,
             "global_task_replenishment": bool(any(value != pending_samples[0] for value in pending_samples)),

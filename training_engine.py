@@ -273,13 +273,20 @@ class TrainingEngine:
 
         snapshot = selected_adapter.snapshot_state(state)
         committed = False
+        phase_timing: dict[str, object] = {
+            "clock": "perf_counter wall time; parent process only",
+            "cpu_clock": "process_time parent CPU time; adapter GPU stages may be device-synchronized",
+        }
         try:
+            phase_started = time.perf_counter()
             if records is not None:
                 source_samples = tuple(selected_adapter.build_samples(tuple(records)))
             else:
                 source_samples = tuple(dict(sample) for sample in samples or ())
+            phase_timing["sample_build_wall_time_sec"] = time.perf_counter() - phase_started
             if not source_samples:
                 raise ValueError("Training generation produced no replay samples")
+            phase_started = time.perf_counter()
             for sample in source_samples:
                 selected_adapter.validate_sample(sample)
             stamped = tuple(selected_adapter.stamp_samples(source_samples, generation))
@@ -287,15 +294,23 @@ class TrainingEngine:
                 raise ValueError("Training generation produced no stamped replay samples")
             for sample in stamped:
                 selected_adapter.validate_sample(sample)
+            phase_timing["sample_validation_and_stamping_wall_time_sec"] = time.perf_counter() - phase_started
 
+            phase_started = time.perf_counter()
             replay_metrics = dict(selected_adapter.update_replay(state.rolling_replay, generation, stamped))
             replay_rows = tuple(selected_adapter.replay_rows(state.rolling_replay))
             selected_adapter.validate_replay(replay_rows)
             replay_fingerprint = sequence_fingerprint(replay_rows)
+            phase_timing["replay_update_and_validation_wall_time_sec"] = time.perf_counter() - phase_started
 
             train_started = time.perf_counter()
             training_metrics = dict(selected_adapter.train(state, replay_rows, int(training_seed)))
             training_metrics.setdefault("training_wall_time_sec", time.perf_counter() - train_started)
+            phase_timing["train_wall_time_sec"] = time.perf_counter() - train_started
+            adapter_timing = training_metrics.get("stage_timing")
+            if isinstance(adapter_timing, Mapping):
+                phase_timing["train_stage_timing"] = dict(adapter_timing)
+            training_metrics["phase_timing"] = phase_timing
             selected_adapter.sync_state(state)
 
             sampled_ids = training_metrics.get("sampled_replay_row_ids", ())
@@ -333,9 +348,12 @@ class TrainingEngine:
                 code_identity=code_identity,
                 device=str(device if device is not None else getattr(state.model, "device", "cpu")),
             )
+            phase_started = time.perf_counter()
             metadata = dict(selected_adapter.prepare_checkpoint(state, context, training_metrics))
+            phase_timing["checkpoint_metadata_prepare_wall_time_sec"] = time.perf_counter() - phase_started
 
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            phase_started = time.perf_counter()
             _write_jsonl(fresh_tmp, stamped)
             _write_jsonl(rolling_tmp, replay_rows)
             saved_metadata = dict(selected_adapter.save_checkpoint(checkpoint_tmp, state, metadata))
@@ -343,6 +361,7 @@ class TrainingEngine:
                 raise RuntimeError("Training adapter did not publish checkpoint metadata sidecar")
             selected_adapter.verify_checkpoint(checkpoint_tmp, state, saved_metadata)
             _write_json(training_tmp, training_metrics)
+            phase_timing["checkpoint_serialization_and_verification_wall_time_sec"] = time.perf_counter() - phase_started
 
             artifacts_tmp = {
                 "fresh_replay": str(fresh_tmp),
@@ -409,6 +428,7 @@ class TrainingEngine:
             }
             _write_json(marker_tmp, marker)
 
+            phase_started = time.perf_counter()
             for source, target in (
                 (fresh_tmp, fresh_final),
                 (rolling_tmp, rolling_final),
@@ -420,6 +440,10 @@ class TrainingEngine:
             ):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(source, target)
+            phase_timing["checkpoint_publication_wall_time_sec"] = time.perf_counter() - phase_started
+            phase_timing["training_transaction_wall_time_sec"] = (
+                time.perf_counter() - train_started
+            )
             committed = True
             state.current_generation = generation
             state.completed_games = context.completed_games
