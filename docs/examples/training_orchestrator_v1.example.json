@@ -1,0 +1,100 @@
+{
+  "arena": {
+    "command": [
+      ".venv/bin/python",
+      "tools/<profile-arena-driver>.py",
+      "--generation",
+      "{generation}"
+    ],
+    "every_generations": 5,
+    "preset_fingerprint": "<frozen-arena-preset-sha256>",
+    "required": true,
+    "startset_fingerprint": "<frozen-startset-sha256>"
+  },
+  "execution": {
+    "generation_command": [
+      ".venv/bin/python",
+      "tools/<profile-generation-driver>.py",
+      "--generation",
+      "{generation}"
+    ],
+    "generation_resume_command": [
+      ".venv/bin/python",
+      "tools/<profile-generation-driver>.py",
+      "--generation",
+      "{generation}",
+      "--resume"
+    ]
+  },
+  "expected_profile_fingerprint": "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775",
+  "health": {
+    "heartbeat_critical_seconds": 900,
+    "heartbeat_warning_seconds": 180,
+    "min_disk_free_gb_critical": 5,
+    "min_disk_free_gb_warning": 15,
+    "min_ram_free_gb_critical": 0.5,
+    "min_ram_free_gb_warning": 2,
+    "poll_seconds": 10
+  },
+  "learning": {
+    "metrics": [
+      "loss.policy",
+      "loss.value",
+      "loss.ownership",
+      "loss.score",
+      "prediction.value_accuracy",
+      "moves_per_sec"
+    ],
+    "stall_checks": [
+      {
+        "direction": "increase",
+        "kind": "generation",
+        "metric": "prediction.value_accuracy",
+        "minimum_delta": 0.0,
+        "policy": "warning",
+        "window": 5
+      },
+      {
+        "direction": "increase",
+        "kind": "arena",
+        "metric": "win_rate",
+        "minimum_delta": 0.0,
+        "policy": "warning",
+        "window": 3
+      }
+    ]
+  },
+  "performance": {
+    "checks": [
+      {
+        "baseline": 0,
+        "fail_ratio": 0.7,
+        "metric": "moves_per_sec",
+        "policy": "warning",
+        "warning_ratio": 0.85
+      }
+    ]
+  },
+  "profile_path": "configs/gocube/torus9_golden_current_v3.json",
+  "required_arena_metrics": [
+    "games",
+    "win_rate"
+  ],
+  "required_generation_metrics": [
+    "games_per_hour",
+    "moves_per_sec",
+    "selfplay_time_sec",
+    "training_time_sec",
+    "optimizer_updates_per_sec",
+    "inference.mean_batch_rows",
+    "hardware.cpu_utilization",
+    "hardware.gpu_utilization"
+  ],
+  "schema": "gocube-production-training-orchestrator-v1",
+  "soft_stop": {
+    "default_minutes": 60,
+    "maximum_minutes": 100,
+    "minimum_minutes": 30
+  },
+  "topology": "torus9"
+}
