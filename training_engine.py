@@ -118,7 +118,13 @@ class TrainingIterationResult:
 
 
 class TrainingAdapter(Protocol):
-    """Protocol implemented by a profile-specific training adapter."""
+    """Protocol implemented by a profile-specific training adapter.
+
+    ``build_samples`` owns semantic validation of rows created from game
+    records. ``update_replay`` owns validation of the stamped rows before it
+    mutates replay state. The engine therefore must not insert duplicate full
+    validation passes between those adapter boundaries.
+    """
 
     def validate_state(self, state: TrainingState) -> None: ...
 
@@ -280,20 +286,27 @@ class TrainingEngine:
         try:
             phase_started = time.perf_counter()
             if records is not None:
+                # Current adapters validate generated rows at the build
+                # boundary. Re-validating every fresh row here was a full
+                # redundant O(fresh replay) pass.
                 source_samples = tuple(selected_adapter.build_samples(tuple(records)))
+                source_samples_need_validation = False
             else:
                 source_samples = tuple(dict(sample) for sample in samples or ())
+                source_samples_need_validation = True
             phase_timing["sample_build_wall_time_sec"] = time.perf_counter() - phase_started
             if not source_samples:
                 raise ValueError("Training generation produced no replay samples")
             phase_started = time.perf_counter()
-            for sample in source_samples:
-                selected_adapter.validate_sample(sample)
+            if source_samples_need_validation:
+                for sample in source_samples:
+                    selected_adapter.validate_sample(sample)
             stamped = tuple(selected_adapter.stamp_samples(source_samples, generation))
             if not stamped:
                 raise ValueError("Training generation produced no stamped replay samples")
-            for sample in stamped:
-                selected_adapter.validate_sample(sample)
+            # ``update_replay`` validates stamped rows immediately before
+            # mutation. A second engine-side pass here duplicated the same
+            # expensive semantic checks without adding a failure boundary.
             phase_timing["sample_validation_and_stamping_wall_time_sec"] = time.perf_counter() - phase_started
 
             phase_started = time.perf_counter()
