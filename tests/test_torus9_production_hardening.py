@@ -147,6 +147,7 @@ def test_prepare_state_uses_external_parent_even_if_local_slot_exists(
     assert selected == parent_checkpoint.resolve()
     assert calls["checkpoint"] == parent_checkpoint.resolve()
     assert calls["replay_path"] == parent_replay.resolve()
+    assert calls["allow_reference"] is True
     assert calls["total_evictions"] == 9
     identity = calls["replay_artifact_identity"]
     assert isinstance(identity, dict)

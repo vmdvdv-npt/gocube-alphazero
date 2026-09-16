@@ -621,6 +621,11 @@ def _prepare_state(
         previous_checkpoint,
         replay_path=previous_replay,
         device=device,
+        # The external canonical M17 predates the Stage-3 metadata extension.
+        # Its checkpoint/replay/profile identities were validated above, so
+        # permit that legacy metadata shape without weakening child lineage
+        # checkpoint validation or replay artifact hash checks.
+        allow_reference=parent_reference is not None,
         total_evictions=evictions,
         replay_artifact_identity=replay_identity,
         load_timing=load_timing,
