@@ -847,12 +847,15 @@ def _finalize(run_dir: Path, status: str, final_strength: Mapping[str, object] |
     manifest["result"] = status
     manifest["resume_test"] = manifest.get("resume_test")
     manifest["performance"] = _training_performance(manifest, run_dir)
+    archived = archived_lineage_dir("torus9", run_dir.name) if status == "PASS" else None
+    if archived is not None and archived.exists():
+        raise FileExistsError(f"Archive target already exists: {archived}")
     report = {
         "report_schema": "torus9-stage7-post-pr118-v1",
         "run_id": run_dir.name,
         "implementation_sha": manifest.get("git_commit"),
         "reference": manifest.get("reference_snapshot"),
-        "new_lineage": {"run_dir": str(run_dir), "parent_checkpoint": manifest.get("parent_checkpoint"), "last_stage": manifest.get("last_completed_generation")},
+        "new_lineage": {"run_dir": str(archived or run_dir), "parent_checkpoint": manifest.get("parent_checkpoint"), "last_stage": manifest.get("last_completed_generation")},
         "iterations": [
             _read_json(run_dir / f"iter-{generation:02d}-summary.json")
             for generation in range(1, int(manifest.get("last_completed_generation", 0)) + 1)
@@ -863,23 +866,21 @@ def _finalize(run_dir: Path, status: str, final_strength: Mapping[str, object] |
         "status": status,
         "final_strength": final_strength,
     }
+    if archived is not None:
+        report["archived_run_dir"] = str(archived)
     _atomic_write(run_dir / "final-report.json", report)
     report_md = _render_report(run_dir, manifest, final_strength=final_strength, status=status)
     _atomic_write_text(run_dir / "final-report.md", report_md)
     _atomic_write(ROOT / "docs" / "STAGE7_POST_PR118_TRAINING_NONINFERIORITY_20260916.json", report)
     _atomic_write_text(ROOT / "docs" / "STAGE7_POST_PR118_TRAINING_NONINFERIORITY_20260916.md", report_md)
     manifest["report"] = {
-        "json": str(run_dir / "final-report.json"),
-        "markdown": str(run_dir / "final-report.md"),
+        "json": str((archived or run_dir) / "final-report.json"),
+        "markdown": str((archived or run_dir) / "final-report.md"),
         "repository_markdown": str(ROOT / "docs" / "STAGE7_POST_PR118_TRAINING_NONINFERIORITY_20260916.md"),
     }
     _atomic_write(run_dir / "manifest.json", manifest)
-    if status == "PASS":
-        archived = archived_lineage_dir("torus9", run_dir.name)
-        if archived.exists():
-            raise FileExistsError(f"Archive target already exists: {archived}")
+    if archived is not None:
         os.replace(run_dir, archived)
-        report["archived_run_dir"] = str(archived)
     return report
 
 
