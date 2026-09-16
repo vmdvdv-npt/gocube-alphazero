@@ -1,16 +1,18 @@
-# Torus9 Production Orchestrator Adapter
+# Torus9 Production Adapter V3
 
-## Scope
+`tools/torus9_run_driver.py` is the single active Torus9 process adapter for Production Training Orchestrator V3.
 
-`tools/torus9_run_driver.py` is the active Torus9 adapter for Production Training Orchestrator V2.
+It does not import or monkey-patch historical orchestrator drivers. Production execution policy is read exclusively from the immutable lineage run-spec.
 
-It deliberately contains no preferred Legion worker count, context count, batch cap, wait, Arena workload, reference gap, seed, heartbeat interval, or performance baseline.
+## Scientific boundary
 
-Those values are supplied once by the task's immutable run-spec.
+The referenced fingerprinted Torus9 scientific profile remains authoritative for rules, network, MCTS/search semantics, optimizer, replay, targets and the intended self-play workload. The adapter validates that explicit run-spec scientific bindings such as game count and reproducibility seeds agree with that profile rather than silently overriding it.
 
-## Generation driver config
+Changing scientific semantics therefore requires a different explicitly fingerprinted profile. The orchestrator never synthesizes a scientific change.
 
-`generation.driver_config` must explicitly provide:
+## Generation execution policy
+
+`generation.driver_config` must explicitly contain:
 
 - `games`;
 - `device`;
@@ -25,14 +27,13 @@ Those values are supplied once by the task's immutable run-spec.
 - `selfplay_master_seed`;
 - `training_master_seed`.
 
-The adapter checks only structural/runtime consistency. It does not compare values with a preferred Legion preset.
+There are no active production defaults for these values in the driver CLI.
 
-`games` is checked against the referenced scientific profile. To change scientific workload, the task must explicitly provide a profile whose fingerprint contains that change rather than silently overriding the profile inside the orchestrator.
+## Arena policy
 
-## Arena driver config
+When Arena is enabled, `arena.driver_config` explicitly contains:
 
-When enabled, `arena.driver_config` explicitly provides:
-
+- `comparison_mode` (`candidate-vs-prior-generation` for periodic Torus9 Arena);
 - `reference_gap`;
 - `games`;
 - `master_seed`;
@@ -42,26 +43,31 @@ When enabled, `arena.driver_config` explicitly provides:
 - `execution.inference_batch_rows`;
 - `execution.inference_batch_wait_ms`;
 - `execution.device`;
-- `execution.strict_production`.
+- `execution.strict_production`;
+- `execution.min_mean_inference_batch_rows`;
+- `execution.min_effective_cpu_cores`;
+- `execution.early_gate_enabled`;
+- `execution.early_gate_min_forwards`;
+- `execution.early_gate_min_wall_sec`.
 
-`arena.startset` pins `master_seed` and `pairs`; the adapter verifies `pairs == games / 2`.
+The fixed startset block is separately fingerprinted and must explicitly contain a generator/schema, master seed and pair count matching the Arena workload.
 
-`strict_production` is itself a run-spec decision. When true, the underlying Torus9 Arena profile may apply its own production compatibility guards. When false, the orchestrator does not force the historical Legion preset.
+Periodic same-lineage Arena output is lineage-owned:
 
-Arena scientific/game semantics remain in the Torus9 Arena profile, code-pinned by the lineage Git commit. The orchestration layer does not duplicate MCTS/scoring/rules logic.
+`runs/torus9/active/<lineage>/arena/generation-NNNN/`
 
-## Performance gates
+It is not written to the global cross-lineage `evaluations/` namespace.
 
-All performance baselines and thresholds live in `performance.checks` in the run-spec. The active adapter does not import or compare against a preferred performance reference.
+## Progress heartbeat
 
-## Resume
+The adapter publishes heartbeat V2 with separate liveness and semantic progress timestamps. Phase transitions such as load-state, self-play completion, training, reload verification and Arena verification advance the semantic progress token; the supervisor independently updates process liveness monitoring and fails closed on stale progress according to the run-spec.
 
-The adapter receives the persisted lineage run-spec through `AZ_RUN_SPEC_PATH` and its manifest-pinned fingerprint through `AZ_RUN_SPEC_FINGERPRINT`.
+## Resume and transaction safety
 
-A resumed generation therefore uses the same execution policy and seeds as the original attempt. The external source JSON used at creation is irrelevant after lineage creation.
+A failed current generation may remove only its uncommitted temporary/current-generation artifacts before re-running. Previous committed checkpoints, replay, metrics and Arena evidence remain untouched.
 
-## Legacy implementation module
+Generation completion is published only after checkpoint reload verification, replay/resume-state persistence and artifact SHA-256 validation. Arena snapshots training-owned artifacts before and after evaluation and must explicitly prove `training_mutated=false`.
 
-`tools/torus9_orchestrator_driver.py` remains an internal compatibility implementation for the transaction/checkpoint mechanics introduced in PR #120. V2 never invokes its CLI and overrides its old execution-policy hooks from the immutable run-spec before generation work. Periodic Arena execution is implemented directly in the V2 adapter using external run policy.
+## Canonical implementation
 
-Do not invoke the legacy driver directly for new production runs.
+The former `tools/torus9_orchestrator_driver.py` duplicate has been removed. New production work has one Torus runtime entrypoint: `tools/torus9_run_driver.py` through the generic orchestrator.

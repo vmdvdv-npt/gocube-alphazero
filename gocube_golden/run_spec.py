@@ -1,8 +1,8 @@
-"""Strict immutable run-spec boundary for production training orchestration.
+"""Strict immutable run-spec boundary for universal production orchestration.
 
-The production CLI must enter the legacy supervisor only through this module.
-All run-specific policy is explicit in one run spec; no scientific, execution,
-health, Arena-cadence, or performance threshold is selected here.
+Every run-specific decision is explicit in one immutable JSON document.  The
+orchestrator never chooses topology, board size, workload, Arena cadence,
+execution tuning, health thresholds, seeds or performance gates implicitly.
 """
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from typing import Mapping, Sequence
 from .orchestrator import (
     HealthPolicy,
     OrchestratorSpec,
-    ProductionTrainingOrchestrator,
     SoftStopPolicy,
     atomic_write_json,
     canonical_json,
@@ -22,8 +21,12 @@ from .orchestrator import (
     sha256_bytes,
     sha256_file,
 )
+from .production_orchestrator import (
+    SupervisionPolicy,
+    UniversalProductionTrainingOrchestrator,
+)
 
-RUN_SPEC_SCHEMA = "gocube-production-run-spec-v2"
+RUN_SPEC_SCHEMA = "gocube-production-run-spec-v3"
 RUN_SPEC_FILENAME = "run-spec.json"
 
 
@@ -51,21 +54,20 @@ def _argv(value: object, label: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _safe_topology(value: object) -> str:
-    topology = str(value).strip()
-    if not topology or topology in {".", ".."} or "/" in topology or "\\" in topology:
-        raise ValueError("topology must be an explicit safe storage topology")
-    return topology
+def _safe_component(value: object, label: str) -> str:
+    text = str(value).strip()
+    if not text or text in {".", ".."} or "/" in text or "\\" in text:
+        raise ValueError(f"{label} must be one safe path component")
+    return text
 
 
 def _safe_lineage_id(value: str) -> str:
-    lineage = str(value).strip()
-    if not lineage or lineage in {".", ".."} or "/" in lineage or "\\" in lineage:
-        raise ValueError("lineage id must be a single safe path component")
-    return lineage
+    return _safe_component(value, "lineage id")
 
 
-def _resolve_profile(repo_root: Path, payload: Mapping[str, object]) -> tuple[Path, dict[str, object], str]:
+def _resolve_profile(
+    repo_root: Path, payload: Mapping[str, object]
+) -> tuple[Path, dict[str, object], str]:
     profile_ref = str(payload.get("profile_path", "")).strip()
     if not profile_ref or profile_ref.lower().endswith(".xlsx"):
         raise ValueError("profile_path must reference JSON and must never use XLSX")
@@ -83,9 +85,13 @@ def _resolve_profile(repo_root: Path, payload: Mapping[str, object]) -> tuple[Pa
     )
     expected = str(payload.get("expected_profile_fingerprint", "")).strip()
     if not expected:
-        raise ValueError("expected_profile_fingerprint is required; implicit profile acceptance is forbidden")
+        raise ValueError(
+            "expected_profile_fingerprint is required; implicit profile acceptance is forbidden"
+        )
     if expected != actual:
-        raise ValueError(f"profile fingerprint mismatch: expected {expected}, got {actual}")
+        raise ValueError(
+            f"profile fingerprint mismatch: expected {expected}, got {actual}"
+        )
     return profile_path, profile, actual
 
 
@@ -111,14 +117,20 @@ def _performance(value: object) -> dict[str, object]:
         raise ValueError("performance.checks must be an explicit list (empty is allowed)")
     for index, item in enumerate(checks):
         check = _mapping(item, f"performance.checks[{index}]")
-        _require_keys(check, ("metric", "baseline", "warning_ratio", "fail_ratio", "policy"), f"performance.checks[{index}]")
+        _require_keys(
+            check,
+            ("metric", "baseline", "warning_ratio", "fail_ratio", "policy"),
+            f"performance.checks[{index}]",
+        )
         baseline = float(check["baseline"])
         warning_ratio = float(check["warning_ratio"])
         fail_ratio = float(check["fail_ratio"])
         if baseline <= 0:
             raise ValueError("performance baseline must be positive")
         if not 0 <= fail_ratio <= warning_ratio:
-            raise ValueError("performance ratios require 0 <= fail_ratio <= warning_ratio")
+            raise ValueError(
+                "performance ratios require 0 <= fail_ratio <= warning_ratio"
+            )
         if str(check["policy"]) not in {"warning", "fail-closed"}:
             raise ValueError("performance policy must be warning or fail-closed")
     return block
@@ -134,7 +146,11 @@ def _learning(value: object) -> dict[str, object]:
         raise ValueError("learning.stall_checks must be an explicit list (empty is allowed)")
     for index, item in enumerate(checks):
         check = _mapping(item, f"learning.stall_checks[{index}]")
-        _require_keys(check, ("kind", "metric", "window", "minimum_delta", "direction", "policy"), f"learning.stall_checks[{index}]")
+        _require_keys(
+            check,
+            ("kind", "metric", "window", "minimum_delta", "direction", "policy"),
+            f"learning.stall_checks[{index}]",
+        )
         if int(check["window"]) < 2:
             raise ValueError("learning stall window must be >= 2")
         if str(check["direction"]) not in {"increase", "decrease"}:
@@ -153,12 +169,24 @@ def _metric_list(payload: Mapping[str, object], key: str) -> list[str]:
     return list(value)
 
 
+def _validate_adapter(value: object) -> dict[str, object]:
+    block = _mapping(value, "adapter")
+    _require_keys(block, ("id", "transport"), "adapter")
+    _safe_component(block["id"], "adapter.id")
+    if block["transport"] != "process":
+        raise ValueError("production adapter.transport currently must be 'process'")
+    return block
+
+
 @dataclass(frozen=True)
 class StrictRunSpec:
     source_path: Path
     payload: Mapping[str, object]
     fingerprint: str
     orchestrator_spec: OrchestratorSpec
+    supervision: SupervisionPolicy
+    board_size: int
+    adapter_id: str
 
     @classmethod
     def load(cls, path: str | Path, *, repo_root: str | Path) -> "StrictRunSpec":
@@ -169,18 +197,61 @@ class StrictRunSpec:
         payload = read_json(source)
         if payload.get("schema") != RUN_SPEC_SCHEMA:
             raise ValueError(f"Unsupported run-spec schema: {payload.get('schema')!r}")
-        _require_keys(payload, ("schema", "topology", "profile_path", "expected_profile_fingerprint", "generation", "arena", "health", "soft_stop", "performance", "learning", "required_generation_metrics", "required_arena_metrics"), "run spec")
-        topology = _safe_topology(payload["topology"])
+        _require_keys(
+            payload,
+            (
+                "schema",
+                "topology",
+                "board_size",
+                "adapter",
+                "profile_path",
+                "expected_profile_fingerprint",
+                "generation",
+                "arena",
+                "health",
+                "supervision",
+                "soft_stop",
+                "performance",
+                "learning",
+                "required_generation_metrics",
+                "required_arena_metrics",
+            ),
+            "run spec",
+        )
+        topology = _safe_component(payload["topology"], "topology")
+        board_size = int(payload["board_size"])
+        if board_size <= 0:
+            raise ValueError("board_size must be positive")
+        adapter = _validate_adapter(payload["adapter"])
+        adapter_id = str(adapter["id"])
         profile_path, profile, profile_fp = _resolve_profile(root, payload)
 
         generation = _mapping(payload["generation"], "generation")
-        _require_keys(generation, ("command", "resume_command", "driver_config"), "generation")
+        _require_keys(
+            generation, ("command", "resume_command", "driver_config"), "generation"
+        )
         generation_command = _argv(generation["command"], "generation.command")
         resume_command = _argv(generation["resume_command"], "generation.resume_command")
-        _mapping(generation["driver_config"], "generation.driver_config")
+        generation_config = _mapping(
+            generation["driver_config"], "generation.driver_config"
+        )
+        _require_keys(generation_config, ("games",), "generation.driver_config")
+        if int(generation_config["games"]) <= 0:
+            raise ValueError("generation.driver_config.games must be positive")
 
         arena = _mapping(payload["arena"], "arena")
-        _require_keys(arena, ("enabled", "required", "every_generations", "command", "driver_config", "startset"), "arena")
+        _require_keys(
+            arena,
+            (
+                "enabled",
+                "required",
+                "every_generations",
+                "command",
+                "driver_config",
+                "startset",
+            ),
+            "arena",
+        )
         enabled = arena["enabled"]
         required = arena["required"]
         if not isinstance(enabled, bool) or not isinstance(required, bool):
@@ -199,6 +270,9 @@ class StrictRunSpec:
         arena_startset = _mapping(arena["startset"], "arena.startset")
 
         health = _health(payload["health"])
+        supervision = SupervisionPolicy.from_mapping(
+            _mapping(payload["supervision"], "supervision")
+        )
         soft_stop = _soft_stop(payload["soft_stop"])
         performance = _performance(payload["performance"])
         learning = _learning(payload["learning"])
@@ -207,7 +281,7 @@ class StrictRunSpec:
 
         fingerprint = run_spec_fingerprint(payload)
         orchestrator_spec = OrchestratorSpec(
-            path=root / ".runtime-run-spec-v2.json",
+            path=root / ".runtime-run-spec-v3.json",
             payload=deepcopy(payload),
             topology=topology,
             profile_path=profile_path,
@@ -219,20 +293,34 @@ class StrictRunSpec:
             arena_command=arena_command,
             arena_every_generations=every,
             arena_required=bool(enabled and required),
-            arena_preset_fingerprint=(run_spec_fingerprint(arena_driver_config) if enabled else None),
-            arena_startset_fingerprint=(run_spec_fingerprint(arena_startset) if enabled else None),
+            arena_preset_fingerprint=(
+                run_spec_fingerprint(arena_driver_config) if enabled else None
+            ),
+            arena_startset_fingerprint=(
+                run_spec_fingerprint(arena_startset) if enabled else None
+            ),
             health=health,
             soft_stop=soft_stop,
             performance=performance,
             learning=learning,
         )
-        return cls(source_path=source, payload=deepcopy(payload), fingerprint=fingerprint, orchestrator_spec=orchestrator_spec)
+        return cls(
+            source_path=source,
+            payload=deepcopy(payload),
+            fingerprint=fingerprint,
+            orchestrator_spec=orchestrator_spec,
+            supervision=supervision,
+            board_size=board_size,
+            adapter_id=adapter_id,
+        )
 
 
 def discover_active_lineage(repo_root: str | Path, lineage_id: str) -> Path:
     root = Path(repo_root).resolve()
     lineage = _safe_lineage_id(lineage_id)
-    matches = [path.parent for path in (root / "runs").glob(f"*/active/{lineage}/manifest.json")]
+    matches = [
+        path.parent for path in (root / "runs").glob(f"*/active/{lineage}/manifest.json")
+    ]
     if not matches:
         raise FileNotFoundError(f"Active lineage not found: {lineage}")
     if len(matches) != 1:
@@ -240,7 +328,9 @@ def discover_active_lineage(repo_root: str | Path, lineage_id: str) -> Path:
     return matches[0]
 
 
-def load_persisted_run_spec(*, repo_root: str | Path, lineage_id: str) -> StrictRunSpec:
+def load_persisted_run_spec(
+    *, repo_root: str | Path, lineage_id: str
+) -> StrictRunSpec:
     root = Path(repo_root).resolve()
     lineage_root = discover_active_lineage(root, lineage_id)
     manifest = read_json(lineage_root / "manifest.json")
@@ -255,12 +345,25 @@ def load_persisted_run_spec(*, repo_root: str | Path, lineage_id: str) -> Strict
     return spec
 
 
-class StrictProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
-    """Production entrypoint that binds the supervisor to an immutable run spec."""
+class StrictProductionTrainingOrchestrator(UniversalProductionTrainingOrchestrator):
+    """Production entrypoint bound to an immutable lineage-owned run spec."""
 
-    def __init__(self, *, repo_root: str | Path, run_spec: StrictRunSpec, lineage_id: str, terminal: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        repo_root: str | Path,
+        run_spec: StrictRunSpec,
+        lineage_id: str,
+        terminal: bool = True,
+    ) -> None:
         self.strict_run_spec = run_spec
-        super().__init__(repo_root=repo_root, spec=run_spec.orchestrator_spec, lineage_id=lineage_id, terminal=terminal)
+        super().__init__(
+            repo_root=repo_root,
+            spec=run_spec.orchestrator_spec,
+            lineage_id=lineage_id,
+            terminal=terminal,
+            supervision=run_spec.supervision,
+        )
 
     @property
     def saved_run_spec_path(self) -> Path:
@@ -274,7 +377,13 @@ class StrictProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
         if not isinstance(orchestrator, dict):
             raise ValueError("New lineage manifest lacks orchestrator block")
         orchestrator["spec_path"] = RUN_SPEC_FILENAME
-        manifest["run_spec"] = {"schema": RUN_SPEC_SCHEMA, "path": RUN_SPEC_FILENAME, "fingerprint": self.strict_run_spec.fingerprint}
+        orchestrator["adapter_id"] = self.strict_run_spec.adapter_id
+        orchestrator["board_size"] = self.strict_run_spec.board_size
+        manifest["run_spec"] = {
+            "schema": RUN_SPEC_SCHEMA,
+            "path": RUN_SPEC_FILENAME,
+            "fingerprint": self.strict_run_spec.fingerprint,
+        }
         manifest["config_fingerprint"] = self.strict_run_spec.fingerprint
         atomic_write_json(self.paths.manifest, manifest)
 
@@ -293,16 +402,27 @@ class StrictProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
 
     def _driver_env(self, generation: int, *, resume: bool, phase: str) -> dict[str, str]:
         env = super()._driver_env(generation, resume=resume, phase=phase)
-        saved = self.saved_run_spec_path
-        env["AZ_RUN_SPEC_PATH"] = str(saved if saved.is_absolute() else (self.repo_root / saved).resolve())
+        env["AZ_RUN_SPEC_PATH"] = str(self.saved_run_spec_path.resolve())
         env["AZ_RUN_SPEC_FINGERPRINT"] = self.strict_run_spec.fingerprint
+        env["AZ_ADAPTER_ID"] = self.strict_run_spec.adapter_id
+        env["AZ_BOARD_SIZE"] = str(self.strict_run_spec.board_size)
         return env
 
     def status(self) -> dict[str, object]:
         status = super().status()
         status["run_spec_fingerprint"] = self.strict_run_spec.fingerprint
         status["run_spec_path"] = str(self.saved_run_spec_path)
+        status["adapter_id"] = self.strict_run_spec.adapter_id
+        status["board_size"] = self.strict_run_spec.board_size
         return status
 
 
-__all__ = ["RUN_SPEC_FILENAME", "RUN_SPEC_SCHEMA", "StrictProductionTrainingOrchestrator", "StrictRunSpec", "discover_active_lineage", "load_persisted_run_spec", "run_spec_fingerprint"]
+__all__ = [
+    "RUN_SPEC_FILENAME",
+    "RUN_SPEC_SCHEMA",
+    "StrictProductionTrainingOrchestrator",
+    "StrictRunSpec",
+    "discover_active_lineage",
+    "load_persisted_run_spec",
+    "run_spec_fingerprint",
+]

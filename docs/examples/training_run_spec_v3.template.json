@@ -1,6 +1,11 @@
 {
-  "schema": "gocube-production-run-spec-v2",
+  "schema": "gocube-production-run-spec-v3",
   "topology": "<topology>",
+  "board_size": "<required-by-task>",
+  "adapter": {
+    "id": "<profile-adapter-id>",
+    "transport": "process"
+  },
   "profile_path": "<repo-relative-json-profile>",
   "expected_profile_fingerprint": "<sha256:...>",
   "generation": {
@@ -27,6 +32,7 @@
     "every_generations": "<required-by-task>",
     "command": [".venv/bin/python", "tools/<profile-run-driver>.py", "arena", "--generation", "{generation}"],
     "driver_config": {
+      "comparison_mode": "<required-by-task>",
       "reference_gap": "<required-by-task>",
       "games": "<required-by-task>",
       "master_seed": "<required-by-task>",
@@ -37,10 +43,20 @@
         "inference_batch_rows": "<required-by-task>",
         "inference_batch_wait_ms": "<required-by-task>",
         "device": "<required-by-task>",
-        "strict_production": "<required-by-task>"
+        "strict_production": "<required-by-task>",
+        "min_mean_inference_batch_rows": "<required-by-task>",
+        "min_effective_cpu_cores": "<required-by-task>",
+        "early_gate_enabled": "<required-by-task>",
+        "early_gate_min_forwards": "<required-by-task>",
+        "early_gate_min_wall_sec": "<required-by-task>"
       }
     },
-    "startset": {"master_seed": "<required-by-task>", "pairs": "<required-by-task>"}
+    "startset": {
+      "schema": "<required-by-task>",
+      "generator": "<required-by-task>",
+      "master_seed": "<required-by-task>",
+      "pairs": "<required-by-task>"
+    }
   },
   "health": {
     "poll_seconds": "<required-by-task>",
@@ -51,9 +67,26 @@
     "min_ram_free_gb_warning": "<required-by-task>",
     "min_ram_free_gb_critical": "<required-by-task>"
   },
-  "soft_stop": {"default_minutes": "<required-by-task>", "minimum_minutes": "<required-by-task>", "maximum_minutes": "<required-by-task>"},
-  "performance": {"checks": []},
-  "learning": {"metrics": [], "stall_checks": []},
+  "supervision": {
+    "startup_ack_timeout_seconds": "<required-by-task>",
+    "progress_warning_seconds": "<required-by-task>",
+    "progress_critical_seconds": "<required-by-task>",
+    "critical_child_grace_seconds": "<required-by-task>",
+    "restart_backoff_seconds": "<required-by-task>",
+    "max_generation_restarts": "<required-by-task>"
+  },
+  "soft_stop": {
+    "default_minutes": "<required-by-task>",
+    "minimum_minutes": "<required-by-task>",
+    "maximum_minutes": "<required-by-task>"
+  },
+  "performance": {
+    "checks": []
+  },
+  "learning": {
+    "metrics": [],
+    "stall_checks": []
+  },
   "required_generation_metrics": [],
   "required_arena_metrics": []
 }
