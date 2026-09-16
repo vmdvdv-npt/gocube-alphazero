@@ -953,6 +953,7 @@ class Torus9TrainingAdapter:
         rows, replay_digest = _read_jsonl_with_identity(replay_path)
         if load_timing is not None:
             load_timing["replay_file_load_wall_time_sec"] = time.perf_counter() - replay_started
+        replay_fingerprint: str | None = None
         if replay_artifact_identity is not None:
             expected_sha = str(
                 replay_artifact_identity.get("sha256")
@@ -971,8 +972,12 @@ class Torus9TrainingAdapter:
             if expected_schema not in (None, ARTIFACT_VALIDATION_SCHEMA):
                 raise ValueError("Current Torus9 replay validation schema mismatch")
             expected_content = replay_artifact_identity.get("canonical_replay_fingerprint")
-            if expected_content is not None and sequence_fingerprint(rows) != expected_content:
-                raise ValueError("Current Torus9 replay content fingerprint mismatch")
+            if expected_content is not None:
+                replay_fingerprint = str(expected_content)
+                # The catalog binds the canonical row fingerprint to the
+                # already-verified immutable file SHA.  Recomputing the
+                # canonical fingerprint here would be a second full replay
+                # pass during every continuation/reload.
         replay = Torus9RollingReplay.from_persisted_rows(
             rows,
             generations=int(self.replay_profile["generations"]),  # type: ignore[index]
@@ -994,7 +999,9 @@ class Torus9TrainingAdapter:
         if len(rows) != int(metadata["valid_replay_positions"]):
             raise ValueError("Current Torus9 resume replay position count mismatch")
         if not allow_reference:
-            if sequence_fingerprint(rows) != metadata.get("replay_fingerprint"):
+            if replay_fingerprint is None:
+                replay_fingerprint = sequence_fingerprint(rows)
+            if replay_fingerprint != metadata.get("replay_fingerprint"):
                 raise ValueError("Current Torus9 resume replay fingerprint mismatch")
             if int(metadata.get("replay_row_count", -1)) != len(rows):
                 raise ValueError("Current Torus9 resume replay row count mismatch")
