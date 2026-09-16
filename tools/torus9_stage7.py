@@ -315,7 +315,7 @@ def _committed_generation(run_dir: Path) -> int:
     generations = []
     for marker in run_dir.glob("generation-*.complete.json"):
         try:
-            generation = int(marker.stem.split("-")[1])
+            generation = int(marker.name.removeprefix("generation-").removesuffix(".complete.json"))
         except (IndexError, ValueError):
             continue
         payload = _read_json(marker)
