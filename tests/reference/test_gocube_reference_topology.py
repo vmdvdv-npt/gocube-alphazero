@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from gocube_reference_topology import rectangular_test_topology
+from tests.support.gocube_reference_topology import rectangular_test_topology
 
 
 @pytest.mark.parametrize("width,height", [(3, 3), (5, 3), (5, 5), (7, 4)])

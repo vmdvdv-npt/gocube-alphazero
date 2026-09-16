@@ -39,16 +39,19 @@ Protocol V1.
 
 ## Verification
 
+The test layout and cleanup policy are documented in [tests/README.md](tests/README.md).
+
 Focused local checks use the repository virtual environment:
 
 ```bash
 .venv/bin/python -m pytest -q \
-  tests/test_stage6_cleanup.py \
-  tests/test_gocube_golden_protocol_stage4.py \
-  tests/test_current_golden_boundary.py \
-  tests/test_selfplay_engine.py \
-  tests/test_selfplay_engine_shared_memory.py \
-  tests/test_training_engine_stage3.py
+  tests/contracts/test_stage6_cleanup.py \
+  tests/contracts/test_gocube_golden_protocol_stage4.py \
+  tests/contracts/test_current_golden_boundary.py \
+  tests/integration/test_selfplay_engine.py \
+  tests/integration/test_selfplay_engine_shared_memory.py \
+  tests/integration/test_torus9_selfplay_serialization.py \
+  tests/integration/test_training_engine_stage3.py
 ```
 
 KataGo differential tests are authoritative CI-only checks and are intentionally

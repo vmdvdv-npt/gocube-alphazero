@@ -91,7 +91,7 @@ def test_streaming_writer_bypasses_to_dict_and_accepts_one_pass_iterable(
 
 def test_nightly_diagnostics_uses_direct_streaming_record_writer() -> None:
     source = (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "tools"
         / "torus9_nightly_diagnostics.py"
     ).read_text(encoding="utf-8")

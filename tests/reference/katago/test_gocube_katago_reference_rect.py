@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from katago_reference_runner import run_fixture
+from tests.support.katago_reference_runner import run_fixture
 
 
 pytestmark = pytest.mark.katago_reference
-FIXTURES = Path(__file__).parent / "reference" / "katago" / "rules_fixtures.json"
+FIXTURES = Path(__file__).with_name("rules_fixtures.json")
 
 
 def _fixtures():

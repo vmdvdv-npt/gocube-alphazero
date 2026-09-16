@@ -92,7 +92,7 @@ def test_golden_descriptors_require_matching_scientific_identity():
 
 
 def test_golden_integration_modules_have_no_legacy_execution_imports():
-    root = Path(__file__).parents[1] / "alphazero/envs/gocube/integration"
+    root = Path(__file__).parents[2] / "alphazero/envs/gocube/integration"
     forbidden = ("alphazero.NNetWrapper", "alphazero.GenericPlayers", "SelfPlayAgent", "Coach")
     for path in root.glob("*.py"):
         source = path.read_text(encoding="utf-8")
@@ -107,7 +107,7 @@ def test_pickle_artifacts_are_unsupported_and_hidden_from_catalog(tmp_path: Path
 
 
 M17_PATH = (
-    Path(__file__).parents[1]
+    Path(__file__).parents[2]
     / "runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03/checkpoints/M17.pt"
 )
 

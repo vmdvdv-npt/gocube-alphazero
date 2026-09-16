@@ -75,7 +75,7 @@ f6bc4b19a1686caa2d088b56251e8c11c8be6d51
 - [KataGo rule reference](KATAGO_RULE_REFERENCE.md)
 - [KataGo oracle README](../tools/katago_reference/README.md)
 - [oracle build script](../tools/katago_reference/build_oracle.sh)
-- [reference test runner](../tests/katago_reference_runner.py)
+- [reference test runner](../tests/support/katago_reference_runner.py)
 
 ### 2.2. `NO_RESULT` и training targets
 

@@ -422,8 +422,8 @@ Replay можно дополнить только детерминированн
 
 ```bash
 PYTHONPATH=tests:. .venv/bin/python - <<'PY'
-from gocube_reference_topology import rectangular_test_topology
-from katago_reference_runner import KatagoOracleProcess
+from tests.support.gocube_reference_topology import rectangular_test_topology
+from tests.support.katago_reference_runner import KatagoOracleProcess
 from alphazero.envs.gocube.katago_v3 import (
     v3_state_from_board, apply_v3_action, terminal_from_state,
 )
@@ -496,14 +496,14 @@ PY
 
 | Область | Основные файлы |
 | --- | --- |
-| Граф | `alphazero/envs/gocube/core.py`, `tests/test_gocube_topology_contract.py` |
+| Граф | `alphazero/envs/gocube/core.py`, `tests/contracts/test_gocube_topology_contract.py` |
 | Сеть | `alphazero/envs/gocube/network.py`, `alphazero/NNetWrapper.py` |
 | Наблюдения/состояние/scoring | `alphazero/envs/gocube/game.py`, `katago_v3.py`, `pinned_game.py`, `selfplay_semantics.py` |
 | Curriculum | `alphazero/SelfPlayAgent.pyx`, `alphazero/envs/gocube/pinned_selfplay.py`, `diversified_game.py`, `diversified_selfplay.py` |
 | Поиск | `alphazero/MCTS.pyx`, `alphazero/search_contract.py`, `alphazero/envs/gocube/exploration_contract.py` |
 | Integration | `alphazero/envs/gocube/integration/manifest.py`, `models.py`, `generation.py`, `catalog.py` |
 | Обучение/данные | `alphazero/envs/gocube/hardened_train.py`, `katago_train.py`, `records.py`, `sample_clock.py`, `atomic_io.py` |
-| Эталон | `tools/katago_reference/oracle.cpp`, `tests/katago_reference_runner.py`, `tests/reference/katago/` |
+| Эталон | `tools/katago_reference/oracle.cpp`, `tests/support/katago_reference_runner.py`, `tests/reference/katago/` |
 
 Upstream закреплён на `f6bc4b19a1686caa2d088b56251e8c11c8be6d51`:
 

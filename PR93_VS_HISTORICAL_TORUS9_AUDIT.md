@@ -24,7 +24,7 @@ Primary implementation sources:
 - `gocube_golden/torus9_contract.py`
 - `configs/gocube/torus9_golden_current_v3.json`
 - `tools/continue_torus9_golden_m1_m100.py`
-- `tests/test_torus9_current_golden.py`
+- `tests/contracts/test_torus9_current_golden.py`
 - pre-PR93 `alphazero/envs/gocube/training_common.py`
 - pre-PR93 `alphazero/inference_batching.py`
 - pre-PR93 `alphazero/SelfPlayAgent.pyx`

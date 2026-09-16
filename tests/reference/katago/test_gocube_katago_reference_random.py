@@ -4,8 +4,8 @@ import random
 
 import pytest
 
-from gocube_reference_topology import rectangular_test_topology
-from katago_reference_runner import (
+from tests.support.gocube_reference_topology import rectangular_test_topology
+from tests.support.katago_reference_runner import (
     KatagoOracleProcess,
     _local_state_from_setup,
     assert_snapshot_equal,

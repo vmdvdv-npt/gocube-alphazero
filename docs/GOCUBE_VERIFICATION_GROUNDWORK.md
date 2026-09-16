@@ -27,9 +27,9 @@ Before adding this layer, the repository already had:
 * canonical Cube/Torus topology in `alphazero/envs/gocube/core.py`;
 * production group, empty-component, pass-alive, and V3 capture logic in
   `alphazero/envs/gocube/katago_v3.py`;
-* the rectangular test bridge in `tests/gocube_reference_topology.py`;
+* the rectangular test bridge in `tests/support/gocube_reference_topology.py`;
 * native KataGo fixtures and runner under `tests/reference/katago/` and
-  `tests/katago_reference_runner.py`;
+  `tests/support/katago_reference_runner.py`;
 * canonical face/row/column `PointId` conversion through `Topology`;
 * existing production topology and ko contract tests.
 

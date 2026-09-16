@@ -24,7 +24,7 @@ reimplement liberties, captures, legality, ko, phase transitions, or scoring.
 | D1 | `cpp/game/boardhistory.h`, `cpp/game/boardhistory.cpp` | `BoardHistory::endAndScoreGameNow` | `alphazero/envs/gocube/katago_v3.py` | `final_v3_score`, `independent_life_analysis` | territory, independent life, seki/tax, prisoners and komi | KataGo `Loc` arrays are mapped to row-major point arrays; no score field is ignored | `territory-scoring`, `seki-tax`, `prisoner-capture-contribution` |
 | D2 | `cpp/game/boardhistory.h`, `cpp/game/boardhistory.cpp` | Rules V3 scoring and cleanup accounting | `alphazero/envs/gocube/katago_v3.py` | `pass_alive_analysis`, `cleanup2_moves`, `second_cleanup_start_colors` | pass-alive terminal, cleanup captures and Cleanup 2 compensation | GoCube's graph is substituted only in Cube/Torus metamorphic tests; planar expected outcomes come from KataGo | `pass-alive-terminal`, `cleanup-capture`, `cleanup-2-compensation` |
 | E1 | `cpp/game/boardhistory.h`, `cpp/game/boardhistory.cpp` | `encorePhase`, `koRecapBlocked`, `makeBoardMoveAssumeLegal` | `alphazero/envs/gocube/katago_v3.py` | `_unblock`, `_pass_for_ko_unblock_target`, `_finish_phase_after_pass` | cleanup ko, ko recap blocks, pass-for-ko, repeated ko and phase transition | KataGo's internal recap bookkeeping is represented by explicit point IDs; legal mask and semantic block set are compared | `cleanup-ko`, `ko-recap-block`, `pass-for-ko-form-1`, `pass-for-ko-form-2`, `repeated-ko-prevention` |
-| T1 | `cpp/game/board.h`, `cpp/game/boardhistory.h` | rectangular coordinate graph and `Loc` conversion | `tests/gocube_reference_topology.py` | `rectangular_test_topology` | independent planar bridge for 3×3, 5×3, 5×5 and 7×4 | test-only topology uses row-major integer points and a final pass action; it is not a production topology | `test_gocube_reference_topology.py` |
+| T1 | `cpp/game/board.h`, `cpp/game/boardhistory.h` | rectangular coordinate graph and `Loc` conversion | `tests/support/gocube_reference_topology.py` | `rectangular_test_topology` | independent planar bridge for 3×3, 5×3, 5×5 and 7×4 | test-only topology uses row-major integer points and a final pass action; it is not a production topology | `reference/test_gocube_reference_topology.py` |
 
 ## Unavailable direct comparisons
 
@@ -32,8 +32,8 @@ KataGo's rectangular `Board` is not a Cube or Torus oracle, and its neural
 network/search code is outside this rule harness.  Those differences are not
 allowlisted as semantic mismatches.  Cube/Torus seam and wrap behavior is
 tested by graph isomorphism and symmetry/metamorphic tests in
-`tests/test_gocube_topology_reference_bridge.py` and
-`tests/test_gocube_topology_symmetry_rules.py`; the planar neighborhood used
+`tests/reference/test_gocube_topology_reference_bridge.py` and
+`tests/reference/test_gocube_topology_symmetry_rules.py`; the planar neighborhood used
 as the source fixture is still evaluated by the pinned KataGo oracle first.
 
 The machine-readable allowlist in

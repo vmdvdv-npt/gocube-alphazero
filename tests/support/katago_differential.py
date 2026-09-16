@@ -6,22 +6,13 @@ import random
 from dataclasses import dataclass
 
 from alphazero.envs.gocube.katago_v3 import apply_v3_action, v3_valid_moves
-try:  # pytest puts ``tests`` on sys.path; regular imports do not.
-    from gocube_reference_topology import rectangular_test_topology
-    from katago_reference_runner import (
-        KatagoOracleProcess,
-        _local_state_from_setup,
-        assert_snapshot_equal,
-        local_snapshot,
-    )
-except ModuleNotFoundError:  # pragma: no cover - exercised by library-style imports
-    from tests.gocube_reference_topology import rectangular_test_topology
-    from tests.katago_reference_runner import (
+from tests.support.gocube_reference_topology import rectangular_test_topology
+from tests.support.katago_reference_runner import (
     KatagoOracleProcess,
     _local_state_from_setup,
     assert_snapshot_equal,
     local_snapshot,
-    )
+)
 
 
 V1_GENERATOR_VERSION = "gocube-v1-legal-intersection-v1"

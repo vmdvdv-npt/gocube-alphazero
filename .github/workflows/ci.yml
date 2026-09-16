@@ -94,7 +94,7 @@ jobs:
       - name: Run pinned KataGo differential, bridge, and symmetry suites
         run: >-
           python -m pytest -q
-          tests/test_gocube_katago_reference_random.py
-          tests/test_gocube_katago_reference_rect.py
-          tests/test_gocube_topology_reference_bridge.py
-          tests/test_gocube_topology_symmetry_rules.py
+          tests/reference/katago/test_gocube_katago_reference_random.py
+          tests/reference/katago/test_gocube_katago_reference_rect.py
+          tests/reference/test_gocube_topology_reference_bridge.py
+          tests/reference/test_gocube_topology_symmetry_rules.py

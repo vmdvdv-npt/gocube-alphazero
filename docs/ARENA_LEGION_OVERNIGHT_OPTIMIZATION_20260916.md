@@ -286,7 +286,7 @@ unless:
 - effective worker CPU is recorded as a diagnostic target; it does not by
   itself fail the run.
 
-`tests/test_torus9_arena_lockdown.py` now checks both the CLI defaults and the
+`tests/contracts/test_torus9_arena_lockdown.py` now checks both the CLI defaults and the
 JSON preset as one explicit performance contract. The behavioral tests also
 cover multi-lane interleaving, replenishment, model-aware isolation, session
 parity, and fail-closed response identity validation.

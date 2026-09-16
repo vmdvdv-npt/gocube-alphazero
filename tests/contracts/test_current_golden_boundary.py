@@ -14,7 +14,7 @@ from tools.arena_engine import ArenaExecutionConfig
 from tools.arena_profiles.torus9 import Torus9ArenaProfile
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 CURRENT_PROFILE = ROOT / "configs/gocube/torus9_golden_current_v3.json"
 REFERENCE_PROFILE_FINGERPRINT = "sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775"
 CURRENT_CONTENT_FINGERPRINT = "sha256:7e97c50e1697641fb8f5b9a3566144f0a58c105e3b688940f42e7b6154fb0831"

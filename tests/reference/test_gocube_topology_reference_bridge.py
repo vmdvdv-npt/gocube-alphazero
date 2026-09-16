@@ -20,7 +20,7 @@ from alphazero.envs.gocube.katago_v3 import (
     v3_state_from_board,
     v3_valid_moves,
 )
-from katago_reference_runner import KatagoOracleProcess
+from tests.support.katago_reference_runner import KatagoOracleProcess
 
 
 pytestmark = pytest.mark.katago_reference

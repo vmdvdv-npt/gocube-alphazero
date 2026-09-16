@@ -11,7 +11,7 @@ from tools.arena_profiles.torus9 import Torus9ArenaProfile
 
 
 def test_repository_has_one_standalone_arena_engine():
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     assert (root / "tools" / "arena.py").is_file()
     assert (root / "tools" / "arena_engine.py").is_file()
     assert not (root / "tools" / "torus9_arena.py").exists()
@@ -53,7 +53,7 @@ def test_production_defaults_encode_current_arena_contract():
 
 
 def test_legion_preset_is_one_explicit_performance_contract():
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     preset = json.loads(
         (root / "configs" / "gocube" / "arena_torus9_legion_v1.json").read_text(
             encoding="utf-8"

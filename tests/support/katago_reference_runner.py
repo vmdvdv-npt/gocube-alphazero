@@ -33,11 +33,11 @@ from alphazero.envs.gocube.katago_v3 import (
 )
 from alphazero.envs.gocube.core import Topology
 
-from gocube_reference_topology import rectangular_test_topology
+from tests.support.gocube_reference_topology import rectangular_test_topology
 
 
 KATAGO_REFERENCE_COMMIT = "f6bc4b19a1686caa2d088b56251e8c11c8be6d51"
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 ORACLE_BUILD = ROOT / "tools" / "katago_reference" / "build_oracle.sh"
 
 
