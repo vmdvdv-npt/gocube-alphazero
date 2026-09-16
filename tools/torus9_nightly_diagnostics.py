@@ -365,6 +365,7 @@ def _iteration_summary_builder(
     records: Sequence[Torus9SelfPlayGameRecord],
     execution: Mapping[str, object],
     selfplay_wall: float,
+    selfplay_postprocessing_wall: float,
     selfplay_serialization_wall: float,
     telemetry: Mapping[str, object],
     adapter: Torus9TrainingAdapter,
@@ -401,6 +402,7 @@ def _iteration_summary_builder(
         timing = {
             "iteration_wall_time_until_publication_sec": max(0.0, time.perf_counter() - started),
             "self_play_wall_time_sec": selfplay_wall,
+            "self_play_postprocessing_wall_time_sec": selfplay_postprocessing_wall,
             "self_play_serialization_wall_time_sec": selfplay_serialization_wall,
             "training_transaction_phase_timing": phase,
             "self_play_startup_wall_time_sec": telemetry.get("startup_wall_time_sec"),
@@ -414,6 +416,7 @@ def _iteration_summary_builder(
                 "technical_games": int(telemetry.get("technical_games", 0)),
                 "moves": moves,
                 "wall_time_sec": selfplay_wall,
+                "postprocessing_wall_time_sec": selfplay_postprocessing_wall,
                 "games_per_sec": games / selfplay_wall if selfplay_wall else 0.0,
                 "games_per_hour": games * 3600.0 / selfplay_wall if selfplay_wall else 0.0,
                 "moves_per_sec": moves / selfplay_wall if selfplay_wall else 0.0,
@@ -495,12 +498,18 @@ def _run_generation(
         execution_reference_interactive=False,
     )
     selfplay_wall = time.perf_counter() - selfplay_started
+    postprocessing_started = time.perf_counter()
     if len(records) != games or {record.game_id for record in records} != set(game_ids):
         raise ValueError(f"M{generation} returned an unexpected game set")
     for record in records:
         record.validate()
         if record.technical_termination is not None:
             raise ValueError(f"Technical self-play game is not allowed: {record.game_id}")
+    move_count = sum(len(record.final_action_trace) for record in records)
+    position_count = sum(len(record.positions) for record in records)
+    if position_count != move_count:
+        raise ValueError("Self-play positions and action traces are not one-to-one")
+    selfplay_postprocessing_wall = time.perf_counter() - postprocessing_started
     if telemetry.get("execution_reference_status") != "validated_recommended":
         raise ValueError("Cadence self-play did not use the validated execution preset")
     if int(telemetry.get("target_active_contexts", 0)) != 64:
@@ -539,6 +548,7 @@ def _run_generation(
                 records=records,
                 execution=EXECUTION,
                 selfplay_wall=selfplay_wall,
+                selfplay_postprocessing_wall=selfplay_postprocessing_wall,
                 selfplay_serialization_wall=selfplay_serialization_wall,
                 telemetry=telemetry,
                 adapter=adapter,
@@ -563,6 +573,7 @@ def _run_generation(
     _write(run_dir / "timing" / f"M{generation:02d}.json", {
         "iteration": generation,
         "self_play_wall_time_sec": selfplay_wall,
+        "self_play_postprocessing_wall_time_sec": selfplay_postprocessing_wall,
         "self_play_serialization_wall_time_sec": selfplay_serialization_wall,
         "training_transaction_wall_time_sec": training_wall,
         "iteration_wall_time_sec": time.perf_counter() - started,
@@ -1036,6 +1047,7 @@ def _critical_path(row: Mapping[str, object], timing: Mapping[str, object]) -> l
     values = [
         ("startup / model load", 0.0),
         ("self-play", float(timing.get("self_play_wall_time_sec", 0.0))),
+        ("self-play validation / accounting", float(timing.get("self_play_postprocessing_wall_time_sec", 0.0))),
         ("self-play finalization / serialization", float(timing.get("self_play_serialization_wall_time_sec", 0.0))),
         ("replay/sample preparation", sum(float(phase.get(key, 0.0)) for key in ("sample_build_wall_time_sec", "sample_validation_and_stamping_wall_time_sec", "replay_update_and_validation_wall_time_sec"))),
         ("training H2D + batch construction", float(train_stages.get("h2d_and_batch_construction_wall_time_sec", 0.0))),
@@ -1045,7 +1057,7 @@ def _critical_path(row: Mapping[str, object], timing: Mapping[str, object]) -> l
         ("training optimizer", float(train_stages.get("optimizer_wall_time_sec", 0.0))),
         ("training parameter accounting", float(train_stages.get("parameter_snapshot_wall_time_sec", 0.0))),
         ("checkpoint serialization / verification", float(phase.get("checkpoint_serialization_and_verification_wall_time_sec", 0.0))),
-        ("checkpoint publication / finalize", max(0.0, float(timing.get("training_transaction_wall_time_sec", 0.0)) - float(timing.get("self_play_serialization_wall_time_sec", 0.0)) - float(phase.get("train_wall_time_sec", 0.0)) - float(phase.get("checkpoint_serialization_and_verification_wall_time_sec", 0.0)))),
+        ("checkpoint publication / finalize", float(phase.get("checkpoint_publication_wall_time_sec", 0.0))),
     ]
     return [
         {
