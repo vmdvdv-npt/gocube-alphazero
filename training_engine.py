@@ -16,7 +16,7 @@ import json
 import os
 from pathlib import Path
 import time
-from typing import Any, Callable, Mapping, MutableMapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, MutableMapping, Protocol, Sequence, runtime_checkable
 
 
 def _jsonable(value: object) -> object:
@@ -184,6 +184,7 @@ class TrainingAdapter(Protocol):
     def sync_state(self, state: TrainingState) -> None: ...
 
 
+@runtime_checkable
 class ReplayConstructionAdapter(Protocol):
     """Optional record-construction capability without full row validation.
 
@@ -302,10 +303,18 @@ class TrainingEngine:
         try:
             phase_started = time.perf_counter()
             if records is not None:
-                # Current adapters validate generated rows at the build
-                # boundary. Re-validating every fresh row here was a full
-                # redundant O(fresh replay) pass.
-                source_samples = tuple(selected_adapter.build_samples(tuple(records)))
+                record_values = tuple(records)
+                if isinstance(selected_adapter, ReplayConstructionAdapter):
+                    # This explicit capability is reserved for record rows
+                    # that are immediately stamped and sent through the
+                    # authoritative update_replay validation boundary.
+                    source_samples = tuple(
+                        selected_adapter.build_samples_for_replay(record_values)
+                    )
+                else:
+                    # Legacy adapters retain the fully validated public
+                    # build_samples contract.
+                    source_samples = tuple(selected_adapter.build_samples(record_values))
                 source_samples_need_validation = False
             else:
                 source_samples = tuple(dict(sample) for sample in samples or ())

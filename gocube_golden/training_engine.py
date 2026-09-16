@@ -2,6 +2,7 @@
 
 from training_engine import (
     CheckpointContext,
+    ReplayConstructionAdapter,
     TrainingAdapter,
     TrainingEngine,
     TrainingIterationResult,
@@ -13,6 +14,7 @@ from training_engine import (
 
 __all__ = [
     "CheckpointContext",
+    "ReplayConstructionAdapter",
     "TrainingAdapter",
     "TrainingEngine",
     "TrainingIterationResult",
