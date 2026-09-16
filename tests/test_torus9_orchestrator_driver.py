@@ -16,8 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC_PATH = ROOT / "configs" / "gocube" / "torus9_training_orchestrator_v1.json"
 
 
-def test_torus9_orchestrator_spec_is_concrete_and_current():
+def _spec_payload() -> dict[str, object]:
     payload = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
+
+
+def test_torus9_orchestrator_spec_is_concrete_and_current():
+    payload = _spec_payload()
     rendered = json.dumps(payload, sort_keys=True)
     assert "<" not in rendered and "profile-arena-driver" not in rendered
     assert payload["topology"] == "torus9"
@@ -33,7 +39,7 @@ def test_torus9_orchestrator_spec_is_concrete_and_current():
 
 
 def test_torus9_orchestrator_generation_command_pins_validated_legion_selfplay():
-    payload = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    payload = _spec_payload()
     argv = payload["execution"]["generation_command"]
     values = {
         argv[index]: argv[index + 1]
@@ -49,8 +55,21 @@ def test_torus9_orchestrator_generation_command_pins_validated_legion_selfplay()
     assert values["--device"] == "cuda"
 
 
+def test_torus9_orchestrator_monitors_neural_training_speed_fail_closed():
+    payload = _spec_payload()
+    checks = {
+        str(item["metric"]): item
+        for item in payload["performance"]["checks"]
+    }
+    training_speed = checks["optimizer_updates_per_sec"]
+    assert float(training_speed["baseline"]) == pytest.approx(80.0 / 6.439437859)
+    assert training_speed["warning_ratio"] == 0.85
+    assert training_speed["fail_ratio"] == 0.7
+    assert training_speed["policy"] == "fail-closed"
+
+
 def test_cube_is_not_claimed_as_a_current_orchestrator_driver():
-    payload = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    payload = _spec_payload()
     commands = payload["execution"]["generation_command"] + payload["arena"]["command"]
     assert "tools/torus9_orchestrator_driver.py" in commands
     assert all("cube" not in token.lower() for token in commands)

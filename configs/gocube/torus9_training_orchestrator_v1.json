@@ -78,7 +78,8 @@
       "learning.mean_gradient_norm",
       "learning.optimizer_updates_total",
       "learning.samples_consumed_total",
-      "moves_per_sec"
+      "moves_per_sec",
+      "optimizer_updates_per_sec"
     ],
     "stall_checks": [
       {
@@ -105,6 +106,13 @@
         "baseline": 21.09873,
         "fail_ratio": 0.7,
         "metric": "moves_per_sec",
+        "policy": "fail-closed",
+        "warning_ratio": 0.85
+      },
+      {
+        "baseline": 12.423444678201063,
+        "fail_ratio": 0.7,
+        "metric": "optimizer_updates_per_sec",
         "policy": "fail-closed",
         "warning_ratio": 0.85
       },
