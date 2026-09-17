@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import gocube_golden.torus9_run_owned_training as run_owned_training
+from gocube_golden.torus9_monolith import TORUS9_TOPOLOGY_FINGERPRINT
 from gocube_golden import (
     Torus9CurrentGraphNet,
     Torus9SelfPlaySearchContract,
@@ -16,6 +17,11 @@ from gocube_golden import (
 )
 from gocube_golden.run_spec import StrictRunSpec
 from gocube_golden.torus9_contract import (
+    TORUS9_CURRENT_ARCHITECTURE_ID,
+    TORUS9_CURRENT_PROFILE_ID,
+    TORUS9_CURRENT_TARGET_FINGERPRINT,
+    TORUS9_KOMI,
+    TORUS9_TARGET_CONTRACT_ID,
     current_torus9_content_fingerprint,
     profile_fingerprint,
     validate_torus9_current_profile,
@@ -237,3 +243,57 @@ def test_torus9_run_spec_ignores_stale_expected_profile_fingerprint(tmp_path: Pa
 def test_invalid_shapes_still_fail_without_golden_comparison() -> None:
     with pytest.raises(ValueError, match="positive"):
         Torus9SelfPlaySearchContract(simulations=0).validate()
+
+
+def test_modern_external_parent_still_validates_stage3_metadata() -> None:
+    parent_metadata = {
+        "checkpoint_schema_version": 1,
+        "checkpoint_label": "M47",
+        "run_id": "parent",
+        "profile_id": TORUS9_CURRENT_PROFILE_ID,
+        "profile_fingerprint": "sha256:" + "1" * 64,
+        "target_contract_id": TORUS9_TARGET_CONTRACT_ID,
+        "target_fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT,
+        "architecture_id": TORUS9_CURRENT_ARCHITECTURE_ID,
+        "architecture_config": {},
+        "architecture_fingerprint": "sha256:" + "2" * 64,
+        "model_hash": "sha256:" + "3" * 64,
+        "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
+        "board_size": [9, 9],
+        "komi": TORUS9_KOMI,
+        "network_heads_and_shapes": {},
+        "optimizer_updates": 3760,
+        "train_samples_consumed": 240640,
+        "adam_step": 3760,
+        "replay_generations": [45, 46, 47],
+        "replay_fingerprint": "sha256:" + "4" * 64,
+        "sampled_row_ids_fingerprint": "sha256:" + "5" * 64,
+        "training_seed": 123,
+        "optimizer_parameter_order": ["weight"],
+        "optimizer_parameter_groups": [{"lr": 0.001}],
+    }
+    adapter = Torus9TrainingAdapter(
+        profile=_run_profile(
+            lr=0.0003,
+            replay_generations=6,
+            replay_cap=40000,
+            simulations=128,
+        )
+    )
+
+    adapter._validate_checkpoint_metadata(
+        parent_metadata,
+        require_optimizer=True,
+        require_stage3_fields=True,
+        allow_profile_reference=True,
+    )
+
+    tampered = dict(parent_metadata)
+    tampered["adam_step"] = int(tampered["optimizer_updates"]) - 1
+    with pytest.raises(ValueError, match="Adam step mismatch"):
+        adapter._validate_checkpoint_metadata(
+            tampered,
+            require_optimizer=True,
+            require_stage3_fields=True,
+            allow_profile_reference=True,
+        )
