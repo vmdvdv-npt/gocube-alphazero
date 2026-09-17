@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 
 from gocube_golden import (
     Torus9CurrentGraphNet,
@@ -64,6 +65,35 @@ def test_run_owned_tunables_are_not_compared_with_golden(
     assert state.optimizer.param_groups[0]["lr"] == pytest.approx(lr)
     assert state.rolling_replay.generations == generations
     assert state.rolling_replay.maximum_positions == cap
+
+
+def test_parent_adam_state_keeps_moments_but_run_lr_wins() -> None:
+    profile = _run_profile(
+        lr=0.0003,
+        replay_generations=6,
+        replay_cap=40000,
+        simulations=128,
+    )
+    model = Torus9CurrentGraphNet()
+    adapter = Torus9TrainingAdapter(profile=profile)
+    state = adapter.create_state(model, run_id="adam-lr-override")
+
+    parent_optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    for parameter in model.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    parent_optimizer.step()
+    state.optimizer.load_state_dict(parent_optimizer.state_dict())
+
+    first_parameter = next(iter(model.parameters()))
+    moment_before = state.optimizer.state[first_parameter]["exp_avg"].detach().clone()
+    step_before = int(state.optimizer.state[first_parameter]["step"].item())
+    assert state.optimizer.param_groups[0]["lr"] == pytest.approx(0.001)
+
+    adapter._apply_effective_lr(state.optimizer)
+
+    assert state.optimizer.param_groups[0]["lr"] == pytest.approx(0.0003)
+    assert int(state.optimizer.state[first_parameter]["step"].item()) == step_before
+    assert torch.equal(state.optimizer.state[first_parameter]["exp_avg"], moment_before)
 
 
 def test_torus9_run_spec_ignores_stale_expected_profile_fingerprint(tmp_path: Path) -> None:
