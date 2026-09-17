@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
+import gocube_golden.torus9_run_owned_training as run_owned_training
 from gocube_golden import (
     Torus9CurrentGraphNet,
     Torus9SelfPlaySearchContract,
@@ -32,6 +33,27 @@ def _run_profile(*, lr: float, replay_generations: int, replay_cap: int, simulat
     profile["content_fingerprint"] = current_torus9_content_fingerprint(profile)
     profile["profile_fingerprint"] = profile_fingerprint(profile)
     return profile
+
+
+def _parent_reference(tmp_path: Path) -> tuple[Path, Path, Path]:
+    root = tmp_path / "parent-lineage"
+    checkpoint = root / "checkpoints" / "M47.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint-placeholder")
+    checkpoint.with_suffix(".metadata.json").write_text(
+        json.dumps(
+            {
+                "checkpoint_label": "M47",
+                "rolling_generations": 3,
+                "maximum_replay_positions": 20000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    replay = root / "replay" / "rolling-after-47.jsonl"
+    replay.parent.mkdir(parents=True)
+    replay.write_text("", encoding="utf-8")
+    return root, checkpoint, replay
 
 
 @pytest.mark.parametrize(
@@ -94,6 +116,107 @@ def test_parent_adam_state_keeps_moments_but_run_lr_wins() -> None:
     assert state.optimizer.param_groups[0]["lr"] == pytest.approx(0.0003)
     assert int(state.optimizer.state[first_parameter]["step"].item()) == step_before
     assert torch.equal(state.optimizer.state[first_parameter]["exp_avg"], moment_before)
+
+
+def test_expanded_parent_replay_requires_complete_fresh_window(tmp_path: Path) -> None:
+    root, checkpoint, fallback = _parent_reference(tmp_path)
+    for generation in (42, 43, 44, 46, 47):
+        (root / "replay" / f"iter-{generation:02d}-fresh.jsonl").write_text(
+            "", encoding="utf-8"
+        )
+    adapter = Torus9TrainingAdapter(
+        profile=_run_profile(
+            lr=0.0003,
+            replay_generations=6,
+            replay_cap=40000,
+            simulations=128,
+        )
+    )
+
+    with pytest.raises(FileNotFoundError, match="iter-45-fresh.jsonl"):
+        adapter._reference_sources(checkpoint, (fallback,))
+
+
+def test_expanded_parent_replay_uses_exact_m42_through_m47(tmp_path: Path) -> None:
+    root, checkpoint, fallback = _parent_reference(tmp_path)
+    for generation in range(42, 48):
+        (root / "replay" / f"iter-{generation:02d}-fresh.jsonl").write_text(
+            "", encoding="utf-8"
+        )
+    adapter = Torus9TrainingAdapter(
+        profile=_run_profile(
+            lr=0.0003,
+            replay_generations=6,
+            replay_cap=40000,
+            simulations=128,
+        )
+    )
+
+    sources = adapter._reference_sources(checkpoint, (fallback,))
+    assert [path.name for path in sources] == [
+        "iter-42-fresh.jsonl",
+        "iter-43-fresh.jsonl",
+        "iter-44-fresh.jsonl",
+        "iter-45-fresh.jsonl",
+        "iter-46-fresh.jsonl",
+        "iter-47-fresh.jsonl",
+    ]
+
+
+def test_parent_rolling_replay_remains_valid_when_child_does_not_expand_scope(
+    tmp_path: Path,
+) -> None:
+    _, checkpoint, fallback = _parent_reference(tmp_path)
+    adapter = Torus9TrainingAdapter(
+        profile=_run_profile(
+            lr=0.0003,
+            replay_generations=3,
+            replay_cap=20000,
+            simulations=128,
+        )
+    )
+
+    assert adapter._reference_sources(checkpoint, (fallback,)) == (fallback,)
+
+
+def test_replay6_bootstrap_evicts_to_40k_instead_of_rejecting_source_total(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    adapter = Torus9TrainingAdapter(
+        profile=_run_profile(
+            lr=0.0003,
+            replay_generations=6,
+            replay_cap=40000,
+            simulations=128,
+        )
+    )
+    sources = tuple(tmp_path / f"iter-{generation:02d}-fresh.jsonl" for generation in range(42, 48))
+    for source in sources:
+        source.write_text("", encoding="utf-8")
+
+    def fake_read(source: Path):
+        generation = int(source.name.split("-")[1])
+        rows = [
+            {
+                "source_generation": generation,
+                "replay_row_id": f"M{generation}:{index}",
+            }
+            for index in range(7000)
+        ]
+        return rows, {"sha256": f"sha256:{generation:064x}", "size_bytes": len(rows)}
+
+    monkeypatch.setattr(run_owned_training._base, "_read_jsonl_with_identity", fake_read)
+    monkeypatch.setattr(adapter, "validate_sample", lambda _row: None)
+
+    replay, digests = adapter._rolling_from_sources(sources, total_evictions=0)
+
+    assert len(digests) == 6
+    assert len(replay.rows) == 40000
+    assert replay.total_evictions == 2000
+    assert replay.rows[0]["replay_row_id"] == "M42:2000"
+    assert replay.rows[-1]["replay_row_id"] == "M47:6999"
+    assert {int(row["source_generation"]) for row in replay.rows} == set(range(42, 48))
 
 
 def test_torus9_run_spec_ignores_stale_expected_profile_fingerprint(tmp_path: Path) -> None:
