@@ -41,19 +41,23 @@ def _init_validation_worker(profile: Mapping[str, object]) -> None:
 
 def _validate_replay_chunk(
     rows: Sequence[Mapping[str, object]],
-) -> tuple[tuple[str, str], ...]:
+) -> tuple[tuple[tuple[str, str], ...], float]:
     """Fully validate one chunk and return content fingerprints for the parent."""
     adapter = _worker_adapter
     if adapter is None:
         raise RuntimeError("Torus9 replay validation worker was not initialized")
     validated: list[tuple[str, str]] = []
+    fingerprint_process_seconds = 0.0
     for row in rows:
         adapter._validate_sample_semantics(row)
         row_id = str(row.get("replay_row_id", ""))
         if not row_id:
             raise ValueError("Parallel Torus9 replay validation requires replay_row_id")
-        validated.append((row_id, value_fingerprint(row)))
-    return tuple(validated)
+        fingerprint_started = time.process_time()
+        fingerprint = value_fingerprint(row)
+        fingerprint_process_seconds += time.process_time() - fingerprint_started
+        validated.append((row_id, fingerprint))
+    return tuple(validated), fingerprint_process_seconds
 
 
 class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
@@ -91,13 +95,16 @@ class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
         self, samples: Sequence[Mapping[str, object]]
     ) -> dict[str, str]:
         fingerprints: dict[str, str] = {}
+        fingerprint_process_seconds = 0.0
         total = len(samples)
         for position, sample in enumerate(samples, 1):
             self._validate_sample_semantics(sample)
             row_id = str(sample.get("replay_row_id", ""))
             if not row_id:
                 raise ValueError("Torus9 replay validation requires replay_row_id")
+            fingerprint_started = time.process_time()
             fingerprints[row_id] = value_fingerprint(sample)
+            fingerprint_process_seconds += time.process_time() - fingerprint_started
             if position == total or position % 256 == 0:
                 self._report_progress(
                     "replay",
@@ -106,6 +113,8 @@ class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
                     "rows",
                     "validation",
                 )
+        if self._diagnostic_timing is not None:
+            self._diagnostic_timing["replay_new_row_fingerprint_process_cpu_sec"] = fingerprint_process_seconds
         return fingerprints
 
     def _validate_new_rows_parallel(
@@ -117,6 +126,7 @@ class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
         chunks = self._validation_chunks(samples, workers)
         fingerprints: dict[str, str] = {}
         completed = 0
+        fingerprint_process_seconds = 0.0
         context = multiprocessing.get_context("spawn")
         with ProcessPoolExecutor(
             max_workers=int(workers),
@@ -124,7 +134,8 @@ class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
             initializer=_init_validation_worker,
             initargs=(dict(self.profile),),
         ) as executor:
-            for result in executor.map(_validate_replay_chunk, chunks):
+            for result, chunk_fingerprint_cpu in executor.map(_validate_replay_chunk, chunks):
+                fingerprint_process_seconds += float(chunk_fingerprint_cpu)
                 for row_id, fingerprint in result:
                     if row_id in fingerprints:
                         raise ValueError(
@@ -143,6 +154,8 @@ class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
             raise RuntimeError(
                 "Parallel Torus9 replay validation did not return the complete batch"
             )
+        if self._diagnostic_timing is not None:
+            self._diagnostic_timing["replay_new_row_fingerprint_process_cpu_sec"] = fingerprint_process_seconds
         return fingerprints
 
     @staticmethod
@@ -170,8 +183,10 @@ class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
         # Identity/provenance remains an authoritative parent-process boundary.
         # No worker may mutate replay, and no semantic validation begins until
         # every row is proven to belong to this generation with its canonical ID.
+        identity_started = time.perf_counter()
         for position, sample in enumerate(samples):
             self._validate_stamped_sample_identity(sample, generation, position)
+        identity_elapsed = time.perf_counter() - identity_started
 
         workers = self._parallel_validation_worker_count(len(samples))
         started = time.perf_counter()
@@ -199,10 +214,13 @@ class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
         # semantic validator succeeded. Validation cache publication follows
         # replay mutation so a failed append cannot leave false trusted state.
         metrics = replay.append_generation(generation, samples)
+        cache_update_started = time.perf_counter()
         self._validated_sample_fingerprints.update(fingerprints)
+        cache_update_elapsed = time.perf_counter() - cache_update_started
 
         if self._diagnostic_timing is not None:
             timing: dict[str, object] = {
+                "replay_new_identity_and_provenance_wall_time_sec": identity_elapsed,
                 "replay_new_semantic_validation_wall_time_sec": elapsed,
                 "replay_new_semantic_validation_workers": int(workers),
                 "replay_new_semantic_validation_mode": mode,
@@ -212,6 +230,7 @@ class Torus9TrainingAdapter(_RunOwnedTorus9TrainingAdapter):
                     if mode == "process-parallel"
                     else (1 if samples else 0)
                 ),
+                "replay_new_validation_cache_update_wall_time_sec": cache_update_elapsed,
             }
             if fallback_reason is not None:
                 timing["replay_new_semantic_validation_fallback_reason"] = fallback_reason

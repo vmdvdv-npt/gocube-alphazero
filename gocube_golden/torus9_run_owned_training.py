@@ -112,6 +112,10 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
 
     def validate_replay(self, rows: Sequence[Mapping[str, object]]) -> None:
         """Validate replay structure and deep-check only rows not already trusted."""
+        validation_started = time.perf_counter()
+        cache_lookup_elapsed = 0.0
+        row_fingerprint_elapsed = 0.0
+        semantic_fallback_elapsed = 0.0
         previous_generation = 0
         row_ids: set[str] = set()
         for row in rows:
@@ -131,15 +135,40 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
                 raise ValueError("Current Torus9 replay target fingerprint drift")
             if row.get("ownership_target") is None or row.get("score_target") is None:
                 raise ValueError("Current Torus9 replay auxiliary target is missing")
+            lookup_started = time.perf_counter()
             if row_id not in self._trusted_historical_row_ids:
                 cached_fingerprint = self._validated_sample_fingerprints.get(row_id)
+            else:
+                cached_fingerprint = None
+            cache_lookup_elapsed += time.perf_counter() - lookup_started
+            if row_id not in self._trusted_historical_row_ids:
+                fingerprint_started = time.perf_counter()
                 current_fingerprint = _base.value_fingerprint(row)
+                row_fingerprint_elapsed += time.perf_counter() - fingerprint_started
                 if cached_fingerprint != current_fingerprint:
+                    semantic_started = time.perf_counter()
                     self.validate_sample(row)
+                    semantic_fallback_elapsed += time.perf_counter() - semantic_started
             previous_generation = generation
             row_ids.add(row_id)
         if len(rows) > int(self.replay_profile["cap"]):  # type: ignore[index]
             raise ValueError("Current Torus9 replay cap exceeded")
+        if self._diagnostic_timing is not None:
+            total = time.perf_counter() - validation_started
+            self._diagnostic_timing.update({
+                "replay_validation_cache_lookup_wall_time_sec": cache_lookup_elapsed,
+                "replay_validation_per_row_fingerprint_wall_time_sec": row_fingerprint_elapsed,
+                "replay_validation_semantic_fallback_wall_time_sec": semantic_fallback_elapsed,
+                "replay_validation_semantic_fallback_and_cache_update_wall_time_sec": semantic_fallback_elapsed,
+                "replay_validation_structural_and_other_wall_time_sec": max(
+                    0.0,
+                    total
+                    - cache_lookup_elapsed
+                    - row_fingerprint_elapsed
+                    - semantic_fallback_elapsed,
+                ),
+                "replay_validation_accounted_sum_sec": total,
+            })
 
     @staticmethod
     def _verified_replay_evidence(
@@ -239,6 +268,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         sources: Sequence[Path],
         *,
         total_evictions: int,
+        generation_identities: Sequence[Mapping[str, object]] | None = None,
     ) -> tuple[_base.Torus9RollingReplay, list[dict[str, object]]]:
         replay = _base.Torus9RollingReplay(
             generations=int(self.replay_profile["generations"]),  # type: ignore[index]
@@ -247,6 +277,13 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         replay.total_evictions = int(total_evictions)
         source_digests: list[dict[str, object]] = []
         seen_generations: set[int] = set()
+        supplied_identities = {
+            int(component["generation"]): dict(component)
+            for component in _base._normalize_generation_identities(
+                generation_identities,
+                label="Torus9 referenced replay generation identities",
+            )
+        }
 
         # Process one source at a time and feed generations through the same
         # rolling replay object used during normal training.  This deliberately
@@ -261,6 +298,10 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
                 if generation <= 0:
                     raise ValueError("Referenced Torus9 replay generation is malformed")
                 by_generation.setdefault(generation, []).append(dict(row))
+            if source.name.endswith("-fresh.jsonl") and len(by_generation) != 1:
+                raise ValueError(
+                    "Referenced Torus9 fresh replay artifact must contain exactly one generation"
+                )
             for generation in sorted(by_generation):
                 if generation in seen_generations:
                     raise ValueError(
@@ -269,7 +310,30 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
                 rows = by_generation[generation]
                 for row in rows:
                     self.validate_sample(row)
-                replay.append_generation(generation, rows)
+                identity = supplied_identities.get(generation)
+                if len(by_generation) == 1 and source.name.endswith("-fresh.jsonl"):
+                    # A fresh source contains exactly one immutable generation;
+                    # its already-computed physical SHA is the durable identity.
+                    if identity is not None:
+                        if str(identity.get("sha256", "")) != str(digest["sha256"]):
+                            raise ValueError(
+                                f"Referenced Torus9 fresh replay M{generation} SHA-256 mismatch"
+                            )
+                        declared_rows = identity.get("row_count")
+                        if declared_rows is not None and int(declared_rows) != len(rows):
+                            raise ValueError(
+                                f"Referenced Torus9 fresh replay M{generation} row count mismatch"
+                            )
+                    identity = _base.replay_generation_identity_from_artifact(
+                        generation,
+                        digest["sha256"],
+                        len(rows),
+                    )
+                replay.append_generation(
+                    generation,
+                    rows,
+                    generation_identity=identity,
+                )
                 seen_generations.add(generation)
 
         if not seen_generations:
@@ -357,11 +421,24 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
             else fallback_sources
         )
         replay_started = time.perf_counter()
+        generation_identities = _base._replay_generation_identities_from_payload(
+            replay_artifact_identity,
+            metadata,
+        )
+        identity_schema = _base._replay_identity_schema_from_payload(
+            replay_artifact_identity,
+            metadata,
+        )
+        expected_identity_fingerprint = _base._replay_fingerprint_from_payload(
+            replay_artifact_identity,
+            metadata,
+        )
 
         if allow_reference or len(sources) > 1:
             replay, source_digests = self._rolling_from_sources(
                 sources,
                 total_evictions=total_evictions,
+                generation_identities=generation_identities,
             )
             rows = list(replay.rows)
             replay_digest = {
@@ -376,6 +453,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
                 generations=int(self.replay_profile["generations"]),  # type: ignore[index]
                 maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
                 total_evictions=int(total_evictions),
+                generation_identities=generation_identities,
             )
 
         if load_timing is not None:
@@ -394,6 +472,17 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         if trusted_historical:
             self._trust_historical_rows(rows)
         self.validate_replay(rows)
+        if (
+            identity_schema == _base.TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA
+            and not allow_reference
+            and len(sources) == 1
+        ):
+            if generation_identities is None or expected_identity_fingerprint is None:
+                raise ValueError("Torus9 replay composition identity evidence is incomplete")
+            actual_identity = replay.replay_identity_descriptor()
+            if actual_identity["fingerprint"] != expected_identity_fingerprint:
+                raise ValueError("Current Torus9 replay composition fingerprint mismatch")
+            replay_fingerprint = expected_identity_fingerprint
         if load_timing is not None:
             load_timing["replay_validation_wall_time_sec"] = time.perf_counter() - validation_started
 
