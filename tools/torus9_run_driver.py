@@ -1459,6 +1459,7 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
         telemetry_map = telemetry if isinstance(telemetry, Mapping) else {}
         arena_block = _mapping(spec.payload["arena"], "arena")
         cross_lineage = reference_identity.lineage_id != candidate_identity.lineage_id
+        comparison = f"periodic-M{args.generation}-vs-M{reference_generation}"
         evaluation_id = (
             evaluation_id_for_comparison(
                 candidate_lineage_id=candidate_identity.lineage_id,
