@@ -48,6 +48,22 @@ def sequence_fingerprint(values: Sequence[object]) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def jsonl_artifact_fingerprint(values: Sequence[object]) -> str:
+    """Return the SHA-256 of the deterministic JSONL representation.
+
+    Generation artifacts are written with ``json.dumps(..., sort_keys=True)``
+    and one newline per row.  A Torus9 adapter may use this for the one new
+    generation identity computed before the artifact is published; historical
+    generations reuse their committed artifact SHA instead of being rendered
+    again.
+    """
+    digest = hashlib.sha256()
+    for value in values:
+        digest.update(json.dumps(_jsonable(value), sort_keys=True).encode("utf-8"))
+        digest.update(b"\n")
+    return "sha256:" + digest.hexdigest()
+
+
 @dataclass
 class TrainingState:
     """Explicit resumable state shared by the engine and its adapter."""
@@ -86,6 +102,7 @@ class CheckpointContext:
     parent_checkpoint_identity: Mapping[str, object] | None
     code_identity: Any
     device: str
+    replay_identity: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -213,6 +230,18 @@ def _write_jsonl(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
             # Adapter replay rows are already JSON-compatible mappings.  Avoid
             # recursively copying each large observation tensor here.
             handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def _write_jsonl_with_identity(path: Path, rows: Sequence[Mapping[str, object]]) -> str:
+    """Write deterministic JSONL and return its physical SHA in the same pass."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            line = json.dumps(row, sort_keys=True) + "\n"
+            handle.write(line)
+            digest.update(line.encode("utf-8"))
+    return "sha256:" + digest.hexdigest()
 
 
 class TrainingEngine:
@@ -343,14 +372,109 @@ class TrainingEngine:
 
             replay_started = time.perf_counter()
             replay_metrics = dict(selected_adapter.update_replay(state.rolling_replay, generation, stamped))
-            phase_timing["replay_update_wall_time_sec"] = time.perf_counter() - replay_started
+            replay_update_elapsed = time.perf_counter() - replay_started
+            # Preserve the historical field while exposing an explicitly
+            # named total for the mutually-exclusive replay breakdown below.
+            phase_timing["replay_update_wall_time_sec"] = replay_update_elapsed
+            phase_timing["replay_update_total_wall_time_sec"] = replay_update_elapsed
+            rows_started = time.perf_counter()
             replay_rows = tuple(selected_adapter.replay_rows(state.rolling_replay))
+            phase_timing["replay_rows_materialization_wall_time_sec"] = time.perf_counter() - rows_started
             validation_started = time.perf_counter()
             selected_adapter.validate_replay(replay_rows)
-            replay_fingerprint = sequence_fingerprint(replay_rows)
             phase_timing["replay_validation_wall_time_sec"] = time.perf_counter() - validation_started
+            fresh_artifact_sha256: str | None = None
+            fresh_artifact_started = time.perf_counter()
+            replay_artifact_identity_setter = getattr(
+                selected_adapter,
+                "set_replay_generation_artifact_identity",
+                None,
+            )
+            if callable(replay_artifact_identity_setter):
+                # The new generation is the only row collection allowed to be
+                # serialized here.  Hash its physical JSONL bytes during the
+                # same write, then attach that immutable identity before the
+                # rolling composition is requested.
+                fresh_artifact_sha256 = _write_jsonl_with_identity(fresh_tmp, stamped)
+                replay_artifact_identity_setter(
+                    state.rolling_replay,
+                    generation,
+                    fresh_artifact_sha256,
+                    len(stamped),
+                )
+            phase_timing["replay_fresh_artifact_serialization_and_hash_wall_time_sec"] = (
+                time.perf_counter() - fresh_artifact_started
+            )
+            identity_started = time.perf_counter()
+            replay_identity_provider = getattr(selected_adapter, "replay_identity", None)
+            if callable(replay_identity_provider):
+                replay_identity = replay_identity_provider(state.rolling_replay)
+                if not isinstance(replay_identity, Mapping):
+                    raise ValueError("Training adapter replay_identity must return a mapping")
+                replay_fingerprint = str(replay_identity.get("fingerprint", ""))
+                if not replay_fingerprint:
+                    raise ValueError("Training adapter replay_identity must include fingerprint")
+            else:
+                # Legacy adapters do not expose committed generation
+                # identities, so retain their established row-sequence
+                # fingerprinting behavior.
+                replay_identity = None
+                replay_fingerprint = sequence_fingerprint(replay_rows)
+            phase_timing["replay_identity_composition_wall_time_sec"] = time.perf_counter() - identity_started
+            adapter_replay_timing_provider = getattr(selected_adapter, "replay_diagnostic_timing", None)
+            adapter_replay_timing = (
+                adapter_replay_timing_provider()
+                if callable(adapter_replay_timing_provider)
+                else {}
+            )
+            if isinstance(adapter_replay_timing, Mapping):
+                for key in (
+                    "replay_new_identity_and_provenance_wall_time_sec",
+                    "replay_new_semantic_validation_wall_time_sec",
+                    "replay_new_row_fingerprint_process_cpu_sec",
+                    "replay_new_validation_cache_update_wall_time_sec",
+                    "replay_validation_cache_lookup_wall_time_sec",
+                    "replay_validation_per_row_fingerprint_wall_time_sec",
+                    "replay_validation_semantic_fallback_wall_time_sec",
+                    "replay_validation_semantic_fallback_and_cache_update_wall_time_sec",
+                    "replay_validation_structural_and_other_wall_time_sec",
+                    "replay_validation_accounted_sum_sec",
+                ):
+                    if key in adapter_replay_timing:
+                        phase_timing[key] = adapter_replay_timing[key]
+            semantic_validation_elapsed = float(
+                phase_timing.get("replay_new_semantic_validation_wall_time_sec", 0.0)
+            )
+            new_identity_elapsed = float(
+                phase_timing.get("replay_new_identity_and_provenance_wall_time_sec", 0.0)
+            )
+            # ``update_replay`` is the authoritative transaction boundary. Its
+            # semantic validation is measured inside the adapter; the residual
+            # below is the exclusive append/cache/update operation.
+            phase_timing["replay_append_and_cache_wall_time_sec"] = max(
+                0.0,
+                replay_update_elapsed
+                - new_identity_elapsed
+                - semantic_validation_elapsed,
+            )
             phase_timing["replay_update_and_validation_wall_time_sec"] = (
                 time.perf_counter() - replay_started
+            )
+            replay_exclusive_parts = (
+                new_identity_elapsed,
+                semantic_validation_elapsed,
+                float(phase_timing["replay_append_and_cache_wall_time_sec"]),
+                float(phase_timing["replay_rows_materialization_wall_time_sec"]),
+                float(phase_timing["replay_validation_wall_time_sec"]),
+                float(phase_timing["replay_fresh_artifact_serialization_and_hash_wall_time_sec"]),
+                float(phase_timing["replay_identity_composition_wall_time_sec"]),
+            )
+            phase_timing["replay_update_and_validation_accounted_sum_sec"] = sum(
+                replay_exclusive_parts
+            )
+            phase_timing["replay_update_and_validation_unaccounted_sec"] = (
+                float(phase_timing["replay_update_and_validation_wall_time_sec"])
+                - float(phase_timing["replay_update_and_validation_accounted_sum_sec"])
             )
 
             train_started = time.perf_counter()
@@ -397,6 +521,7 @@ class TrainingEngine:
                 parent_checkpoint_identity=parent,
                 code_identity=code_identity,
                 device=str(device if device is not None else getattr(state.model, "device", "cpu")),
+                replay_identity=replay_identity,
             )
             phase_started = time.perf_counter()
             metadata = dict(selected_adapter.prepare_checkpoint(state, context, training_metrics))
@@ -404,7 +529,8 @@ class TrainingEngine:
 
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
             serialization_started = time.perf_counter()
-            _write_jsonl(fresh_tmp, stamped)
+            if fresh_artifact_sha256 is None:
+                _write_jsonl(fresh_tmp, stamped)
             _write_jsonl(rolling_tmp, replay_rows)
             phase_timing["replay_serialization_wall_time_sec"] = time.perf_counter() - serialization_started
             checkpoint_write_started = time.perf_counter()
@@ -424,12 +550,22 @@ class TrainingEngine:
             )
             checkpoint_artifact_hash = selected_adapter.artifact_hash(checkpoint_tmp)
             artifact_hash_cache = {
-                "fresh_replay": selected_adapter.artifact_hash(fresh_tmp),
+                "fresh_replay": (
+                    fresh_artifact_sha256
+                    if fresh_artifact_sha256 is not None
+                    else selected_adapter.artifact_hash(fresh_tmp)
+                ),
                 "rolling_replay": selected_adapter.artifact_hash(rolling_tmp),
                 "checkpoint": checkpoint_artifact_hash,
                 "checkpoint_metadata": selected_adapter.artifact_hash(checkpoint_metadata_tmp),
                 "training_metrics": selected_adapter.artifact_hash(training_tmp),
             }
+            if isinstance(replay_identity, Mapping):
+                expected_fresh_sha = replay_identity.get("new_generation_artifact_sha256")
+                if expected_fresh_sha is not None and str(expected_fresh_sha) != artifact_hash_cache["fresh_replay"]:
+                    raise ValueError(
+                        "Replay generation identity disagrees with the published fresh replay artifact"
+                    )
 
             artifacts_tmp = {
                 "fresh_replay": str(fresh_tmp),
@@ -494,6 +630,21 @@ class TrainingEngine:
                 "summary_sha256": selected_adapter.artifact_hash(summary_tmp),
                 "model_hash": saved_metadata.get("model_hash"),
                 "replay_fingerprint": replay_fingerprint,
+                "replay_identity_schema": (
+                    replay_identity.get("schema")
+                    if isinstance(replay_identity, Mapping)
+                    else None
+                ),
+                "replay_identity_components": (
+                    replay_identity.get("components")
+                    if isinstance(replay_identity, Mapping)
+                    else None
+                ),
+                "replay_identity_contract": (
+                    replay_identity.get("contract")
+                    if isinstance(replay_identity, Mapping)
+                    else None
+                ),
                 "replay_row_count": len(replay_rows),
                 "replay_generations": list(context.replay_generations),
                 "validation_schema": "torus9-replay-validation-v1",

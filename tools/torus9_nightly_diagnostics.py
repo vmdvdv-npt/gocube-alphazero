@@ -1190,12 +1190,40 @@ def _critical_path(row: Mapping[str, object], timing: Mapping[str, object]) -> l
     train_stages = phase.get("train_stage_timing")
     train_stages = train_stages if isinstance(train_stages, Mapping) else {}
     total = float(timing.get("iteration_wall_time_sec", 0.0))
+    replay_total = float(phase.get("replay_update_and_validation_wall_time_sec", 0.0))
+    replay_breakdown_keys = (
+        "replay_new_identity_and_provenance_wall_time_sec",
+        "replay_new_semantic_validation_wall_time_sec",
+        "replay_append_and_cache_wall_time_sec",
+        "replay_rows_materialization_wall_time_sec",
+        "replay_validation_wall_time_sec",
+        "replay_fresh_artifact_serialization_and_hash_wall_time_sec",
+        "replay_identity_composition_wall_time_sec",
+        "replay_update_and_validation_unaccounted_sec",
+    )
+    has_replay_breakdown = any(key in phase for key in replay_breakdown_keys[:-1])
+    replay_stages = (
+        [
+            ("replay — new row identity / provenance", float(phase.get("replay_new_identity_and_provenance_wall_time_sec", 0.0))),
+            ("replay — new semantic validation", float(phase.get("replay_new_semantic_validation_wall_time_sec", 0.0))),
+            ("replay — append / cache update", float(phase.get("replay_append_and_cache_wall_time_sec", 0.0))),
+            ("replay — row materialization", float(phase.get("replay_rows_materialization_wall_time_sec", 0.0))),
+            ("replay — structural validation", float(phase.get("replay_validation_wall_time_sec", 0.0))),
+            ("replay — fresh artifact serialization / SHA", float(phase.get("replay_fresh_artifact_serialization_and_hash_wall_time_sec", 0.0))),
+            ("replay — rolling identity composition", float(phase.get("replay_identity_composition_wall_time_sec", 0.0))),
+            ("replay — unaccounted remainder", max(0.0, replay_total - float(phase.get("replay_update_and_validation_accounted_sum_sec", 0.0)))),
+        ]
+        if has_replay_breakdown
+        else [("replay/sample preparation", replay_total)]
+    )
     values = [
         ("startup / model load", 0.0),
         ("self-play", float(timing.get("self_play_wall_time_sec", 0.0))),
         ("self-play validation / accounting", float(timing.get("self_play_postprocessing_wall_time_sec", 0.0))),
         ("self-play finalization / serialization", float(timing.get("self_play_serialization_wall_time_sec", 0.0))),
-        ("replay/sample preparation", sum(float(phase.get(key, 0.0)) for key in ("sample_build_wall_time_sec", "sample_validation_and_stamping_wall_time_sec", "replay_update_and_validation_wall_time_sec"))),
+        ("sample build", float(phase.get("sample_build_wall_time_sec", 0.0))),
+        ("sample validation / stamping", float(phase.get("sample_validation_and_stamping_wall_time_sec", 0.0))),
+        *replay_stages,
         ("training H2D + batch construction", float(train_stages.get("h2d_and_batch_construction_wall_time_sec", 0.0))),
         ("training forward", float(train_stages.get("forward_wall_time_sec", 0.0))),
         ("training loss", float(train_stages.get("loss_wall_time_sec", 0.0))),

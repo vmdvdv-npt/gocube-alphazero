@@ -47,6 +47,7 @@ from gocube_golden.torus9_contract import (
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
 )
+from gocube_golden.torus9_training import TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA
 from tools.arena_engine import (
     ArenaExecutionConfig,
     classify_arena_performance,
@@ -494,6 +495,56 @@ def _seed_model(seed: int) -> None:
         torch.cuda.manual_seed_all(int(seed))
 
 
+def _resume_replay_generation_identities(
+    *,
+    root: Path,
+    metadata: Mapping[str, object],
+    base_identity: Mapping[str, object] | None,
+    catalog: ArtifactCatalog | None,
+    parent_reference: Mapping[str, object] | None,
+) -> list[dict[str, object]] | None:
+    """Resolve compact fresh-generation identities without reading replay rows."""
+    for source in (base_identity, metadata):
+        if not isinstance(source, Mapping):
+            continue
+        for key in ("generation_identities", "replay_generation_identities", "replay_identity_components"):
+            value = source.get(key)
+            if isinstance(value, list):
+                return [dict(component) for component in value if isinstance(component, Mapping)]
+
+    raw_generations = metadata.get("replay_generations")
+    if not isinstance(raw_generations, list):
+        return None
+    generations = [int(value) for value in raw_generations]
+    parent_entries: dict[int, Mapping[str, object]] = {}
+    if isinstance(parent_reference, Mapping):
+        references = parent_reference.get("replay_references")
+        if isinstance(references, list):
+            for raw in references:
+                if isinstance(raw, Mapping) and raw.get("generation") is not None:
+                    parent_entries[int(raw["generation"])] = raw
+
+    components: list[dict[str, object]] = []
+    for generation in generations:
+        known: Mapping[str, object] | None = parent_entries.get(generation)
+        relative = f"replay/iter-{generation:02d}-fresh.jsonl"
+        if catalog is not None:
+            candidate = catalog.entries.get(relative)
+            if isinstance(candidate, Mapping):
+                known = candidate
+        if known is None:
+            return None
+        component: dict[str, object] = {
+            "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+            "generation": generation,
+            "sha256": known.get("sha256"),
+        }
+        if known.get("row_count") is not None:
+            component["row_count"] = known["row_count"]
+        components.append(component)
+    return components
+
+
 def _prepare_state(
     *,
     root: Path,
@@ -595,10 +646,23 @@ def _prepare_state(
         discovered = _parent_replay_reference_paths(parent_root, generation)
         if all(path.is_file() for path in discovered):
             parent_replay_paths = discovered
-            manifest["parent_checkpoint"]["replay_references"] = [
-                {"generation": value, "path": str(path), "sha256": file_sha256(path)}
-                for value, path in zip(range(max(1, generation - 6), generation), discovered)
-            ]
+            existing_references = {
+                int(item["generation"]): str(item.get("sha256", ""))
+                for item in candidate.get("replay_references", [])
+                if isinstance(item, Mapping) and item.get("generation") is not None
+            }
+            replay_references = []
+            for value, path in zip(range(max(1, generation - 6), generation), discovered):
+                digest = file_sha256(path)
+                expected = existing_references.get(value)
+                if expected and expected != digest:
+                    raise ValueError(
+                        f"Referenced parent fresh replay M{value} SHA-256 mismatch"
+                    )
+                replay_references.append(
+                    {"generation": value, "path": str(path), "sha256": digest}
+                )
+            manifest["parent_checkpoint"]["replay_references"] = replay_references
             _atomic_json(root / "manifest.json", manifest)
     elif not local_checkpoint.is_file() or not local_replay.is_file():
         if isinstance(candidate, Mapping):
@@ -624,6 +688,7 @@ def _prepare_state(
     load_timing = timing if isinstance(timing, dict) else None
     replay_identity: Mapping[str, object] | None = None
     catalog_path = root / "runtime" / "artifact-catalog.json"
+    catalog: ArtifactCatalog | None = None
     if parent_reference is not None and not parent_replay_paths:
         replay_identity = {
             "sha256": parent_reference.get("replay_sha256"),
@@ -637,6 +702,26 @@ def _prepare_state(
     elif catalog_path.is_file() and previous_replay.resolve().is_relative_to(root.resolve()):
         catalog = ArtifactCatalog.load(catalog_path, root=root)
         replay_identity = catalog.identity(_relative(root, previous_replay))
+    previous_metadata = _read_json(previous_checkpoint.with_suffix(".metadata.json"))
+    if replay_identity is not None:
+        enriched_identity = dict(replay_identity)
+        generation_identities = _resume_replay_generation_identities(
+            root=root,
+            metadata=previous_metadata,
+            base_identity=replay_identity,
+            catalog=catalog,
+            parent_reference=(
+                parent_reference
+                if parent_reference is not None
+                else (candidate if isinstance(candidate, Mapping) else None)
+            ),
+        )
+        if generation_identities is not None:
+            enriched_identity["generation_identities"] = generation_identities
+        for key in ("replay_identity_schema", "replay_identity_contract"):
+            if previous_metadata.get(key) is not None:
+                enriched_identity[key] = previous_metadata[key]
+        replay_identity = enriched_identity
     restore_started = time.perf_counter()
     state = adapter.load_state(
         previous_checkpoint,
@@ -939,6 +1024,12 @@ def _publish_generation_result(
         "canonical_replay_fingerprint": marker_payload.get("replay_fingerprint"),
         "validation_schema": marker_payload.get("validation_schema", ARTIFACT_VALIDATION_SCHEMA),
     }
+    if marker_payload.get("replay_identity_schema") is not None:
+        replay_identity["replay_identity_schema"] = marker_payload["replay_identity_schema"]
+    if marker_payload.get("replay_identity_components") is not None:
+        replay_identity["generation_identities"] = marker_payload["replay_identity_components"]
+    if marker_payload.get("replay_identity_contract") is not None:
+        replay_identity["replay_identity_contract"] = marker_payload["replay_identity_contract"]
     adapter = Torus9TrainingAdapter(profile=load_torus9_current_profile(profile_path))
     reload_timing: dict[str, object] = {}
     loaded = adapter.load_state(
@@ -996,6 +1087,21 @@ def _publish_generation_result(
                 "canonical_replay_fingerprint": marker_payload.get("replay_fingerprint"),
                 "validation_schema": marker_payload.get("validation_schema", ARTIFACT_VALIDATION_SCHEMA),
             }
+            if marker_payload.get("replay_identity_schema") is not None:
+                extra = {
+                    **extra,
+                    "replay_identity_schema": marker_payload["replay_identity_schema"],
+                }
+            if marker_payload.get("replay_identity_components") is not None:
+                extra = {
+                    **extra,
+                    "generation_identities": marker_payload["replay_identity_components"],
+                }
+            if marker_payload.get("replay_identity_contract") is not None:
+                extra = {
+                    **extra,
+                    "replay_identity_contract": marker_payload["replay_identity_contract"],
+                }
         known = cached_identities.get(_relative(root, path))
         if path == selfplay_path and known is None:
             known = {

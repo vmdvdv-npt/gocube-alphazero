@@ -23,6 +23,7 @@ from training_engine import (
     TrainingEngine,
     TrainingIterationResult,
     TrainingState,
+    jsonl_artifact_fingerprint,
     sequence_fingerprint,
     value_fingerprint,
 )
@@ -55,6 +56,161 @@ from .artifact_catalog import ARTIFACT_VALIDATION_SCHEMA
 
 
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA = "torus9-replay-generation-artifact-v1"
+TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA = "torus9-replay-composition-v1"
+TORUS9_REPLAY_SELECTION_CONTRACT = "rolling-recent-generations-then-last-cap-v1"
+
+
+def _normalize_generation_identities(
+    value: object,
+    *,
+    label: str = "Torus9 replay generation identities",
+) -> tuple[dict[str, object], ...]:
+    """Validate and normalize the small identity manifest for a replay window."""
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError(f"{label} must be an ordered list")
+    normalized: list[dict[str, object]] = []
+    previous_generation = 0
+    for raw in value:
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"{label} contains a non-object component")
+        schema = raw.get("schema")
+        if schema != TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA:
+            raise ValueError(f"{label} component schema mismatch")
+        try:
+            generation = int(raw.get("generation", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} component generation is malformed") from exc
+        if generation <= previous_generation:
+            raise ValueError(f"{label} generations must be strictly increasing")
+        sha256 = str(raw.get("sha256", ""))
+        if not _SHA256_RE.fullmatch(sha256):
+            raise ValueError(f"{label} component SHA-256 is malformed")
+        component: dict[str, object] = {
+            "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+            "generation": generation,
+            "sha256": sha256,
+        }
+        for field in ("row_count", "retained_row_count"):
+            if raw.get(field) is not None:
+                try:
+                    count = int(raw[field])  # type: ignore[index]
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{label} component {field} is malformed") from exc
+                if count < 0:
+                    raise ValueError(f"{label} component {field} is negative")
+                component[field] = count
+        if (
+            component.get("row_count") is not None
+            and component.get("retained_row_count") is not None
+            and int(component["retained_row_count"]) > int(component["row_count"])
+        ):
+            raise ValueError(f"{label} retained row count exceeds artifact row count")
+        normalized.append(component)
+        previous_generation = generation
+    return tuple(normalized)
+
+
+def replay_generation_identity_from_rows(
+    generation: int,
+    rows: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Create the one new-generation identity from its deterministic JSONL bytes."""
+    generation = int(generation)
+    if generation <= 0:
+        raise ValueError("Torus9 replay generation must be positive")
+    return {
+        "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+        "generation": generation,
+        "sha256": jsonl_artifact_fingerprint(rows),
+        "row_count": len(rows),
+    }
+
+
+def replay_generation_identity_from_artifact(
+    generation: int,
+    sha256: object,
+    row_count: int | None = None,
+) -> dict[str, object]:
+    """Create a generation identity from a previously committed artifact."""
+    generation = int(generation)
+    digest = str(sha256)
+    if generation <= 0 or not _SHA256_RE.fullmatch(digest):
+        raise ValueError("Torus9 replay generation artifact identity is malformed")
+    result: dict[str, object] = {
+        "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+        "generation": generation,
+        "sha256": digest,
+    }
+    if row_count is not None:
+        row_count = int(row_count)
+        if row_count < 0:
+            raise ValueError("Torus9 replay generation artifact row count is negative")
+        result["row_count"] = row_count
+    return result
+
+
+def _replay_generation_identities_from_payload(
+    artifact_identity: Mapping[str, object] | None,
+    metadata: Mapping[str, object] | None,
+) -> tuple[dict[str, object], ...] | None:
+    """Read the durable component list from either artifact or checkpoint metadata."""
+    candidates: list[tuple[str, object]] = []
+    for source_name, source in (("artifact identity", artifact_identity), ("checkpoint metadata", metadata)):
+        if not isinstance(source, Mapping):
+            continue
+        for key in ("generation_identities", "replay_generation_identities", "replay_identity_components"):
+            if source.get(key) is not None:
+                candidates.append((f"{source_name}.{key}", source[key]))
+                break
+    if not candidates:
+        return None
+    normalized = _normalize_generation_identities(candidates[0][1], label=candidates[0][0])
+    for source_name, value in candidates[1:]:
+        other = _normalize_generation_identities(value, label=source_name)
+        if other != normalized:
+            raise ValueError("Torus9 replay generation identity evidence disagrees")
+    return normalized
+
+
+def _replay_identity_schema_from_payload(
+    artifact_identity: Mapping[str, object] | None,
+    metadata: Mapping[str, object] | None,
+) -> str | None:
+    values: list[object] = []
+    for source in (artifact_identity, metadata):
+        if isinstance(source, Mapping):
+            for key in ("replay_identity_schema", "replay_composition_schema"):
+                if source.get(key) is not None:
+                    values.append(source[key])
+                    break
+    if not values:
+        return None
+    if any(value != values[0] for value in values[1:]):
+        raise ValueError("Torus9 replay identity schema evidence disagrees")
+    return str(values[0])
+
+
+def _replay_fingerprint_from_payload(
+    artifact_identity: Mapping[str, object] | None,
+    metadata: Mapping[str, object] | None,
+) -> str | None:
+    values: list[object] = []
+    for source in (artifact_identity, metadata):
+        if not isinstance(source, Mapping):
+            continue
+        for key in ("canonical_replay_fingerprint", "replay_composition_fingerprint", "replay_fingerprint"):
+            if source.get(key) is not None:
+                values.append(str(source[key]))
+                break
+    if not values:
+        return None
+    if any(value != values[0] for value in values[1:]):
+        raise ValueError("Torus9 replay fingerprint evidence disagrees")
+    return values[0]
 
 
 # Keep one scientific implementation.  These aliases expose numerical
@@ -145,6 +301,17 @@ def _optimizer_parameter_order(model: Any) -> tuple[str, ...]:
 class Torus9RollingReplay(_core.Torus9RollingReplay):
     """Current-path facade over the single proven rolling replay core."""
 
+    def __init__(
+        self,
+        *,
+        generations: int = TORUS9_ROLLING_GENERATIONS,
+        maximum_positions: int = TORUS9_MAX_REPLAY_POSITIONS,
+    ) -> None:
+        super().__init__(generations=generations, maximum_positions=maximum_positions)
+        self._generation_identities: dict[int, dict[str, object]] = {}
+        self._generation_row_counts: dict[int, int] = {}
+        self._generation_input_counts: dict[int, int] = {}
+
     @property
     def last_generation(self) -> int:
         return int(self._last_generation)
@@ -157,6 +324,7 @@ class Torus9RollingReplay(_core.Torus9RollingReplay):
         generations: int = TORUS9_ROLLING_GENERATIONS,
         maximum_positions: int = TORUS9_MAX_REPLAY_POSITIONS,
         total_evictions: int = 0,
+        generation_identities: object = None,
     ) -> "Torus9RollingReplay":
         replay = cls(generations=generations, maximum_positions=maximum_positions)
         copied = [dict(row) for row in rows]
@@ -177,10 +345,20 @@ class Torus9RollingReplay(_core.Torus9RollingReplay):
         replay.total_evictions = int(total_evictions)
         if replay.total_evictions < 0:
             raise ValueError("Persisted Torus9 replay eviction count is negative")
+        counts: dict[int, int] = {}
+        for generation in generations_seen:
+            counts[generation] = counts.get(generation, 0) + 1
+        replay._generation_row_counts = counts
+        if generation_identities is not None:
+            replay.set_generation_identities(generation_identities)
         return replay
 
     def append_generation(
-        self, generation: int, samples: Sequence[Mapping[str, object]]
+        self,
+        generation: int,
+        samples: Sequence[Mapping[str, object]],
+        *,
+        generation_identity: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         generation = int(generation)
         if generation <= self.last_generation:
@@ -193,7 +371,147 @@ class Torus9RollingReplay(_core.Torus9RollingReplay):
         existing_ids = {str(row.get("replay_row_id")) for row in self.rows}
         if existing_ids.intersection(incoming_ids):
             raise ValueError("Torus9 replay contains a duplicate row ID")
-        return super().append_generation(generation, samples)
+        if generation_identity is not None:
+            normalized = _normalize_generation_identities(
+                (generation_identity,),
+                label="Torus9 replay generation identity",
+            )
+            if len(normalized) != 1 or int(normalized[0]["generation"]) != generation:
+                raise ValueError("Torus9 replay generation identity disagrees with append")
+            declared_row_count = normalized[0].get("row_count")
+            declared_retained_count = normalized[0].get("retained_row_count")
+            if (
+                declared_row_count is not None
+                and int(declared_row_count) != len(samples)
+                and (declared_retained_count is None or int(declared_retained_count) != len(samples))
+            ):
+                raise ValueError("Torus9 replay generation identity row count disagrees with append")
+            incoming_identity = dict(normalized[0])
+        else:
+            incoming_identity = None
+        metrics = super().append_generation(generation, samples)
+        counts = {
+            int(key): int(value)
+            for key, value in dict(metrics.get("positions_per_generation", {})).items()
+        }
+        self._generation_row_counts = counts
+        self._generation_input_counts[generation] = int(
+            incoming_identity.get("row_count", len(samples))
+            if incoming_identity is not None
+            else len(samples)
+        )
+        if incoming_identity is None:
+            self._generation_identities.pop(generation, None)
+        else:
+            incoming_identity["retained_row_count"] = counts.get(generation, 0)
+            self._generation_identities[generation] = incoming_identity
+        for represented in tuple(self._generation_identities):
+            if represented not in counts:
+                self._generation_identities.pop(represented, None)
+            else:
+                self._generation_identities[represented]["retained_row_count"] = counts[represented]
+        return metrics
+
+    def set_generation_artifact_identity(
+        self,
+        generation: int,
+        sha256: object,
+        row_count: int,
+    ) -> None:
+        """Bind the physical fresh-artifact SHA after its single-pass write."""
+        generation = int(generation)
+        row_count = int(row_count)
+        if generation != self.last_generation or generation not in self._generation_row_counts:
+            raise ValueError("Torus9 replay generation artifact is not the current append")
+        expected_count = self._generation_input_counts.get(generation)
+        if expected_count is not None and expected_count != row_count:
+            raise ValueError("Torus9 replay generation artifact row count disagrees with append")
+        component = replay_generation_identity_from_artifact(
+            generation,
+            sha256,
+            row_count,
+        )
+        component["retained_row_count"] = self._generation_row_counts[generation]
+        self._generation_identities[generation] = component
+
+    def set_generation_identities(self, value: object) -> None:
+        """Attach durable artifact identities to the rows currently retained."""
+        normalized = _normalize_generation_identities(value)
+        represented = set(self._generation_row_counts)
+        supplied = {int(component["generation"]): component for component in normalized}
+        if set(supplied) != represented:
+            raise ValueError(
+                "Torus9 replay generation identity coverage disagrees with retained rows"
+            )
+        identities: dict[int, dict[str, object]] = {}
+        for generation in sorted(represented):
+            component = dict(supplied[generation])
+            retained = int(self._generation_row_counts[generation])
+            declared_retained = component.get("retained_row_count")
+            if declared_retained is not None and int(declared_retained) != retained:
+                raise ValueError(
+                    "Torus9 replay generation identity retained row count disagrees"
+                )
+            component["retained_row_count"] = retained
+            if component.get("row_count") is not None:
+                self._generation_input_counts[generation] = int(component["row_count"])
+            else:
+                self._generation_input_counts[generation] = retained
+            identities[generation] = component
+        self._generation_identities = identities
+
+    @property
+    def generation_identities(self) -> tuple[dict[str, object], ...]:
+        return tuple(
+            dict(self._generation_identities[generation])
+            for generation in sorted(self._generation_identities)
+        )
+
+    def replay_identity_descriptor(self) -> dict[str, object]:
+        """Return a compact rolling identity without walking replay row content."""
+        counts = dict(self._generation_row_counts)
+        if not counts and self.rows:
+            counts = {}
+            for row in self.rows:
+                generation = int(row.get("source_generation", 0))
+                counts[generation] = counts.get(generation, 0) + 1
+            self._generation_row_counts = counts
+        represented = sorted(counts)
+        if set(self._generation_identities) != set(represented):
+            missing = sorted(set(represented) - set(self._generation_identities))
+            raise ValueError(
+                "Torus9 replay generation artifact identities are incomplete"
+                + (f": missing M{missing}" if missing else "")
+            )
+        components: list[dict[str, object]] = []
+        for generation in represented:
+            component = dict(self._generation_identities[generation])
+            component["retained_row_count"] = counts[generation]
+            components.append(component)
+        contract = {
+            "selection": TORUS9_REPLAY_SELECTION_CONTRACT,
+            "generations": int(self.generations),
+            "maximum_positions": int(self.maximum_positions),
+        }
+        payload = {
+            "schema": TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA,
+            "contract": contract,
+            "components": components,
+        }
+        latest = components[-1] if components else None
+        return {
+            "schema": TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA,
+            "fingerprint": value_fingerprint(payload),
+            "contract": contract,
+            "components": components,
+            "represented_generations": represented,
+            "position_counts": {
+                str(generation): counts[generation] for generation in represented
+            },
+            "new_generation_artifact_sha256": (
+                latest.get("sha256") if latest is not None else None
+            ),
+        }
 
 
 @dataclass(frozen=True)
@@ -207,6 +525,7 @@ class _Torus9StateSnapshot:
     replay_rows: tuple[dict[str, object], ...]
     replay_last_generation: int
     replay_evictions: int
+    replay_generation_identities: tuple[dict[str, object], ...]
     parent_checkpoint_identity: Mapping[str, object] | None
 
 
@@ -252,6 +571,10 @@ class Torus9TrainingAdapter:
         alter the canonical execution contract or add synchronization.
         """
         self._diagnostic_timing = timing
+
+    def replay_diagnostic_timing(self) -> Mapping[str, object]:
+        """Return optional replay subphase timings captured by the adapter."""
+        return dict(self._diagnostic_timing or {})
 
     def set_progress_callback(self, callback: Callable[..., None] | None) -> None:
         """Attach optional semantic progress reporting for one generation."""
@@ -613,9 +936,12 @@ class Torus9TrainingAdapter:
         # Identity/provenance is part of the authoritative mutation boundary,
         # not merely a promise made by stamp_samples. Validate the entire batch
         # before replay state changes.
+        identity_started = time.perf_counter()
         for position, sample in enumerate(samples):
             self._validate_stamped_sample_identity(sample, generation, position)
+        identity_elapsed = time.perf_counter() - identity_started
         total = len(samples)
+        semantic_started = time.perf_counter()
         for position, sample in enumerate(samples, 1):
             self._validate_sample_semantics(sample)
             if position == total or position % 256 == 0:
@@ -626,14 +952,45 @@ class Torus9TrainingAdapter:
                     "rows",
                     "validation",
                 )
+        semantic_elapsed = time.perf_counter() - semantic_started
         metrics = replay.append_generation(generation, samples)
         # Cache only after the whole batch validated and mutation succeeded.
         for sample in samples:
             self._remember_validated_sample(sample)
+        if self._diagnostic_timing is not None:
+            self._diagnostic_timing["replay_new_identity_and_provenance_wall_time_sec"] = identity_elapsed
+            self._diagnostic_timing["replay_new_semantic_validation_wall_time_sec"] = semantic_elapsed
         return metrics
 
+    def replay_generation_identity(
+        self,
+        generation: int,
+        samples: Sequence[Mapping[str, object]],
+    ) -> Mapping[str, object]:
+        """Compute the identity of the one new immutable fresh-replay artifact."""
+        return replay_generation_identity_from_rows(generation, samples)
+
+    def set_replay_generation_artifact_identity(
+        self,
+        replay: Torus9RollingReplay,
+        generation: int,
+        sha256: object,
+        row_count: int,
+    ) -> None:
+        replay.set_generation_artifact_identity(generation, sha256, row_count)
+
+    def replay_identity(
+        self,
+        replay: Torus9RollingReplay,
+    ) -> Mapping[str, object]:
+        """Compose rolling identity from generation artifacts and policy only."""
+        return replay.replay_identity_descriptor()
+
     def replay_rows(self, replay: Torus9RollingReplay) -> Sequence[Mapping[str, object]]:
-        return tuple(dict(row) for row in replay.rows)
+        # ``Torus9RollingReplay.rows`` already exposes a fresh tuple of the
+        # replay-owned mappings.  Copying every large observation dictionary
+        # here would add an avoidable full-window walk before training.
+        return replay.rows
 
     def validate_replay(self, rows: Sequence[Mapping[str, object]]) -> None:
         previous_generation = 0
@@ -747,6 +1104,22 @@ class Torus9TrainingAdapter:
             "parent_checkpoint_identity": dict(parent) if isinstance(parent, Mapping) else None,
             "replay_generations": list(context.replay_generations),
             "replay_fingerprint": context.replay_fingerprint,
+            "replay_identity_schema": (
+                context.replay_identity.get("schema")
+                if isinstance(context.replay_identity, Mapping)
+                else None
+            ),
+            "replay_identity_contract": (
+                dict(context.replay_identity.get("contract", {}))
+                if isinstance(context.replay_identity, Mapping)
+                and isinstance(context.replay_identity.get("contract"), Mapping)
+                else None
+            ),
+            "replay_generation_identities": (
+                [dict(component) for component in context.replay_identity.get("components", ())]
+                if isinstance(context.replay_identity, Mapping)
+                else None
+            ),
             "sampled_row_ids_fingerprint": context.sampled_row_ids_fingerprint,
             "training_seed": int(context.training_seed),
             "fresh_replay_positions": int(context.fresh_positions),
@@ -972,6 +1345,18 @@ class Torus9TrainingAdapter:
         if load_timing is not None:
             load_timing["replay_file_load_wall_time_sec"] = time.perf_counter() - replay_started
         replay_fingerprint: str | None = None
+        generation_identities = _replay_generation_identities_from_payload(
+            replay_artifact_identity,
+            metadata,
+        )
+        identity_schema = _replay_identity_schema_from_payload(
+            replay_artifact_identity,
+            metadata,
+        )
+        expected_identity_fingerprint = _replay_fingerprint_from_payload(
+            replay_artifact_identity,
+            metadata,
+        )
         if replay_artifact_identity is not None:
             expected_sha = str(
                 replay_artifact_identity.get("sha256")
@@ -1001,7 +1386,19 @@ class Torus9TrainingAdapter:
             generations=int(self.replay_profile["generations"]),  # type: ignore[index]
             maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
             total_evictions=int(total_evictions),
+            generation_identities=generation_identities,
         )
+        if (
+            identity_schema == TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA
+            and not allow_reference
+            and len(replay_sources) == 1
+        ):
+            if generation_identities is None or expected_identity_fingerprint is None:
+                raise ValueError("Torus9 replay composition identity evidence is incomplete")
+            actual_identity = replay.replay_identity_descriptor()
+            if actual_identity["fingerprint"] != expected_identity_fingerprint:
+                raise ValueError("Current Torus9 replay composition fingerprint mismatch")
+            replay_fingerprint = expected_identity_fingerprint
         validation_started = time.perf_counter()
         if replay_artifact_identity is None:
             self.validate_replay(rows)
@@ -1074,7 +1471,15 @@ class Torus9TrainingAdapter:
             if validate_evicted_generations or is_in_rolling_window:
                 for row in rows:
                     self.validate_sample(row)
-            replay.append_generation(generation, rows)
+            replay.append_generation(
+                generation,
+                rows,
+                generation_identity=replay_generation_identity_from_artifact(
+                    generation,
+                    file_sha256(Path(path_value)),
+                    len(rows),
+                ),
+            )
         if list(replay.rows) != list(_read_jsonl(Path(expected_rolling_path))):
             raise ValueError("Reconstructed Torus9 rolling replay differs from persisted state")
         replay.total_evictions = int(total_evictions)
@@ -1089,9 +1494,13 @@ class Torus9TrainingAdapter:
             samples_consumed=int(state.samples_consumed),
             current_generation=int(state.current_generation),
             completed_games=int(state.completed_games),
-            replay_rows=tuple(dict(row) for row in replay.rows),
+            # Replay append/validation/training treat retained mappings as
+            # immutable.  Keep references in the rollback snapshot so a
+            # successful iteration does not copy every historical row.
+            replay_rows=tuple(replay.rows),
             replay_last_generation=int(replay.last_generation),
             replay_evictions=int(replay.total_evictions),
+            replay_generation_identities=replay.generation_identities,
             parent_checkpoint_identity=(
                 dict(state.parent_checkpoint_identity)
                 if state.parent_checkpoint_identity is not None
@@ -1110,6 +1519,15 @@ class Torus9TrainingAdapter:
         replay._rows = [dict(row) for row in snapshot.replay_rows]
         replay._last_generation = int(snapshot.replay_last_generation)
         replay.total_evictions = int(snapshot.replay_evictions)
+        replay._generation_row_counts = {}
+        for row in replay._rows:
+            generation = int(row.get("source_generation", 0))
+            replay._generation_row_counts[generation] = replay._generation_row_counts.get(generation, 0) + 1
+        if snapshot.replay_generation_identities or not replay._rows:
+            replay.set_generation_identities(snapshot.replay_generation_identities)
+        else:
+            replay._generation_identities = {}
+            replay._generation_input_counts = {}
         state.parent_checkpoint_identity = (
             dict(snapshot.parent_checkpoint_identity)
             if snapshot.parent_checkpoint_identity is not None
@@ -1151,6 +1569,9 @@ def run_torus9_training_iteration(
 
 
 __all__ = [
+    "TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA",
+    "TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA",
+    "TORUS9_REPLAY_SELECTION_CONTRACT",
     "Torus9CurrentGraphNet",
     "Torus9GraphNet",
     "Torus9OwnershipGraphNet",
@@ -1161,6 +1582,8 @@ __all__ = [
     "Torus9TrainingAdapter",
     "TrainingState",
     "run_torus9_training_iteration",
+    "replay_generation_identity_from_artifact",
+    "replay_generation_identity_from_rows",
     "torus9_checkpoint_metadata",
     "torus9_load_checkpoint",
     "torus9_model_from_metadata",
