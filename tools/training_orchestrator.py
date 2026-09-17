@@ -57,7 +57,14 @@ def main(argv: list[str] | None = None) -> int:
     install()
     _core._cmd_stop = _cmd_stop_with_telegram
     try:
-        return int(_core.main(values))
+        # The core CLI parses sys.argv itself; keep argv injection local to
+        # this wrapper so status/start/stop work when imported as a facade.
+        previous = sys.argv
+        sys.argv = [previous[0], *values]
+        try:
+            return int(_core.main())
+        finally:
+            sys.argv = previous
     finally:
         # Final stop/crash/Arena notifications are queued during the run.
         flush_all()

@@ -288,9 +288,40 @@ def current_torus9_content_fingerprint(profile: Mapping[str, Any]) -> str:
 
 def current_torus9_profile_fingerprint(profile: Mapping[str, Any]) -> str:
     value = profile.get("profile_fingerprint")
+    if isinstance(profile.get("experiment"), Mapping):
+        expected = profile_fingerprint(profile)
+        if value != expected:
+            raise ValueError(f"Experimental Torus 9x9 profile fingerprint drift: {expected}")
+        return expected
     if value != TORUS9_CURRENT_PROFILE_FINGERPRINT:
         raise ValueError("Current Torus 9×9 profile lineage fingerprint drift")
     return TORUS9_CURRENT_PROFILE_FINGERPRINT
+
+
+def _validate_experimental_torus9_profile(profile: Mapping[str, Any]) -> None:
+    """Validate a declared experiment while retaining the Golden invariants."""
+    marker = profile.get("experiment")
+    if not isinstance(marker, Mapping) or marker.get("kind") != "torus9-plateau-exit-v1":
+        raise ValueError("Experimental Torus 9x9 profile marker is missing")
+    normalized = json.loads(json.dumps(profile))
+    normalized.pop("experiment", None)
+    normalized["profile_fingerprint"] = TORUS9_CURRENT_PROFILE_FINGERPRINT
+    normalized["content_fingerprint"] = TORUS9_CURRENT_CONTENT_FINGERPRINT
+    normalized["self_play"]["mcts_simulations"] = 64
+    normalized["self_play"]["fingerprint"] = current_torus9_selfplay_contract_fingerprint(
+        float(normalized["self_play"]["dirichlet_alpha"])
+    )
+    normalized["training"]["learning_rate"] = 0.001
+    normalized["replay"]["window"] = "rolling last 3 generations"
+    normalized["replay"]["generations"] = TORUS9_ROLLING_GENERATIONS
+    normalized["replay"]["cap"] = TORUS9_MAX_REPLAY_POSITIONS
+    _validate_current_torus9_profile(normalized)
+    if profile.get("self_play", {}).get("mcts_simulations") != 128:
+        raise ValueError("Plateau-exit self-play must use 128 simulations")
+    if profile.get("training", {}).get("learning_rate") != 0.0003:
+        raise ValueError("Plateau-exit learning rate must be 0.0003")
+    if profile.get("replay", {}).get("generations") != 6 or profile.get("replay", {}).get("cap") != 40000:
+        raise ValueError("Plateau-exit replay must be rolling-6/cap-40000")
 
 
 def validate_torus9_current_profile(
@@ -308,7 +339,10 @@ def validate_torus9_current_profile(
     """
     if not isinstance(profile, Mapping):
         raise ValueError("Current Torus 9×9 profile must be a JSON object")
-    _validate_current_torus9_profile(profile)
+    if isinstance(profile.get("experiment"), Mapping):
+        _validate_experimental_torus9_profile(profile)
+    else:
+        _validate_current_torus9_profile(profile)
     source = profile.get("golden_source", {})
     if not isinstance(source, Mapping):
         raise ValueError("Current Torus Golden source section is malformed")
@@ -328,7 +362,7 @@ def validate_torus9_current_profile(
         expected_content = current_torus9_content_fingerprint(profile)
         if profile.get("content_fingerprint") != expected_content:
             raise ValueError(f"Current Torus 9×9 content fingerprint mismatch: {expected_content}")
-        if expected_content != TORUS9_CURRENT_CONTENT_FINGERPRINT:
+        if not isinstance(profile.get("experiment"), Mapping) and expected_content != TORUS9_CURRENT_CONTENT_FINGERPRINT:
             raise ValueError("Current Torus 9×9 canonical content fingerprint drift")
     return dict(profile)
 
@@ -336,4 +370,23 @@ def validate_torus9_current_profile(
 def load_torus9_current_profile(path: str | Path | None = None, *, verify_fingerprint: bool = True) -> dict[str, Any]:
     profile_path = Path(path) if path is not None else Path(__file__).resolve().parents[1] / TORUS9_CURRENT_PROFILE_PATH
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    base_ref = profile.get("base_profile_path")
+    if base_ref:
+        base_path = (profile_path.parent / str(base_ref)).resolve()
+        base = load_torus9_current_profile(base_path, verify_fingerprint=True)
+
+        def merge(left: dict[str, Any], right: Mapping[str, Any]) -> dict[str, Any]:
+            result = dict(left)
+            for key, value in right.items():
+                if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
+                    result[key] = merge(dict(result[key]), value)
+                else:
+                    result[key] = value
+            return result
+
+        overlay = dict(profile)
+        overlay.pop("base_profile_path", None)
+        profile = merge(base, overlay)
+        profile["content_fingerprint"] = current_torus9_content_fingerprint(profile)
+        profile["profile_fingerprint"] = profile_fingerprint(profile)
     return validate_torus9_current_profile(profile, verify_fingerprint=verify_fingerprint)

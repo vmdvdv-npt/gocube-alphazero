@@ -1,0 +1,20 @@
+{
+  "profile_id": "gocube-torus9-golden-v3",
+  "base_profile_path": "torus9_golden_current_v3.json",
+  "experiment": {
+    "kind": "torus9-plateau-exit-v1",
+    "lineage_reason": "plateau-exit experiment after M47 vs M37 = 33/31/0",
+    "parent_generation": 47
+  },
+  "self_play": {
+    "mcts_simulations": 128
+  },
+  "training": {
+    "learning_rate": 0.0003
+  },
+  "replay": {
+    "window": "rolling last 6 generations",
+    "generations": 6,
+    "cap": 40000
+  }
+}

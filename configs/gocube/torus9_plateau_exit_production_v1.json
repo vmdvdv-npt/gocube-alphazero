@@ -1,0 +1,83 @@
+{
+  "schema": "gocube-production-run-spec-v3",
+  "topology": "torus9",
+  "board_size": 9,
+  "adapter": {"id": "torus9-production-v3", "transport": "process"},
+  "profile_path": "configs/gocube/torus9_plateau_exit_m47.json",
+  "expected_profile_fingerprint": "sha256:e4b8dde145555a3ba4633faaf273f1211a6e8bb717d04e64fcc7dff2688a2036",
+  "generation": {
+    "command": [".venv/bin/python", "tools/torus9_run_driver.py", "generation", "--generation", "{generation}"],
+    "resume_command": [".venv/bin/python", "tools/torus9_run_driver.py", "generation", "--generation", "{generation}", "--resume"],
+    "driver_config": {
+      "games": 64,
+      "device": "cuda",
+      "workers": 16,
+      "active_games_per_worker": 4,
+      "total_active_contexts": 64,
+      "inference_batch_cap": 64,
+      "inference_batch_wait_ms": 1,
+      "coalescing": true,
+      "heartbeat_interval_seconds": 5,
+      "model_init_seed": 202609131001,
+      "selfplay_master_seed": 202609131002,
+      "training_master_seed": 202609131003
+    }
+  },
+  "arena": {
+    "enabled": true,
+    "required": true,
+    "every_generations": 5,
+    "command": [".venv/bin/python", "tools/torus9_run_driver.py", "arena", "--generation", "{generation}"],
+    "driver_config": {
+      "comparison_mode": "candidate-vs-prior-generation",
+      "reference_gap": 5,
+      "games": 64,
+      "master_seed": 202609131004,
+      "heartbeat_interval_seconds": 5,
+      "execution": {
+        "workers": 16,
+        "games_per_worker": 4,
+        "inference_batch_rows": 64,
+        "inference_batch_wait_ms": 1,
+        "device": "cuda",
+        "strict_production": true,
+        "min_mean_inference_batch_rows": 0,
+        "min_effective_cpu_cores": 0,
+        "early_gate_enabled": false,
+        "early_gate_min_forwards": 128,
+        "early_gate_min_wall_sec": 5
+      }
+    },
+    "startset": {
+      "generator": "torus9-evaluation-starts-v2",
+      "master_seed": 202609131004,
+      "pairs": 32,
+      "schema": "golden-evaluation-startset-v2"
+    }
+  },
+  "health": {
+    "poll_seconds": 5,
+    "heartbeat_warning_seconds": 180,
+    "heartbeat_critical_seconds": 900,
+    "min_disk_free_gb_warning": 100,
+    "min_disk_free_gb_critical": 20,
+    "min_ram_free_gb_warning": 4,
+    "min_ram_free_gb_critical": 1
+  },
+  "supervision": {
+    "startup_ack_timeout_seconds": 120,
+    "progress_warning_seconds": 180,
+    "progress_critical_seconds": 900,
+    "max_generation_restarts": 1,
+    "restart_backoff_seconds": 30,
+    "critical_child_grace_seconds": 10
+  },
+  "soft_stop": {"default_minutes": 60, "minimum_minutes": 30, "maximum_minutes": 1440},
+  "performance": {"checks": []},
+  "learning": {
+    "metrics": ["loss.total", "learning.samples_consumed_total", "optimizer_updates_per_sec"],
+    "stall_checks": []
+  },
+  "required_generation_metrics": ["games_per_hour", "moves_per_sec", "optimizer_updates_per_sec", "learning.samples_consumed_total", "loss.total", "timing.self_play_wall_time_sec", "timing.training.training_wall_time_sec"],
+  "required_arena_metrics": ["games", "wins", "losses", "draws", "win_rate", "games_per_hour", "moves_per_sec", "inference_mean_batch_rows", "effective_cpu_cores"]
+}

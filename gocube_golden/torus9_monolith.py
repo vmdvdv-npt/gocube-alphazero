@@ -945,8 +945,8 @@ class _Torus9TrainingCore:
         weight_decay: float = 0.0,
         optimizer_steps_per_iteration: int = TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
     ) -> None:
-        if learning_rate != 0.001 or weight_decay != 0.0:
-            raise ValueError("Canonical Torus 9×9 optimizer is Adam(lr=0.001, weight_decay=0)")
+        if learning_rate <= 0.0 or weight_decay != 0.0:
+            raise ValueError("Torus 9×9 optimizer requires positive Adam learning rate and weight_decay=0")
         if optimizer_steps_per_iteration != TORUS9_OPTIMIZER_STEPS_PER_ITERATION:
             raise ValueError("Canonical Torus 9×9 optimizer budget is fixed at 80 updates")
         self.model = model
