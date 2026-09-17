@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import training_orchestrator_core as _core
-from training_orchestrator_core import *  # noqa: F401,F403
+from tools import training_orchestrator_core as _core
+from tools.training_orchestrator_core import *  # noqa: F401,F403
 from gocube_golden.telegram_notifier import (
     TelegramError,
     flush_all,
