@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -41,6 +42,10 @@ from tools.arena_profiles.torus9 import PROFILE as TORUS9_ARENA_PROFILE
 
 EXPERIMENT_SPEC_SCHEMA = "gocube-torus9-experiment-v1"
 DEFAULT_EXPERIMENT_SPEC = "configs/gocube/torus9_staged_cadence_experiment_v1.json"
+EVALUATION_IDENTITY_SCHEMA = "gocube-arena-evaluation-identity-v1"
+EVALUATION_IDENTITY_RECORD_SCHEMA = "gocube-arena-evaluation-identity-record-v1"
+EVALUATION_IDENTITY_FILENAME = "evaluation-identity.json"
+EVALUATION_IDENTITY_HASH_PREFIX = 12
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,15 @@ def _read_json(path: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"Expected JSON object: {path}")
     return value
+
+
+def _write_json(path: Path, payload: Mapping[str, object]) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(dict(payload), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 def _mapping(value: object, label: str) -> dict[str, object]:
@@ -398,6 +412,157 @@ def arena_config(
     return config
 
 
+def _checkpoint_identity_payload(reference: Mapping[str, object]) -> dict[str, object]:
+    sha256 = str(reference.get("artifact_sha256") or reference.get("sha256") or "")
+    if not sha256:
+        raise ValueError("Evaluation checkpoint identity is missing SHA-256")
+    return {
+        "lineage_id": str(reference["lineage_id"]),
+        "generation": int(reference["generation"]),
+        "checkpoint_sha256": sha256,
+    }
+
+
+def _canonical_evaluation_json(payload: Mapping[str, object]) -> str:
+    return json.dumps(
+        dict(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+def _evaluation_fingerprint(payload: Mapping[str, object]) -> str:
+    return hashlib.sha256(
+        _canonical_evaluation_json(payload).encode("utf-8")
+    ).hexdigest()
+
+
+def _build_evaluation_identity(
+    *,
+    candidate: Mapping[str, object],
+    reference: Mapping[str, object],
+    profile: str,
+    games: int,
+    master_seed: int,
+    scientific_contract: Mapping[str, object],
+    execution: ArenaExecutionConfig,
+) -> tuple[dict[str, object], str]:
+    if int(execution.games) != int(games):
+        raise ValueError("Evaluation identity games drift from Arena execution config")
+    payload: dict[str, object] = {
+        "schema": EVALUATION_IDENTITY_SCHEMA,
+        "candidate": _checkpoint_identity_payload(candidate),
+        "reference": _checkpoint_identity_payload(reference),
+        "profile": str(profile),
+        "games": int(games),
+        "master_seed": int(master_seed),
+        "scientific_contract": dict(scientific_contract),
+        "execution": asdict(execution),
+    }
+    return payload, _evaluation_fingerprint(payload)
+
+
+def _resolved_evaluation_identity(
+    spec: Mapping[str, object],
+    evaluation: Evaluation,
+    candidate: Mapping[str, object],
+    reference: Mapping[str, object],
+    config: ArenaExecutionConfig,
+) -> tuple[dict[str, object], str]:
+    scientific_contract = dict(TORUS9_ARENA_PROFILE.scientific_contract(config))
+    expected = _mapping(
+        spec.get("arena_scientific_contract"), "arena_scientific_contract"
+    )
+    for key, value in expected.items():
+        if scientific_contract.get(key) != value:
+            raise ValueError(f"Arena scientific contract drift for {key}")
+    return _build_evaluation_identity(
+        candidate=candidate,
+        reference=reference,
+        profile=TORUS9_ARENA_PROFILE.profile_id,
+        games=evaluation.games,
+        master_seed=evaluation.master_seed,
+        scientific_contract=scientific_contract,
+        execution=config,
+    )
+
+
+def _evaluation_run_id(
+    candidate: Mapping[str, object],
+    reference: Mapping[str, object],
+    fingerprint: str,
+) -> str:
+    base = evaluation_id_for_comparison(
+        candidate_lineage_id=str(candidate["lineage_id"]),
+        candidate_generation=int(candidate["generation"]),
+        reference_lineage_id=str(reference["lineage_id"]),
+        reference_generation=int(reference["generation"]),
+    )
+    return f"{base}-{fingerprint[:EVALUATION_IDENTITY_HASH_PREFIX]}"
+
+
+def _write_evaluation_identity(
+    output: Path,
+    run_id: str,
+    identity: Mapping[str, object],
+    fingerprint: str,
+) -> None:
+    if _evaluation_fingerprint(identity) != fingerprint:
+        raise ValueError("Evaluation identity fingerprint is internally inconsistent")
+    output.mkdir(parents=True, exist_ok=False)
+    _write_json(
+        output / EVALUATION_IDENTITY_FILENAME,
+        {
+            "schema": EVALUATION_IDENTITY_RECORD_SCHEMA,
+            "evaluation_id": run_id,
+            "fingerprint": fingerprint,
+            "identity": dict(identity),
+        },
+    )
+
+
+def _stamp_evaluation_identity_metadata(
+    output: Path,
+    run_id: str,
+    fingerprint: str,
+) -> None:
+    marker = {
+        "schema": EVALUATION_IDENTITY_SCHEMA,
+        "path": EVALUATION_IDENTITY_FILENAME,
+        "fingerprint": fingerprint,
+    }
+    for filename in ("provenance.json", "manifest.json"):
+        path = output / filename
+        if not path.is_file():
+            continue
+        payload = _read_json(path)
+        payload["evaluation_id"] = run_id
+        payload["evaluation_identity"] = marker
+        _write_json(path, payload)
+
+
+def _identity_mismatch(output: Path, detail: str) -> RuntimeError:
+    return RuntimeError(
+        f"evaluation identity/contract mismatch: {detail}: {output}"
+    )
+
+
+def _provenance_checkpoint_matches(
+    actual: object,
+    expected: Mapping[str, object],
+) -> bool:
+    if not isinstance(actual, Mapping):
+        return False
+    return (
+        str(actual.get("lineage_id")) == str(expected["lineage_id"])
+        and int(actual.get("generation", -1)) == int(expected["generation"])
+        and str(actual.get("artifact_sha256") or actual.get("sha256"))
+        == str(expected["checkpoint_sha256"])
+    )
+
+
 def _summary_wld(summary: Mapping[str, object]) -> tuple[int, int, int]:
     wld = summary.get("W/L/D")
     if not isinstance(wld, list) or len(wld) != 3:
@@ -560,30 +725,55 @@ def _checkpoint_reference(result: Mapping[str, object]) -> dict[str, object]:
 
 def _existing_arena(
     output: Path,
-    candidate: Mapping[str, object],
-    reference: Mapping[str, object],
-    games: int,
+    expected_identity: Mapping[str, object],
+    expected_fingerprint: str,
 ) -> dict[str, object] | None:
     if not output.exists():
         return None
+    identity_path = output / EVALUATION_IDENTITY_FILENAME
+    if not identity_path.is_file():
+        raise _identity_mismatch(output, "missing persisted evaluation identity")
+    try:
+        record = _read_json(identity_path)
+    except (OSError, ValueError) as exc:
+        raise _identity_mismatch(output, "malformed persisted evaluation identity") from exc
+    if record.get("schema") != EVALUATION_IDENTITY_RECORD_SCHEMA:
+        raise _identity_mismatch(output, "unsupported persisted identity schema")
+    saved_identity = record.get("identity")
+    saved_fingerprint = record.get("fingerprint")
+    if not isinstance(saved_identity, Mapping) or not isinstance(saved_fingerprint, str):
+        raise _identity_mismatch(output, "malformed persisted identity payload")
+    saved_payload = dict(saved_identity)
+    try:
+        recomputed = _evaluation_fingerprint(saved_payload)
+    except (TypeError, ValueError) as exc:
+        raise _identity_mismatch(output, "non-canonical persisted identity payload") from exc
+    if recomputed != saved_fingerprint:
+        raise _identity_mismatch(
+            output, "persisted full fingerprint does not match canonical payload"
+        )
+    if _evaluation_fingerprint(expected_identity) != expected_fingerprint:
+        raise ValueError("Expected evaluation identity fingerprint is internally inconsistent")
+    if saved_payload != dict(expected_identity) or saved_fingerprint != expected_fingerprint:
+        raise _identity_mismatch(output, "persisted payload does not match current contract")
+
     summary_path = output / "summary.json"
     provenance_path = output / "provenance.json"
     if not summary_path.is_file() or not provenance_path.is_file():
         raise RuntimeError(f"Incomplete evaluation directory: {output}")
     summary = _read_json(summary_path)
     provenance = _read_json(provenance_path)
-    actual_candidate = provenance.get("candidate")
-    actual_reference = provenance.get("reference")
-    if not isinstance(actual_candidate, Mapping) or not isinstance(actual_reference, Mapping):
-        raise ValueError(f"Malformed Arena provenance: {output}")
+    expected_candidate = _mapping(expected_identity.get("candidate"), "identity.candidate")
+    expected_reference = _mapping(expected_identity.get("reference"), "identity.reference")
     if (
-        str(actual_candidate.get("artifact_sha256") or actual_candidate.get("sha256"))
-        != str(candidate["artifact_sha256"])
-        or str(actual_reference.get("artifact_sha256") or actual_reference.get("sha256"))
-        != str(reference["artifact_sha256"])
-        or int(summary.get("games", -1)) != games
+        not _provenance_checkpoint_matches(provenance.get("candidate"), expected_candidate)
+        or not _provenance_checkpoint_matches(provenance.get("reference"), expected_reference)
+        or int(summary.get("games", -1)) != int(expected_identity["games"])
+        or str(provenance.get("profile")) != str(expected_identity["profile"])
+        or int(provenance.get("master_seed", -1)) != int(expected_identity["master_seed"])
     ):
-        raise ValueError(f"Existing Arena does not match experiment: {output}")
+        raise _identity_mismatch(output, "Arena result metadata disagrees with persisted identity")
+
     telemetry = summary.get("telemetry")
     if not isinstance(telemetry, Mapping):
         raise RuntimeError(
@@ -626,17 +816,18 @@ def _compare(
 ) -> dict[str, object]:
     candidate = _checkpoint_reference(arm_results[evaluation.candidate])
     reference = _checkpoint_reference(arm_results[evaluation.reference])
-    run_id = evaluation_id_for_comparison(
-        candidate_lineage_id=str(candidate["lineage_id"]),
-        candidate_generation=int(candidate["generation"]),
-        reference_lineage_id=str(reference["lineage_id"]),
-        reference_generation=int(reference["generation"]),
+    config = arena_config(spec, evaluation)
+    identity, fingerprint = _resolved_evaluation_identity(
+        spec, evaluation, candidate, reference, config
     )
+    run_id = _evaluation_run_id(candidate, reference, fingerprint)
     output = evaluation_dir("torus9", run_id)
-    existing = _existing_arena(output, candidate, reference, evaluation.games)
+    existing = _existing_arena(output, identity, fingerprint)
     if existing is not None:
         return existing
-    return run_arena(
+
+    _write_evaluation_identity(output, run_id, identity, fingerprint)
+    result = run_arena(
         candidate_path=candidate,
         reference_path=reference,
         profile_name="torus9",
@@ -646,8 +837,12 @@ def _compare(
         run_id=run_id,
         comparison=f"{spec['kind']} {evaluation.candidate} vs {evaluation.reference}",
         master_seed=evaluation.master_seed,
-        config=arena_config(spec, evaluation),
+        config=config,
     )
+    _stamp_evaluation_identity_metadata(output, run_id, fingerprint)
+    result["evaluation_id"] = run_id
+    result["evaluation_fingerprint"] = fingerprint
+    return result
 
 
 def run_experiment(
