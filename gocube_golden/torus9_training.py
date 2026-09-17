@@ -848,6 +848,7 @@ class Torus9TrainingAdapter:
         *,
         require_optimizer: bool,
         require_stage3_fields: bool,
+        allow_profile_reference: bool = False,
     ) -> None:
         required = (
             "checkpoint_schema_version",
@@ -873,7 +874,9 @@ class Torus9TrainingAdapter:
             raise ValueError("Current Torus9 checkpoint metadata is incomplete: " + ", ".join(missing))
         if metadata.get("checkpoint_schema_version") != 1:
             raise ValueError("Current Torus9 checkpoint schema mismatch")
-        if metadata.get("profile_id") != TORUS9_CURRENT_PROFILE_ID or metadata.get("profile_fingerprint") != self.profile_fingerprint:
+        if metadata.get("profile_id") != TORUS9_CURRENT_PROFILE_ID or (
+            not allow_profile_reference and metadata.get("profile_fingerprint") != self.profile_fingerprint
+        ):
             raise ValueError("Current Torus9 checkpoint profile mismatch")
         if metadata.get("target_contract_id") != TORUS9_TARGET_CONTRACT_ID or metadata.get("target_fingerprint") != TORUS9_CURRENT_TARGET_FINGERPRINT:
             raise ValueError("Current Torus9 checkpoint target fingerprint mismatch")
@@ -926,6 +929,7 @@ class Torus9TrainingAdapter:
             metadata,
             require_optimizer=True,
             require_stage3_fields=not allow_reference,
+            allow_profile_reference=allow_reference,
         )
         model = _core.torus9_model_from_metadata(metadata).to(device)
         trainer = Torus9OwnershipScoreTrainer(
