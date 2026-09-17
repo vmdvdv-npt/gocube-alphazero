@@ -585,8 +585,37 @@ def _existing_arena(
     ):
         raise ValueError(f"Existing Arena does not match experiment: {output}")
     telemetry = summary.get("telemetry")
-    if not isinstance(telemetry, Mapping) or int(telemetry.get("technical_games", 0)) != 0:
+    if not isinstance(telemetry, Mapping):
+        raise RuntimeError(
+            f"Existing evaluation failed production validity/performance gates: "
+            f"malformed telemetry: {output}"
+        )
+    technical_games = telemetry.get("technical_games")
+    if isinstance(technical_games, bool) or not isinstance(technical_games, int):
+        raise RuntimeError(
+            f"Existing evaluation failed production validity/performance gates: "
+            f"malformed technical_games: {output}"
+        )
+    if technical_games != 0:
         raise ValueError(f"Existing Arena has technical outcomes: {output}")
+    performance_status = telemetry.get("performance_status")
+    performance_failures = telemetry.get("performance_failures")
+    if not isinstance(performance_status, str) or not performance_status.strip():
+        raise RuntimeError(
+            f"Existing evaluation failed production validity/performance gates: "
+            f"malformed performance_status: {output}"
+        )
+    if not isinstance(performance_failures, list):
+        raise RuntimeError(
+            f"Existing evaluation failed production validity/performance gates: "
+            f"malformed performance_failures: {output}"
+        )
+    if performance_status.strip().upper() == "CRITICAL" or performance_failures:
+        raise RuntimeError(
+            "Existing evaluation failed production validity/performance gates: "
+            f"performance_status={performance_status!r}, "
+            f"performance_failures={performance_failures!r}: {output}"
+        )
     return summary
 
 
