@@ -10,6 +10,7 @@ from .errors import CheckpointCatalogCollision
 
 _GOLDEN_CHECKPOINT_RE = re.compile(r"^M(\d+)\.pt$")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_LINEAGE_STATUSES = frozenset({"ACTIVE", "ARCHIVED", "DISCARDED"})
 GOLDEN_TERMINAL_ADJUDICATOR = "golden-graph-area-v1"
 
 
@@ -24,6 +25,7 @@ class CheckpointDescriptor:
     komi: float
     terminal_adjudicator: str
     path: str
+    lineage_status: str = "ACTIVE"
     metadata_error: str | None = None
     profile_id: str | None = None
     profile_fingerprint: str | None = None
@@ -43,6 +45,7 @@ class CheckpointDescriptor:
             "ruleSet": self.rule_set,
             "komi": self.komi,
             "terminalAdjudicator": self.terminal_adjudicator,
+            "lineageStatus": self.lineage_status,
         }
 
 
@@ -218,16 +221,25 @@ class CheckpointCatalog:
         }
 
     @staticmethod
-    def _lineage_id_for_checkpoint(path: str) -> str | None:
-        """Use storage lineage identity when metadata kept a legacy run id."""
+    def _lineage_identity_for_checkpoint(path: str) -> tuple[str, str] | None:
+        """Use canonical lineage identity and lifecycle status when available."""
         manifest_path = Path(path).parent.parent / "manifest.json"
         try:
             with manifest_path.open("r", encoding="utf-8") as handle:
                 manifest = json.load(handle)
         except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
             return None
-        lineage_id = manifest.get("lineage_id") if isinstance(manifest, dict) else None
-        return lineage_id if isinstance(lineage_id, str) and lineage_id else None
+        if not isinstance(manifest, dict):
+            return None
+        lineage_id = manifest.get("lineage_id")
+        lineage_status = manifest.get("status")
+        if (
+            not isinstance(lineage_id, str)
+            or not lineage_id
+            or lineage_status not in _LINEAGE_STATUSES
+        ):
+            return None
+        return lineage_id, str(lineage_status)
 
     def _golden_descriptors(self) -> list[CheckpointDescriptor]:
         descriptors: list[CheckpointDescriptor] = []
@@ -252,8 +264,10 @@ class CheckpointCatalog:
             identity = self._validate_golden_metadata(self._golden_metadata(metadata_path))
             if identity is None:
                 continue
-            lineage_id = self._lineage_id_for_checkpoint(path)
-            if lineage_id is not None:
+            lineage_status = "ACTIVE"
+            lineage_identity = self._lineage_identity_for_checkpoint(path)
+            if lineage_identity is not None:
+                lineage_id, lineage_status = lineage_identity
                 identity["run_name"] = lineage_id
             filename_match = _GOLDEN_CHECKPOINT_RE.fullmatch(os.path.basename(path))
             if filename_match is None or identity["iteration"] != int(filename_match.group(1)):
@@ -272,6 +286,7 @@ class CheckpointCatalog:
                     komi=float(identity["komi"]),
                     terminal_adjudicator=GOLDEN_TERMINAL_ADJUDICATOR,
                     path=os.path.abspath(path),
+                    lineage_status=lineage_status,
                     profile_id=str(identity["profile_id"]),
                     profile_fingerprint=str(identity["profile_fingerprint"]),
                     architecture_id=str(identity["architecture_id"]),
