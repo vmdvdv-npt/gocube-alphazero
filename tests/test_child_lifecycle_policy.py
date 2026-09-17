@@ -10,6 +10,7 @@ import gocube_golden.production_orchestrator as production_orchestrator
 from gocube_golden.orchestrator import HealthPolicy, OrchestratorSpec, SoftStopPolicy
 from gocube_golden.production_orchestrator import (
     ChildLifecycleContext,
+    CriticalHealthError,
     NoOpChildLifecyclePolicy,
     SupervisionPolicy,
     UniversalProductionTrainingOrchestrator,
@@ -31,6 +32,12 @@ class RecordingPolicy:
     ) -> None:
         self.order.append(f"{self.label}:after")
         self.events.append(("after", context, exit_code))
+
+    def after_child_abort(
+        self, context: ChildLifecycleContext, error: BaseException
+    ) -> None:
+        self.order.append(f"{self.label}:abort")
+        self.events.append(("abort", context, error))
 
 
 def _spec(tmp_path: Path) -> OrchestratorSpec:
@@ -144,6 +151,48 @@ def _install_fake_child(
     return captured
 
 
+def _install_running_child(
+    monkeypatch: pytest.MonkeyPatch,
+    order: list[str],
+) -> object:
+    class FakeProcess:
+        pid = 424243
+
+        def __init__(self) -> None:
+            self.returncode: int | None = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            if self.returncode is None:
+                self.returncode = -15
+            return self.returncode
+
+    process = FakeProcess()
+
+    def fake_popen(
+        argv: Sequence[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        start_new_session: bool,
+    ) -> FakeProcess:
+        del argv, cwd, env, start_new_session
+        order.append("child:start")
+        return process
+
+    monkeypatch.setattr(production_orchestrator.subprocess, "Popen", fake_popen)
+    return process
+
+
+def _isolate_monitoring(run: UniversalProductionTrainingOrchestrator, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(run, "_state", lambda: {})
+    monkeypatch.setattr(run, "_heartbeat", lambda _state: None)
+    monkeypatch.setattr(run, "_stop_request", lambda: None)
+
+
 def test_base_orchestrator_without_policy_preserves_child_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -152,6 +201,7 @@ def test_base_orchestrator_without_policy_preserves_child_result(
     run = _run(tmp_path, monkeypatch, lineage_id="default-policy")
 
     assert isinstance(run.child_lifecycle_policy, NoOpChildLifecyclePolicy)
+    assert callable(run.child_lifecycle_policy.after_child_abort)
     assert (
         run._run_child(
             ("fake-child", "--generation={generation}"),
@@ -239,6 +289,150 @@ def test_explicit_policy_wraps_child_and_receives_typed_context(
     )
     assert captured["argv"] == before.command
     assert events[1][2] == 4
+
+
+def test_supervisor_exception_cleans_up_then_aborts_and_propagates_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order: list[str] = []
+    events: list[tuple[object, ...]] = []
+    policy = RecordingPolicy("policy", order, events)
+    process = _install_running_child(monkeypatch, order)
+    run = _run(tmp_path, monkeypatch, lineage_id="monitor-abort", policy=policy)
+    _isolate_monitoring(run, monkeypatch)
+    original = CriticalHealthError("worker/inference health failure")
+
+    def fail_health(_process: object) -> dict[str, object]:
+        order.append("monitor")
+        raise original
+
+    def cleanup(proc: object, *, reason: str) -> None:
+        del reason
+        order.append("cleanup")
+        setattr(proc, "returncode", -15)
+
+    monkeypatch.setattr(run, "_health_snapshot", fail_health)
+    monkeypatch.setattr(run, "_terminate_child_group", cleanup)
+
+    with pytest.raises(CriticalHealthError) as caught:
+        run._run_child(("fake-child",), generation=13, resume=False, phase="generation")
+
+    assert caught.value is original
+    assert getattr(process, "returncode") == -15
+    assert order == [
+        "policy:before",
+        "child:start",
+        "monitor",
+        "cleanup",
+        "policy:abort",
+    ]
+    assert [event[0] for event in events] == ["before", "abort"]
+    assert events[1][2] is original
+    assert not run.active_child_path.exists()
+
+
+def test_startup_heartbeat_timeout_is_abort_outcome_after_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order: list[str] = []
+    events: list[tuple[object, ...]] = []
+    policy = RecordingPolicy("policy", order, events)
+    _install_running_child(monkeypatch, order)
+    run = _run(tmp_path, monkeypatch, lineage_id="startup-timeout", policy=policy)
+    _isolate_monitoring(run, monkeypatch)
+    ticks = iter((100.0, 102.0))
+    monkeypatch.setattr(production_orchestrator.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(run, "_health_snapshot", lambda _process: {})
+
+    def cleanup(proc: object, *, reason: str) -> None:
+        assert "startup heartbeat" in reason
+        order.append("cleanup")
+        setattr(proc, "returncode", -15)
+
+    monkeypatch.setattr(run, "_terminate_child_group", cleanup)
+
+    with pytest.raises(
+        CriticalHealthError,
+        match="driver did not publish startup heartbeat before timeout",
+    ):
+        run._run_child(("fake-child",), generation=14, resume=False, phase="generation")
+
+    assert order == ["policy:before", "child:start", "cleanup", "policy:abort"]
+    assert [event[0] for event in events] == ["before", "abort"]
+    assert isinstance(events[1][2], CriticalHealthError)
+    assert not run.active_child_path.exists()
+
+
+def test_arena_phase_uses_generic_abort_callback_without_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order: list[str] = []
+    events: list[tuple[object, ...]] = []
+    policy = RecordingPolicy("policy", order, events)
+    _install_running_child(monkeypatch, order)
+    run = _run(tmp_path, monkeypatch, lineage_id="arena-abort", policy=policy)
+    _isolate_monitoring(run, monkeypatch)
+    original = RuntimeError("arena monitoring failed")
+
+    def fail_health(_process: object) -> dict[str, object]:
+        raise original
+
+    def cleanup(proc: object, *, reason: str) -> None:
+        del reason
+        order.append("cleanup")
+        setattr(proc, "returncode", -15)
+
+    monkeypatch.setattr(run, "_health_snapshot", fail_health)
+    monkeypatch.setattr(run, "_terminate_child_group", cleanup)
+
+    with pytest.raises(RuntimeError) as caught:
+        run._run_child(("fake-arena",), generation=15, resume=False, phase="arena")
+
+    assert caught.value is original
+    assert [event[0] for event in events] == ["before", "abort"]
+    assert events[1][1].phase == "arena"
+    assert events[1][2] is original
+    assert order[-2:] == ["cleanup", "policy:abort"]
+
+
+def test_abort_bookkeeping_failure_does_not_mask_original_supervisor_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order: list[str] = []
+    events: list[tuple[object, ...]] = []
+
+    class FailingAbortPolicy(RecordingPolicy):
+        def after_child_abort(
+            self, context: ChildLifecycleContext, error: BaseException
+        ) -> None:
+            super().after_child_abort(context, error)
+            raise RuntimeError("provenance write failed")
+
+    policy = FailingAbortPolicy("policy", order, events)
+    _install_running_child(monkeypatch, order)
+    run = _run(tmp_path, monkeypatch, lineage_id="abort-bookkeeping", policy=policy)
+    _isolate_monitoring(run, monkeypatch)
+    original = CriticalHealthError("original supervisor failure")
+
+    def fail_health(_process: object) -> dict[str, object]:
+        raise original
+
+    def cleanup(proc: object, *, reason: str) -> None:
+        del reason
+        setattr(proc, "returncode", -15)
+
+    monkeypatch.setattr(run, "_health_snapshot", fail_health)
+    monkeypatch.setattr(run, "_terminate_child_group", cleanup)
+
+    with pytest.raises(CriticalHealthError) as caught:
+        run._run_child(("fake-child",), generation=16, resume=False, phase="generation")
+
+    assert caught.value is original
+    assert [event[0] for event in events] == ["before", "abort"]
+    assert any(
+        "after_child_abort failed" in note
+        for note in getattr(original, "__notes__", [])
+    )
 
 
 def test_child_lifecycle_policy_is_instance_local_and_requires_no_registration(

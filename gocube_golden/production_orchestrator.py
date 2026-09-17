@@ -101,6 +101,11 @@ class ChildLifecyclePolicy(Protocol):
     ) -> None:
         """Run after a normally observed child exit and supervisor cleanup."""
 
+    def after_child_abort(
+        self, context: ChildLifecycleContext, error: BaseException
+    ) -> None:
+        """Run after supervisor abort cleanup, before the original error propagates."""
+
 
 class NoOpChildLifecyclePolicy:
     """Default lifecycle policy preserving the historical supervisor behavior."""
@@ -112,6 +117,11 @@ class NoOpChildLifecyclePolicy:
         self, context: ChildLifecycleContext, exit_code: int
     ) -> None:
         del context, exit_code
+
+    def after_child_abort(
+        self, context: ChildLifecycleContext, error: BaseException
+    ) -> None:
+        del context, error
 
 
 def _timestamp_age_seconds(value: object) -> float | None:
@@ -319,6 +329,13 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
                 f"child process group {process_group} survived scoped fail-closed termination"
             )
 
+    @staticmethod
+    def _note_secondary_failure(error: BaseException, label: str, secondary: BaseException) -> None:
+        try:
+            error.add_note(f"{label}: {type(secondary).__name__}: {secondary}")
+        except (AttributeError, TypeError):
+            pass
+
     def _run_child(self, command: Sequence[str], *, generation: int, resume: bool, phase: str) -> int:
         from .orchestrator import _render_command
 
@@ -338,29 +355,31 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
             command=tuple(rendered),
         )
         self.child_lifecycle_policy.before_child_start(context)
-        self.paths.driver_heartbeat.unlink(missing_ok=True)
-        self.events.emit("INFO", f"Starting {phase}", generation=generation, argv=rendered)
-        process = subprocess.Popen(
-            rendered,
-            cwd=self.repo_root,
-            env=self._driver_env(generation, resume=resume, phase=phase),
-            start_new_session=True,
-        )
-        atomic_write_json(
-            self.active_child_path,
-            {
-                "schema": ACTIVE_CHILD_SCHEMA,
-                "pid": process.pid,
-                "process_group": process.pid,
-                "generation": generation,
-                "phase": phase,
-                "started_at": utc_now(),
-                "argv": rendered,
-            },
-        )
-        started = time.monotonic()
+
+        process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None
         exit_code: int | None = None
         try:
+            self.paths.driver_heartbeat.unlink(missing_ok=True)
+            self.events.emit("INFO", f"Starting {phase}", generation=generation, argv=rendered)
+            process = subprocess.Popen(
+                rendered,
+                cwd=self.repo_root,
+                env=self._driver_env(generation, resume=resume, phase=phase),
+                start_new_session=True,
+            )
+            atomic_write_json(
+                self.active_child_path,
+                {
+                    "schema": ACTIVE_CHILD_SCHEMA,
+                    "pid": process.pid,
+                    "process_group": process.pid,
+                    "generation": generation,
+                    "phase": phase,
+                    "started_at": utc_now(),
+                    "argv": rendered,
+                },
+            )
+            started = time.monotonic()
             while True:
                 code = process.poll()
                 if code is not None:
@@ -372,15 +391,11 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
                 atomic_write_json(self.paths.metrics / "health-latest.json", snapshot)
                 if not self.paths.driver_heartbeat.is_file():
                     if time.monotonic() - started >= self.supervision.startup_ack_timeout_seconds:
-                        reason = "driver did not publish startup heartbeat before timeout"
-                        self._terminate_child_group(process, reason=reason)
-                        raise CriticalHealthError(reason)
+                        raise CriticalHealthError(
+                            "driver did not publish startup heartbeat before timeout"
+                        )
                 else:
-                    try:
-                        self._emit_health_warnings(snapshot)
-                    except CriticalHealthError as exc:
-                        self._terminate_child_group(process, reason=str(exc))
-                        raise
+                    self._emit_health_warnings(snapshot)
                 stop = self._stop_request()
                 if stop is not None:
                     target = parse_utc(str(stop["target_deadline_at"]))
@@ -392,17 +407,36 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
                             phase=phase,
                         )
                 time.sleep(self.spec.health.poll_seconds)
-        finally:
+
+            if process.poll() is None or self._process_group_exists(process.pid):
+                self._terminate_child_group(
+                    process,
+                    reason="supervisor monitor exited before child process group was fully reaped",
+                )
+            self.active_child_path.unlink(missing_ok=True)
+            if exit_code is None:
+                raise RuntimeError("child process exited without an observable exit code")
+        except BaseException as error:
             try:
-                if process.poll() is None or self._process_group_exists(process.pid):
+                if process is not None and (
+                    process.poll() is None or self._process_group_exists(process.pid)
+                ):
                     self._terminate_child_group(
                         process,
-                        reason="supervisor monitor exited before child process group was fully reaped",
+                        reason=str(error) or "supervisor aborted child execution",
                     )
-            finally:
+            except BaseException as cleanup_error:
+                self._note_secondary_failure(error, "child process-group cleanup failed", cleanup_error)
+            try:
                 self.active_child_path.unlink(missing_ok=True)
-        if exit_code is None:
-            raise RuntimeError("child process exited without an observable exit code")
+            except BaseException as cleanup_error:
+                self._note_secondary_failure(error, "active-child cleanup failed", cleanup_error)
+            try:
+                self.child_lifecycle_policy.after_child_abort(context, error)
+            except BaseException as lifecycle_error:
+                self._note_secondary_failure(error, "after_child_abort failed", lifecycle_error)
+            raise
+
         self.child_lifecycle_policy.after_child_finish(context, exit_code)
         return exit_code
 

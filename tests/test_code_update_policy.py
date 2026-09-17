@@ -14,6 +14,7 @@ from gocube_golden.code_update_policy import CodeUpdateProvenancePolicy
 from gocube_golden.orchestrator import HealthPolicy, OrchestratorSpec, SoftStopPolicy
 from gocube_golden.production_orchestrator import (
     ChildLifecycleContext,
+    CriticalHealthError,
     NoOpChildLifecyclePolicy,
     SupervisionPolicy,
     UniversalProductionTrainingOrchestrator,
@@ -165,6 +166,7 @@ assert U._run_child.__name__ == "_run_child"
 source = inspect.getsource(U._run_child)
 assert "child_lifecycle_policy.before_child_start" in source
 assert "child_lifecycle_policy.after_child_finish" in source
+assert "child_lifecycle_policy.after_child_abort" in source
 '''
     subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True)
     source = (ROOT / "gocube_golden" / "code_update_policy.py").read_text(encoding="utf-8")
@@ -278,10 +280,103 @@ def test_generation_provenance_preserves_identity_fingerprints_parameters_and_at
     assert attempts[0]["effective_parameters"]["profile"] == run.spec.profile_payload
     assert attempts[0]["effective_parameters"]["generation"] == run.spec.payload["generation"]
     assert attempts[0]["orchestrator_restart_attempts"] == 0
+    assert attempts[0]["status"] == "CHILD_FAILED"
     assert attempts[0]["child_exit_code"] == 9
+    assert attempts[0]["attempt_finished_at"]
     assert attempts[1]["code"]["git_commit_sha"] == "commit-b"
     assert attempts[1]["orchestrator_restart_attempts"] == 1
+    assert attempts[1]["status"] == "CHILD_COMPLETED"
     assert attempts[1]["child_exit_code"] == 0
+    assert attempts[1]["attempt_finished_at"]
+
+
+def test_generation_supervisor_abort_closes_attempt_without_fake_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _prepare_fake_run(tmp_path)
+    monkeypatch.setattr(
+        policy_module,
+        "capture_code_identity",
+        lambda _root: _identity("commit-a", "tree-a"),
+    )
+    policy = CodeUpdateProvenancePolicy()
+    context = _context(run, generation=18)
+
+    policy.before_child_start(context)
+    path = run.paths.root / "provenance" / "generations" / "generation-0018.json"
+    assert _read(path)["status"] == "CHILD_RUNNING"
+
+    error = CriticalHealthError(
+        "driver did not publish startup heartbeat before timeout"
+    )
+    policy.after_child_abort(context, error)
+
+    provenance = _read(path)
+    assert provenance["status"] == "SUPERVISOR_ABORTED"
+    attempt = provenance["latest_attempt"]
+    assert attempt["status"] == "SUPERVISOR_ABORTED"
+    assert attempt["attempt_finished_at"]
+    assert attempt["supervisor_error_type"] == "CriticalHealthError"
+    assert attempt["supervisor_error_message"] == str(error)
+    assert "child_exit_code" not in attempt
+
+
+def test_retry_after_supervisor_abort_preserves_both_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _prepare_fake_run(tmp_path)
+    identities = iter(
+        [
+            _identity("commit-a", "tree-a"),
+            _identity("commit-b", "tree-b"),
+        ]
+    )
+    monkeypatch.setattr(policy_module, "capture_code_identity", lambda _root: next(identities))
+    policy = CodeUpdateProvenancePolicy()
+
+    first = _context(run, generation=18, resume=False)
+    policy.before_child_start(first)
+    policy.after_child_abort(first, CriticalHealthError("first attempt aborted"))
+
+    tx_path = run._generation_tx_path(18)
+    tx_path.parent.mkdir(parents=True, exist_ok=True)
+    tx_path.write_text(json.dumps({"restart_attempts": 1}), encoding="utf-8")
+
+    second = _context(run, generation=18, resume=True)
+    policy.before_child_start(second)
+    policy.after_child_finish(second, 0)
+
+    path = run.paths.root / "provenance" / "generations" / "generation-0018.json"
+    provenance = _read(path)
+    attempts = provenance["attempts"]
+    assert len(attempts) == 2
+    assert attempts[0]["status"] == "SUPERVISOR_ABORTED"
+    assert attempts[0]["supervisor_error_type"] == "CriticalHealthError"
+    assert "child_exit_code" not in attempts[0]
+    assert attempts[1]["status"] == "CHILD_COMPLETED"
+    assert attempts[1]["orchestrator_restart_attempts"] == 1
+    assert attempts[1]["child_exit_code"] == 0
+    assert provenance["latest_attempt"] == attempts[1]
+    assert provenance["status"] == "CHILD_COMPLETED"
+
+
+def test_arena_abort_does_not_create_generation_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _prepare_fake_run(tmp_path)
+    monkeypatch.setattr(
+        policy_module,
+        "capture_code_identity",
+        lambda _root: _identity("commit-a", "tree-a"),
+    )
+    policy = CodeUpdateProvenancePolicy()
+    context = _context(run, generation=19, phase="arena")
+
+    policy.before_child_start(context)
+    policy.after_child_abort(context, RuntimeError("arena supervisor abort"))
+
+    path = run.paths.root / "provenance" / "generations" / "generation-0019.json"
+    assert not path.exists()
 
 
 def test_existing_pr136_manifest_and_provenance_shape_remains_compatible(
@@ -361,3 +456,4 @@ def test_existing_pr136_manifest_and_provenance_shape_remains_compatible(
     assert provenance["schema"] == "gocube-training-generation-provenance-v1"
     assert provenance["attempts"][0]["code"]["git_commit_sha"] == "commit-a"
     assert provenance["attempts"][1]["code"]["git_commit_sha"] == "commit-b"
+    assert provenance["attempts"][1]["status"] == "CHILD_COMPLETED"

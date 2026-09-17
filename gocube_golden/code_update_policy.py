@@ -122,6 +122,7 @@ def _record_generation_attempt(
     attempt = {
         "attempt_index": len(history),
         "orchestrator_restart_attempts": restart_attempts,
+        "status": "CHILD_RUNNING",
         "recorded_at": _utc_now(),
         "code": dict(code),
         "run_spec_fingerprint": strict_fingerprint
@@ -155,15 +156,37 @@ def _finish_generation_attempt(path: Path, exit_code: int) -> None:
     if not path.is_file():
         return
     payload = read_json(path)
+    status = "CHILD_COMPLETED" if int(exit_code) == 0 else "CHILD_FAILED"
     attempts = payload.get("attempts")
     if isinstance(attempts, list) and attempts and isinstance(attempts[-1], Mapping):
         final = dict(attempts[-1])
+        finished_at = _utc_now()
+        final["status"] = status
         final["child_exit_code"] = int(exit_code)
-        final["child_finished_at"] = _utc_now()
+        final["child_finished_at"] = finished_at
+        final["attempt_finished_at"] = finished_at
         attempts = [*attempts[:-1], final]
         payload["attempts"] = attempts
         payload["latest_attempt"] = final
-    payload["status"] = "CHILD_COMPLETED" if int(exit_code) == 0 else "CHILD_FAILED"
+    payload["status"] = status
+    atomic_write_json(path, payload)
+
+
+def _abort_generation_attempt(path: Path, error: BaseException) -> None:
+    if not path.is_file():
+        return
+    payload = read_json(path)
+    attempts = payload.get("attempts")
+    if isinstance(attempts, list) and attempts and isinstance(attempts[-1], Mapping):
+        final = dict(attempts[-1])
+        final["status"] = "SUPERVISOR_ABORTED"
+        final["attempt_finished_at"] = _utc_now()
+        final["supervisor_error_type"] = type(error).__name__
+        final["supervisor_error_message"] = str(error)
+        attempts = [*attempts[:-1], final]
+        payload["attempts"] = attempts
+        payload["latest_attempt"] = final
+    payload["status"] = "SUPERVISOR_ABORTED"
     atomic_write_json(path, payload)
 
 
@@ -209,6 +232,17 @@ class CodeUpdateProvenancePolicy:
         provenance = self._generation_provenance.pop(self._key(context), None)
         if provenance is not None:
             _finish_generation_attempt(provenance, int(exit_code))
+
+    def after_child_abort(
+        self,
+        context: "ChildLifecycleContext",
+        error: BaseException,
+    ) -> None:
+        if context.phase != "generation":
+            return
+        provenance = self._generation_provenance.pop(self._key(context), None)
+        if provenance is not None:
+            _abort_generation_attempt(provenance, error)
 
 
 __all__ = [
