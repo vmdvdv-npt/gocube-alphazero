@@ -187,7 +187,22 @@ def install_code_update_policy() -> None:
         resume: bool,
         phase: str,
     ) -> int:
-        code = _code_snapshot(Path(getattr(self, "repo_root")))
+        repo_root = Path(getattr(self, "repo_root"))
+        # Unit-test/fake orchestrators often use temporary non-Git roots.  The
+        # rollover policy is production checkout behavior and must not alter
+        # those synthetic execution contracts.
+        if not (repo_root / ".git").exists():
+            return int(
+                original(
+                    self,
+                    command,
+                    generation=int(generation),
+                    resume=bool(resume),
+                    phase=str(phase),
+                )
+            )
+
+        code = _code_snapshot(repo_root)
         _advance_manifest_code_pin(
             self,
             code=code,
