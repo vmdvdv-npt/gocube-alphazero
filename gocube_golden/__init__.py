@@ -117,6 +117,16 @@ from .torus9_contract import (
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
 )
+from .torus9_run_owned import (
+    install_run_spec_policy,
+    install_telegram_start_notification,
+)
+
+# Production policy installation is process-local.  It changes no Golden
+# rules/model semantics; it only makes the declared tuning knobs run-owned and
+# exposes their effective values through Telegram at startup.
+install_run_spec_policy()
+install_telegram_start_notification()
 
 
 __all__ = [name for name in globals() if not name.startswith("_")]
