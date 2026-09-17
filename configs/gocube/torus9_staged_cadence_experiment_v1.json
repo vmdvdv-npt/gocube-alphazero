@@ -1,0 +1,111 @@
+{
+  "schema": "gocube-torus9-experiment-v1",
+  "kind": "torus9-staged-cadence-v1",
+  "profile_path": "configs/gocube/torus9_staged_cadence_profile_v1.json",
+  "run_spec_template_path": "configs/gocube/torus9_experiment_arm_template_v1.json",
+  "batch_size": 64,
+  "fixed_training": {
+    "self_play_mcts_simulations": 128,
+    "learning_rate": 0.0003,
+    "replay_generations": 6,
+    "replay_cap": 40000,
+    "network_hidden": 80,
+    "network_blocks": 8,
+    "batch_size": 64
+  },
+  "budget": {
+    "mode": "equal",
+    "expected": {
+      "self_play_games": 384,
+      "optimizer_steps": 480,
+      "sample_exposures": 30720
+    }
+  },
+  "arena_execution": {
+    "workers": 16,
+    "games_per_worker": 4,
+    "inference_batch_rows": 64,
+    "inference_batch_wait_ms": 1.0,
+    "device": "cuda",
+    "strict_production": true,
+    "min_mean_inference_batch_rows": 0.0,
+    "min_effective_cpu_cores": 0.0,
+    "early_gate_enabled": false,
+    "early_gate_min_forwards": 128,
+    "early_gate_min_wall_sec": 5.0
+  },
+  "arena_scientific_contract": {
+    "simulations": 64,
+    "noise": false,
+    "temperature": 0.0,
+    "fast_search": false,
+    "resign": false,
+    "komi": 0.5,
+    "paired_starts_color_swap": true,
+    "deterministic_tie_break": true,
+    "technical_fail_closed": true
+  },
+  "arms": [
+    {
+      "id": "g64",
+      "games_per_iteration": 64,
+      "iterations": 6,
+      "optimizer_steps_per_iteration": 80
+    },
+    {
+      "id": "g128",
+      "games_per_iteration": 128,
+      "iterations": 3,
+      "optimizer_steps_per_iteration": 160
+    },
+    {
+      "id": "g192",
+      "games_per_iteration": 192,
+      "iterations": 2,
+      "optimizer_steps_per_iteration": 240
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "g128-vs-g64",
+      "candidate": "g128",
+      "reference": "g64",
+      "games": 128,
+      "master_seed": 202609131004
+    },
+    {
+      "id": "g192-vs-g128",
+      "candidate": "g192",
+      "reference": "g128",
+      "games": 128,
+      "master_seed": 202609131004
+    }
+  ],
+  "stages": [
+    {
+      "id": "stage-1-64-vs-128",
+      "arms": [
+        "g64",
+        "g128"
+      ],
+      "evaluations": [
+        "g128-vs-g64"
+      ]
+    },
+    {
+      "id": "stage-2-conditional-192",
+      "run_if": {
+        "evaluation": "g128-vs-g64",
+        "metric": "wins_minus_losses",
+        "operator": ">",
+        "value": 0
+      },
+      "arms": [
+        "g192"
+      ],
+      "evaluations": [
+        "g192-vs-g128"
+      ]
+    }
+  ]
+}

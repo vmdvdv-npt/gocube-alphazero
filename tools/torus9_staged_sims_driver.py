@@ -1,51 +1,114 @@
 #!/usr/bin/env python3
-"""Experiment-only Torus9 driver for the staged 64/128/192 cadence harness.
+"""Experiment-only Torus9 driver for config-driven cadence studies.
 
-The normal production driver and Golden profile remain unchanged.  This wrapper
-reuses the production lifecycle/replay/checkpoint path, but opts into the
-already-proven proportional cadence adapter (80/160/240 Adam steps) and permits
-only the three equal-budget workloads declared by the staged experiment.
+The immutable run spec supplies games-per-iteration and optimizer-step budget.
+The harness owns cross-arm budget comparability; this driver keeps the current
+Torus9 scientific/execution boundaries and applies the declared Adam work.
 """
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
+from gocube_golden.torus9 import Torus9TrainingAdapter
+from training_engine import value_fingerprint
 from tools import torus9_run_driver as _base
-from tools.torus9_nightly_diagnostics import CadenceTrainingAdapter
 
 
-BUDGETS: dict[int, int] = {64: 80, 128: 160, 192: 240}
 BATCH_SIZE = 64
-TOTAL_GAMES = 384
-TOTAL_OPTIMIZER_STEPS = 480
-TOTAL_SAMPLE_EXPOSURES = 30_720
-
-
-def optimizer_steps_for_games(games: int) -> int:
-    try:
-        return BUDGETS[int(games)]
-    except KeyError as exc:
-        raise ValueError("Staged Torus9 cadence must be one of 64, 128, or 192 games") from exc
 
 
 def validate_arm_budget(*, games: int, optimizer_steps: int) -> None:
-    expected = optimizer_steps_for_games(games)
-    if int(optimizer_steps) != expected:
-        raise ValueError(
-            f"Staged Torus9 cadence {games} games requires {expected} optimizer steps, "
-            f"got {optimizer_steps}"
+    if int(games) <= 0:
+        raise ValueError("Experiment games_per_iteration must be positive")
+    if int(optimizer_steps) <= 0:
+        raise ValueError("Experiment optimizer_steps_per_iteration must be positive")
+
+
+class ExperimentCadenceTrainingAdapter(Torus9TrainingAdapter):
+    """Training adapter whose per-iteration Adam budget comes from the run spec."""
+
+    def __init__(self, *, optimizer_steps: int, **kwargs: object) -> None:
+        if int(optimizer_steps) <= 0:
+            raise ValueError("Experiment optimizer step budget must be positive")
+        super().__init__(**kwargs)
+        self.cadence_optimizer_steps = int(optimizer_steps)
+
+    def create_state(self, *args: object, **kwargs: object):
+        state = super().create_state(*args, **kwargs)  # type: ignore[arg-type]
+        state.adapter_state.optimizer_steps_per_iteration = self.cadence_optimizer_steps
+        return state
+
+    def train(
+        self,
+        state: Any,
+        rows: Sequence[Mapping[str, object]],
+        seed: int,
+    ) -> Mapping[str, object]:
+        self.validate_state(state)
+        trainer = state.adapter_state
+        count = self.cadence_optimizer_steps * BATCH_SIZE
+        indices = trainer._sample_indices(len(rows), seed=int(seed), count=count)
+        metrics = dict(
+            trainer.train_fixed_budget(
+                rows,
+                seed=int(seed),
+                validate_samples=False,
+                timing=self._diagnostic_timing,
+            )
         )
+        if self._diagnostic_timing is not None:
+            metrics["stage_timing"] = dict(self._diagnostic_timing)
+        metrics.update(
+            {
+                "training_seed": int(seed),
+                "cadence_optimizer_steps_per_iteration": self.cadence_optimizer_steps,
+                "sampled_replay_row_ids": tuple(
+                    str(rows[index].get("replay_row_id", index)) for index in indices
+                ),
+            }
+        )
+        metrics["sampled_row_ids_fingerprint"] = value_fingerprint(
+            metrics["sampled_replay_row_ids"]
+        )
+        if metrics.get("optimizer_steps") != self.cadence_optimizer_steps:
+            raise ValueError("Experiment optimizer step budget drift")
+        if metrics.get("samples_consumed") != count:
+            raise ValueError("Experiment sample exposure budget drift")
+        return metrics
+
+    def prepare_checkpoint(
+        self,
+        state: Any,
+        context: Any,
+        training_metrics: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        metadata = dict(super().prepare_checkpoint(state, context, training_metrics))
+        metadata["optimizer_steps_per_iteration"] = self.cadence_optimizer_steps
+        metadata["samples_consumed_per_iteration"] = (
+            self.cadence_optimizer_steps * BATCH_SIZE
+        )
+        contract = dict(metadata["scientific_contract"])  # type: ignore[arg-type]
+        contract.update(
+            {
+                "optimizer_steps": self.cadence_optimizer_steps,
+                "samples_consumed": self.cadence_optimizer_steps * BATCH_SIZE,
+            }
+        )
+        metadata["scientific_contract"] = contract
+        metadata["cadence_experiment"] = {
+            "status": "controlled run-spec-owned arm",
+            "canonical_profile_unchanged": True,
+            "optimizer": "Adam",
+            "batch_size": BATCH_SIZE,
+            "steps_per_iteration": self.cadence_optimizer_steps,
+            "sample_draws_per_iteration": self.cadence_optimizer_steps * BATCH_SIZE,
+        }
+        return metadata
 
 
-def _validate_staged_scientific_bindings(
+def _validate_experiment_bindings(
     profile: Mapping[str, object], config: Mapping[str, object]
 ) -> None:
-    """Validate every fixed experiment setting while allowing cadence batch size.
-
-    ``games_per_iteration`` is deliberately an experiment execution/budget knob
-    here, just as in the earlier equal-budget cadence harness.  Search, LR,
-    replay scope, architecture, seeds and execution preset remain pinned.
-    """
     self_play = _base._mapping(profile.get("self_play"), "profile.self_play")
     training = _base._mapping(profile.get("training"), "profile.training")
     replay = _base._mapping(profile.get("replay"), "profile.replay")
@@ -55,16 +118,16 @@ def _validate_staged_scientific_bindings(
     steps = int(config.get("optimizer_steps_per_iteration", 0))
     validate_arm_budget(games=games, optimizer_steps=steps)
 
-    if int(self_play["mcts_simulations"]) != 128:
-        raise ValueError("Staged Torus9 harness requires exactly 128 self-play simulations")
-    if float(training["learning_rate"]) != 0.0003:
-        raise ValueError("Staged Torus9 harness requires LR=3e-4")
+    if int(self_play["mcts_simulations"]) <= 0:
+        raise ValueError("Experiment self-play simulations must be positive")
+    if float(training["learning_rate"]) <= 0.0:
+        raise ValueError("Experiment learning rate must be positive")
     if int(training["batch_size"]) != BATCH_SIZE:
-        raise ValueError("Staged Torus9 harness requires batch size 64")
-    if int(replay["generations"]) != 6 or int(replay["cap"]) != 40_000:
-        raise ValueError("Staged Torus9 harness requires replay=6 generations / 40k positions")
+        raise ValueError("Torus9 experiment driver requires batch size 64")
+    if int(replay["generations"]) <= 0 or int(replay["cap"]) <= 0:
+        raise ValueError("Experiment replay window/cap must be positive")
     if int(network["hidden"]) != 80 or int(network["blocks"]) != 8:
-        raise ValueError("Staged Torus9 harness requires the same 80x8 network")
+        raise ValueError("Torus9 experiment driver requires the current 80x8 network")
 
     expected_execution = {
         "workers": 16,
@@ -78,9 +141,9 @@ def _validate_staged_scientific_bindings(
         actual = config.get(key)
         if isinstance(expected, float):
             if float(actual) != expected:
-                raise ValueError(f"Staged Torus9 execution drift: {key}={actual!r}")
+                raise ValueError(f"Torus9 experiment execution drift: {key}={actual!r}")
         elif actual != expected:
-            raise ValueError(f"Staged Torus9 execution drift: {key}={actual!r}")
+            raise ValueError(f"Torus9 experiment execution drift: {key}={actual!r}")
 
     seeds = _base._mapping(profile.get("seeds"), "profile.seeds")
     for config_key, profile_key in (
@@ -95,18 +158,19 @@ def _validate_staged_scientific_bindings(
 
 
 def _adapter_type(optimizer_steps: int):
-    class StagedCadenceTrainingAdapter(CadenceTrainingAdapter):
+    class BoundExperimentCadenceTrainingAdapter(ExperimentCadenceTrainingAdapter):
         def __init__(self, *args: object, **kwargs: object) -> None:
+            if args:
+                raise TypeError("Experiment adapter accepts keyword construction only")
             super().__init__(
-                *args,
                 optimizer_steps=int(optimizer_steps),
                 **kwargs,
             )
 
-    StagedCadenceTrainingAdapter.__name__ = (
-        f"StagedCadenceTrainingAdapter{int(optimizer_steps)}"
+    BoundExperimentCadenceTrainingAdapter.__name__ = (
+        f"ExperimentCadenceTrainingAdapter{int(optimizer_steps)}"
     )
-    return StagedCadenceTrainingAdapter
+    return BoundExperimentCadenceTrainingAdapter
 
 
 def configure_from_run_spec() -> int:
@@ -116,12 +180,9 @@ def configure_from_run_spec() -> int:
     steps = int(config.get("optimizer_steps_per_iteration", 0))
     validate_arm_budget(games=games, optimizer_steps=steps)
 
-    # Local process-only overrides.  The normal driver module on disk and
-    # Golden profile stay untouched; every child process reconstructs these
-    # bindings from its immutable lineage-owned run spec.
     _base.Torus9TrainingAdapter = _adapter_type(steps)
     _base.TORUS9_OPTIMIZER_STEPS_PER_ITERATION = steps
-    _base._validate_scientific_bindings = _validate_staged_scientific_bindings
+    _base._validate_scientific_bindings = _validate_experiment_bindings
     return steps
 
 
