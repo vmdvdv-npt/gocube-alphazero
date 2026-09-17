@@ -145,7 +145,7 @@ def _payload(tmp_path: Path, *, behavior: str = "normal", arena_every: int = 2, 
             "required": True,
             "every_generations": arena_every,
             "command": [sys.executable,"fake_driver.py","arena","normal"],
-            "driver_config": {"mode":"fake","games":8},
+            "driver_config": {"mode":"fake","games":8,"reference_gap":arena_every},
             "startset": {"seed":123,"pairs":4},
         },
         "health": {
@@ -222,6 +222,26 @@ def test_reference_parent_sets_generation_origin_and_arena_cadence(
     assert manifest["orchestrator"]["generation_origin"] == 17
     assert not run._arena_due(20)
     assert run._arena_due(27)
+
+
+def test_external_parent_arena_result_uses_evaluation_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    run = _run(tmp_path, monkeypatch, arena_every=10)
+    run.create(
+        parent_checkpoint={
+            "lineage_id": "historical-lineage",
+            "label": "M17",
+            "generation": 17,
+            "path": "/reference/M17.pt",
+        }
+    )
+
+    result_path = run._arena_result_path(27)
+
+    assert result_path.parent.parent.name == "evaluations"
+    assert result_path.name == "result.json"
+    assert not (run.paths.root / "arena" / "generation-0027").exists()
 
 
 def test_soft_stop_after_generation_does_not_start_new_arena(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -366,4 +386,5 @@ def test_active_torus_driver_does_not_import_or_monkeypatch_legacy_driver():
     assert "monkeypatch" not in source.lower()
     assert "PERIODIC_ARENA_PRESET" not in source
     assert "LEGION_TORUS9_SELFPLAY_PERFORMANCE_REFERENCE" not in source
-    assert 'root / "arena" / f"generation-{args.generation:04d}"' in source
+    assert "resolve_checkpoint(" in source
+    assert "evaluation_id_for_comparison(" in source

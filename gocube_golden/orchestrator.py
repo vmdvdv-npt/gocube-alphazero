@@ -24,7 +24,13 @@ import time
 from typing import Any, Mapping, Sequence
 
 from .artifact_catalog import ArtifactCatalog, ARTIFACT_CATALOG_SCHEMA
-from .run_storage import active_lineage_dir, create_lineage
+from .run_storage import (
+    active_lineage_dir,
+    create_lineage,
+    ensure_evaluation_layout,
+    evaluation_dir,
+    evaluation_id_for_comparison,
+)
 
 
 ORCHESTRATOR_SCHEMA = "gocube-production-training-orchestrator-v1"
@@ -862,6 +868,35 @@ class ProductionTrainingOrchestrator:
         return self.paths.generations / f"generation-{generation:04d}-driver-result.json"
 
     def _arena_result_path(self, generation: int) -> Path:
+        manifest = read_json(self.paths.manifest)
+        parent = manifest.get("parent_checkpoint")
+        arena_payload = self.spec.payload.get("arena")
+        arena_config = arena_payload.get("driver_config") if isinstance(arena_payload, Mapping) else None
+        reference_gap = arena_config.get("reference_gap") if isinstance(arena_config, Mapping) else None
+        external_parent: Mapping[str, object] | None = None
+        if isinstance(parent, Mapping) and reference_gap is not None:
+            try:
+                reference_generation = int(generation) - int(reference_gap)
+                parent_generation = int(parent.get("generation", -1))
+            except (TypeError, ValueError):
+                reference_generation = -1
+                parent_generation = -2
+            if (
+                parent_generation == reference_generation
+                and str(parent.get("lineage_id", ""))
+                and str(parent.get("lineage_id")) != self.lineage_id
+            ):
+                external_parent = parent
+        if external_parent is not None:
+            evaluation_id = evaluation_id_for_comparison(
+                candidate_lineage_id=self.lineage_id,
+                candidate_generation=int(generation),
+                reference_lineage_id=str(external_parent["lineage_id"]),
+                reference_generation=int(external_parent["generation"]),
+            )
+            root = evaluation_dir(self.spec.topology, evaluation_id)
+            ensure_evaluation_layout(root)
+            return root / "result.json"
         return self.paths.root / "arena" / f"generation-{generation:04d}" / "result.json"
 
     def _record_generation_artifacts(

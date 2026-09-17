@@ -26,6 +26,11 @@ if str(ROOT) not in sys.path:
 
 from gocube_golden.provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
 from gocube_golden.run_spec import StrictRunSpec, run_spec_fingerprint
+from gocube_golden.run_storage import (
+    ensure_evaluation_layout,
+    evaluation_id_for_comparison,
+    resolve_checkpoint,
+)
 from gocube_golden.artifact_catalog import ArtifactCatalog, ARTIFACT_VALIDATION_SCHEMA
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
@@ -671,6 +676,71 @@ def _relative(root: Path, path: Path) -> str:
     return str(path.resolve().relative_to(root.resolve()))
 
 
+def _local_checkpoint_reference(
+    *,
+    root: Path,
+    lineage_id: str,
+    generation: int,
+    manifest: Mapping[str, object],
+) -> dict[str, object]:
+    """Describe a checkpoint owned by the current lineage."""
+    relative = f"checkpoints/M{int(generation)}.pt"
+    path = (root / relative).resolve()
+    checkpoint_hashes = manifest.get("checkpoint_hashes")
+    digest: object | None = None
+    if isinstance(checkpoint_hashes, Mapping):
+        digest = checkpoint_hashes.get(relative)
+    if digest is None:
+        catalog_path = root / "runtime" / "artifact-catalog.json"
+        if catalog_path.is_file():
+            catalog = ArtifactCatalog.load(catalog_path, root=root)
+            digest = catalog.identity(relative).get("sha256")
+    if digest is None and path.is_file():
+        digest = file_sha256(path)
+    return {
+        "topology": "torus9",
+        "lineage_id": lineage_id,
+        "checkpoint_id": f"M{int(generation)}",
+        "label": f"M{int(generation)}",
+        "generation": int(generation),
+        "path": str(path),
+        "sha256": str(digest or ""),
+        "artifact_sha256": str(digest or ""),
+        "source_type": "lineage-owned",
+    }
+
+
+def _arena_checkpoint_references(
+    *,
+    root: Path,
+    lineage_id: str,
+    generation: int,
+    reference_generation: int,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Return independently resolvable candidate/reference declarations."""
+    manifest = _read_json(root / "manifest.json")
+    candidate = _local_checkpoint_reference(
+        root=root,
+        lineage_id=lineage_id,
+        generation=generation,
+        manifest=manifest,
+    )
+    parent = manifest.get("parent_checkpoint")
+    if isinstance(parent, Mapping) and int(parent.get("generation", -1)) == int(reference_generation):
+        reference = dict(parent)
+        reference.setdefault("topology", "torus9")
+        reference.setdefault("checkpoint_id", reference.get("label", f"M{reference_generation}"))
+        reference.setdefault("source_type", "external-parent")
+    else:
+        reference = _local_checkpoint_reference(
+            root=root,
+            lineage_id=lineage_id,
+            generation=reference_generation,
+            manifest=manifest,
+        )
+    return candidate, reference
+
+
 def _artifact(root: Path, path: Path) -> dict[str, object]:
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -1158,7 +1228,15 @@ def _training_snapshot(
     snapshot: dict[str, object] = {}
     for path in sorted({path.resolve() for path in paths}):
         if path.is_file():
-            snapshot[_relative(root, path)] = {
+            try:
+                key = _relative(root, path)
+            except ValueError:
+                # External reference checkpoints are intentionally outside the
+                # training lineage.  Snapshot them by canonical absolute path
+                # so mutation checks remain bounded without pretending that
+                # the file is lineage-owned.
+                key = f"external::{path}"
+            snapshot[key] = {
                 "sha256": file_sha256(path),
                 "size_bytes": path.stat().st_size,
             }
@@ -1226,19 +1304,39 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
     if args.generation < reference_gap:
         raise ValueError("Arena generation/reference gap is invalid")
     reference_generation = int(args.generation) - reference_gap
-    candidate = root / "checkpoints" / f"M{args.generation}.pt"
-    reference = root / "checkpoints" / f"M{reference_generation}.pt"
-    if not candidate.is_file() or not reference.is_file():
-        raise FileNotFoundError("Arena candidate/reference checkpoint is missing")
+    candidate_declared, reference_declared = _arena_checkpoint_references(
+        root=root,
+        lineage_id=lineage_id,
+        generation=int(args.generation),
+        reference_generation=reference_generation,
+    )
+    runs_root = root.parents[2]
+    candidate_identity = resolve_checkpoint(
+        candidate_declared,
+        topology="torus9",
+        runs_root=runs_root,
+    )
+    reference_identity = resolve_checkpoint(
+        reference_declared,
+        topology="torus9",
+        runs_root=runs_root,
+    )
+    candidate = candidate_identity.path
+    reference = reference_identity.path
     catalog_path = root / "runtime" / "artifact-catalog.json"
     if not catalog_path.is_file():
         raise ValueError("Torus9 Arena requires the committed artifact catalog")
     catalog = ArtifactCatalog.load(catalog_path, root=root)
     candidate_relative = _relative(root, candidate)
-    reference_relative = _relative(root, reference)
-    verified_artifacts = catalog.verify((candidate_relative, reference_relative))
+    verified_artifacts = catalog.verify((candidate_relative,))
     candidate_sha256 = verified_artifacts[candidate_relative]
-    reference_sha256 = verified_artifacts[reference_relative]
+    if reference_identity.lineage_id == lineage_id:
+        reference_relative = _relative(root, reference)
+        verified_artifacts.update(catalog.verify((reference_relative,)))
+        reference_sha256 = verified_artifacts[reference_relative]
+    else:
+        reference_relative = None
+        reference_sha256 = reference_identity.sha256
 
     heartbeat_path = Path(os.environ["AZ_DRIVER_HEARTBEAT_PATH"])
     with _Heartbeat(
@@ -1258,8 +1356,10 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
             args.generation,
             tracked_paths=(candidate, reference),
         )
-        output = root / "arena" / f"generation-{args.generation:04d}"
         result_path = Path(os.environ["AZ_ARENA_RESULT_PATH"])
+        output = result_path.parent.resolve()
+        if reference_identity.lineage_id != lineage_id:
+            ensure_evaluation_layout(output)
         summary_path = output / "summary.json"
         if output.exists() and not summary_path.is_file():
             # Keep the orchestrator-owned directory but remove only incomplete
@@ -1330,12 +1430,21 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 config=arena_execution,
                 expected_candidate_artifact_sha256=candidate_sha256,
                 expected_reference_artifact_sha256=reference_sha256,
+                expected_candidate_model_hash=candidate_declared.get("model_hash"),
+                expected_reference_model_hash=reference_declared.get("model_hash"),
                 progress_callback=arena_progress,
             )
         heartbeat.advance("arena-verify")
         # Recheck the selected immutable artifacts after Arena.  Unrelated
         # ancient files are intentionally outside this bounded operation.
-        catalog.verify((candidate_relative, reference_relative))
+        if reference_relative is None:
+            if file_sha256(reference) != reference_sha256:
+                raise ValueError(
+                    "External Arena reference checkpoint changed during evaluation: "
+                    f"{reference}"
+                )
+        else:
+            catalog.verify((candidate_relative, reference_relative))
         after = _training_snapshot(
             root,
             args.generation,
@@ -1349,6 +1458,41 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
         telemetry = summary.get("telemetry")
         telemetry_map = telemetry if isinstance(telemetry, Mapping) else {}
         arena_block = _mapping(spec.payload["arena"], "arena")
+        cross_lineage = reference_identity.lineage_id != candidate_identity.lineage_id
+        evaluation_id = (
+            evaluation_id_for_comparison(
+                candidate_lineage_id=candidate_identity.lineage_id,
+                candidate_generation=candidate_identity.generation or int(args.generation),
+                reference_lineage_id=reference_identity.lineage_id,
+                reference_generation=reference_identity.generation,
+            )
+            if cross_lineage
+            else None
+        )
+        provenance = {
+            "schema": "gocube-checkpoint-evaluation-provenance-v1",
+            "evaluation_id": evaluation_id,
+            "comparison": comparison,
+            "candidate": candidate_identity.as_reference(),
+            "reference": reference_identity.as_reference(),
+            "arena_config": dict(arena_block["driver_config"]),
+            "startset": dict(startset),
+            "startset_fingerprint": run_spec_fingerprint(startset),
+            "master_seed": int(config["master_seed"]),
+            "profile_fingerprint": expected_fingerprint,
+            "training_mutated": False,
+        }
+        _atomic_json(output / "provenance.json", provenance)
+        engine_manifest_path = output / "manifest.json"
+        if engine_manifest_path.is_file():
+            engine_manifest = _read_json(engine_manifest_path)
+            engine_manifest["evaluation_id"] = evaluation_id
+            engine_manifest["checkpoint_references"] = {
+                "candidate": candidate_identity.as_reference(),
+                "reference": reference_identity.as_reference(),
+            }
+            engine_manifest["provenance"] = str(output / "provenance.json")
+            _atomic_json(engine_manifest_path, engine_manifest)
         payload = {
             "schema": ARENA_RESULT_SCHEMA,
             "generation": int(args.generation),
@@ -1362,6 +1506,9 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
             ),
             "startset_fingerprint": run_spec_fingerprint(startset),
             "evaluation_output": str(output),
+            "evaluation_id": evaluation_id,
+            "candidate_reference": candidate_identity.as_reference(),
+            "reference_reference": reference_identity.as_reference(),
             "candidate_generation": int(args.generation),
             "reference_generation": reference_generation,
             "metrics": {
