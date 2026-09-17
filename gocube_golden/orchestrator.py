@@ -1396,10 +1396,10 @@ class ProductionTrainingOrchestrator:
             self._check_required_metrics(metrics, kind="arena")
             self._append_metrics("arena", generation, metrics)
             performance_status = str(metrics.get("performance_status", "HEALTHY"))
-            if performance_status == "WARNING":
+            if performance_status in {"WARNING", "SEVERE_WARNING"}:
                 self.events.emit(
                     "WARNING",
-                    "Arena performance below healthy target but above hard minimum; Arena accepted",
+                    "Arena performance warning; Arena accepted",
                     generation=generation,
                     mean_inference_batch_rows=metrics.get("inference_mean_batch_rows"),
                     performance_gate=metrics.get("performance_gate"),

@@ -9,10 +9,10 @@ from tools.torus9_run_driver import _apply_arena_performance_policy
 @pytest.mark.parametrize(
     ("mean_batch", "status", "hard_failures", "warnings"),
     (
-        (8.99, "CRITICAL", ["mean_inference_batch_rows"], []),
-        (9.0, "WARNING", [], ["mean_inference_batch_rows"]),
-        (13.249, "WARNING", [], ["mean_inference_batch_rows"]),
+        (7.0, "SEVERE_WARNING", [], ["mean_inference_batch_rows"]),
+        (10.0, "WARNING", [], ["mean_inference_batch_rows"]),
         (13.25, "HEALTHY", [], []),
+        (14.0, "HEALTHY", [], []),
     ),
 )
 def test_standard_64_arena_performance_policy_boundaries(
@@ -36,7 +36,7 @@ def test_standard_64_arena_performance_policy_boundaries(
     assert policy["status"] == status
     assert policy["hard_failures"] == hard_failures
     assert policy["warnings"] == warnings
-    assert policy["hard_minimum"] == 9.0
+    assert policy["severe_warning_threshold"] == 9.0
     assert policy["healthy_minimum"] == 13.25
 
 
@@ -68,3 +68,34 @@ def test_completed_arena_summary_is_reclassified_without_rerunning_games():
     assert normalized["telemetry"]["performance_failures"] == []
     assert normalized["telemetry"]["performance_warnings"] == []
     assert summary["telemetry"]["performance_status"] == "PERFORMANCE_DEGRADED"
+
+
+def test_completed_low_batch_arena_is_accepted_as_severe_warning():
+    config = ArenaExecutionConfig(
+        games=64,
+        workers=16,
+        games_per_worker=4,
+        inference_batch_rows=64,
+        inference_batch_wait_ms=1.0,
+        device="cpu",
+        strict_production=True,
+    )
+    summary = {
+        "games": 64,
+        "technical_games": 0,
+        "telemetry": {
+            "mean_inference_batch_rows": 7.0,
+            "performance_status": "CRITICAL",
+            "performance_failures": ["mean_inference_batch_rows"],
+        },
+    }
+
+    normalized, policy = _apply_arena_performance_policy(summary, config)
+
+    assert policy["status"] == "SEVERE_WARNING"
+    assert normalized["telemetry"]["performance_status"] == "SEVERE_WARNING"
+    assert normalized["telemetry"]["performance_failures"] == []
+    assert normalized["telemetry"]["performance_warnings"] == [
+        "mean_inference_batch_rows"
+    ]
+    assert normalized["telemetry"]["performance_gate"]["mean_inference_batch_rows"] == 7.0

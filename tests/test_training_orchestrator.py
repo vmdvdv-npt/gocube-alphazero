@@ -127,6 +127,36 @@ def test_five_generations_commit_and_arena(tmp_path, monkeypatch):
     assert "committed generation: **5**" in report
 
 
+def test_low_arena_batch_does_not_override_technical_fail_closed(tmp_path, monkeypatch):
+    run, _ = _write_fixture(tmp_path, monkeypatch)
+    run.create()
+    result_path = run._arena_result_path(5)
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(
+        json.dumps(
+            {
+                "schema": "gocube-arena-driver-result-v1",
+                "generation": 5,
+                "status": "COMPLETED",
+                "profile_fingerprint": run.spec.profile_fingerprint,
+                "technical_games": 1,
+                "invalid_games": 0,
+                "training_mutated": False,
+                "preset_fingerprint": run.spec.arena_preset_fingerprint,
+                "startset_fingerprint": run.spec.arena_startset_fingerprint,
+                "metrics": {
+                    "inference_mean_batch_rows": 7.0,
+                    "performance_status": "SEVERE_WARNING",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="technical/invalid"):
+        run._validate_arena_result(5)
+
+
 def test_soft_stop_is_durable_and_bounded(tmp_path, monkeypatch):
     run, _ = _write_fixture(tmp_path, monkeypatch)
     run.create()
@@ -219,4 +249,3 @@ def test_soft_stopped_lineage_can_explicitly_resume(tmp_path, monkeypatch):
     run.run(max_generations=2)
     assert run.status()["state"] == "COMPLETED"
     assert run.status()["last_committed_generation"] == 2
-

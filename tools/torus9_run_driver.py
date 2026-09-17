@@ -1273,6 +1273,8 @@ def _validate_existing_arena(
     manifest = _read_json(manifest_path)
     execution = summary.get("execution")
     expected_execution = config["execution"]
+    if int(summary.get("technical_games", 0)) != 0 or int(summary.get("invalid_games", 0)) != 0:
+        raise ValueError("Existing Arena technical/invalid outcomes are fail-closed")
     if (
         summary.get("candidate_artifact_sha256")
         != (candidate_sha256 or file_sha256(candidate))
@@ -1328,13 +1330,21 @@ def _apply_arena_performance_policy(
         if str(value) != "mean_inference_batch_rows"
     ]
     warnings.extend(str(value) for value in policy["warnings"])
-    status = "CRITICAL" if hard_failures else ("WARNING" if warnings else "HEALTHY")
+    status = (
+        "CRITICAL"
+        if hard_failures
+        else (
+            str(policy["status"])
+            if str(policy["status"]) == "SEVERE_WARNING"
+            else ("WARNING" if warnings else "HEALTHY")
+        )
+    )
     telemetry["performance_status"] = status
     telemetry["performance_failures"] = sorted(set(hard_failures))
     telemetry["performance_warnings"] = sorted(set(warnings))
     telemetry["performance_gate"] = {
         "mean_inference_batch_rows": mean_batch,
-        "hard_minimum": policy["hard_minimum"],
+        "severe_warning_threshold": policy["severe_warning_threshold"],
         "healthy_minimum": policy["healthy_minimum"],
     }
     normalized["telemetry"] = telemetry
@@ -1486,11 +1496,11 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
             )
             summary, performance_policy = _apply_arena_performance_policy(summary, arena_execution)
             _atomic_json(summary_path, summary)
-        if performance_policy["status"] == "WARNING":
+        if performance_policy["status"] in {"WARNING", "SEVERE_WARNING"}:
             _atomic_json(
                 output / "performance-warning.json",
                 {
-                    "status": "WARNING",
+                    "status": str(performance_policy["status"]),
                     "reasons": list(performance_policy["warnings"]),
                     "performance_gate": dict(performance_policy),
                     "summary": str(summary_path),

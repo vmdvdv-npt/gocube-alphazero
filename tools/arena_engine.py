@@ -32,10 +32,10 @@ DEFAULT_GAMES_PER_WORKER = 12
 DEFAULT_INFERENCE_BATCH_ROWS = 64
 DEFAULT_INFERENCE_BATCH_WAIT_MS = 4.0
 DEFAULT_MASTER_SEED = 202609131004
-# Standard-64 Arena has a lower hard floor than the historical throughput
-# preset.  The healthy reference is advisory; only the hard floor can fail
-# closed.  Keep the generic/default config at the legacy value for workloads
-# other than standard-64.
+# Standard-64 Arena keeps the Golden reference as an advisory performance
+# band.  Mean batching never fails Arena closed; real execution/correctness
+# failures are handled separately.  Keep the generic/default config at the
+# legacy value for workloads other than standard-64.
 MIN_MEAN_INFERENCE_BATCH_ROWS = 9.0
 STANDARD_64_GAMES = 64
 STANDARD_64_HEALTHY_MEAN_INFERENCE_BATCH_ROWS = 13.25
@@ -94,25 +94,25 @@ def classify_arena_performance(
 ) -> dict[str, object]:
     """Classify Arena batching without turning the healthy target into a hard gate.
 
-    Standard-64 uses the Golden reference of 13.25 rows as the healthy line
-    and 9.0 rows as the fail-closed floor.  Other workloads retain their
-    explicitly configured hard minimum and have no separate healthy band.
+    Standard-64 uses the Golden reference of 13.25 rows as the healthy line.
+    Values below 9.0 are severe warnings, never hard failures. Other
+    workloads retain their explicitly configured reference band.
     """
     mean = float(mean_inference_batch_rows)
     if config.games == STANDARD_64_GAMES:
-        hard_min = MIN_MEAN_INFERENCE_BATCH_ROWS
+        severe_warning_threshold = MIN_MEAN_INFERENCE_BATCH_ROWS
         healthy_min = STANDARD_64_HEALTHY_MEAN_INFERENCE_BATCH_ROWS
     else:
-        hard_min = float(config.min_mean_inference_batch_rows)
-        healthy_min = hard_min
+        severe_warning_threshold = float(config.min_mean_inference_batch_rows)
+        healthy_min = severe_warning_threshold
 
-    if mean < hard_min:
+    if mean < severe_warning_threshold:
         return {
-            "status": "CRITICAL",
-            "hard_failures": ["mean_inference_batch_rows"],
-            "warnings": [],
+            "status": "SEVERE_WARNING",
+            "hard_failures": [],
+            "warnings": ["mean_inference_batch_rows"],
             "mean_inference_batch_rows": mean,
-            "hard_minimum": hard_min,
+            "severe_warning_threshold": severe_warning_threshold,
             "healthy_minimum": healthy_min,
         }
     if mean < healthy_min:
@@ -121,7 +121,7 @@ def classify_arena_performance(
             "hard_failures": [],
             "warnings": ["mean_inference_batch_rows"],
             "mean_inference_batch_rows": mean,
-            "hard_minimum": hard_min,
+            "severe_warning_threshold": severe_warning_threshold,
             "healthy_minimum": healthy_min,
         }
     return {
@@ -129,7 +129,7 @@ def classify_arena_performance(
         "hard_failures": [],
         "warnings": [],
         "mean_inference_batch_rows": mean,
-        "hard_minimum": hard_min,
+        "severe_warning_threshold": severe_warning_threshold,
         "healthy_minimum": healthy_min,
     }
 
@@ -1371,7 +1371,7 @@ def run_arena(
                     },
                 )
                 raise RuntimeError(
-                    "PERFORMANCE_DEGRADED early Arena execution gate: "
+                    "Arena execution gate failed: "
                     + ", ".join(failures)
                 )
 
@@ -1885,13 +1885,13 @@ def run_arena(
     telemetry["performance_status"] = (
         "CRITICAL"
         if performance_failures
-        else ("WARNING" if performance_warnings else "HEALTHY")
+        else (str(mean_batch_policy["status"]) if performance_warnings else "HEALTHY")
     )
     telemetry["performance_failures"] = performance_failures
     telemetry["performance_warnings"] = performance_warnings
     telemetry["performance_gate"] = {
         "mean_inference_batch_rows": mean_batch_policy["mean_inference_batch_rows"],
-        "hard_minimum": mean_batch_policy["hard_minimum"],
+        "severe_warning_threshold": mean_batch_policy["severe_warning_threshold"],
         "healthy_minimum": mean_batch_policy["healthy_minimum"],
     }
 
@@ -1946,14 +1946,14 @@ def run_arena(
         _write_json(
             output_dir / "performance-warning.json",
             {
-                "status": "WARNING",
+                "status": str(mean_batch_policy["status"]),
                 "run_id": run_id,
                 "reasons": performance_warnings,
                 "observed": {
                     "mean_inference_batch_rows": telemetry[
                         "mean_inference_batch_rows"
                     ],
-                    "hard_minimum": mean_batch_policy["hard_minimum"],
+                    "severe_warning_threshold": mean_batch_policy["severe_warning_threshold"],
                     "healthy_minimum": mean_batch_policy["healthy_minimum"],
                     "technical_games": telemetry["technical_games"],
                 },
