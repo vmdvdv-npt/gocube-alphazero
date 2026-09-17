@@ -92,9 +92,6 @@ def _run(
     if policy is not ...:
         kwargs["child_lifecycle_policy"] = policy
     run = UniversalProductionTrainingOrchestrator(**kwargs)
-    # These tests isolate the child lifecycle boundary.  Building the real
-    # driver env also resolves Arena paths from a full lineage manifest, which
-    # is unrelated to the extension-point contract under test.
     monkeypatch.setattr(
         run,
         "_driver_env",
@@ -419,6 +416,7 @@ def test_abort_bookkeeping_failure_does_not_mask_original_supervisor_failure(
 
     def cleanup(proc: object, *, reason: str) -> None:
         del reason
+        order.append("cleanup")
         setattr(proc, "returncode", -15)
 
     monkeypatch.setattr(run, "_health_snapshot", fail_health)
@@ -429,10 +427,12 @@ def test_abort_bookkeeping_failure_does_not_mask_original_supervisor_failure(
 
     assert caught.value is original
     assert [event[0] for event in events] == ["before", "abort"]
-    assert any(
-        "after_child_abort failed" in note
-        for note in getattr(original, "__notes__", [])
-    )
+    assert order[-2:] == ["cleanup", "policy:abort"]
+    if hasattr(BaseException, "add_note"):
+        assert any(
+            "after_child_abort failed" in note
+            for note in getattr(original, "__notes__", [])
+        )
 
 
 def test_child_lifecycle_policy_is_instance_local_and_requires_no_registration(
@@ -459,8 +459,6 @@ def test_child_lifecycle_policy_is_instance_local_and_requires_no_registration(
     assert [event[1].generation for event in events_a] == [1, 1]
     assert [event[1].generation for event in events_b] == [2, 2]
 
-    # Explicit policies are constructor-owned; creating them does not register
-    # process-global behavior for later orchestrator instances.
     run_default = _run(tmp_path, monkeypatch, lineage_id="lineage-default")
     assert isinstance(run_default.child_lifecycle_policy, NoOpChildLifecyclePolicy)
     assert run_default.child_lifecycle_policy is not run_a.child_lifecycle_policy
