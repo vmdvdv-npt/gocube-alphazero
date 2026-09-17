@@ -95,6 +95,17 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         if _base._adam_step(state.optimizer) != int(state.optimizer_updates):
             raise ValueError("Current Torus9 Adam step does not match training clock")
 
+    @staticmethod
+    def _parent_replay_scope(metadata: Mapping[str, object]) -> tuple[int, int]:
+        scientific = metadata.get("scientific_contract")
+        contract = scientific if isinstance(scientific, Mapping) else {}
+        generations = metadata.get("rolling_generations", contract.get("replay_generations", 0))
+        cap = metadata.get("maximum_replay_positions", contract.get("replay_cap", 0))
+        try:
+            return int(generations or 0), int(cap or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Referenced Torus9 parent replay scope is malformed") from exc
+
     def _reference_sources(
         self,
         checkpoint_path: Path,
@@ -104,51 +115,83 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         label = str(metadata.get("checkpoint_label", ""))
         if not (label.startswith("M") and label[1:].isdigit()):
             return tuple(fallback)
+
         generation = int(label[1:])
-        requested = int(self.replay_profile["generations"])  # type: ignore[index]
-        first = max(1, generation - requested + 1)
+        requested_generations = int(self.replay_profile["generations"])  # type: ignore[index]
+        requested_cap = int(self.replay_profile["cap"])  # type: ignore[index]
+        parent_generations, parent_cap = self._parent_replay_scope(metadata)
+
+        # A parent rolling artifact is sufficient only if it was built with a
+        # window/cap at least as large as the child asks for.  Expanding either
+        # dimension requires reconstructing from the immutable fresh artifacts;
+        # silently falling back to the smaller parent rolling replay would
+        # change the declared experiment.
+        needs_fresh_bootstrap = (
+            requested_generations > parent_generations or requested_cap > parent_cap
+        )
+        if not needs_fresh_bootstrap:
+            sources = tuple(fallback)
+            if not sources or any(not path.is_file() for path in sources):
+                raise FileNotFoundError("Referenced Torus9 parent rolling replay is missing")
+            return sources
+
+        first = max(1, generation - requested_generations + 1)
         parent_root = checkpoint_path.parents[1]
         candidates = tuple(
             parent_root / "replay" / f"iter-{value:02d}-fresh.jsonl"
             for value in range(first, generation + 1)
         )
-        available = tuple(path for path in candidates if path.is_file())
-        # A larger requested window than retained historical data is valid: use
-        # every available generation and let subsequent child generations fill
-        # the configured window.  Never substitute Golden's 3-generation size.
-        return available or tuple(fallback)
+        missing = tuple(path for path in candidates if not path.is_file())
+        if missing:
+            names = ", ".join(path.name for path in missing)
+            raise FileNotFoundError(
+                "Referenced Torus9 replay bootstrap is incomplete; "
+                f"required fresh window M{first}..M{generation}, missing: {names}. "
+                "Refusing fallback to the smaller parent rolling replay."
+            )
+        return candidates
 
     def _rolling_from_sources(
         self,
         sources: Sequence[Path],
         *,
         total_evictions: int,
-    ) -> tuple[_base.Torus9RollingReplay, list[dict[str, object]], list[dict[str, object]]]:
+    ) -> tuple[_base.Torus9RollingReplay, list[dict[str, object]]]:
         replay = _base.Torus9RollingReplay(
             generations=int(self.replay_profile["generations"]),  # type: ignore[index]
             maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
         )
         replay.total_evictions = int(total_evictions)
-        all_rows: list[dict[str, object]] = []
         source_digests: list[dict[str, object]] = []
-        by_generation: dict[int, list[dict[str, object]]] = {}
+        seen_generations: set[int] = set()
+
+        # Process one source at a time and feed generations through the same
+        # rolling replay object used during normal training.  This deliberately
+        # avoids concatenating the whole bootstrap corpus and then rejecting it
+        # merely because the source total exceeds the configured cap.
         for source in sources:
             source_rows, digest = _base._read_jsonl_with_identity(source)
             source_digests.append(digest)
+            by_generation: dict[int, list[dict[str, object]]] = {}
             for row in source_rows:
                 generation = int(row.get("source_generation", 0))
                 if generation <= 0:
                     raise ValueError("Referenced Torus9 replay generation is malformed")
                 by_generation.setdefault(generation, []).append(dict(row))
-                all_rows.append(dict(row))
-        if not by_generation:
+            for generation in sorted(by_generation):
+                if generation in seen_generations:
+                    raise ValueError(
+                        f"Referenced Torus9 replay generation M{generation} appears in multiple sources"
+                    )
+                rows = by_generation[generation]
+                for row in rows:
+                    self.validate_sample(row)
+                replay.append_generation(generation, rows)
+                seen_generations.add(generation)
+
+        if not seen_generations:
             raise ValueError("Referenced Torus9 replay is empty")
-        for generation in sorted(by_generation):
-            rows = by_generation[generation]
-            for row in rows:
-                self.validate_sample(row)
-            replay.append_generation(generation, rows)
-        return replay, all_rows, source_digests
+        return replay, source_digests
 
     def load_state(
         self,
@@ -211,7 +254,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         replay_started = time.perf_counter()
 
         if allow_reference or len(sources) > 1:
-            replay, loaded_rows, source_digests = self._rolling_from_sources(
+            replay, source_digests = self._rolling_from_sources(
                 sources,
                 total_evictions=total_evictions,
             )
@@ -220,10 +263,6 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
                 "sha256": "multi-source-reference",
                 "size_bytes": sum(int(item["size_bytes"]) for item in source_digests),
             }
-            # Historical rows evicted by the chosen cap/window are intentionally
-            # not training-visible and therefore do not trigger a Golden-size
-            # error.  The effective rows are validated below.
-            _ = loaded_rows
         else:
             source_rows, replay_digest = _base._read_jsonl_with_identity(sources[0])
             rows = list(source_rows)
