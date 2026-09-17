@@ -210,10 +210,27 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         if not metadata_path.is_file():
             raise ValueError("Current Torus9 checkpoint metadata sidecar is missing")
         metadata = _base._read_json(metadata_path)
+        stage3_fields = (
+            "adam_step",
+            "replay_generations",
+            "replay_fingerprint",
+            "sampled_row_ids_fingerprint",
+            "training_seed",
+            "optimizer_parameter_order",
+            "optimizer_parameter_groups",
+        )
+        # ``allow_reference`` permits an intentionally different parent
+        # profile fingerprint, not a blanket bypass of checkpoint integrity.
+        # Only genuinely legacy references may omit Stage-3 fields.  Modern
+        # parent checkpoints (including M47) must receive the same validation
+        # as an in-lineage resume.
+        legacy_reference = allow_reference and not all(
+            key in metadata for key in stage3_fields
+        )
         self._validate_checkpoint_metadata(
             metadata,
             require_optimizer=True,
-            require_stage3_fields=not allow_reference,
+            require_stage3_fields=not legacy_reference,
             allow_profile_reference=allow_reference,
         )
         model = _core.torus9_model_from_metadata(metadata).to(device)

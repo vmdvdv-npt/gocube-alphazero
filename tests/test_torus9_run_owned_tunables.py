@@ -237,3 +237,37 @@ def test_torus9_run_spec_ignores_stale_expected_profile_fingerprint(tmp_path: Pa
 def test_invalid_shapes_still_fail_without_golden_comparison() -> None:
     with pytest.raises(ValueError, match="positive"):
         Torus9SelfPlaySearchContract(simulations=0).validate()
+
+
+def test_modern_external_parent_still_validates_stage3_metadata() -> None:
+    parent_metadata = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "runs/torus9/active/torus9-golden-v3-production-20260917-m17/checkpoints/M47.metadata.json"
+        ).read_text(encoding="utf-8")
+    )
+    adapter = Torus9TrainingAdapter(
+        profile=_run_profile(
+            lr=0.0003,
+            replay_generations=6,
+            replay_cap=40000,
+            simulations=128,
+        )
+    )
+
+    adapter._validate_checkpoint_metadata(
+        parent_metadata,
+        require_optimizer=True,
+        require_stage3_fields=True,
+        allow_profile_reference=True,
+    )
+
+    tampered = dict(parent_metadata)
+    tampered["adam_step"] = int(tampered["optimizer_updates"]) - 1
+    with pytest.raises(ValueError, match="Adam step mismatch"):
+        adapter._validate_checkpoint_metadata(
+            tampered,
+            require_optimizer=True,
+            require_stage3_fields=True,
+            allow_profile_reference=True,
+        )
