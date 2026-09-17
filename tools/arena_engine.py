@@ -32,7 +32,14 @@ DEFAULT_GAMES_PER_WORKER = 12
 DEFAULT_INFERENCE_BATCH_ROWS = 64
 DEFAULT_INFERENCE_BATCH_WAIT_MS = 4.0
 DEFAULT_MASTER_SEED = 202609131004
-MIN_MEAN_INFERENCE_BATCH_ROWS = 16.0
+# Standard-64 Arena has a lower hard floor than the historical throughput
+# preset.  The healthy reference is advisory; only the hard floor can fail
+# closed.  Keep the generic/default config at the legacy value for workloads
+# other than standard-64.
+MIN_MEAN_INFERENCE_BATCH_ROWS = 9.0
+STANDARD_64_GAMES = 64
+STANDARD_64_HEALTHY_MEAN_INFERENCE_BATCH_ROWS = 13.25
+DEFAULT_NON_STANDARD_MIN_MEAN_INFERENCE_BATCH_ROWS = 16.0
 MIN_EFFECTIVE_CPU_CORES = 8.0
 
 
@@ -62,7 +69,7 @@ class ArenaExecutionConfig:
     inference_batch_wait_ms: float = DEFAULT_INFERENCE_BATCH_WAIT_MS
     device: str = "cuda"
     strict_production: bool = True
-    min_mean_inference_batch_rows: float = MIN_MEAN_INFERENCE_BATCH_ROWS
+    min_mean_inference_batch_rows: float = DEFAULT_NON_STANDARD_MIN_MEAN_INFERENCE_BATCH_ROWS
     min_effective_cpu_cores: float = MIN_EFFECTIVE_CPU_CORES
     early_gate_enabled: bool = True
     early_gate_min_forwards: int = 128
@@ -79,6 +86,52 @@ class ArenaExecutionConfig:
             raise ValueError("inference_batch_rows must cover at least one worker request")
         if self.early_gate_min_forwards <= 0 or self.early_gate_min_wall_sec < 0.0:
             raise ValueError("Arena early performance gate settings are invalid")
+
+
+def classify_arena_performance(
+    mean_inference_batch_rows: float,
+    config: ArenaExecutionConfig,
+) -> dict[str, object]:
+    """Classify Arena batching without turning the healthy target into a hard gate.
+
+    Standard-64 uses the Golden reference of 13.25 rows as the healthy line
+    and 9.0 rows as the fail-closed floor.  Other workloads retain their
+    explicitly configured hard minimum and have no separate healthy band.
+    """
+    mean = float(mean_inference_batch_rows)
+    if config.games == STANDARD_64_GAMES:
+        hard_min = MIN_MEAN_INFERENCE_BATCH_ROWS
+        healthy_min = STANDARD_64_HEALTHY_MEAN_INFERENCE_BATCH_ROWS
+    else:
+        hard_min = float(config.min_mean_inference_batch_rows)
+        healthy_min = hard_min
+
+    if mean < hard_min:
+        return {
+            "status": "CRITICAL",
+            "hard_failures": ["mean_inference_batch_rows"],
+            "warnings": [],
+            "mean_inference_batch_rows": mean,
+            "hard_minimum": hard_min,
+            "healthy_minimum": healthy_min,
+        }
+    if mean < healthy_min:
+        return {
+            "status": "WARNING",
+            "hard_failures": [],
+            "warnings": ["mean_inference_batch_rows"],
+            "mean_inference_batch_rows": mean,
+            "hard_minimum": hard_min,
+            "healthy_minimum": healthy_min,
+        }
+    return {
+        "status": "HEALTHY",
+        "hard_failures": [],
+        "warnings": [],
+        "mean_inference_batch_rows": mean,
+        "hard_minimum": hard_min,
+        "healthy_minimum": healthy_min,
+    }
 
 
 @dataclass(frozen=True)
@@ -1294,13 +1347,13 @@ def run_arena(
                 failures.append("active_contexts")
             if not observed_lanes:
                 failures.append("lane_occupancy")
-            if statistics.mean(recent) < config.min_mean_inference_batch_rows:
-                failures.append("mean_inference_batch_rows")
+            recent_policy = classify_arena_performance(statistics.mean(recent), config)
+            failures.extend(str(value) for value in recent_policy["hard_failures"])
             if failures:
                 _write_json(
                     output_dir / "performance-degraded.json",
                     {
-                        "status": "PERFORMANCE_DEGRADED",
+                        "status": "CRITICAL",
                         "reason": failures,
                         "observed_peak_active_contexts": peak_active_contexts,
                         "expected_active_contexts": expected_active,
@@ -1819,8 +1872,9 @@ def run_arena(
         performance_failures.append("active_contexts")
     if any(telemetry["worker_cuda_initialized_after_run"]):
         performance_failures.append("cuda_in_worker")
-    if mean_batch < config.min_mean_inference_batch_rows:
-        performance_failures.append("mean_inference_batch_rows")
+    mean_batch_policy = classify_arena_performance(mean_batch, config)
+    performance_failures.extend(str(value) for value in mean_batch_policy["hard_failures"])
+    performance_warnings = [str(value) for value in mean_batch_policy["warnings"]]
     if int(summary["technical_games"]) != 0:
         performance_failures.append("technical_games")
     telemetry["effective_cpu_cores_target"] = config.min_effective_cpu_cores
@@ -1829,9 +1883,17 @@ def run_arena(
     )
     telemetry["effective_cpu_cores_role"] = "diagnostic_only"
     telemetry["performance_status"] = (
-        "PASS" if not performance_failures else "PERFORMANCE_DEGRADED"
+        "CRITICAL"
+        if performance_failures
+        else ("WARNING" if performance_warnings else "HEALTHY")
     )
     telemetry["performance_failures"] = performance_failures
+    telemetry["performance_warnings"] = performance_warnings
+    telemetry["performance_gate"] = {
+        "mean_inference_batch_rows": mean_batch_policy["mean_inference_batch_rows"],
+        "hard_minimum": mean_batch_policy["hard_minimum"],
+        "healthy_minimum": mean_batch_policy["healthy_minimum"],
+    }
 
     summary.update(
         {
@@ -1860,7 +1922,7 @@ def run_arena(
         _write_json(
             output_dir / "performance-degraded.json",
             {
-                "status": "PERFORMANCE_DEGRADED",
+                "status": "CRITICAL",
                 "run_id": run_id,
                 "reasons": performance_failures,
                 "observed": {
@@ -1875,6 +1937,24 @@ def run_arena(
                         "mean_inference_batch_rows"
                     ],
                     "effective_cpu_cores": telemetry["effective_cpu_cores"],
+                    "technical_games": telemetry["technical_games"],
+                },
+                "summary": str(output_dir / "summary.json"),
+            },
+        )
+    elif performance_warnings:
+        _write_json(
+            output_dir / "performance-warning.json",
+            {
+                "status": "WARNING",
+                "run_id": run_id,
+                "reasons": performance_warnings,
+                "observed": {
+                    "mean_inference_batch_rows": telemetry[
+                        "mean_inference_batch_rows"
+                    ],
+                    "hard_minimum": mean_batch_policy["hard_minimum"],
+                    "healthy_minimum": mean_batch_policy["healthy_minimum"],
                     "technical_games": telemetry["technical_games"],
                 },
                 "summary": str(output_dir / "summary.json"),

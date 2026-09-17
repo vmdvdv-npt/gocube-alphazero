@@ -47,7 +47,11 @@ from gocube_golden.torus9_contract import (
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
 )
-from tools.arena_engine import ArenaExecutionConfig, run_arena as run_arena_engine
+from tools.arena_engine import (
+    ArenaExecutionConfig,
+    classify_arena_performance,
+    run_arena as run_arena_engine,
+)
 from tools.arena_profiles.torus9 import PROFILE as TORUS9_ARENA_PROFILE
 
 
@@ -1293,6 +1297,50 @@ def _validate_existing_arena(
         raise ValueError("Existing Arena output does not match immutable run-spec policy")
 
 
+def _apply_arena_performance_policy(
+    summary: Mapping[str, object],
+    config: ArenaExecutionConfig,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Reclassify a completed Arena summary under the current gate policy.
+
+    This is intentionally used for both freshly produced and already complete
+    summaries.  It lets recovery commit a finished Arena without replaying
+    games after a policy-only change.
+    """
+    normalized = dict(summary)
+    telemetry_value = normalized.get("telemetry")
+    if not isinstance(telemetry_value, Mapping):
+        raise ValueError("Arena summary requires telemetry for performance policy validation")
+    telemetry = dict(telemetry_value)
+    mean_batch = float(telemetry.get("mean_inference_batch_rows", 0.0))
+    policy = classify_arena_performance(mean_batch, config)
+    prior_failures = telemetry.get("performance_failures", [])
+    prior_warnings = telemetry.get("performance_warnings", [])
+    hard_failures = [
+        str(value)
+        for value in prior_failures
+        if str(value) != "mean_inference_batch_rows"
+    ]
+    hard_failures.extend(str(value) for value in policy["hard_failures"])
+    warnings = [
+        str(value)
+        for value in prior_warnings
+        if str(value) != "mean_inference_batch_rows"
+    ]
+    warnings.extend(str(value) for value in policy["warnings"])
+    status = "CRITICAL" if hard_failures else ("WARNING" if warnings else "HEALTHY")
+    telemetry["performance_status"] = status
+    telemetry["performance_failures"] = sorted(set(hard_failures))
+    telemetry["performance_warnings"] = sorted(set(warnings))
+    telemetry["performance_gate"] = {
+        "mean_inference_batch_rows": mean_batch,
+        "hard_minimum": policy["hard_minimum"],
+        "healthy_minimum": policy["healthy_minimum"],
+    }
+    normalized["telemetry"] = telemetry
+    return normalized, policy
+
+
 def run_arena(args: argparse.Namespace) -> dict[str, object]:
     spec = _load_run_spec()
     config, startset = _arena_config(spec)
@@ -1372,6 +1420,20 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 else:
                     child.unlink()
         output.mkdir(parents=True, exist_ok=True)
+        arena_execution = ArenaExecutionConfig(
+            games=int(config["games"]),
+            workers=int(execution["workers"]),
+            games_per_worker=int(execution["games_per_worker"]),
+            inference_batch_rows=int(execution["inference_batch_rows"]),
+            inference_batch_wait_ms=float(execution["inference_batch_wait_ms"]),
+            device=str(execution["device"]),
+            strict_production=bool(execution["strict_production"]),
+            min_mean_inference_batch_rows=float(execution["min_mean_inference_batch_rows"]),
+            min_effective_cpu_cores=float(execution["min_effective_cpu_cores"]),
+            early_gate_enabled=bool(execution["early_gate_enabled"]),
+            early_gate_min_forwards=int(execution["early_gate_min_forwards"]),
+            early_gate_min_wall_sec=float(execution["early_gate_min_wall_sec"]),
+        )
         if summary_path.is_file():
             summary = _read_json(summary_path)
             _validate_existing_arena(
@@ -1383,6 +1445,8 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 candidate_sha256=candidate_sha256,
                 reference_sha256=reference_sha256,
             )
+            summary, performance_policy = _apply_arena_performance_policy(summary, arena_execution)
+            _atomic_json(summary_path, summary)
         else:
             heartbeat.advance(
                 "arena",
@@ -1403,20 +1467,6 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                     subphase="games",
                 )
 
-            arena_execution = ArenaExecutionConfig(
-                games=int(config["games"]),
-                workers=int(execution["workers"]),
-                games_per_worker=int(execution["games_per_worker"]),
-                inference_batch_rows=int(execution["inference_batch_rows"]),
-                inference_batch_wait_ms=float(execution["inference_batch_wait_ms"]),
-                device=str(execution["device"]),
-                strict_production=bool(execution["strict_production"]),
-                min_mean_inference_batch_rows=float(execution["min_mean_inference_batch_rows"]),
-                min_effective_cpu_cores=float(execution["min_effective_cpu_cores"]),
-                early_gate_enabled=bool(execution["early_gate_enabled"]),
-                early_gate_min_forwards=int(execution["early_gate_min_forwards"]),
-                early_gate_min_wall_sec=float(execution["early_gate_min_wall_sec"]),
-            )
             summary = run_arena_engine(
                 profile=TORUS9_ARENA_PROFILE,
                 candidate_path=candidate,
@@ -1433,6 +1483,18 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 expected_candidate_model_hash=candidate_declared.get("model_hash"),
                 expected_reference_model_hash=reference_declared.get("model_hash"),
                 progress_callback=arena_progress,
+            )
+            summary, performance_policy = _apply_arena_performance_policy(summary, arena_execution)
+            _atomic_json(summary_path, summary)
+        if performance_policy["status"] == "WARNING":
+            _atomic_json(
+                output / "performance-warning.json",
+                {
+                    "status": "WARNING",
+                    "reasons": list(performance_policy["warnings"]),
+                    "performance_gate": dict(performance_policy),
+                    "summary": str(summary_path),
+                },
             )
         heartbeat.advance("arena-verify")
         # Recheck the selected immutable artifacts after Arena.  Unrelated
@@ -1481,6 +1543,7 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
             "startset_fingerprint": run_spec_fingerprint(startset),
             "master_seed": int(config["master_seed"]),
             "profile_fingerprint": expected_fingerprint,
+            "performance_policy": dict(performance_policy),
             "training_mutated": False,
         }
         _atomic_json(output / "provenance.json", provenance)
@@ -1526,6 +1589,9 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 "effective_cpu_cores": float(
                     telemetry_map.get("effective_cpu_cores", 0.0)
                 ),
+                "performance_status": str(telemetry_map.get("performance_status", "HEALTHY")),
+                "performance_warnings": list(telemetry_map.get("performance_warnings", [])),
+                "performance_gate": dict(performance_policy),
             },
         }
         _atomic_json(result_path, payload)

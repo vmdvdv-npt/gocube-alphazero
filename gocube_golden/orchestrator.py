@@ -1395,6 +1395,17 @@ class ProductionTrainingOrchestrator:
         if isinstance(metrics, Mapping):
             self._check_required_metrics(metrics, kind="arena")
             self._append_metrics("arena", generation, metrics)
+            performance_status = str(metrics.get("performance_status", "HEALTHY"))
+            if performance_status == "WARNING":
+                self.events.emit(
+                    "WARNING",
+                    "Arena performance below healthy target but above hard minimum; Arena accepted",
+                    generation=generation,
+                    mean_inference_batch_rows=metrics.get("inference_mean_batch_rows"),
+                    performance_gate=metrics.get("performance_gate"),
+                )
+            elif performance_status == "CRITICAL":
+                raise RuntimeError("Arena performance policy reported CRITICAL")
         self._update_manifest(committed_generation=generation, arena_generation=generation)
         self.events.emit("INFO", "Arena completed", generation=generation)
 
