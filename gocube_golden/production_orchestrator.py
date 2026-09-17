@@ -15,7 +15,7 @@ from pathlib import Path
 import signal
 import subprocess
 import time
-from typing import Mapping, Sequence
+from typing import Mapping, Protocol, Sequence
 
 from .orchestrator import (
     ProductionTrainingOrchestrator,
@@ -79,6 +79,41 @@ class SupervisionPolicy:
         return result
 
 
+@dataclass(frozen=True)
+class ChildLifecycleContext:
+    """Game-agnostic data exposed around one orchestrated child execution."""
+
+    orchestrator: "UniversalProductionTrainingOrchestrator"
+    generation: int
+    phase: str
+    resume: bool
+    command: tuple[str, ...]
+
+
+class ChildLifecyclePolicy(Protocol):
+    """Per-orchestrator extension point around generation/Arena child execution."""
+
+    def before_child_start(self, context: ChildLifecycleContext) -> None:
+        """Run immediately before the child process is started."""
+
+    def after_child_finish(
+        self, context: ChildLifecycleContext, exit_code: int
+    ) -> None:
+        """Run after a normally observed child exit and supervisor cleanup."""
+
+
+class NoOpChildLifecyclePolicy:
+    """Default lifecycle policy preserving the historical supervisor behavior."""
+
+    def before_child_start(self, context: ChildLifecycleContext) -> None:
+        del context
+
+    def after_child_finish(
+        self, context: ChildLifecycleContext, exit_code: int
+    ) -> None:
+        del context, exit_code
+
+
 def _timestamp_age_seconds(value: object) -> float | None:
     if value is None:
         return None
@@ -105,8 +140,19 @@ def _metric_number(payload: Mapping[str, object], dotted: str) -> float | None:
 class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
     """Game-independent production supervisor with autonomous safety gates."""
 
-    def __init__(self, *args: object, supervision: SupervisionPolicy, **kwargs: object) -> None:
+    def __init__(
+        self,
+        *args: object,
+        supervision: SupervisionPolicy,
+        child_lifecycle_policy: ChildLifecyclePolicy | None = None,
+        **kwargs: object,
+    ) -> None:
         self.supervision = supervision
+        self.child_lifecycle_policy = (
+            child_lifecycle_policy
+            if child_lifecycle_policy is not None
+            else NoOpChildLifecyclePolicy()
+        )
         self._last_warning_key: tuple[str, str] | None = None
         self._last_warning_at = 0.0
         super().__init__(*args, **kwargs)
@@ -284,6 +330,14 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
             run_root=str(self.paths.root),
             profile_path=str(self.spec.profile_path),
         )
+        context = ChildLifecycleContext(
+            orchestrator=self,
+            generation=int(generation),
+            phase=str(phase),
+            resume=bool(resume),
+            command=tuple(rendered),
+        )
+        self.child_lifecycle_policy.before_child_start(context)
         self.paths.driver_heartbeat.unlink(missing_ok=True)
         self.events.emit("INFO", f"Starting {phase}", generation=generation, argv=rendered)
         process = subprocess.Popen(
@@ -305,11 +359,13 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
             },
         )
         started = time.monotonic()
+        exit_code: int | None = None
         try:
             while True:
                 code = process.poll()
                 if code is not None:
-                    return int(code)
+                    exit_code = int(code)
+                    break
                 state = self._state()
                 self._heartbeat(state)
                 snapshot = self._health_snapshot(process)
@@ -345,6 +401,10 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
                     )
             finally:
                 self.active_child_path.unlink(missing_ok=True)
+        if exit_code is None:
+            raise RuntimeError("child process exited without an observable exit code")
+        self.child_lifecycle_policy.after_child_finish(context, exit_code)
+        return exit_code
 
     def _run_generation(self, generation: int) -> None:
         tx_path = self._generation_tx_path(generation)
@@ -637,8 +697,11 @@ def format_production_status(status: Mapping[str, object]) -> str:
 
 __all__ = [
     "ACTIVE_CHILD_SCHEMA",
+    "ChildLifecycleContext",
+    "ChildLifecyclePolicy",
     "CriticalHealthError",
     "DRIVER_HEARTBEAT_SCHEMA",
+    "NoOpChildLifecyclePolicy",
     "SupervisionPolicy",
     "UniversalProductionTrainingOrchestrator",
     "format_production_status",
