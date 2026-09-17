@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from tools import training_orchestrator_core as _core
 from tools.training_orchestrator_core import *  # noqa: F401,F403
+from gocube_golden.operator_policy import install_operator_policy
 from gocube_golden.telegram_notifier import (
     TelegramError,
     flush_all,
@@ -50,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Telegram test message sent.")
         return 0
 
+    # Operator policy is process-local and deliberately does not mutate the
+    # immutable scientific run-spec/fingerprint.
+    install_operator_policy()
     install()
     _core._cmd_stop = _cmd_stop_with_telegram
     try:
