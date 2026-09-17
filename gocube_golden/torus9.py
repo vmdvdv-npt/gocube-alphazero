@@ -7,6 +7,17 @@ Torus9 runners are not part of the public Golden runtime.
 
 from __future__ import annotations
 
+# Install the run-owned profile resolver before self-play/training modules bind
+# their loader references.  Golden remains the invariant/reference layer; LR,
+# replay, self-play simulations and Arena cadence are operator-owned.
+from .torus9_run_owned import (
+    RunOwnedTorus9SelfPlaySearchContract,
+    install_profile_loader,
+    install_selfplay_boundary,
+)
+
+install_profile_loader()
+
 from .torus9_monolith import (
     TORUS9_OBSERVATION_CHANNELS,
     TORUS9_TOPOLOGY_FINGERPRINT,
@@ -20,7 +31,6 @@ from .torus9_monolith import (
     Torus9RootNoiseEvaluator,
     Torus9SelfPlayGameRecord,
     Torus9SelfPlayPosition,
-    Torus9SelfPlaySearchContract,
     _sample_action,
     build_torus9_observation,
     build_torus9_observation_bundle,
@@ -49,6 +59,10 @@ from .torus9_monolith import (
     write_json,
     write_jsonl,
 )
+from . import torus9_selfplay as _torus9_selfplay
+
+install_selfplay_boundary(_torus9_selfplay)
+
 from .torus9_selfplay import (
     Torus9CentralInferenceOwner,
     Torus9SelfPlayAdapter,
@@ -60,10 +74,20 @@ from .torus9_training import (
     Torus9OwnershipScoreTrainer,
     Torus9OwnershipTrainer,
     Torus9RollingReplay,
-    Torus9TrainingAdapter,
     TrainingState,
-    run_torus9_training_iteration,
 )
+from .torus9_run_owned_training import Torus9TrainingAdapter
+from . import torus9_training as _torus9_training
+
+# Public name used by the production driver.  Only the simulation count differs
+# from the frozen search-family contract; the actual value is profile/run-owned.
+Torus9SelfPlaySearchContract = RunOwnedTorus9SelfPlaySearchContract
+
+
+def run_torus9_training_iteration(*, adapter=None, **kwargs):
+    """Current Torus9 training front door with the run-owned adapter by default."""
+    selected = adapter or Torus9TrainingAdapter()
+    return _torus9_training.run_torus9_training_iteration(adapter=selected, **kwargs)
 
 
 __all__ = [
