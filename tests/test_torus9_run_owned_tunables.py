@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import gocube_golden.torus9_run_owned_training as run_owned_training
+from gocube_golden.torus9_monolith import TORUS9_TOPOLOGY_FINGERPRINT
 from gocube_golden import (
     Torus9CurrentGraphNet,
     Torus9SelfPlaySearchContract,
@@ -16,6 +17,11 @@ from gocube_golden import (
 )
 from gocube_golden.run_spec import StrictRunSpec
 from gocube_golden.torus9_contract import (
+    TORUS9_CURRENT_ARCHITECTURE_ID,
+    TORUS9_CURRENT_PROFILE_ID,
+    TORUS9_CURRENT_TARGET_FINGERPRINT,
+    TORUS9_KOMI,
+    TORUS9_TARGET_CONTRACT_ID,
     current_torus9_content_fingerprint,
     profile_fingerprint,
     validate_torus9_current_profile,
@@ -240,12 +246,32 @@ def test_invalid_shapes_still_fail_without_golden_comparison() -> None:
 
 
 def test_modern_external_parent_still_validates_stage3_metadata() -> None:
-    parent_metadata = json.loads(
-        (
-            Path(__file__).resolve().parents[1]
-            / "runs/torus9/active/torus9-golden-v3-production-20260917-m17/checkpoints/M47.metadata.json"
-        ).read_text(encoding="utf-8")
-    )
+    parent_metadata = {
+        "checkpoint_schema_version": 1,
+        "checkpoint_label": "M47",
+        "run_id": "parent",
+        "profile_id": TORUS9_CURRENT_PROFILE_ID,
+        "profile_fingerprint": "sha256:" + "1" * 64,
+        "target_contract_id": TORUS9_TARGET_CONTRACT_ID,
+        "target_fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT,
+        "architecture_id": TORUS9_CURRENT_ARCHITECTURE_ID,
+        "architecture_config": {},
+        "architecture_fingerprint": "sha256:" + "2" * 64,
+        "model_hash": "sha256:" + "3" * 64,
+        "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
+        "board_size": [9, 9],
+        "komi": TORUS9_KOMI,
+        "network_heads_and_shapes": {},
+        "optimizer_updates": 3760,
+        "train_samples_consumed": 240640,
+        "adam_step": 3760,
+        "replay_generations": [45, 46, 47],
+        "replay_fingerprint": "sha256:" + "4" * 64,
+        "sampled_row_ids_fingerprint": "sha256:" + "5" * 64,
+        "training_seed": 123,
+        "optimizer_parameter_order": ["weight"],
+        "optimizer_parameter_groups": [{"lr": 0.001}],
+    }
     adapter = Torus9TrainingAdapter(
         profile=_run_profile(
             lr=0.0003,
