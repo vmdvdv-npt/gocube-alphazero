@@ -173,22 +173,23 @@ def _adapter_type(optimizer_steps: int):
     return BoundExperimentCadenceTrainingAdapter
 
 
-def configure_from_run_spec() -> int:
+def configure_from_run_spec() -> _base.DriverBindings:
     spec = _base._load_run_spec()
     config = _base._generation_config(spec)
     games = int(config["games"])
     steps = int(config.get("optimizer_steps_per_iteration", 0))
     validate_arm_budget(games=games, optimizer_steps=steps)
 
-    _base.Torus9TrainingAdapter = _adapter_type(steps)
-    _base.TORUS9_OPTIMIZER_STEPS_PER_ITERATION = steps
-    _base._validate_scientific_bindings = _validate_experiment_bindings
-    return steps
+    return _base.DriverBindings(
+        training_adapter_factory=_adapter_type(steps),
+        optimizer_steps_per_iteration=steps,
+        scientific_validator=_validate_experiment_bindings,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    configure_from_run_spec()
-    return _base.main(argv)
+    bindings = configure_from_run_spec()
+    return _base.main(argv, bindings=bindings)
 
 
 if __name__ == "__main__":

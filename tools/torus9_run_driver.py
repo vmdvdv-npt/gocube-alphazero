@@ -16,7 +16,7 @@ import shutil
 import sys
 import threading
 import time
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
 import torch
 
@@ -59,6 +59,17 @@ from tools.arena_profiles.torus9 import PROFILE as TORUS9_ARENA_PROFILE
 GENERATION_RESULT_SCHEMA = "gocube-generation-driver-result-v1"
 ARENA_RESULT_SCHEMA = "gocube-arena-driver-result-v1"
 HEARTBEAT_SCHEMA = "gocube-training-driver-heartbeat-v2"
+
+
+class DriverBindings(NamedTuple):
+    """Explicit production driver dependencies for one invocation."""
+
+    training_adapter_factory: Callable[..., Torus9TrainingAdapter]
+    optimizer_steps_per_iteration: int
+    scientific_validator: Callable[
+        [Mapping[str, object], Mapping[str, object]],
+        None,
+    ]
 
 
 def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
@@ -471,6 +482,13 @@ def _validate_scientific_bindings(
             )
 
 
+DEFAULT_DRIVER_BINDINGS = DriverBindings(
+    training_adapter_factory=Torus9TrainingAdapter,
+    optimizer_steps_per_iteration=TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+    scientific_validator=_validate_scientific_bindings,
+)
+
+
 def _contract(profile: Mapping[str, object]) -> Torus9SelfPlaySearchContract:
     settings = _mapping(profile["self_play"], "profile.self_play")
     temperature_plies = settings.get("temperature_plies")
@@ -555,8 +573,9 @@ def _prepare_state(
     device: str,
     code_identity: CodeIdentity,
     timing: Mapping[str, object] | None = None,
+    bindings: DriverBindings = DEFAULT_DRIVER_BINDINGS,
 ) -> tuple[Torus9TrainingAdapter, Any, Path]:
-    adapter = Torus9TrainingAdapter(
+    adapter = bindings.training_adapter_factory(
         profile=profile,
         code_identity=code_identity,
         base_commit=TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
@@ -984,6 +1003,7 @@ def _publish_generation_result(
     profile_fingerprint: str,
     selfplay_metrics: Mapping[str, object],
     config: Mapping[str, object],
+    bindings: DriverBindings = DEFAULT_DRIVER_BINDINGS,
 ) -> dict[str, object]:
     checkpoint = root / "checkpoints" / f"M{generation}.pt"
     replay = root / "replay" / f"rolling-after-{generation:02d}.jsonl"
@@ -1030,7 +1050,9 @@ def _publish_generation_result(
         replay_identity["generation_identities"] = marker_payload["replay_identity_components"]
     if marker_payload.get("replay_identity_contract") is not None:
         replay_identity["replay_identity_contract"] = marker_payload["replay_identity_contract"]
-    adapter = Torus9TrainingAdapter(profile=load_torus9_current_profile(profile_path))
+    adapter = bindings.training_adapter_factory(
+        profile=load_torus9_current_profile(profile_path)
+    )
     reload_timing: dict[str, object] = {}
     loaded = adapter.load_state(
         checkpoint,
@@ -1147,13 +1169,21 @@ def _publish_generation_result(
     return payload
 
 
-def run_generation(args: argparse.Namespace) -> dict[str, object]:
+def run_generation(
+    args: argparse.Namespace,
+    *,
+    bindings: DriverBindings = DEFAULT_DRIVER_BINDINGS,
+) -> dict[str, object]:
     spec = _load_run_spec()
     config = _generation_config(spec)
+    optimizer_steps = _positive_int(
+        bindings.optimizer_steps_per_iteration,
+        "driver bindings optimizer_steps_per_iteration",
+    )
     _validate_device(str(config["device"]))
     root, lineage_id, profile_path, expected_fingerprint, code = _environment(args.generation)
     profile = _load_profile(profile_path, expected_fingerprint)
-    _validate_scientific_bindings(profile, config)
+    bindings.scientific_validator(profile, config)
     heartbeat_path = Path(os.environ["AZ_DRIVER_HEARTBEAT_PATH"])
     marker = root / f"generation-{args.generation:02d}.complete.json"
 
@@ -1175,6 +1205,7 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
                 profile_fingerprint=expected_fingerprint,
                 selfplay_metrics=persisted,
                 config=config,
+                bindings=bindings,
             )
         if args.resume:
             heartbeat.advance("cleanup-uncommitted-generation")
@@ -1196,6 +1227,7 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             device=str(config["device"]),
             code_identity=code,
             timing=generation_timing,
+            bindings=bindings,
         )
         generation_timing.setdefault(
             "restore_previous_state_wall_time_sec",
@@ -1293,9 +1325,9 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
         adapter.set_diagnostic_timing(generation_timing)
         heartbeat.advance(
             "training",
-            token=f"training:0/{TORUS9_OPTIMIZER_STEPS_PER_ITERATION} optimizer_steps",
+            token=f"training:0/{optimizer_steps} optimizer_steps",
             completed=0,
-            total=TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+            total=optimizer_steps,
             unit="optimizer_steps",
             subphase="optimizer",
         )
@@ -1320,9 +1352,9 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
         )
         heartbeat.advance(
             "training",
-            token=f"training:{TORUS9_OPTIMIZER_STEPS_PER_ITERATION}/{TORUS9_OPTIMIZER_STEPS_PER_ITERATION} optimizer_steps",
-            completed=TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
-            total=TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+            token=f"training:{optimizer_steps}/{optimizer_steps} optimizer_steps",
+            completed=optimizer_steps,
+            total=optimizer_steps,
             unit="optimizer_steps",
             subphase="optimizer",
         )
@@ -1333,6 +1365,7 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
             profile_fingerprint=expected_fingerprint,
             selfplay_metrics=selfplay_metrics,
             config=config,
+            bindings=bindings,
         )
         heartbeat.advance("completed", token=f"generation-M{args.generation}-completed")
         return payload
@@ -1750,11 +1783,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    bindings: DriverBindings = DEFAULT_DRIVER_BINDINGS,
+) -> int:
     args = build_parser().parse_args(argv)
     if args.generation <= 0:
         raise SystemExit("--generation must be positive")
-    result = args.func(args)
+    result = (
+        args.func(args, bindings=bindings)
+        if args.command == "generation"
+        else args.func(args)
+    )
     print(json.dumps(result, sort_keys=True))
     return 0
 
