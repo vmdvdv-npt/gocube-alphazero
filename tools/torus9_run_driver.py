@@ -592,13 +592,12 @@ def _prepare_state(
         # Bootstrap a full rolling-6 window from immutable parent fresh-replay
         # artifacts. These are references only; no parent dataset is copied.
         parent_root = previous_checkpoint.parents[1]
-        first = max(1, generation - 6)
-        discovered = tuple(parent_root / "replay" / f"iter-{value:02d}-fresh.jsonl" for value in range(first, generation))
+        discovered = _parent_replay_reference_paths(parent_root, generation)
         if all(path.is_file() for path in discovered):
             parent_replay_paths = discovered
             manifest["parent_checkpoint"]["replay_references"] = [
                 {"generation": value, "path": str(path), "sha256": file_sha256(path)}
-                for value, path in zip(range(first, generation), discovered)
+                for value, path in zip(range(max(1, generation - 6), generation), discovered)
             ]
             _atomic_json(root / "manifest.json", manifest)
     elif not local_checkpoint.is_file() or not local_replay.is_file():
@@ -657,6 +656,15 @@ def _prepare_state(
         load_timing["restore_previous_state_wall_time_sec"] = time.perf_counter() - restore_started
         load_timing["replay_validation_mode"] = "catalog-evidence" if replay_identity is not None else "cold-full-validation"
     return adapter, state, previous_checkpoint
+
+
+def _parent_replay_reference_paths(parent_root: Path, generation: int) -> tuple[Path, ...]:
+    """Return the exact six pre-fork fresh replay generations for M48+."""
+    first = max(1, int(generation) - 6)
+    return tuple(
+        parent_root / "replay" / f"iter-{value:02d}-fresh.jsonl"
+        for value in range(first, int(generation))
+    )
 
 
 def _generation_paths(root: Path, generation: int) -> tuple[Path, ...]:

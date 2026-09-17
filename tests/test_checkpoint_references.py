@@ -7,6 +7,7 @@ import pytest
 
 import gocube_golden.run_storage as run_storage
 from gocube_golden.run_storage import CheckpointResolutionError, resolve_checkpoint
+from tools.torus9_run_driver import _parent_replay_reference_paths
 
 
 def _lineage(
@@ -152,3 +153,53 @@ def test_resolve_same_lineage_reference(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     assert resolved.path == root / "checkpoints" / "M22.pt"
     assert resolved.lineage_id == "same-lineage"
+
+
+def test_parent_bootstrap_references_exactly_m42_through_m47(tmp_path: Path) -> None:
+    root = tmp_path / "parent"
+    paths = _parent_replay_reference_paths(root, 48)
+    assert [path.name for path in paths] == [
+        "iter-42-fresh.jsonl",
+        "iter-43-fresh.jsonl",
+        "iter-44-fresh.jsonl",
+        "iter-45-fresh.jsonl",
+        "iter-46-fresh.jsonl",
+        "iter-47-fresh.jsonl",
+    ]
+
+
+def test_downstream_manifest_protects_parent_from_discard(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from gocube_golden.run_lifecycle import discard_lineage
+
+    monkeypatch.setattr(run_storage, "RUNS_ROOT", tmp_path / "runs")
+    parent, parent_hash = _lineage(
+        tmp_path, lineage_id="parent-to-retain", generation=47, content=b"parent"
+    )
+    (parent / "runtime" / "state.json").write_text(
+        json.dumps({"state": "SOFT_STOPPED"}), encoding="utf-8"
+    )
+    child = run_storage.active_lineage_dir("torus9", "child-reference")
+    child.mkdir(parents=True)
+    (child / "manifest.json").write_text(
+        json.dumps({
+            "lineage_id": "child-reference",
+            "topology": "torus9",
+            "status": "ACTIVE",
+            "parent_checkpoint": {
+                "lineage_id": "parent-to-retain",
+                "path": str(parent / "checkpoints" / "M47.pt"),
+                "sha256": parent_hash,
+            },
+            "checkpoint_hashes": {},
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="reference"):
+        discard_lineage(
+            repo_root=tmp_path,
+            lineage_id="parent-to-retain",
+            reason="test protection",
+            useful_result="none",
+        )
