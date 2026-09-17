@@ -12,6 +12,7 @@ from copy import deepcopy
 import json
 import math
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from . import torus9_contract as _contract
@@ -30,6 +31,7 @@ _ORIGINAL_PROFILE_VALIDATOR = _contract.validate_torus9_current_profile
 _PROFILE_LOADER_INSTALLED = False
 _RUN_SPEC_INSTALLED = False
 _TELEGRAM_INSTALLED = False
+_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _merge(left: dict[str, Any], right: Mapping[str, Any]) -> dict[str, Any]:
@@ -198,7 +200,7 @@ class RunOwnedTorus9SelfPlaySearchContract(_core.Torus9SelfPlaySearchContract):
 
 
 def install_selfplay_boundary(module: object) -> None:
-    """Remove only the Golden profile equality check from self-play startup."""
+    """Remove only Golden-value equality for run-owned self-play knobs."""
     def validate_boundary(
         model: object,
         *,
@@ -222,8 +224,11 @@ def install_selfplay_boundary(module: object) -> None:
             abs_tol=0.0,
         ):
             raise ValueError("Current Torus9 Dirichlet alpha drift")
-        if not str(profile_fp).startswith("sha256:"):
-            raise ValueError("Current Torus9 run profile fingerprint is malformed")
+        # Production resolves and binds the exact full run-profile fingerprint
+        # before entering self-play.  This lower boundary therefore checks its
+        # integrity/shape, not equality to the Golden reference fingerprint.
+        if not _SHA256_RE.fullmatch(str(profile_fp)):
+            raise ValueError("Current Torus9 profile fingerprint drift")
         getattr(contract, "validate")()
 
     setattr(module, "_validate_current_scientific_boundary", validate_boundary)
@@ -279,9 +284,15 @@ def install_run_spec_policy() -> None:
 
     def create(self: object, *, parent_checkpoint: Mapping[str, object] | None = None) -> None:
         original_create(self, parent_checkpoint=parent_checkpoint)
+        strict_spec = getattr(self, "strict_run_spec")
+        orchestrator_spec = getattr(strict_spec, "orchestrator_spec")
+        # This policy is Torus9-specific.  The universal orchestrator must keep
+        # working unchanged for Cube and future adapters.
+        if getattr(orchestrator_spec, "topology", None) != "torus9":
+            return
         manifest_path = getattr(self, "paths").manifest
         manifest = module.read_json(manifest_path)
-        manifest["operator_tunables"] = _run_owned_tunables_from_spec(getattr(self, "strict_run_spec"))
+        manifest["operator_tunables"] = _run_owned_tunables_from_spec(strict_spec)
         module.atomic_write_json(manifest_path, manifest)
 
     module._resolve_profile = resolve_profile
