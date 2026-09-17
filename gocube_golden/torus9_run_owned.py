@@ -3,7 +3,7 @@
 The Golden profile remains an immutable reference for scientific invariants,
 but four operator-controlled knobs are deliberately outside Golden equality
 checks: learning rate, replay window/cap, self-play MCTS simulations, and
-periodic Arena cadence.  Their effective values remain part of run provenance.
+periodic Arena cadence. Their effective values remain part of run provenance.
 """
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ RUN_OWNED_TUNABLES = (
 )
 
 _ORIGINAL_PROFILE_LOADER = _contract.load_torus9_current_profile
+_ORIGINAL_PROFILE_VALIDATOR = _contract.validate_torus9_current_profile
 _PROFILE_LOADER_INSTALLED = False
 _RUN_SPEC_INSTALLED = False
 _TELEGRAM_INSTALLED = False
@@ -44,8 +45,11 @@ def _merge(left: dict[str, Any], right: Mapping[str, Any]) -> dict[str, Any]:
 def _positive_int(value: object, label: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{label} must be a positive integer")
-    result = int(value)
-    if result <= 0 or result != value:
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a positive integer") from exc
+    if result <= 0 or isinstance(value, float) and not value.is_integer():
         raise ValueError(f"{label} must be a positive integer")
     return result
 
@@ -53,7 +57,10 @@ def _positive_int(value: object, label: str) -> int:
 def _positive_float(value: object, label: str) -> float:
     if isinstance(value, bool):
         raise ValueError(f"{label} must be positive and finite")
-    result = float(value)
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be positive and finite") from exc
     if not math.isfinite(result) or result <= 0.0:
         raise ValueError(f"{label} must be positive and finite")
     return result
@@ -66,7 +73,7 @@ def validate_run_owned_profile(
 ) -> dict[str, Any]:
     """Validate Golden invariants without comparing the run-owned knobs.
 
-    The four knobs are checked only for basic executable shape/range.  They are
+    The four knobs are checked only for basic executable shape/range. They are
     never compared with Golden values and therefore cannot cause a Golden-drift
     error merely because the operator selected another valid value.
     """
@@ -87,17 +94,13 @@ def validate_run_owned_profile(
     _positive_int(replay.get("generations"), "replay.generations")
     _positive_int(replay.get("cap"), "replay.cap")
 
-    base = (
-        dict(base_profile)
-        if base_profile is not None
-        else _ORIGINAL_PROFILE_LOADER()
-    )
+    base = dict(base_profile) if base_profile is not None else _ORIGINAL_PROFILE_LOADER()
     normalized = deepcopy(dict(profile))
     normalized.pop("experiment", None)
     normalized.pop("base_profile_path", None)
 
     # Replace only operator-owned tunables with the immutable reference values
-    # while validating every other Golden invariant through the existing
+    # while validating every other Golden invariant through the original
     # machine-checked validator.
     normalized["self_play"]["mcts_simulations"] = base["self_play"]["mcts_simulations"]
     normalized["self_play"]["fingerprint"] = base["self_play"]["fingerprint"]
@@ -107,8 +110,34 @@ def validate_run_owned_profile(
     normalized["replay"]["cap"] = base["replay"]["cap"]
     normalized["content_fingerprint"] = base["content_fingerprint"]
     normalized["profile_fingerprint"] = base["profile_fingerprint"]
-    _contract.validate_torus9_current_profile(normalized, verify_fingerprint=True)
+    _ORIGINAL_PROFILE_VALIDATOR(normalized, verify_fingerprint=True)
     return dict(profile)
+
+
+def validate_torus9_run_profile(
+    profile: Mapping[str, Any],
+    *,
+    verify_fingerprint: bool = True,
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Public validator that treats the four tuning knobs as run-owned."""
+    if not isinstance(profile, Mapping):
+        raise ValueError("Current Torus 9×9 profile must be a JSON object")
+    if isinstance(profile.get("experiment"), Mapping):
+        validated = validate_run_owned_profile(profile)
+        if verify_fingerprint:
+            expected_content = _contract.current_torus9_content_fingerprint(profile)
+            if profile.get("content_fingerprint") != expected_content:
+                raise ValueError(f"Current Torus 9×9 content fingerprint mismatch: {expected_content}")
+            expected_profile = _contract.profile_fingerprint(profile)
+            if profile.get("profile_fingerprint") != expected_profile:
+                raise ValueError(f"Experimental Torus 9×9 profile fingerprint drift: {expected_profile}")
+        return validated
+    return _ORIGINAL_PROFILE_VALIDATOR(
+        profile,
+        verify_fingerprint=verify_fingerprint,
+        repo_root=repo_root,
+    )
 
 
 def load_torus9_run_profile(
@@ -118,7 +147,7 @@ def load_torus9_run_profile(
 ) -> dict[str, Any]:
     """Resolve a Torus9 profile with run-owned tuning overlays.
 
-    Canonical profiles still use the original strict loader.  An overlay may
+    Canonical profiles still use the original strict loader. An overlay may
     change only fields that survive ``validate_run_owned_profile``; changing LR,
     replay, or self-play simulations never requires a Golden-value exception.
     """
@@ -139,7 +168,7 @@ def load_torus9_run_profile(
     profile = _merge(dict(base), overlay)
     validate_run_owned_profile(profile, base_profile=base)
 
-    # The complete run profile is still fingerprinted for provenance.  The
+    # The complete run profile is still fingerprinted for provenance. The
     # fingerprint is descriptive, not a Golden allow/deny gate.
     profile["content_fingerprint"] = _contract.current_torus9_content_fingerprint(profile)
     profile["profile_fingerprint"] = _contract.profile_fingerprint(profile)
@@ -151,6 +180,7 @@ def install_profile_loader() -> None:
     if _PROFILE_LOADER_INSTALLED:
         return
     _contract.load_torus9_current_profile = load_torus9_run_profile
+    _contract.validate_torus9_current_profile = validate_torus9_run_profile
     _PROFILE_LOADER_INSTALLED = True
 
 
@@ -310,4 +340,5 @@ __all__ = [
     "install_telegram_start_notification",
     "load_torus9_run_profile",
     "validate_run_owned_profile",
+    "validate_torus9_run_profile",
 ]
