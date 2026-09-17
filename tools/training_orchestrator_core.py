@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from gocube_golden.code_update_policy import CodeUpdateProvenancePolicy
 from gocube_golden.production_orchestrator import format_production_status
 from gocube_golden.provenance import file_sha256
 from gocube_golden.provenance import canonical_json
@@ -37,6 +38,7 @@ def _from_source(
         run_spec=spec,
         lineage_id=args.lineage,
         terminal=terminal,
+        child_lifecycle_policy=CodeUpdateProvenancePolicy(),
     )
 
 
@@ -49,6 +51,7 @@ def _from_lineage(
         run_spec=spec,
         lineage_id=args.lineage,
         terminal=terminal,
+        child_lifecycle_policy=CodeUpdateProvenancePolicy(),
     )
 
 

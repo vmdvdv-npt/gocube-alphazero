@@ -22,6 +22,7 @@ from .orchestrator import (
     sha256_file,
 )
 from .production_orchestrator import (
+    ChildLifecyclePolicy,
     SupervisionPolicy,
     UniversalProductionTrainingOrchestrator,
 )
@@ -364,6 +365,7 @@ class StrictProductionTrainingOrchestrator(UniversalProductionTrainingOrchestrat
         run_spec: StrictRunSpec,
         lineage_id: str,
         terminal: bool = True,
+        child_lifecycle_policy: ChildLifecyclePolicy | None = None,
     ) -> None:
         self.strict_run_spec = run_spec
         super().__init__(
@@ -372,6 +374,7 @@ class StrictProductionTrainingOrchestrator(UniversalProductionTrainingOrchestrat
             lineage_id=lineage_id,
             terminal=terminal,
             supervision=run_spec.supervision,
+            child_lifecycle_policy=child_lifecycle_policy,
         )
 
     @property

@@ -121,16 +121,12 @@ from .torus9_run_owned import (
     install_run_spec_policy,
     install_telegram_start_notification,
 )
-from .code_update_policy import install_code_update_policy
 
-# Production policy installation is process-local.  It changes no Golden
-# rules/model semantics; it only makes the declared tuning knobs run-owned,
-# permits clean application-code rollovers inside the same lineage, records
-# per-generation code/config provenance, and exposes effective values through
-# Telegram at startup.
+# Existing run-owned tuning and Telegram presentation policies remain
+# process-local. Application-code rollover/provenance is deliberately not
+# installed here; it is an explicit child-lifecycle policy per orchestrator.
 install_run_spec_policy()
 install_telegram_start_notification()
-install_code_update_policy()
 
 
 __all__ = [name for name in globals() if not name.startswith("_")]

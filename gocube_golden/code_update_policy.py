@@ -1,23 +1,22 @@
-"""Allow clean application-code rollovers inside one production training lineage.
+"""Explicit per-orchestrator application-code rollover and provenance policy.
 
-A lineage represents one training history, not one application commit.  The
+A lineage represents one training history, not one application commit. The
 creation commit remains preserved, while each generation records the exact
-code revision and resolved parameters used for that attempt.  Before launching
-a child under newer clean code, the legacy Torus9 manifest pin is advanced so
-the existing lineage can resume without creating a child lineage solely for an
-application update.
+code revision and resolved parameters used for that attempt. The behavior is
+opt-in per orchestrator instance through the production child-lifecycle API.
 """
 from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping
 
 from .orchestrator import atomic_write_json, read_json
 from .provenance import capture_code_identity
 
-_INSTALLED = False
+if TYPE_CHECKING:
+    from .production_orchestrator import ChildLifecycleContext
 
 
 def _utc_now() -> str:
@@ -168,71 +167,50 @@ def _finish_generation_attempt(path: Path, exit_code: int) -> None:
     atomic_write_json(path, payload)
 
 
-def install_code_update_policy() -> None:
-    """Install process-local rollover/provenance hooks once."""
+class CodeUpdateProvenancePolicy:
+    """Opt-in lifecycle policy for clean code rollover and generation provenance."""
 
-    global _INSTALLED
-    if _INSTALLED:
-        return
+    def __init__(self) -> None:
+        self._generation_provenance: dict[tuple[int, int], Path] = {}
 
-    from .production_orchestrator import UniversalProductionTrainingOrchestrator
+    @staticmethod
+    def _key(context: "ChildLifecycleContext") -> tuple[int, int]:
+        return (id(context.orchestrator), int(context.generation))
 
-    original = UniversalProductionTrainingOrchestrator._run_child
-
-    def run_child(
-        self: object,
-        command: Sequence[str],
-        *,
-        generation: int,
-        resume: bool,
-        phase: str,
-    ) -> int:
-        repo_root = Path(getattr(self, "repo_root"))
-        # Unit-test/fake orchestrators often use temporary non-Git roots.  The
-        # rollover policy is production checkout behavior and must not alter
-        # those synthetic execution contracts.
+    def before_child_start(self, context: "ChildLifecycleContext") -> None:
+        run = context.orchestrator
+        repo_root = Path(getattr(run, "repo_root"))
+        # Synthetic/unit-test orchestrators commonly use temporary non-Git
+        # roots. The policy remains a production-checkout concern.
         if not (repo_root / ".git").exists():
-            return int(
-                original(
-                    self,
-                    command,
-                    generation=int(generation),
-                    resume=bool(resume),
-                    phase=str(phase),
-                )
-            )
+            return
 
         code = _code_snapshot(repo_root)
         _advance_manifest_code_pin(
-            self,
+            run,
             code=code,
-            generation=int(generation),
-            phase=str(phase),
+            generation=int(context.generation),
+            phase=str(context.phase),
         )
-        provenance: Path | None = None
-        if phase == "generation":
-            provenance = _record_generation_attempt(
-                self,
-                generation=int(generation),
+        if context.phase == "generation":
+            self._generation_provenance[self._key(context)] = _record_generation_attempt(
+                run,
+                generation=int(context.generation),
                 code=code,
             )
-        exit_code = int(
-            original(
-                self,
-                command,
-                generation=int(generation),
-                resume=bool(resume),
-                phase=str(phase),
-            )
-        )
-        if provenance is not None:
-            _finish_generation_attempt(provenance, exit_code)
-        return exit_code
 
-    UniversalProductionTrainingOrchestrator._run_child = run_child
-    _INSTALLED = True
+    def after_child_finish(
+        self,
+        context: "ChildLifecycleContext",
+        exit_code: int,
+    ) -> None:
+        if context.phase != "generation":
+            return
+        provenance = self._generation_provenance.pop(self._key(context), None)
+        if provenance is not None:
+            _finish_generation_attempt(provenance, int(exit_code))
 
 
 __all__ = [
-    "install_code_update_policy",
+    "CodeUpdateProvenancePolicy",
 ]
