@@ -86,7 +86,7 @@ def test_parent_checkpoint_cli_builds_complete_continuation_reference(tmp_path: 
 
 
 def test_prepare_state_uses_external_parent_even_if_local_slot_exists(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     root = tmp_path / "runs" / "torus9" / "active" / "child"
     local_checkpoint = root / "checkpoints" / "M17.pt"
@@ -131,7 +131,11 @@ def test_prepare_state_uses_external_parent_even_if_local_slot_exists(
             calls.update(kwargs)
             return SimpleNamespace()
 
-    monkeypatch.setattr(run_driver, "Torus9TrainingAdapter", FakeAdapter)
+    bindings = run_driver.DriverBindings(
+        training_adapter_factory=FakeAdapter,
+        optimizer_steps_per_iteration=run_driver.TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+        scientific_validator=run_driver._validate_scientific_bindings,
+    )
     adapter, state, selected = run_driver._prepare_state(
         root=root,
         lineage_id="child",
@@ -140,6 +144,7 @@ def test_prepare_state_uses_external_parent_even_if_local_slot_exists(
         config={},
         device="cpu",
         code_identity=SimpleNamespace(),
+        bindings=bindings,
     )
 
     assert adapter.__class__ is FakeAdapter
