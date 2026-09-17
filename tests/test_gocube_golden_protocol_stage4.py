@@ -91,6 +91,25 @@ def test_golden_descriptors_require_matching_scientific_identity():
     assert not _compatible(golden, different_profile)
 
 
+def test_lineage_identity_uses_manifest_status_and_legacy_defaults_active(tmp_path: Path):
+    checkpoint = tmp_path / "torus9" / "archive" / "old-run" / "checkpoints" / "M3.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    manifest = checkpoint.parent.parent / "manifest.json"
+    manifest.write_text(
+        json.dumps({"lineage_id": "old-run", "status": "DISCARDED"}),
+        encoding="utf-8",
+    )
+
+    assert CheckpointCatalog._lineage_identity_for_checkpoint(str(checkpoint)) == (
+        "old-run",
+        "DISCARDED",
+    )
+    assert CheckpointCatalog._lineage_identity_for_checkpoint(
+        str(tmp_path / "legacy" / "checkpoints" / "M1.pt")
+    ) == (None, "ACTIVE")
+
+
 def test_golden_integration_modules_have_no_legacy_execution_imports():
     root = Path(__file__).parents[1] / "alphazero/envs/gocube/integration"
     forbidden = ("alphazero.NNetWrapper", "alphazero.GenericPlayers", "SelfPlayAgent", "Coach")
@@ -135,6 +154,7 @@ def test_real_m17_golden_loader_and_protocol_round_trip_are_read_only():
         "ruleSet": "chinese",
         "komi": 0.5,
         "terminalAdjudicator": "golden-graph-area-v1",
+        "lineageStatus": "ACTIVE",
     }
 
     loader = GoldenCheckpointLoader(catalog, device="cpu")
