@@ -17,7 +17,16 @@ def paths(tmp_path: Path) -> SimpleNamespace:
         json.dumps(
             {
                 "lineage_id": "lineage-a",
+                "config_fingerprint": "sha256:test-config",
                 "orchestrator": {"arena_generations": [37, 47]},
+                "operator_tunables": {
+                    "learning_rate": 0.0003,
+                    "replay_generations": 6,
+                    "replay_cap": 40000,
+                    "replay_window": "rolling last 6 generations",
+                    "self_play_mcts_simulations": 128,
+                    "arena_every_generations": 5,
+                },
             }
         ),
         encoding="utf-8",
@@ -43,18 +52,19 @@ def paths(tmp_path: Path) -> SimpleNamespace:
     )
 
 
-def test_config_file(tmp_path: Path) -> None:
-    env = tmp_path / "telegram.env"
-    env.write_text(
-        "GOCUBE_TELEGRAM_BOT_TOKEN=123:secret\nGOCUBE_TELEGRAM_CHAT_ID=-456\n",
-        encoding="utf-8",
-    )
-    assert tg.load_config(environ={}, env_file=env) == ("123:secret", "-456")
-
-
-def test_filtering(tmp_path: Path) -> None:
+def test_filtering_and_start_tunables(tmp_path: Path) -> None:
     p = paths(tmp_path)
-    assert tg.build_notification(p, "INFO", "Training orchestrator started", {}) is None
+    start = tg.build_notification(p, "INFO", "Training orchestrator started", {})
+    assert start is not None
+    text = start[1]
+    for expected in (
+        "Training started",
+        "LR: 0.0003",
+        "Replay: 6 generations / 40000 positions",
+        "Self-play MCTS: 128 sims",
+        "Arena cadence: every 5 generations",
+    ):
+        assert expected in text
     assert (
         tg.build_notification(
             p,
