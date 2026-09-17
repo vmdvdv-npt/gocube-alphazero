@@ -76,7 +76,7 @@ from .torus9_training import (
     Torus9RollingReplay,
     TrainingState,
 )
-from .torus9_run_owned_training import Torus9TrainingAdapter
+from .torus9_parallel_validation import Torus9TrainingAdapter
 from . import torus9_training as _torus9_training
 
 # Public name used by the production driver.  Only the simulation count differs
