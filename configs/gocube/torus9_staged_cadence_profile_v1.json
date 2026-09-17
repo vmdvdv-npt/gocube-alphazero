@@ -1,0 +1,19 @@
+{
+  "profile_id": "gocube-torus9-golden-v3",
+  "base_profile_path": "torus9_golden_current_v3.json",
+  "experiment": {
+    "kind": "torus9-staged-cadence-v1",
+    "purpose": "equal-budget 64 vs 128 cadence, conditional 192 follow-up from one shared parent checkpoint and optimizer state"
+  },
+  "self_play": {
+    "mcts_simulations": 128
+  },
+  "training": {
+    "learning_rate": 0.0003
+  },
+  "replay": {
+    "window": "rolling last 6 generations",
+    "generations": 6,
+    "cap": 40000
+  }
+}

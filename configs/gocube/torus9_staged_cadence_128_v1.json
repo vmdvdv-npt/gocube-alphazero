@@ -1,0 +1,36 @@
+{
+  "schema": "gocube-production-run-spec-v3",
+  "topology": "torus9",
+  "board_size": 9,
+  "adapter": {"id": "torus9-staged-cadence-v1", "transport": "process"},
+  "profile_path": "configs/gocube/torus9_staged_cadence_profile_v1.json",
+  "expected_profile_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "generation": {
+    "command": [".venv/bin/python", "tools/torus9_staged_sims_driver.py", "generation", "--generation", "{generation}"],
+    "resume_command": [".venv/bin/python", "tools/torus9_staged_sims_driver.py", "generation", "--generation", "{generation}", "--resume"],
+    "driver_config": {
+      "games": 128,
+      "optimizer_steps_per_iteration": 160,
+      "device": "cuda",
+      "workers": 16,
+      "active_games_per_worker": 4,
+      "total_active_contexts": 64,
+      "inference_batch_cap": 64,
+      "inference_batch_wait_ms": 1,
+      "coalescing": true,
+      "heartbeat_interval_seconds": 5,
+      "model_init_seed": 202609131001,
+      "selfplay_master_seed": 202609131002,
+      "training_master_seed": 202609131003
+    }
+  },
+  "arena": {"enabled": false, "required": false, "every_generations": 999999, "command": null, "driver_config": {}, "startset": {}},
+  "health": {"poll_seconds": 5, "heartbeat_warning_seconds": 180, "heartbeat_critical_seconds": 900, "min_disk_free_gb_warning": 100, "min_disk_free_gb_critical": 20, "min_ram_free_gb_warning": 4, "min_ram_free_gb_critical": 1},
+  "supervision": {"startup_ack_timeout_seconds": 120, "progress_warning_seconds": 180, "progress_critical_seconds": 900, "max_generation_restarts": 1, "restart_backoff_seconds": 30, "critical_child_grace_seconds": 10},
+  "soft_stop": {"default_minutes": 60, "minimum_minutes": 30, "maximum_minutes": 1440},
+  "performance": {"checks": []},
+  "learning": {"metrics": ["loss.total", "learning.samples_consumed_total", "optimizer_updates_per_sec"], "stall_checks": []},
+  "required_generation_metrics": ["games_per_hour", "moves_per_sec", "optimizer_updates_per_sec", "learning.samples_consumed_total", "loss.total", "timing.self_play_wall_time_sec", "timing.training.training_wall_time_sec"],
+  "required_arena_metrics": ["games", "wins", "losses", "draws", "win_rate", "games_per_hour", "moves_per_sec", "inference_mean_batch_rows", "effective_cpu_cores"],
+  "experiment": {"kind": "torus9-staged-cadence-v1", "games_per_iteration": 128, "iterations": 3, "total_self_play_games": 384, "optimizer_steps_per_iteration": 160, "total_optimizer_steps": 480, "total_sample_exposures": 30720, "conditional": "always"}
+}
