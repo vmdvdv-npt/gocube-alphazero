@@ -278,6 +278,8 @@ class Torus9TrainingAdapter:
     @staticmethod
     def _validate_current_profile(profile: Mapping[str, object]) -> None:
         validate_torus9_current_profile(profile)
+        if isinstance(profile.get("experiment"), Mapping):
+            return
         if profile.get("profile_id") != TORUS9_CURRENT_PROFILE_ID:
             raise ValueError("Current Torus9 training requires the current profile")
         if profile.get("profile_fingerprint") != current_torus9_profile_fingerprint(profile):
@@ -659,7 +661,7 @@ class Torus9TrainingAdapter:
                 self.validate_sample(row)
             previous_generation = generation
             row_ids.add(row_id)
-        if len(rows) > TORUS9_MAX_REPLAY_POSITIONS:
+        if len(rows) > int(self.replay_profile["cap"]):  # type: ignore[index]
             raise ValueError("Current Torus9 replay cap exceeded")
 
     def train(
@@ -670,7 +672,7 @@ class Torus9TrainingAdapter:
     ) -> Mapping[str, object]:
         self.validate_state(state)
         trainer = state.adapter_state
-        count = TORUS9_BATCH_SIZE * TORUS9_OPTIMIZER_STEPS_PER_ITERATION
+        count = int(self.training_profile["batch_size"]) * int(self.training_profile["optimizer_steps_per_iteration"])  # type: ignore[index]
         indices = trainer._sample_indices(len(rows), seed=int(seed), count=count)
 
         def training_progress(completed: int, total: int) -> None:
@@ -701,7 +703,7 @@ class Torus9TrainingAdapter:
             str(rows[index].get("replay_row_id", index)) for index in indices
         )
         metrics["sampled_row_ids_fingerprint"] = value_fingerprint(metrics["sampled_replay_row_ids"])
-        if metrics.get("optimizer_steps") != TORUS9_OPTIMIZER_STEPS_PER_ITERATION:
+        if metrics.get("optimizer_steps") != int(self.training_profile["optimizer_steps_per_iteration"]):  # type: ignore[index]
             raise ValueError("Current Torus9 optimizer step budget drift")
         if metrics.get("samples_consumed") != count:
             raise ValueError("Current Torus9 sample exposure budget drift")
@@ -761,15 +763,15 @@ class Torus9TrainingAdapter:
             ],
             "scientific_contract": {
                 "optimizer": "Adam",
-                "learning_rate": 0.001,
+                "learning_rate": float(self.training_profile["learning_rate"]),  # type: ignore[index]
                 "weight_decay": 0.0,
-                "batch_size": TORUS9_BATCH_SIZE,
-                "optimizer_steps": TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
-                "samples_consumed": TORUS9_BATCH_SIZE * TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+                "batch_size": int(self.training_profile["batch_size"]),  # type: ignore[index]
+                "optimizer_steps": int(self.training_profile["optimizer_steps_per_iteration"]),  # type: ignore[index]
+                "samples_consumed": int(self.training_profile["samples_consumed_per_iteration"]),  # type: ignore[index]
                 "scheduler": None,
                 "model_gating": False,
-                "replay_generations": TORUS9_ROLLING_GENERATIONS,
-                "replay_cap": TORUS9_MAX_REPLAY_POSITIONS,
+                "replay_generations": int(self.replay_profile["generations"]),  # type: ignore[index]
+                "replay_cap": int(self.replay_profile["cap"]),  # type: ignore[index]
                 "komi": TORUS9_KOMI,
                 "ownership_loss": True,
                 "score_loss": True,
@@ -908,6 +910,7 @@ class Torus9TrainingAdapter:
         checkpoint_path: str | Path,
         *,
         replay_path: str | Path,
+        replay_paths: Sequence[str | Path] | None = None,
         device: str = "cpu",
         allow_reference: bool = False,
         total_evictions: int = 0,
@@ -928,9 +931,9 @@ class Torus9TrainingAdapter:
         trainer = Torus9OwnershipScoreTrainer(
             model,
             score_loss_enabled=True,
-            learning_rate=0.001,
+            learning_rate=float(self.training_profile["learning_rate"]),  # type: ignore[index]
             weight_decay=0.0,
-            optimizer_steps_per_iteration=TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+            optimizer_steps_per_iteration=int(self.training_profile["optimizer_steps_per_iteration"]),  # type: ignore[index]
         )
         _core.torus9_load_checkpoint(
             checkpoint_path,
@@ -939,7 +942,7 @@ class Torus9TrainingAdapter:
             expected={
                 "model_hash": metadata["model_hash"],
                 "profile_id": TORUS9_CURRENT_PROFILE_ID,
-                "profile_fingerprint": self.profile_fingerprint,
+                "profile_fingerprint": self.profile_fingerprint if not allow_reference else metadata.get("profile_fingerprint"),
                 "target_fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT,
             },
             device=device,
@@ -950,7 +953,18 @@ class Torus9TrainingAdapter:
             raise ValueError("Current Torus9 resume optimizer step mismatch")
         replay_path = Path(replay_path)
         replay_started = time.perf_counter()
-        rows, replay_digest = _read_jsonl_with_identity(replay_path)
+        replay_sources = tuple(Path(value) for value in (replay_paths or (replay_path,)))
+        rows_list: list[dict[str, object]] = []
+        source_digests = []
+        for source in replay_sources:
+            source_rows, source_digest = _read_jsonl_with_identity(source)
+            rows_list.extend(source_rows)
+            source_digests.append(source_digest)
+        rows = rows_list
+        replay_digest = source_digests[0] if len(source_digests) == 1 else {
+            "sha256": "multi-source-reference",
+            "size_bytes": sum(int(item["size_bytes"]) for item in source_digests),
+        }
         if load_timing is not None:
             load_timing["replay_file_load_wall_time_sec"] = time.perf_counter() - replay_started
         replay_fingerprint: str | None = None
@@ -996,7 +1010,7 @@ class Torus9TrainingAdapter:
                 self._remember_validated_sample(row)
         if load_timing is not None:
             load_timing["replay_validation_wall_time_sec"] = time.perf_counter() - validation_started
-        if len(rows) != int(metadata["valid_replay_positions"]):
+        if not allow_reference and len(rows) != int(metadata["valid_replay_positions"]):
             raise ValueError("Current Torus9 resume replay position count mismatch")
         if not allow_reference:
             if replay_fingerprint is None:

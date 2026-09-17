@@ -554,6 +554,7 @@ def _prepare_state(
     previous_checkpoint = local_checkpoint
     previous_replay = local_replay
     parent_reference: Mapping[str, object] | None = None
+    parent_replay_paths: tuple[Path, ...] = ()
     manifest = _read_json(root / "manifest.json")
     candidate = manifest.get("parent_checkpoint")
     if candidate is not None:
@@ -588,6 +589,18 @@ def _prepare_state(
         expected_replay_sha = str(candidate.get("replay_sha256") or "")
         if expected_replay_sha and file_sha256(previous_replay) != expected_replay_sha:
             raise ValueError("Referenced parent replay SHA-256 mismatch")
+        # Bootstrap a full rolling-6 window from immutable parent fresh-replay
+        # artifacts. These are references only; no parent dataset is copied.
+        parent_root = previous_checkpoint.parents[1]
+        first = max(1, generation - 6)
+        discovered = tuple(parent_root / "replay" / f"iter-{value:02d}-fresh.jsonl" for value in range(first, generation))
+        if all(path.is_file() for path in discovered):
+            parent_replay_paths = discovered
+            manifest["parent_checkpoint"]["replay_references"] = [
+                {"generation": value, "path": str(path), "sha256": file_sha256(path)}
+                for value, path in zip(range(first, generation), discovered)
+            ]
+            _atomic_json(root / "manifest.json", manifest)
     elif not local_checkpoint.is_file() or not local_replay.is_file():
         if isinstance(candidate, Mapping):
             raise ValueError(
@@ -612,7 +625,7 @@ def _prepare_state(
     load_timing = timing if isinstance(timing, dict) else None
     replay_identity: Mapping[str, object] | None = None
     catalog_path = root / "runtime" / "artifact-catalog.json"
-    if parent_reference is not None:
+    if parent_reference is not None and not parent_replay_paths:
         replay_identity = {
             "sha256": parent_reference.get("replay_sha256"),
             "size_bytes": previous_replay.stat().st_size,
@@ -629,6 +642,7 @@ def _prepare_state(
     state = adapter.load_state(
         previous_checkpoint,
         replay_path=previous_replay,
+        replay_paths=parent_replay_paths or None,
         device=device,
         # The external canonical M17 predates the Stage-3 metadata extension.
         # Its checkpoint/replay/profile identities were validated above, so
