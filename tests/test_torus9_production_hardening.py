@@ -8,6 +8,7 @@ import pytest
 
 import tools.hardware_telemetry as hardware_telemetry
 import tools.torus9_run_driver as run_driver
+import tools.training_orchestrator as training_orchestrator
 from gocube_golden.artifact_catalog import ArtifactCatalog, sha256_file
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_PROFILE_FINGERPRINT,
@@ -45,6 +46,113 @@ def test_driver_rejects_tampered_golden_payload_with_stale_fingerprint(
 def test_driver_accepts_only_the_canonical_golden_payload() -> None:
     profile = run_driver._load_profile(CURRENT_PROFILE, TORUS9_CURRENT_PROFILE_FINGERPRINT)
     assert profile == load_torus9_current_profile()
+
+
+def test_parent_checkpoint_cli_builds_complete_continuation_reference(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "parent" / "checkpoints" / "M17.pt"
+    metadata = checkpoint.with_suffix(".metadata.json")
+    replay = tmp_path / "parent" / "replay" / "rolling-after-17.jsonl"
+    checkpoint.parent.mkdir(parents=True)
+    replay.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"parent-checkpoint")
+    metadata.write_text(
+        json.dumps(
+            {
+                "checkpoint_label": "M17",
+                "valid_replay_positions": 1,
+                "replay_fingerprint": "sha256:canonical-replay",
+            }
+        ),
+        encoding="utf-8",
+    )
+    replay.write_text('{"source_generation":17}\n', encoding="utf-8")
+    args = SimpleNamespace(
+        parent_lineage="historical-lineage",
+        parent_path=str(checkpoint),
+        parent_sha256=training_orchestrator.file_sha256(checkpoint),
+        parent_generation=None,
+        parent_replay_path=str(replay),
+    )
+
+    reference = training_orchestrator._parent_checkpoint(args)
+
+    assert reference is not None
+    assert reference["generation"] == 17
+    assert reference["label"] == "M17"
+    assert reference["path"] == str(checkpoint.resolve())
+    assert reference["replay_path"] == str(replay.resolve())
+    assert reference["replay_row_count"] == 1
+    assert reference["metadata_sha256"] == training_orchestrator.file_sha256(metadata)
+
+
+def test_prepare_state_uses_external_parent_even_if_local_slot_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "runs" / "torus9" / "active" / "child"
+    local_checkpoint = root / "checkpoints" / "M17.pt"
+    local_replay = root / "replay" / "rolling-after-17.jsonl"
+    local_checkpoint.parent.mkdir(parents=True)
+    local_replay.parent.mkdir(parents=True)
+    local_checkpoint.write_bytes(b"stale-local-checkpoint")
+    local_replay.write_text("stale-local-replay\n", encoding="utf-8")
+
+    parent_checkpoint = tmp_path / "runs" / "torus9" / "archive" / "parent" / "checkpoints" / "M17.pt"
+    parent_metadata = parent_checkpoint.with_suffix(".metadata.json")
+    parent_replay = parent_checkpoint.parents[1] / "replay" / "rolling-after-17.jsonl"
+    parent_checkpoint.parent.mkdir(parents=True)
+    parent_replay.parent.mkdir(parents=True)
+    parent_checkpoint.write_bytes(b"authoritative-parent-checkpoint")
+    parent_metadata.write_text("{}\n", encoding="utf-8")
+    parent_replay.write_text("authoritative-parent-replay\n", encoding="utf-8")
+    parent = {
+        "lineage_id": "parent",
+        "label": "M17",
+        "generation": 17,
+        "path": str(parent_checkpoint),
+        "artifact_sha256": run_driver.file_sha256(parent_checkpoint),
+        "metadata_sha256": run_driver.file_sha256(parent_metadata),
+        "replay_path": str(parent_replay),
+        "replay_sha256": run_driver.file_sha256(parent_replay),
+        "replay_row_count": 1,
+        "replay_fingerprint": "sha256:canonical-replay",
+        "replay_validation_schema": "torus9-replay-validation-v1",
+        "total_evictions": 9,
+    }
+    (root / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (root / "manifest.json").write_text(json.dumps({"parent_checkpoint": parent}), encoding="utf-8")
+    calls: dict[str, object] = {}
+
+    class FakeAdapter:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def load_state(self, checkpoint: Path, **kwargs: object) -> object:
+            calls["checkpoint"] = checkpoint
+            calls.update(kwargs)
+            return SimpleNamespace()
+
+    monkeypatch.setattr(run_driver, "Torus9TrainingAdapter", FakeAdapter)
+    adapter, state, selected = run_driver._prepare_state(
+        root=root,
+        lineage_id="child",
+        generation=18,
+        profile={},
+        config={},
+        device="cpu",
+        code_identity=SimpleNamespace(),
+    )
+
+    assert adapter.__class__ is FakeAdapter
+    assert isinstance(state, SimpleNamespace)
+    assert selected == parent_checkpoint.resolve()
+    assert calls["checkpoint"] == parent_checkpoint.resolve()
+    assert calls["replay_path"] == parent_replay.resolve()
+    assert calls["allow_reference"] is True
+    assert calls["total_evictions"] == 9
+    identity = calls["replay_artifact_identity"]
+    assert isinstance(identity, dict)
+    assert identity["sha256"] == parent["replay_sha256"]
+    assert identity["row_count"] == 1
 
 
 def test_semantic_heartbeat_publishes_incremental_counts() -> None:

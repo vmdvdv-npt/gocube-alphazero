@@ -9,6 +9,8 @@ creation path cannot leave a lineage without a manifest.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -35,6 +37,41 @@ REQUIRED_LINEAGE_MANIFEST_FIELDS = (
     "created_at",
     "checkpoint_hashes",
 )
+
+
+class CheckpointResolutionError(ValueError):
+    """Raised when a declared checkpoint reference cannot be trusted."""
+
+
+@dataclass(frozen=True)
+class ResolvedCheckpoint:
+    """A verified physical checkpoint selected from a logical reference."""
+
+    topology: str
+    lineage_id: str
+    checkpoint_id: str
+    generation: int | None
+    path: Path
+    sha256: str
+    owner_status: str
+    reference: dict[str, Any]
+
+    def as_reference(self) -> dict[str, Any]:
+        """Return a stable, machine-readable reference for reports/evaluations."""
+        result = dict(self.reference)
+        result.update(
+            {
+                "topology": self.topology,
+                "lineage_id": self.lineage_id,
+                "checkpoint_id": self.checkpoint_id,
+                "generation": self.generation,
+                "path": str(self.path),
+                "sha256": self.sha256,
+                "artifact_sha256": self.sha256,
+                "owner_status": self.owner_status,
+            }
+        )
+        return result
 
 
 def _safe_component(value: str, *, label: str) -> str:
@@ -77,6 +114,234 @@ def evaluation_dir(topology: str, evaluation_id: str) -> Path:
 def evaluations_root(topology: str) -> Path:
     """Return the only parent under which evaluation outputs may be stored."""
     return topology_root(topology) / EVALUATIONS
+
+
+def evaluation_id_for_comparison(
+    *,
+    candidate_lineage_id: str,
+    candidate_generation: int,
+    reference_lineage_id: str,
+    reference_generation: int | None,
+) -> str:
+    """Build a stable evaluation id without embedding filesystem separators."""
+    candidate = _safe_component(candidate_lineage_id, label="candidate lineage id")
+    reference = _safe_component(reference_lineage_id, label="reference lineage id")
+    candidate_label = f"M{int(candidate_generation):04d}"
+    reference_label = (
+        f"M{int(reference_generation):04d}"
+        if reference_generation is not None
+        else "checkpoint"
+    )
+    return f"{candidate}-{candidate_label}-vs-{reference}-{reference_label}"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def _lineage_root_for_reference(
+    topology: str,
+    lineage_id: str,
+    *,
+    runs_root: Path,
+) -> tuple[Path, dict[str, Any]]:
+    """Find the unique active/archived owner and load its manifest."""
+    matches: list[Path] = []
+    for namespace in (ACTIVE, ARCHIVE):
+        candidate = runs_root / _safe_component(topology, label="topology") / namespace / _safe_component(
+            lineage_id,
+            label="lineage id",
+        )
+        if candidate.is_dir():
+            matches.append(candidate)
+    if not matches:
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: lineage={lineage_id!r} "
+            f"topology={topology!r}; owner lineage was not found"
+        )
+    if len(matches) > 1:
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: lineage={lineage_id!r}; "
+            f"owner exists in multiple namespaces: {matches}"
+        )
+    root = matches[0]
+    manifest_path = root / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: lineage={lineage_id!r}; "
+            f"cannot read owner manifest {manifest_path}"
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise CheckpointResolutionError(f"Owner manifest is not an object: {manifest_path}")
+    if manifest.get("lineage_id") != lineage_id or manifest.get("topology") != topology:
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: owner manifest identity mismatch: {manifest_path}"
+        )
+    status = str(manifest.get("status", ""))
+    if status not in {"ACTIVE", "ARCHIVED"}:
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: lineage={lineage_id!r}; "
+            f"owner status={status!r} is not usable"
+        )
+    return root, manifest
+
+
+def resolve_checkpoint(
+    reference: Mapping[str, Any],
+    *,
+    topology: str | None = None,
+    runs_root: str | Path | None = None,
+) -> ResolvedCheckpoint:
+    """Resolve and verify a canonical checkpoint reference.
+
+    The declared owner lineage is authoritative for relative locators.  An
+    absolute path is still required to be inside that owner, and the physical
+    bytes must match the declared SHA-256 (or the owner manifest identity).
+    """
+    if not isinstance(reference, Mapping):
+        raise CheckpointResolutionError("Checkpoint reference must be an object")
+    raw_topology = topology or reference.get("topology")
+    if not raw_topology:
+        raise CheckpointResolutionError("Checkpoint reference is missing topology")
+    resolved_topology = _safe_component(str(raw_topology), label="topology")
+    raw_lineage = reference.get("lineage_id") or reference.get("parent_lineage")
+    raw_path = reference.get("path") or reference.get("canonical_path")
+    root_base = Path(runs_root).resolve() if runs_root is not None else RUNS_ROOT.resolve()
+
+    inferred_root: Path | None = None
+    if raw_path and Path(str(raw_path)).is_absolute():
+        absolute_path = Path(str(raw_path)).resolve()
+        topology_root_path = (root_base / resolved_topology).resolve()
+        try:
+            relative_to_topology = absolute_path.relative_to(topology_root_path)
+        except ValueError as exc:
+            raise CheckpointResolutionError(
+                f"Checkpoint reference resolution failed: path={absolute_path}; "
+                f"path is outside topology root {topology_root_path}"
+            ) from exc
+        parts = relative_to_topology.parts
+        if len(parts) >= 3 and parts[0] in {ACTIVE, ARCHIVE}:
+            inferred_root = topology_root_path / parts[0] / parts[1]
+            if raw_lineage is None:
+                raw_lineage = parts[1]
+
+    if not raw_lineage:
+        raise CheckpointResolutionError("Checkpoint reference is missing lineage_id")
+    lineage_id = _safe_component(str(raw_lineage), label="lineage id")
+    owner_root, manifest = _lineage_root_for_reference(
+        resolved_topology,
+        lineage_id,
+        runs_root=root_base,
+    )
+    if inferred_root is not None and inferred_root != owner_root.resolve():
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: lineage={lineage_id!r}; "
+            f"declared path owner {inferred_root} does not match manifest owner {owner_root}"
+        )
+
+    if raw_path:
+        declared_path = Path(str(raw_path))
+        candidate_path = (
+            declared_path.resolve()
+            if declared_path.is_absolute()
+            else (owner_root / declared_path).resolve()
+        )
+    else:
+        generation_value = reference.get("generation")
+        if generation_value is None:
+            raise CheckpointResolutionError(
+                f"Checkpoint reference resolution failed: lineage={lineage_id!r}; "
+                "path or generation is required"
+            )
+        candidate_path = (owner_root / "checkpoints" / f"M{int(generation_value)}.pt").resolve()
+    try:
+        candidate_path.relative_to(owner_root.resolve())
+    except ValueError as exc:
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: lineage={lineage_id!r}; "
+            f"resolved path escapes owner lineage: {candidate_path}"
+        ) from exc
+
+    relative = candidate_path.relative_to(owner_root.resolve()).as_posix()
+    checkpoint_hashes = manifest.get("checkpoint_hashes")
+    manifest_sha = None
+    if isinstance(checkpoint_hashes, Mapping):
+        value = checkpoint_hashes.get(relative)
+        if value is not None:
+            manifest_sha = str(value)
+    declared_sha = reference.get("artifact_sha256") or reference.get("sha256")
+    expected_sha = str(declared_sha or manifest_sha or "")
+    if not expected_sha.startswith("sha256:"):
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: lineage={lineage_id!r} "
+            f"checkpoint={reference.get('label') or reference.get('checkpoint_id') or relative}; "
+            "expected SHA-256 is missing"
+        )
+    if manifest_sha is not None and manifest_sha != expected_sha:
+        actual_sha = _sha256_file(candidate_path) if candidate_path.is_file() else None
+        raise CheckpointResolutionError(
+            f"Checkpoint reference resolution failed: lineage={lineage_id!r} checkpoint={relative}; "
+            f"declared SHA={expected_sha}, owner manifest SHA={manifest_sha}, "
+            f"actual sha256={actual_sha or '<missing>'}"
+        )
+    exists = candidate_path.is_file()
+    actual_sha = _sha256_file(candidate_path) if exists else None
+    if actual_sha != expected_sha:
+        raise CheckpointResolutionError(
+            "Checkpoint reference resolution failed\n"
+            f"lineage: {lineage_id}\n"
+            f"checkpoint: {reference.get('label') or reference.get('checkpoint_id') or relative}\n"
+            f"expected path/reference: {raw_path or relative}\n"
+            f"resolved path: {candidate_path}\n"
+            f"exists: {str(exists).lower()}\n"
+            f"expected sha256: {expected_sha}\n"
+            f"actual sha256: {actual_sha or '<missing>'}"
+        )
+
+    generation: int | None
+    raw_generation = reference.get("generation")
+    if raw_generation is None:
+        checkpoint_id = str(reference.get("checkpoint_id") or candidate_path.stem)
+        generation = (
+            int(checkpoint_id[1:])
+            if checkpoint_id.startswith("M") and checkpoint_id[1:].isdigit()
+            else None
+        )
+    else:
+        generation = int(raw_generation)
+        checkpoint_id = str(reference.get("checkpoint_id") or reference.get("label") or f"M{generation}")
+
+    canonical = dict(reference)
+    canonical.update(
+        {
+            "topology": resolved_topology,
+            "lineage_id": lineage_id,
+            "checkpoint_id": checkpoint_id,
+            "generation": generation,
+            "path": str(candidate_path),
+            "sha256": expected_sha,
+            "artifact_sha256": expected_sha,
+        }
+    )
+    return ResolvedCheckpoint(
+        topology=resolved_topology,
+        lineage_id=lineage_id,
+        checkpoint_id=checkpoint_id,
+        generation=generation,
+        path=candidate_path,
+        sha256=expected_sha,
+        owner_status=str(manifest["status"]),
+        reference=canonical,
+    )
 
 
 def topology_for_profile(profile_id: str) -> str:

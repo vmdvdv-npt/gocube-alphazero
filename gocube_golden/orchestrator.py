@@ -24,7 +24,13 @@ import time
 from typing import Any, Mapping, Sequence
 
 from .artifact_catalog import ArtifactCatalog, ARTIFACT_CATALOG_SCHEMA
-from .run_storage import active_lineage_dir, create_lineage
+from .run_storage import (
+    active_lineage_dir,
+    create_lineage,
+    ensure_evaluation_layout,
+    evaluation_dir,
+    evaluation_id_for_comparison,
+)
 
 
 ORCHESTRATOR_SCHEMA = "gocube-production-training-orchestrator-v1"
@@ -476,6 +482,14 @@ class ProductionTrainingOrchestrator:
     def create(self, *, parent_checkpoint: Mapping[str, object] | None = None) -> None:
         if self.paths.root.exists():
             raise FileExistsError(f"Lineage already exists: {self.paths.root}")
+        initial_generation = 0
+        if parent_checkpoint is not None and parent_checkpoint.get("generation") is not None:
+            try:
+                initial_generation = int(parent_checkpoint["generation"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("parent checkpoint generation must be an integer") from exc
+            if initial_generation < 0:
+                raise ValueError("parent checkpoint generation must be non-negative")
         manifest: dict[str, object] = {
             "lineage_id": self.lineage_id,
             "topology": self.spec.topology,
@@ -491,7 +505,8 @@ class ProductionTrainingOrchestrator:
                 "profile_path": str(self.spec.profile_path.relative_to(self.repo_root)),
                 "profile_fingerprint": self.spec.profile_fingerprint,
                 "arena_every_generations": self.spec.arena_every_generations,
-                "last_committed_generation": 0,
+                "generation_origin": initial_generation,
+                "last_committed_generation": initial_generation,
                 "arena_generations": [],
                 "runtime_state": "CREATED",
                 "artifact_catalog": {
@@ -524,7 +539,8 @@ class ProductionTrainingOrchestrator:
             "lineage_id": self.lineage_id,
             "topology": self.spec.topology,
             "state": "CREATED",
-            "last_committed_generation": 0,
+            "generation_origin": initial_generation,
+            "last_committed_generation": initial_generation,
             "active_generation": None,
             "active_phase": None,
             "pid": None,
@@ -852,6 +868,35 @@ class ProductionTrainingOrchestrator:
         return self.paths.generations / f"generation-{generation:04d}-driver-result.json"
 
     def _arena_result_path(self, generation: int) -> Path:
+        manifest = read_json(self.paths.manifest)
+        parent = manifest.get("parent_checkpoint")
+        arena_payload = self.spec.payload.get("arena")
+        arena_config = arena_payload.get("driver_config") if isinstance(arena_payload, Mapping) else None
+        reference_gap = arena_config.get("reference_gap") if isinstance(arena_config, Mapping) else None
+        external_parent: Mapping[str, object] | None = None
+        if isinstance(parent, Mapping) and reference_gap is not None:
+            try:
+                reference_generation = int(generation) - int(reference_gap)
+                parent_generation = int(parent.get("generation", -1))
+            except (TypeError, ValueError):
+                reference_generation = -1
+                parent_generation = -2
+            if (
+                parent_generation == reference_generation
+                and str(parent.get("lineage_id", ""))
+                and str(parent.get("lineage_id")) != self.lineage_id
+            ):
+                external_parent = parent
+        if external_parent is not None:
+            evaluation_id = evaluation_id_for_comparison(
+                candidate_lineage_id=self.lineage_id,
+                candidate_generation=int(generation),
+                reference_lineage_id=str(external_parent["lineage_id"]),
+                reference_generation=int(external_parent["generation"]),
+            )
+            root = evaluation_dir(self.spec.topology, evaluation_id)
+            ensure_evaluation_layout(root)
+            return root / "result.json"
         return self.paths.root / "arena" / f"generation-{generation:04d}" / "result.json"
 
     def _record_generation_artifacts(
@@ -1350,11 +1395,22 @@ class ProductionTrainingOrchestrator:
         if isinstance(metrics, Mapping):
             self._check_required_metrics(metrics, kind="arena")
             self._append_metrics("arena", generation, metrics)
+            performance_status = str(metrics.get("performance_status", "HEALTHY"))
+            if performance_status in {"WARNING", "SEVERE_WARNING"}:
+                self.events.emit(
+                    "WARNING",
+                    "Arena performance warning; Arena accepted",
+                    generation=generation,
+                    mean_inference_batch_rows=metrics.get("inference_mean_batch_rows"),
+                    performance_gate=metrics.get("performance_gate"),
+                )
+            elif performance_status == "CRITICAL":
+                raise RuntimeError("Arena performance policy reported CRITICAL")
         self._update_manifest(committed_generation=generation, arena_generation=generation)
         self.events.emit("INFO", "Arena completed", generation=generation)
 
     def _ensure_pending_arena(self, committed_generation: int) -> None:
-        if committed_generation <= 0 or committed_generation % self.spec.arena_every_generations != 0:
+        if not self._arena_due(committed_generation):
             return
         manifest = self._load_manifest()
         orchestrator = manifest.get("orchestrator")
@@ -1368,6 +1424,20 @@ class ProductionTrainingOrchestrator:
                 generation=committed_generation,
             )
             self._run_arena(committed_generation)
+
+    def _generation_origin(self) -> int:
+        state = self._state()
+        try:
+            return max(0, int(state.get("generation_origin", 0)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Runtime generation origin is malformed") from exc
+
+    def _arena_due(self, generation: int) -> bool:
+        origin = self._generation_origin()
+        return (
+            int(generation) > origin
+            and (int(generation) - origin) % self.spec.arena_every_generations == 0
+        )
 
     def _run_generation(self, generation: int) -> None:
         tx_path = self._generation_tx_path(generation)
@@ -1431,7 +1501,7 @@ class ProductionTrainingOrchestrator:
         if isinstance(metrics, Mapping):
             self._check_performance(generation, metrics)
         self._learning_stall_checks()
-        if generation % self.spec.arena_every_generations == 0:
+        if self._arena_due(generation):
             self._run_arena(generation)
         self._render_report()
 
@@ -1530,6 +1600,9 @@ class ProductionTrainingOrchestrator:
             "generation": state.get("active_generation"),
             "phase": state.get("active_phase"),
             "last_committed_generation": state.get("last_committed_generation", 0),
+            "generation_origin": state.get("generation_origin", 0),
+            "next_generation": int(state.get("last_committed_generation", 0)) + 1,
+            "parent_checkpoint": manifest.get("parent_checkpoint"),
             "pid": state.get("pid"),
             "heartbeat_age_sec": heartbeat_age,
             "stop_request": self._stop_request(),

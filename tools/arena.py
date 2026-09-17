@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -37,7 +37,13 @@ from tools.arena_engine import (
     run_arena as run_engine,
 )
 from tools.arena_profiles import available_profiles, detect_profile, get_profile
-from gocube_golden.run_storage import evaluation_dir, evaluations_root, topology_for_profile
+from gocube_golden.run_storage import (
+    ResolvedCheckpoint,
+    evaluation_dir,
+    evaluations_root,
+    resolve_checkpoint,
+    topology_for_profile,
+)
 
 
 def _resolve_profile(profile_name: str, candidate: Path):
@@ -67,10 +73,20 @@ def _canonical_evaluation_output(profile_id: str, output_dir: Path) -> Path:
     return output_dir
 
 
+def _write_json(path: Path, payload: Mapping[str, object]) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(dict(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _write_provenance(output_dir: Path, payload: Mapping[str, object]) -> None:
+    _write_json(output_dir / "provenance.json", payload)
+
+
 def run_arena(
     *,
-    candidate_path: Path,
-    reference_path: Path | None = None,
+    candidate_path: Path | Mapping[str, Any],
+    reference_path: Path | Mapping[str, Any] | None = None,
     profile_name: str = "auto",
     output_dir: Path | None = None,
     candidate_label: str | None = None,
@@ -84,14 +100,41 @@ def run_arena(
     expected_reference_model_hash: str | None = None,
     expected_reference_artifact_sha256: str | None = None,
 ) -> dict[str, object]:
-    """Resolve one profile and invoke the one universal Arena engine."""
-    profile = _resolve_profile(profile_name, candidate_path)
-    reference_path = reference_path or candidate_path
+    """Resolve checkpoint paths/references and invoke the universal Arena."""
+    candidate_identity: ResolvedCheckpoint | None = None
+    if isinstance(candidate_path, Mapping) and not candidate_path.get("path"):
+        candidate_identity = resolve_checkpoint(
+            candidate_path,
+            topology=str(candidate_path.get("topology") or "") or None,
+        )
+        candidate_probe = candidate_identity.path
+    else:
+        candidate_probe = (
+            Path(str(candidate_path.get("path")))
+            if isinstance(candidate_path, Mapping)
+            else Path(candidate_path)
+        )
+    profile = _resolve_profile(profile_name, candidate_probe)
+    topology = topology_for_profile(profile.profile_id)
+    reference_identity: ResolvedCheckpoint | None = None
+    if isinstance(candidate_path, Mapping):
+        if candidate_identity is None:
+            candidate_identity = resolve_checkpoint(candidate_path, topology=topology)
+        candidate_path = candidate_identity.path
+    else:
+        candidate_path = Path(candidate_path).resolve()
+    if reference_path is None:
+        reference_path = candidate_path
+    elif isinstance(reference_path, Mapping):
+        reference_identity = resolve_checkpoint(reference_path, topology=topology)
+        reference_path = reference_identity.path
+    else:
+        reference_path = Path(reference_path).resolve()
     output_dir = _canonical_evaluation_output(
         profile.profile_id,
         output_dir or _default_output(profile.profile_id, candidate_path, reference_path),
     )
-    return run_engine(
+    result = run_engine(
         profile=profile,
         candidate_path=candidate_path,
         reference_path=reference_path,
@@ -102,11 +145,81 @@ def run_arena(
         comparison=comparison,
         master_seed=master_seed,
         config=config,
-        expected_candidate_model_hash=expected_candidate_model_hash,
-        expected_candidate_artifact_sha256=expected_candidate_artifact_sha256,
-        expected_reference_model_hash=expected_reference_model_hash,
-        expected_reference_artifact_sha256=expected_reference_artifact_sha256,
+        expected_candidate_model_hash=(
+            expected_candidate_model_hash
+            or (candidate_identity.reference.get("model_hash") if candidate_identity else None)
+        ),
+        expected_candidate_artifact_sha256=(
+            expected_candidate_artifact_sha256
+            or (candidate_identity.sha256 if candidate_identity else None)
+        ),
+        expected_reference_model_hash=(
+            expected_reference_model_hash
+            or (reference_identity.reference.get("model_hash") if reference_identity else None)
+        ),
+        expected_reference_artifact_sha256=(
+            expected_reference_artifact_sha256
+            or (reference_identity.sha256 if reference_identity else None)
+        ),
     )
+    if candidate_identity is not None or reference_identity is not None:
+        candidate_ref = candidate_identity.as_reference() if candidate_identity else {
+            "path": str(candidate_path),
+            "sha256": expected_candidate_artifact_sha256,
+        }
+        reference_ref = reference_identity.as_reference() if reference_identity else {
+            "path": str(reference_path),
+            "sha256": expected_reference_artifact_sha256,
+        }
+        cross_lineage = (
+            candidate_identity is not None
+            and reference_identity is not None
+            and candidate_identity.lineage_id != reference_identity.lineage_id
+        )
+        evaluation_id = (
+            f"{candidate_identity.lineage_id}-M{candidate_identity.generation:04d}-vs-"
+            f"{reference_identity.lineage_id}-M{reference_identity.generation:04d}"
+            if cross_lineage
+            else None
+        )
+        _write_provenance(
+            output_dir,
+            {
+                "schema": "gocube-checkpoint-evaluation-provenance-v1",
+                "evaluation_id": evaluation_id,
+                "candidate": candidate_ref,
+                "reference": reference_ref,
+                "profile": profile.profile_id,
+                "master_seed": master_seed,
+                "training_mutated": False,
+            },
+        )
+        manifest_path = output_dir / "manifest.json"
+        if manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["evaluation_id"] = evaluation_id
+            manifest["checkpoint_references"] = {
+                "candidate": candidate_ref,
+                "reference": reference_ref,
+            }
+            manifest["provenance"] = str(output_dir / "provenance.json")
+            _write_json(manifest_path, manifest)
+            _write_provenance(
+                output_dir,
+                {
+                    "schema": "gocube-checkpoint-evaluation-provenance-v1",
+                    "evaluation_id": evaluation_id,
+                    "candidate": candidate_ref,
+                    "reference": reference_ref,
+                    "profile": profile.profile_id,
+                    "master_seed": master_seed,
+                    "training_mutated": False,
+                },
+            )
+        result["evaluation_id"] = evaluation_id
+        result["candidate_reference"] = candidate_ref
+        result["reference_reference"] = reference_ref
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:

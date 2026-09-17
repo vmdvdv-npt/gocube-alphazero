@@ -26,6 +26,11 @@ if str(ROOT) not in sys.path:
 
 from gocube_golden.provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
 from gocube_golden.run_spec import StrictRunSpec, run_spec_fingerprint
+from gocube_golden.run_storage import (
+    ensure_evaluation_layout,
+    evaluation_id_for_comparison,
+    resolve_checkpoint,
+)
 from gocube_golden.artifact_catalog import ArtifactCatalog, ARTIFACT_VALIDATION_SCHEMA
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
@@ -42,7 +47,11 @@ from gocube_golden.torus9_contract import (
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
 )
-from tools.arena_engine import ArenaExecutionConfig, run_arena as run_arena_engine
+from tools.arena_engine import (
+    ArenaExecutionConfig,
+    classify_arena_performance,
+    run_arena as run_arena_engine,
+)
 from tools.arena_profiles.torus9 import PROFILE as TORUS9_ARENA_PROFILE
 
 
@@ -540,22 +549,80 @@ def _prepare_state(
             timing["replay_validation_mode"] = "initial-empty"
         return adapter, state, m0
 
-    previous_checkpoint = root / "checkpoints" / f"M{generation - 1}.pt"
-    previous_replay = root / "replay" / f"rolling-after-{generation - 1:02d}.jsonl"
-    if not previous_checkpoint.is_file() or not previous_replay.is_file():
+    local_checkpoint = root / "checkpoints" / f"M{generation - 1}.pt"
+    local_replay = root / "replay" / f"rolling-after-{generation - 1:02d}.jsonl"
+    previous_checkpoint = local_checkpoint
+    previous_replay = local_replay
+    parent_reference: Mapping[str, object] | None = None
+    manifest = _read_json(root / "manifest.json")
+    candidate = manifest.get("parent_checkpoint")
+    if candidate is not None:
+        if not isinstance(candidate, Mapping):
+            raise ValueError("Parent checkpoint reference must be an object")
+        try:
+            parent_generation = int(candidate.get("generation", -1))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Parent checkpoint generation is malformed") from exc
+        if parent_generation == generation - 1:
+            parent_reference = candidate
+
+    if parent_reference is not None:
+        parent_checkpoint_value = candidate.get("path")
+        parent_replay_value = candidate.get("replay_path")
+        if not parent_checkpoint_value or not parent_replay_value:
+            raise ValueError("Parent checkpoint reference must include path and replay_path")
+        previous_checkpoint = Path(str(parent_checkpoint_value)).resolve()
+        previous_replay = Path(str(parent_replay_value)).resolve()
+        parent_reference = candidate
+        if not previous_checkpoint.is_file() or not previous_replay.is_file():
+            raise FileNotFoundError("Referenced parent checkpoint or replay is missing")
+        expected_checkpoint_sha = str(
+            candidate.get("artifact_sha256") or candidate.get("sha256") or ""
+        )
+        if expected_checkpoint_sha and file_sha256(previous_checkpoint) != expected_checkpoint_sha:
+            raise ValueError("Referenced parent checkpoint SHA-256 mismatch")
+        expected_metadata_sha = str(candidate.get("metadata_sha256") or "")
+        metadata_path = previous_checkpoint.with_suffix(".metadata.json")
+        if expected_metadata_sha and file_sha256(metadata_path) != expected_metadata_sha:
+            raise ValueError("Referenced parent checkpoint metadata SHA-256 mismatch")
+        expected_replay_sha = str(candidate.get("replay_sha256") or "")
+        if expected_replay_sha and file_sha256(previous_replay) != expected_replay_sha:
+            raise ValueError("Referenced parent replay SHA-256 mismatch")
+    elif not local_checkpoint.is_file() or not local_replay.is_file():
+        if isinstance(candidate, Mapping):
+            raise ValueError(
+                "Parent checkpoint is not the immediately preceding generation: "
+                f"parent=M{int(candidate.get('generation', -1))}, requested=M{generation}"
+            )
         raise FileNotFoundError(
             f"Cannot start M{generation}; previous committed checkpoint/replay is missing"
         )
-    previous_summary = root / f"iter-{generation - 1:02d}-summary.json"
+    previous_summary = (
+        root / f"iter-{generation - 1:02d}-summary.json"
+        if parent_reference is None
+        else None
+    )
     evictions = 0
-    if previous_summary.is_file():
+    if previous_summary is not None and previous_summary.is_file():
         replay_metrics = _read_json(previous_summary).get("replay")
         if isinstance(replay_metrics, Mapping):
             evictions = int(replay_metrics.get("total_evictions", 0))
+    if parent_reference is not None:
+        evictions = int(parent_reference.get("total_evictions", 0))
     load_timing = timing if isinstance(timing, dict) else None
     replay_identity: Mapping[str, object] | None = None
     catalog_path = root / "runtime" / "artifact-catalog.json"
-    if catalog_path.is_file():
+    if parent_reference is not None:
+        replay_identity = {
+            "sha256": parent_reference.get("replay_sha256"),
+            "size_bytes": previous_replay.stat().st_size,
+            "row_count": parent_reference.get("replay_row_count"),
+            "canonical_replay_fingerprint": parent_reference.get("replay_fingerprint"),
+            "validation_schema": parent_reference.get(
+                "replay_validation_schema", ARTIFACT_VALIDATION_SCHEMA
+            ),
+        }
+    elif catalog_path.is_file():
         catalog = ArtifactCatalog.load(catalog_path, root=root)
         replay_identity = catalog.identity(_relative(root, previous_replay))
     restore_started = time.perf_counter()
@@ -563,6 +630,11 @@ def _prepare_state(
         previous_checkpoint,
         replay_path=previous_replay,
         device=device,
+        # The external canonical M17 predates the Stage-3 metadata extension.
+        # Its checkpoint/replay/profile identities were validated above, so
+        # permit that legacy metadata shape without weakening child lineage
+        # checkpoint validation or replay artifact hash checks.
+        allow_reference=parent_reference is not None,
         total_evictions=evictions,
         replay_artifact_identity=replay_identity,
         load_timing=load_timing,
@@ -606,6 +678,71 @@ def _cleanup_uncommitted_generation(root: Path, generation: int) -> None:
 
 def _relative(root: Path, path: Path) -> str:
     return str(path.resolve().relative_to(root.resolve()))
+
+
+def _local_checkpoint_reference(
+    *,
+    root: Path,
+    lineage_id: str,
+    generation: int,
+    manifest: Mapping[str, object],
+) -> dict[str, object]:
+    """Describe a checkpoint owned by the current lineage."""
+    relative = f"checkpoints/M{int(generation)}.pt"
+    path = (root / relative).resolve()
+    checkpoint_hashes = manifest.get("checkpoint_hashes")
+    digest: object | None = None
+    if isinstance(checkpoint_hashes, Mapping):
+        digest = checkpoint_hashes.get(relative)
+    if digest is None:
+        catalog_path = root / "runtime" / "artifact-catalog.json"
+        if catalog_path.is_file():
+            catalog = ArtifactCatalog.load(catalog_path, root=root)
+            digest = catalog.identity(relative).get("sha256")
+    if digest is None and path.is_file():
+        digest = file_sha256(path)
+    return {
+        "topology": "torus9",
+        "lineage_id": lineage_id,
+        "checkpoint_id": f"M{int(generation)}",
+        "label": f"M{int(generation)}",
+        "generation": int(generation),
+        "path": str(path),
+        "sha256": str(digest or ""),
+        "artifact_sha256": str(digest or ""),
+        "source_type": "lineage-owned",
+    }
+
+
+def _arena_checkpoint_references(
+    *,
+    root: Path,
+    lineage_id: str,
+    generation: int,
+    reference_generation: int,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Return independently resolvable candidate/reference declarations."""
+    manifest = _read_json(root / "manifest.json")
+    candidate = _local_checkpoint_reference(
+        root=root,
+        lineage_id=lineage_id,
+        generation=generation,
+        manifest=manifest,
+    )
+    parent = manifest.get("parent_checkpoint")
+    if isinstance(parent, Mapping) and int(parent.get("generation", -1)) == int(reference_generation):
+        reference = dict(parent)
+        reference.setdefault("topology", "torus9")
+        reference.setdefault("checkpoint_id", reference.get("label", f"M{reference_generation}"))
+        reference.setdefault("source_type", "external-parent")
+    else:
+        reference = _local_checkpoint_reference(
+            root=root,
+            lineage_id=lineage_id,
+            generation=reference_generation,
+            manifest=manifest,
+        )
+    return candidate, reference
 
 
 def _artifact(root: Path, path: Path) -> dict[str, object]:
@@ -701,7 +838,13 @@ def _generation_metrics(
         timing.update(dict(selfplay_timing))
     training_timing = training.get("phase_timing")
     if isinstance(training_timing, Mapping):
-        timing["training"] = dict(training_timing)
+        normalized_training_timing = dict(training_timing)
+        # Keep the canonical phase timing name alongside the historical
+        # adapter name so required-metric paths remain stable across reports.
+        normalized_training_timing.setdefault(
+            "training_wall_time_sec", training_wall
+        )
+        timing["training"] = normalized_training_timing
     metrics.update(
         {
             "training_time_sec": training_wall,
@@ -892,10 +1035,6 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
         interval=float(config["heartbeat_interval_seconds"]),
     ) as heartbeat:
         manifest = _read_json(root / "manifest.json")
-        if args.generation == 1 and manifest.get("parent_checkpoint") is not None:
-            raise ValueError(
-                "Current Torus9 adapter supports fresh M0 lineages only; it will not discard a cross-lineage parent state"
-            )
         if marker.is_file():
             heartbeat.advance("recover-published-generation")
             summary = _read_json(root / f"iter-{args.generation:02d}-summary.json")
@@ -1044,7 +1183,7 @@ def run_generation(args: argparse.Namespace) -> dict[str, object]:
                 "training",
                 args.generation,
             ),
-            completed_games=args.generation * games,
+            completed_games=int(state.completed_games) + games,
             code_identity=code,
             device=str(config["device"]),
             adapter=adapter,
@@ -1093,7 +1232,15 @@ def _training_snapshot(
     snapshot: dict[str, object] = {}
     for path in sorted({path.resolve() for path in paths}):
         if path.is_file():
-            snapshot[_relative(root, path)] = {
+            try:
+                key = _relative(root, path)
+            except ValueError:
+                # External reference checkpoints are intentionally outside the
+                # training lineage.  Snapshot them by canonical absolute path
+                # so mutation checks remain bounded without pretending that
+                # the file is lineage-owned.
+                key = f"external::{path}"
+            snapshot[key] = {
                 "sha256": file_sha256(path),
                 "size_bytes": path.stat().st_size,
             }
@@ -1126,6 +1273,8 @@ def _validate_existing_arena(
     manifest = _read_json(manifest_path)
     execution = summary.get("execution")
     expected_execution = config["execution"]
+    if int(summary.get("technical_games", 0)) != 0 or int(summary.get("invalid_games", 0)) != 0:
+        raise ValueError("Existing Arena technical/invalid outcomes are fail-closed")
     if (
         summary.get("candidate_artifact_sha256")
         != (candidate_sha256 or file_sha256(candidate))
@@ -1150,6 +1299,58 @@ def _validate_existing_arena(
         raise ValueError("Existing Arena output does not match immutable run-spec policy")
 
 
+def _apply_arena_performance_policy(
+    summary: Mapping[str, object],
+    config: ArenaExecutionConfig,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Reclassify a completed Arena summary under the current gate policy.
+
+    This is intentionally used for both freshly produced and already complete
+    summaries.  It lets recovery commit a finished Arena without replaying
+    games after a policy-only change.
+    """
+    normalized = dict(summary)
+    telemetry_value = normalized.get("telemetry")
+    if not isinstance(telemetry_value, Mapping):
+        raise ValueError("Arena summary requires telemetry for performance policy validation")
+    telemetry = dict(telemetry_value)
+    mean_batch = float(telemetry.get("mean_inference_batch_rows", 0.0))
+    policy = classify_arena_performance(mean_batch, config)
+    prior_failures = telemetry.get("performance_failures", [])
+    prior_warnings = telemetry.get("performance_warnings", [])
+    hard_failures = [
+        str(value)
+        for value in prior_failures
+        if str(value) != "mean_inference_batch_rows"
+    ]
+    hard_failures.extend(str(value) for value in policy["hard_failures"])
+    warnings = [
+        str(value)
+        for value in prior_warnings
+        if str(value) != "mean_inference_batch_rows"
+    ]
+    warnings.extend(str(value) for value in policy["warnings"])
+    status = (
+        "CRITICAL"
+        if hard_failures
+        else (
+            str(policy["status"])
+            if str(policy["status"]) == "SEVERE_WARNING"
+            else ("WARNING" if warnings else "HEALTHY")
+        )
+    )
+    telemetry["performance_status"] = status
+    telemetry["performance_failures"] = sorted(set(hard_failures))
+    telemetry["performance_warnings"] = sorted(set(warnings))
+    telemetry["performance_gate"] = {
+        "mean_inference_batch_rows": mean_batch,
+        "severe_warning_threshold": policy["severe_warning_threshold"],
+        "healthy_minimum": policy["healthy_minimum"],
+    }
+    normalized["telemetry"] = telemetry
+    return normalized, policy
+
+
 def run_arena(args: argparse.Namespace) -> dict[str, object]:
     spec = _load_run_spec()
     config, startset = _arena_config(spec)
@@ -1161,19 +1362,39 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
     if args.generation < reference_gap:
         raise ValueError("Arena generation/reference gap is invalid")
     reference_generation = int(args.generation) - reference_gap
-    candidate = root / "checkpoints" / f"M{args.generation}.pt"
-    reference = root / "checkpoints" / f"M{reference_generation}.pt"
-    if not candidate.is_file() or not reference.is_file():
-        raise FileNotFoundError("Arena candidate/reference checkpoint is missing")
+    candidate_declared, reference_declared = _arena_checkpoint_references(
+        root=root,
+        lineage_id=lineage_id,
+        generation=int(args.generation),
+        reference_generation=reference_generation,
+    )
+    runs_root = root.parents[2]
+    candidate_identity = resolve_checkpoint(
+        candidate_declared,
+        topology="torus9",
+        runs_root=runs_root,
+    )
+    reference_identity = resolve_checkpoint(
+        reference_declared,
+        topology="torus9",
+        runs_root=runs_root,
+    )
+    candidate = candidate_identity.path
+    reference = reference_identity.path
     catalog_path = root / "runtime" / "artifact-catalog.json"
     if not catalog_path.is_file():
         raise ValueError("Torus9 Arena requires the committed artifact catalog")
     catalog = ArtifactCatalog.load(catalog_path, root=root)
     candidate_relative = _relative(root, candidate)
-    reference_relative = _relative(root, reference)
-    verified_artifacts = catalog.verify((candidate_relative, reference_relative))
+    verified_artifacts = catalog.verify((candidate_relative,))
     candidate_sha256 = verified_artifacts[candidate_relative]
-    reference_sha256 = verified_artifacts[reference_relative]
+    if reference_identity.lineage_id == lineage_id:
+        reference_relative = _relative(root, reference)
+        verified_artifacts.update(catalog.verify((reference_relative,)))
+        reference_sha256 = verified_artifacts[reference_relative]
+    else:
+        reference_relative = None
+        reference_sha256 = reference_identity.sha256
 
     heartbeat_path = Path(os.environ["AZ_DRIVER_HEARTBEAT_PATH"])
     with _Heartbeat(
@@ -1193,8 +1414,10 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
             args.generation,
             tracked_paths=(candidate, reference),
         )
-        output = root / "arena" / f"generation-{args.generation:04d}"
         result_path = Path(os.environ["AZ_ARENA_RESULT_PATH"])
+        output = result_path.parent.resolve()
+        if reference_identity.lineage_id != lineage_id:
+            ensure_evaluation_layout(output)
         summary_path = output / "summary.json"
         if output.exists() and not summary_path.is_file():
             # Keep the orchestrator-owned directory but remove only incomplete
@@ -1207,6 +1430,20 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 else:
                     child.unlink()
         output.mkdir(parents=True, exist_ok=True)
+        arena_execution = ArenaExecutionConfig(
+            games=int(config["games"]),
+            workers=int(execution["workers"]),
+            games_per_worker=int(execution["games_per_worker"]),
+            inference_batch_rows=int(execution["inference_batch_rows"]),
+            inference_batch_wait_ms=float(execution["inference_batch_wait_ms"]),
+            device=str(execution["device"]),
+            strict_production=bool(execution["strict_production"]),
+            min_mean_inference_batch_rows=float(execution["min_mean_inference_batch_rows"]),
+            min_effective_cpu_cores=float(execution["min_effective_cpu_cores"]),
+            early_gate_enabled=bool(execution["early_gate_enabled"]),
+            early_gate_min_forwards=int(execution["early_gate_min_forwards"]),
+            early_gate_min_wall_sec=float(execution["early_gate_min_wall_sec"]),
+        )
         if summary_path.is_file():
             summary = _read_json(summary_path)
             _validate_existing_arena(
@@ -1218,6 +1455,8 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 candidate_sha256=candidate_sha256,
                 reference_sha256=reference_sha256,
             )
+            summary, performance_policy = _apply_arena_performance_policy(summary, arena_execution)
+            _atomic_json(summary_path, summary)
         else:
             heartbeat.advance(
                 "arena",
@@ -1238,20 +1477,6 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                     subphase="games",
                 )
 
-            arena_execution = ArenaExecutionConfig(
-                games=int(config["games"]),
-                workers=int(execution["workers"]),
-                games_per_worker=int(execution["games_per_worker"]),
-                inference_batch_rows=int(execution["inference_batch_rows"]),
-                inference_batch_wait_ms=float(execution["inference_batch_wait_ms"]),
-                device=str(execution["device"]),
-                strict_production=bool(execution["strict_production"]),
-                min_mean_inference_batch_rows=float(execution["min_mean_inference_batch_rows"]),
-                min_effective_cpu_cores=float(execution["min_effective_cpu_cores"]),
-                early_gate_enabled=bool(execution["early_gate_enabled"]),
-                early_gate_min_forwards=int(execution["early_gate_min_forwards"]),
-                early_gate_min_wall_sec=float(execution["early_gate_min_wall_sec"]),
-            )
             summary = run_arena_engine(
                 profile=TORUS9_ARENA_PROFILE,
                 candidate_path=candidate,
@@ -1265,12 +1490,33 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 config=arena_execution,
                 expected_candidate_artifact_sha256=candidate_sha256,
                 expected_reference_artifact_sha256=reference_sha256,
+                expected_candidate_model_hash=candidate_declared.get("model_hash"),
+                expected_reference_model_hash=reference_declared.get("model_hash"),
                 progress_callback=arena_progress,
+            )
+            summary, performance_policy = _apply_arena_performance_policy(summary, arena_execution)
+            _atomic_json(summary_path, summary)
+        if performance_policy["status"] in {"WARNING", "SEVERE_WARNING"}:
+            _atomic_json(
+                output / "performance-warning.json",
+                {
+                    "status": str(performance_policy["status"]),
+                    "reasons": list(performance_policy["warnings"]),
+                    "performance_gate": dict(performance_policy),
+                    "summary": str(summary_path),
+                },
             )
         heartbeat.advance("arena-verify")
         # Recheck the selected immutable artifacts after Arena.  Unrelated
         # ancient files are intentionally outside this bounded operation.
-        catalog.verify((candidate_relative, reference_relative))
+        if reference_relative is None:
+            if file_sha256(reference) != reference_sha256:
+                raise ValueError(
+                    "External Arena reference checkpoint changed during evaluation: "
+                    f"{reference}"
+                )
+        else:
+            catalog.verify((candidate_relative, reference_relative))
         after = _training_snapshot(
             root,
             args.generation,
@@ -1284,6 +1530,43 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
         telemetry = summary.get("telemetry")
         telemetry_map = telemetry if isinstance(telemetry, Mapping) else {}
         arena_block = _mapping(spec.payload["arena"], "arena")
+        cross_lineage = reference_identity.lineage_id != candidate_identity.lineage_id
+        comparison = f"periodic-M{args.generation}-vs-M{reference_generation}"
+        evaluation_id = (
+            evaluation_id_for_comparison(
+                candidate_lineage_id=candidate_identity.lineage_id,
+                candidate_generation=candidate_identity.generation or int(args.generation),
+                reference_lineage_id=reference_identity.lineage_id,
+                reference_generation=reference_identity.generation,
+            )
+            if cross_lineage
+            else None
+        )
+        provenance = {
+            "schema": "gocube-checkpoint-evaluation-provenance-v1",
+            "evaluation_id": evaluation_id,
+            "comparison": comparison,
+            "candidate": candidate_identity.as_reference(),
+            "reference": reference_identity.as_reference(),
+            "arena_config": dict(arena_block["driver_config"]),
+            "startset": dict(startset),
+            "startset_fingerprint": run_spec_fingerprint(startset),
+            "master_seed": int(config["master_seed"]),
+            "profile_fingerprint": expected_fingerprint,
+            "performance_policy": dict(performance_policy),
+            "training_mutated": False,
+        }
+        _atomic_json(output / "provenance.json", provenance)
+        engine_manifest_path = output / "manifest.json"
+        if engine_manifest_path.is_file():
+            engine_manifest = _read_json(engine_manifest_path)
+            engine_manifest["evaluation_id"] = evaluation_id
+            engine_manifest["checkpoint_references"] = {
+                "candidate": candidate_identity.as_reference(),
+                "reference": reference_identity.as_reference(),
+            }
+            engine_manifest["provenance"] = str(output / "provenance.json")
+            _atomic_json(engine_manifest_path, engine_manifest)
         payload = {
             "schema": ARENA_RESULT_SCHEMA,
             "generation": int(args.generation),
@@ -1297,6 +1580,9 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
             ),
             "startset_fingerprint": run_spec_fingerprint(startset),
             "evaluation_output": str(output),
+            "evaluation_id": evaluation_id,
+            "candidate_reference": candidate_identity.as_reference(),
+            "reference_reference": reference_identity.as_reference(),
             "candidate_generation": int(args.generation),
             "reference_generation": reference_generation,
             "metrics": {
@@ -1313,6 +1599,9 @@ def run_arena(args: argparse.Namespace) -> dict[str, object]:
                 "effective_cpu_cores": float(
                     telemetry_map.get("effective_cpu_cores", 0.0)
                 ),
+                "performance_status": str(telemetry_map.get("performance_status", "HEALTHY")),
+                "performance_warnings": list(telemetry_map.get("performance_warnings", [])),
+                "performance_gate": dict(performance_policy),
             },
         }
         _atomic_json(result_path, payload)

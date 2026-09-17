@@ -43,7 +43,8 @@ def test_torus9_driver_is_not_claimed_as_cube_driver():
     assert "cube" not in run_driver.__doc__.lower()
 
 
-def test_periodic_arena_is_lineage_owned():
+def test_periodic_arena_uses_resolved_checkpoint_references():
     source = (ROOT / "tools" / "torus9_run_driver.py").read_text(encoding="utf-8")
-    assert 'output = root / "arena" / f"generation-{args.generation:04d}"' in source
-    assert "evaluation_dir(" not in source
+    assert "resolve_checkpoint(" in source
+    assert "evaluation_id_for_comparison(" in source
+    assert "ensure_evaluation_layout(" in source
