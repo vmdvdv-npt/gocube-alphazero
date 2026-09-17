@@ -122,9 +122,9 @@ from .torus9_run_owned import (
     install_telegram_start_notification,
 )
 
-# Production policy installation is process-local.  It changes no Golden
-# rules/model semantics; it only makes the declared tuning knobs run-owned and
-# exposes their effective values through Telegram at startup.
+# Existing run-owned tuning and Telegram presentation policies remain
+# process-local. Application-code rollover/provenance is deliberately not
+# installed here; it is an explicit child-lifecycle policy per orchestrator.
 install_run_spec_policy()
 install_telegram_start_notification()
 
