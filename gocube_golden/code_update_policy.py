@@ -12,7 +12,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from .orchestrator import atomic_write_json, read_json
 from .provenance import capture_code_identity
@@ -181,7 +181,7 @@ def install_code_update_policy() -> None:
 
     def run_child(
         self: object,
-        command: object,
+        command: Sequence[str],
         *,
         generation: int,
         resume: bool,
