@@ -19,6 +19,8 @@ from gocube_golden.production_orchestrator import (
     SupervisionPolicy,
     UniversalProductionTrainingOrchestrator,
 )
+import tools.torus9_staged_sims_harness as staged_harness
+import tools.training_orchestrator_core as training_cli
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,6 +157,37 @@ def _context(
     )
 
 
+def _composition_spec(topology: str) -> SimpleNamespace:
+    return SimpleNamespace(orchestrator_spec=SimpleNamespace(topology=topology))
+
+
+def _install_cli_composition_probe(
+    monkeypatch: pytest.MonkeyPatch, spec: SimpleNamespace
+) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+
+    class ProbeRun:
+        def __init__(self, **kwargs: object) -> None:
+            calls.append(dict(kwargs))
+            policy = kwargs.get("child_lifecycle_policy")
+            self.child_lifecycle_policy = (
+                policy if policy is not None else NoOpChildLifecyclePolicy()
+            )
+
+    monkeypatch.setattr(
+        training_cli,
+        "StrictRunSpec",
+        SimpleNamespace(load=lambda path, *, repo_root: spec),
+    )
+    monkeypatch.setattr(
+        training_cli,
+        "load_persisted_run_spec",
+        lambda *, repo_root, lineage_id: spec,
+    )
+    monkeypatch.setattr(training_cli, "StrictProductionTrainingOrchestrator", ProbeRun)
+    return calls
+
+
 def test_import_gocube_golden_does_not_install_code_update_monkeypatch() -> None:
     code = r'''
 import inspect, sys
@@ -192,10 +225,76 @@ def test_explicit_policy_is_instance_local(
     assert isinstance(run_b.child_lifecycle_policy, NoOpChildLifecyclePolicy)
     assert run_b.child_lifecycle_policy is not policy
 
-    cli_source = (ROOT / "tools" / "training_orchestrator_core.py").read_text(encoding="utf-8")
-    harness_source = (ROOT / "tools" / "torus9_staged_sims_harness.py").read_text(encoding="utf-8")
-    assert "child_lifecycle_policy=CodeUpdateProvenancePolicy()" in cli_source
-    assert "child_lifecycle_policy=CodeUpdateProvenancePolicy()" in harness_source
+
+def test_training_cli_torus9_new_run_enables_code_update_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = _composition_spec("torus9")
+    calls = _install_cli_composition_probe(monkeypatch, spec)
+    run = training_cli._from_source(
+        SimpleNamespace(spec="synthetic.json", lineage="torus-new"), terminal=False
+    )
+
+    assert isinstance(run.child_lifecycle_policy, CodeUpdateProvenancePolicy)
+    assert isinstance(calls[0]["child_lifecycle_policy"], CodeUpdateProvenancePolicy)
+
+
+def test_training_cli_torus9_resume_enables_code_update_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = _composition_spec("torus9")
+    calls = _install_cli_composition_probe(monkeypatch, spec)
+    run = training_cli._from_lineage(
+        SimpleNamespace(lineage="torus-resume"), terminal=False
+    )
+
+    assert isinstance(run.child_lifecycle_policy, CodeUpdateProvenancePolicy)
+    assert isinstance(calls[0]["child_lifecycle_policy"], CodeUpdateProvenancePolicy)
+
+
+@pytest.mark.parametrize("factory_name", ["_from_source", "_from_lineage"])
+def test_training_cli_non_torus9_uses_default_noop_policy(
+    monkeypatch: pytest.MonkeyPatch, factory_name: str
+) -> None:
+    spec = _composition_spec("synthetic-other-topology")
+    calls = _install_cli_composition_probe(monkeypatch, spec)
+    args = SimpleNamespace(spec="synthetic.json", lineage="other-lineage")
+    run = getattr(training_cli, factory_name)(args, terminal=False)
+
+    assert isinstance(run.child_lifecycle_policy, NoOpChildLifecyclePolicy)
+    assert not isinstance(calls[0]["child_lifecycle_policy"], CodeUpdateProvenancePolicy)
+
+
+def test_staged_harness_passes_code_update_policy_explicitly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class ProbeStop(RuntimeError):
+        pass
+
+    def probe_orchestrator(**kwargs: object) -> object:
+        captured.update(kwargs)
+        raise ProbeStop
+
+    monkeypatch.setattr(
+        staged_harness, "StrictProductionTrainingOrchestrator", probe_orchestrator
+    )
+    monkeypatch.setattr(
+        staged_harness,
+        "build_arm_run_spec",
+        lambda spec, arm: SimpleNamespace(),
+    )
+
+    with pytest.raises(ProbeStop):
+        staged_harness._run_arm(
+            "experiment",
+            {},
+            SimpleNamespace(arm_id="g64"),
+            {},
+        )
+
+    assert isinstance(captured["child_lifecycle_policy"], CodeUpdateProvenancePolicy)
 
 
 def test_dirty_tree_is_fail_closed_only_when_explicit_policy_is_enabled(
@@ -437,7 +536,6 @@ def test_existing_pr136_manifest_and_provenance_shape_remains_compatible(
         ),
         encoding="utf-8",
     )
-
     monkeypatch.setattr(
         policy_module,
         "capture_code_identity",

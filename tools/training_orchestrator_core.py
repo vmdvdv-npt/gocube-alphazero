@@ -17,7 +17,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from gocube_golden.code_update_policy import CodeUpdateProvenancePolicy
-from gocube_golden.production_orchestrator import format_production_status
+from gocube_golden.production_orchestrator import (
+    ChildLifecyclePolicy,
+    format_production_status,
+)
 from gocube_golden.provenance import file_sha256
 from gocube_golden.provenance import canonical_json
 from gocube_golden.artifact_catalog import ARTIFACT_VALIDATION_SCHEMA
@@ -29,30 +32,39 @@ from gocube_golden.run_spec import (
 )
 
 
+def _child_lifecycle_policy_for(spec: StrictRunSpec) -> ChildLifecyclePolicy | None:
+    if spec.orchestrator_spec.topology == "torus9":
+        return CodeUpdateProvenancePolicy()
+    return None
+
+
+def _compose_orchestrator(
+    spec: StrictRunSpec,
+    *,
+    lineage_id: str,
+    terminal: bool,
+) -> StrictProductionTrainingOrchestrator:
+    return StrictProductionTrainingOrchestrator(
+        repo_root=ROOT,
+        run_spec=spec,
+        lineage_id=lineage_id,
+        terminal=terminal,
+        child_lifecycle_policy=_child_lifecycle_policy_for(spec),
+    )
+
+
 def _from_source(
     args: argparse.Namespace, *, terminal: bool = True
 ) -> StrictProductionTrainingOrchestrator:
     spec = StrictRunSpec.load(args.spec, repo_root=ROOT)
-    return StrictProductionTrainingOrchestrator(
-        repo_root=ROOT,
-        run_spec=spec,
-        lineage_id=args.lineage,
-        terminal=terminal,
-        child_lifecycle_policy=CodeUpdateProvenancePolicy(),
-    )
+    return _compose_orchestrator(spec, lineage_id=args.lineage, terminal=terminal)
 
 
 def _from_lineage(
     args: argparse.Namespace, *, terminal: bool = True
 ) -> StrictProductionTrainingOrchestrator:
     spec = load_persisted_run_spec(repo_root=ROOT, lineage_id=args.lineage)
-    return StrictProductionTrainingOrchestrator(
-        repo_root=ROOT,
-        run_spec=spec,
-        lineage_id=args.lineage,
-        terminal=terminal,
-        child_lifecycle_policy=CodeUpdateProvenancePolicy(),
-    )
+    return _compose_orchestrator(spec, lineage_id=args.lineage, terminal=terminal)
 
 
 def _parent_checkpoint(args: argparse.Namespace) -> dict[str, object] | None:
