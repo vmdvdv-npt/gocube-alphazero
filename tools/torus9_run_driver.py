@@ -635,7 +635,7 @@ def _prepare_state(
                 "replay_validation_schema", ARTIFACT_VALIDATION_SCHEMA
             ),
         }
-    elif catalog_path.is_file():
+    elif catalog_path.is_file() and previous_replay.resolve().is_relative_to(root.resolve()):
         catalog = ArtifactCatalog.load(catalog_path, root=root)
         replay_identity = catalog.identity(_relative(root, previous_replay))
     restore_started = time.perf_counter()
