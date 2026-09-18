@@ -247,6 +247,15 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
                 raise FileNotFoundError("Referenced Torus9 parent rolling replay is missing")
             return sources
 
+        # The production driver may provide an immutable fresh-replay window
+        # spanning multiple lineage roots.  Keep those exact references; the
+        # local-path reconstruction below is only the fallback for callers
+        # that did not resolve an external parent window.
+        expected_sources = min(requested_generations, generation)
+        supplied = tuple(fallback)
+        if len(supplied) == expected_sources and all(path.is_file() for path in supplied):
+            return supplied
+
         first = max(1, generation - requested_generations + 1)
         parent_root = checkpoint_path.parents[1]
         candidates = tuple(
