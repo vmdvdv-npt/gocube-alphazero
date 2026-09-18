@@ -12,18 +12,26 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import time
 from typing import Mapping, Protocol, Sequence
 
 from .orchestrator import (
     ProductionTrainingOrchestrator,
-    atomic_write_json,
-    atomic_write_text,
     parse_utc,
-    read_json,
     utc_now,
+)
+from .process_supervision import (
+    atomic_write_json,
+    clear_active_child,
+    process_group_exists,
+    read_active_child,
+    read_json,
+    start_owned_child,
+    terminate_process_group,
+    timestamp_age_seconds,
+    wait_for_process_group_exit,
+    write_active_child,
 )
 
 
@@ -124,18 +132,6 @@ class NoOpChildLifecyclePolicy:
         del context, error
 
 
-def _timestamp_age_seconds(value: object) -> float | None:
-    if value is None:
-        return None
-    try:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return max(0.0, time.time() - float(value))
-        parsed = parse_utc(str(value))
-        return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
 def _metric_number(payload: Mapping[str, object], dotted: str) -> float | None:
     current: object = payload
     for key in dotted.split("."):
@@ -186,10 +182,10 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
         snapshot = super()._health_snapshot(child)
         driver = snapshot.get("driver_health")
         if isinstance(driver, Mapping):
-            snapshot["driver_liveness_age_sec"] = _timestamp_age_seconds(
+            snapshot["driver_liveness_age_sec"] = timestamp_age_seconds(
                 driver.get("liveness_at", driver.get("at"))
             )
-            snapshot["driver_progress_age_sec"] = _timestamp_age_seconds(
+            snapshot["driver_progress_age_sec"] = timestamp_age_seconds(
                 driver.get("progress_at")
             )
             snapshot["driver_progress_token"] = driver.get("progress_token")
@@ -269,22 +265,14 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
 
     @staticmethod
     def _process_group_exists(process_group: int) -> bool:
-        try:
-            os.killpg(int(process_group), 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
+        return process_group_exists(process_group)
 
     def _wait_for_process_group_exit(self, process_group: int, timeout: float) -> bool:
-        deadline = time.monotonic() + max(0.0, float(timeout))
-        while self._process_group_exists(process_group):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0.0:
-                return False
-            time.sleep(min(0.01, remaining))
-        return True
+        return wait_for_process_group_exit(
+            process_group,
+            timeout,
+            exists=self._process_group_exists,
+        )
 
     def _terminate_child_group(self, process: subprocess.Popen[bytes] | subprocess.Popen[str], *, reason: str) -> None:
         process_group = int(process.pid)
@@ -298,36 +286,14 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
             pid=process.pid,
             reason=reason,
         )
-        if group_alive:
-            try:
-                os.killpg(process_group, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-        if process.poll() is None:
-            try:
-                process.wait(timeout=self.supervision.critical_child_grace_seconds)
-            except subprocess.TimeoutExpired:
-                pass
-        group_gone = self._wait_for_process_group_exit(
-            process_group,
-            self.supervision.critical_child_grace_seconds,
+        terminate_process_group(
+            process,
+            process_group=process_group,
+            term_timeout=self.supervision.critical_child_grace_seconds,
+            kill_timeout=10.0,
+            reason=reason,
+            exists=self._process_group_exists,
         )
-        if not group_gone:
-            try:
-                os.killpg(process_group, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        if process.poll() is None:
-            try:
-                process.wait(timeout=10.0)
-            except subprocess.TimeoutExpired as exc:
-                raise RuntimeError(
-                    f"child process {process.pid} survived scoped fail-closed termination"
-                ) from exc
-        if not self._wait_for_process_group_exit(process_group, 10.0):
-            raise RuntimeError(
-                f"child process group {process_group} survived scoped fail-closed termination"
-            )
 
     @staticmethod
     def _note_secondary_failure(error: BaseException, label: str, secondary: BaseException) -> None:
@@ -361,13 +327,13 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
         try:
             self.paths.driver_heartbeat.unlink(missing_ok=True)
             self.events.emit("INFO", f"Starting {phase}", generation=generation, argv=rendered)
-            process = subprocess.Popen(
+            process = start_owned_child(
                 rendered,
                 cwd=self.repo_root,
                 env=self._driver_env(generation, resume=resume, phase=phase),
-                start_new_session=True,
+                popen=subprocess.Popen,
             )
-            atomic_write_json(
+            write_active_child(
                 self.active_child_path,
                 {
                     "schema": ACTIVE_CHILD_SCHEMA,
@@ -413,7 +379,7 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
                     process,
                     reason="supervisor monitor exited before child process group was fully reaped",
                 )
-            self.active_child_path.unlink(missing_ok=True)
+            clear_active_child(self.active_child_path)
             if exit_code is None:
                 raise RuntimeError("child process exited without an observable exit code")
         except BaseException as error:
@@ -428,7 +394,7 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
             except BaseException as cleanup_error:
                 self._note_secondary_failure(error, "child process-group cleanup failed", cleanup_error)
             try:
-                self.active_child_path.unlink(missing_ok=True)
+                clear_active_child(self.active_child_path)
             except BaseException as cleanup_error:
                 self._note_secondary_failure(error, "active-child cleanup failed", cleanup_error)
             try:
@@ -669,11 +635,7 @@ class UniversalProductionTrainingOrchestrator(ProductionTrainingOrchestrator):
                 "last_arena_generation": arena_generations[-1] if arena_generations else None,
                 "arena_generations": arena_generations,
                 "safe_stop_eta_seconds": safe_stop_eta_seconds,
-                "active_child": (
-                    read_json(self.active_child_path)
-                    if self.active_child_path.is_file()
-                    else None
-                ),
+                "active_child": read_active_child(self.active_child_path),
             }
         )
         return status

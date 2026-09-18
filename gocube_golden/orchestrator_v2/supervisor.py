@@ -15,17 +15,29 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from enum import Enum
 import os
 from pathlib import Path
 import re
-import signal
 import subprocess
 import time
 import uuid
 
-from ..orchestrator import atomic_write_json, read_json
+from ..process_supervision import (
+    ProcessOwnershipError,
+    atomic_write_json,
+    clear_active_child,
+    heartbeat_timestamp,
+    process_group_exists,
+    process_group_for,
+    process_group_owned_by,
+    read_active_child,
+    read_json,
+    start_owned_child,
+    terminate_process_group,
+    timestamp_seconds,
+    write_active_child,
+)
 
 
 SUPERVISOR_SCHEMA = "gocube-orchestrator-supervisor-v2"
@@ -150,7 +162,7 @@ class ActiveChild:
             attempt = int(payload.get("attempt", 1))
             pid = int(payload["pid"])
             process_group = int(payload.get("process_group", pid))
-            started_at = _epoch_seconds(payload.get("started_at"))
+            started_at = timestamp_seconds(payload.get("started_at"))
         except (KeyError, TypeError, ValueError) as exc:
             raise SupervisorIntegrityError("active-child identity is malformed") from exc
         if lineage_id != owner_lineage_id:
@@ -233,17 +245,6 @@ class HeartbeatStatus:
     @property
     def stale(self) -> bool:
         return self.liveness_stale or self.progress_stale
-
-
-def _epoch_seconds(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    if isinstance(value, str):
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.timestamp()
-    raise ValueError("timestamp is required")
 
 
 def _confined_path(root: Path, value: object, label: str) -> Path:
@@ -368,7 +369,7 @@ class SupervisorV2:
                     reason="active child and generation intent disagree",
                     active_child=active,
                 )
-            group_alive = self._child_group_alive(active.process_group)
+            group_alive = process_group_exists(active.process_group)
             if group_alive and self._child_group_matches(active):
                 return RecoveryPlan(
                     action=SupervisorAction.REATTACH,
@@ -464,7 +465,7 @@ class SupervisorV2:
             except TechnicalFailure as exc:
                 if active is not None:
                     self._terminate_group(active, reason=str(exc), process=process)
-                self.active_child_path.unlink(missing_ok=True)
+                clear_active_child(self.active_child_path)
                 if attempt >= self.policy.max_attempts:
                     self._write_stop(generation, attempt, str(exc))
                     return SupervisionResult(
@@ -541,7 +542,7 @@ class SupervisorV2:
             return None
         try:
             return ActiveChild.from_dict(
-                read_json(self.active_child_path),
+                read_active_child(self.active_child_path) or {},
                 root=self.root,
                 owner_lineage_id=self.lineage_id,
             )
@@ -596,28 +597,17 @@ class SupervisorV2:
                     "AZ_DRIVER_HEARTBEAT_PATH": str(liveness_path),
                 }
             )
-            process = subprocess.Popen(
+            process = start_owned_child(
                 self.command,
-                cwd=str(self.cwd) if self.cwd is not None else None,
+                cwd=self.cwd,
                 env=child_env,
-                start_new_session=True,
+                popen=subprocess.Popen,
             )
         try:
             pid = int(process.pid)
-            process_group = os.getpgid(pid)
-        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            process_group = process_group_for(process)
+        except (AttributeError, OSError, ProcessOwnershipError, TypeError, ValueError) as exc:
             raise SupervisorIntegrityError("launcher did not return a usable child process") from exc
-        if process_group != pid:
-            # A V2 execution unit must own its own group; never record a shared
-            # group that could make a later cleanup affect unrelated work.
-            # The launcher is responsible for this failed child; terminate the
-            # direct PID only and never signal the unowned shared group.
-            try:
-                process.terminate()
-                process.wait(timeout=self.policy.termination_grace_seconds)
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-            raise SupervisorIntegrityError("launcher did not create a private process group")
         active = ActiveChild(
             lineage_id=self.lineage_id,
             generation=generation,
@@ -630,7 +620,7 @@ class SupervisorV2:
             progress_path=progress_path,
         )
         try:
-            atomic_write_json(self.active_child_path, active.to_dict(self.root))
+            write_active_child(self.active_child_path, active.to_dict(self.root))
         except BaseException as exc:
             self._terminate_group(active, reason="active-child publication failed", process=process)
             raise SupervisorIntegrityError("could not publish active-child identity") from exc
@@ -643,15 +633,15 @@ class SupervisorV2:
     ) -> None:
         while True:
             if self._has_commit(active.generation):
-                if self._child_group_alive(active.process_group):
+                if process_group_exists(active.process_group):
                     self._terminate_group(active, reason="commit marker published", process=process)
-                self.active_child_path.unlink(missing_ok=True)
+                clear_active_child(self.active_child_path)
                 return
 
             if process is not None and process.poll() is not None:
                 code = int(process.returncode)
                 raise TechnicalFailure(f"child exited with code {code}")
-            if not self._child_group_alive(active.process_group):
+            if not process_group_exists(active.process_group):
                 raise TechnicalFailure("active child process group is gone")
 
             health = self.heartbeat_status(active)
@@ -665,52 +655,17 @@ class SupervisorV2:
             self.sleeper(self.policy.poll_interval_seconds)
 
     def _heartbeat_timestamp(self, path: Path, field: str, now: float) -> float | None:
-        if not path.is_file():
-            return None
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError):
-            try:
-                return path.stat().st_mtime
-            except OSError:
-                return None
-        raw = payload.get(field)
-        if raw is None and field == "progress_at":
-            raw = payload.get("progressed_at")
-        if raw is None and not (field == "progress_at" and "liveness_at" in payload):
-            # A generic {"at": ...} heartbeat is accepted only as a
-            # compatibility fallback.  The V2 driver publishes both fields.
-            raw = payload.get("at")
-        try:
-            return _epoch_seconds(raw) if raw is not None else None
-        except (TypeError, ValueError, OverflowError):
-            return None
+        del now
+        return heartbeat_timestamp(path, field)
 
     def _has_commit(self, generation: int) -> bool:
         marker = self.last_committed()
         return marker is not None and marker.generation >= generation
 
-    @staticmethod
-    def _child_group_alive(process_group: int) -> bool:
-        try:
-            os.killpg(int(process_group), 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
-
     def _child_group_matches(self, child: ActiveChild) -> bool:
-        if not self._child_group_alive(child.process_group):
+        if not process_group_exists(child.process_group):
             return False
-        try:
-            return os.getpgid(child.pid) == child.process_group
-        except ProcessLookupError:
-            # The leader may have exited while descendants still own the
-            # recorded group; the durable record still scopes cleanup.
-            return True
-        except PermissionError:
-            return True
+        return process_group_owned_by(child.pid, child.process_group)
 
     def _discard_committed_stale_child(
         self,
@@ -719,20 +674,14 @@ class SupervisorV2:
     ) -> None:
         if child is None or last_committed_generation is None or child.generation > last_committed_generation:
             return
-        if self._child_group_alive(child.process_group):
+        if process_group_exists(child.process_group):
             if not self._can_terminate_group(child):
                 raise SupervisorIntegrityError("committed stale child process group ownership mismatch")
             self._terminate_group(child, reason="child belongs to an already committed generation")
-        self.active_child_path.unlink(missing_ok=True)
+        clear_active_child(self.active_child_path)
 
     def _can_terminate_group(self, child: ActiveChild) -> bool:
-        process_group = int(child.process_group)
-        if process_group <= 1 or process_group == os.getpgrp():
-            return False
-        try:
-            return os.getpgid(child.pid) == process_group
-        except (ProcessLookupError, PermissionError):
-            return True
+        return process_group_owned_by(child.pid, child.process_group)
 
     def _terminate_group(
         self,
@@ -741,56 +690,18 @@ class SupervisorV2:
         reason: str,
         process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None,
     ) -> None:
-        process_group = int(child.process_group)
-        if process_group <= 1 or process_group == os.getpgrp():
-            raise SupervisorIntegrityError("refusing to terminate an unscoped process group")
         try:
-            recorded_group = os.getpgid(child.pid)
-        except ProcessLookupError:
-            recorded_group = process_group
-        except PermissionError:
-            recorded_group = process_group
-        if recorded_group != process_group:
-            raise SupervisorIntegrityError("refusing to terminate a process group with mismatched ownership")
-        if not self._child_group_alive(process_group):
-            if process is not None:
-                try:
-                    process.wait(timeout=0)
-                except subprocess.TimeoutExpired:
-                    pass
-            return
-        try:
-            os.killpg(process_group, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        if process is not None:
-            try:
-                process.wait(timeout=self.policy.termination_grace_seconds)
-            except subprocess.TimeoutExpired:
-                pass
-        if self._wait_group_gone(process_group, self.policy.termination_grace_seconds):
-            return
-        try:
-            os.killpg(process_group, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-        if process is not None:
-            try:
-                process.wait(timeout=self.policy.termination_grace_seconds)
-            except subprocess.TimeoutExpired:
-                pass
-        if not self._wait_group_gone(process_group, self.policy.termination_grace_seconds):
-            raise SupervisorIntegrityError(
-                f"scoped child process group {process_group} survived termination: {reason}"
+            terminate_process_group(
+                process,
+                owner_pid=child.pid,
+                process_group=child.process_group,
+                term_timeout=self.policy.termination_grace_seconds,
+                kill_timeout=self.policy.termination_grace_seconds,
+                reason=reason,
+                sleeper=self.sleeper,
             )
-
-    def _wait_group_gone(self, process_group: int, timeout: float) -> bool:
-        deadline = time.monotonic() + max(0.0, float(timeout))
-        while self._child_group_alive(process_group):
-            if time.monotonic() >= deadline:
-                return False
-            self.sleeper(min(0.05, max(0.0, deadline - time.monotonic())))
-        return True
+        except ProcessOwnershipError as exc:
+            raise SupervisorIntegrityError(str(exc)) from exc
 
     def _write_stop(self, generation: int, attempt: int, reason: str) -> None:
         committed = self.last_committed()
@@ -809,7 +720,7 @@ class SupervisorV2:
         )
 
     def _clear_runtime_identity(self) -> None:
-        self.active_child_path.unlink(missing_ok=True)
+        clear_active_child(self.active_child_path)
         self.generation_intent_path.unlink(missing_ok=True)
 
 

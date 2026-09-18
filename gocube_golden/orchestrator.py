@@ -24,6 +24,13 @@ import time
 from typing import Any, Mapping, Sequence
 
 from .artifact_catalog import ArtifactCatalog, ARTIFACT_CATALOG_SCHEMA
+from .process_supervision import (
+    atomic_write_json,
+    atomic_write_text,
+    heartbeat_age_seconds,
+    read_json,
+    start_owned_child,
+)
 from .run_storage import (
     active_lineage_dir,
     create_lineage,
@@ -69,40 +76,6 @@ def sha256_file(path: Path) -> str:
                 break
             digest.update(chunk)
     return "sha256:" + digest.hexdigest()
-
-
-def _fsync_dir(path: Path) -> None:
-    descriptor: int | None = None
-    try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        os.fsync(descriptor)
-    except OSError:
-        pass
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-
-
-def atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    with temporary.open("w", encoding="utf-8") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
-    _fsync_dir(path.parent)
-
-
-def atomic_write_json(path: Path, payload: Mapping[str, object] | Sequence[object]) -> None:
-    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
-
-
-def read_json(path: Path) -> dict[str, object]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"Expected JSON object: {path}")
-    return payload
 
 
 def _git_sha(repo_root: Path) -> str:
@@ -1034,7 +1007,10 @@ class ProductionTrainingOrchestrator:
         heartbeat_age: float | None = None
         driver_health: dict[str, object] | None = None
         if self.paths.driver_heartbeat.is_file():
-            heartbeat_age = max(0.0, time.time() - self.paths.driver_heartbeat.stat().st_mtime)
+            heartbeat_age = heartbeat_age_seconds(
+                self.paths.driver_heartbeat,
+                "liveness_at",
+            )
             try:
                 driver_health = read_json(self.paths.driver_heartbeat)
             except Exception:
@@ -1100,11 +1076,11 @@ class ProductionTrainingOrchestrator:
             profile_path=str(self.spec.profile_path),
         )
         self.events.emit("INFO", f"Starting {phase}", generation=generation, argv=rendered)
-        process = subprocess.Popen(
+        process = start_owned_child(
             rendered,
             cwd=self.repo_root,
             env=self._driver_env(generation, resume=resume, phase=phase),
-            start_new_session=True,
+            popen=subprocess.Popen,
         )
         while True:
             code = process.poll()
