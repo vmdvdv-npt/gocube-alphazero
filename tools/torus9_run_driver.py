@@ -1343,7 +1343,8 @@ def _v2_generation_config(value: object) -> dict[str, object]:
     replay = _mapping(effective.get("replay"), "effective_config.replay")
     execution = _mapping(effective.get("execution"), "effective_config.execution")
     extensions = _mapping(effective.get("extensions", {}), "effective_config.extensions")
-    seeds = _mapping(extensions.get("seeds", extensions), "effective_config.extensions.seeds")
+    seed_values = extensions.get("seeds", execution)
+    seeds = _mapping(seed_values, "effective_config.execution seeds")
     workers = int(execution["workers"])
     active_contexts = int(
         execution["active_contexts"]
