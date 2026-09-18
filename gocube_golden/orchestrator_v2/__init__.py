@@ -1,3 +1,14 @@
-"""Versioned contracts for Orchestrator V2."""
+"""Versioned contracts and runtime resolution for Orchestrator V2."""
 
 from .contracts import *  # noqa: F401,F403
+from .artifact_resolver import (  # noqa: F401
+    NODE_DIRECTORY,
+    ArtifactIntegrityError,
+    ArtifactResolutionError,
+    ArtifactResolver,
+    GraphIntegrityError,
+    ResolvedArtifact,
+    ResolvedCheckpointNode,
+    ResolvedEffectiveConfig,
+    checkpoint_node_path,
+)
