@@ -259,13 +259,17 @@ def _read_jsonl(path: Path) -> tuple[dict[str, object], ...]:
 
 def _read_jsonl_with_identity(
     path: Path,
+    *,
+    compute_hash: bool = True,
+    known_sha256: str | None = None,
 ) -> tuple[tuple[dict[str, object], ...], dict[str, object]]:
-    """Parse JSONL and compute its byte identity in one sequential read."""
+    """Parse JSONL and optionally reuse a resolver-verified byte identity."""
     rows: list[dict[str, object]] = []
-    digest = hashlib.sha256()
+    digest = hashlib.sha256() if compute_hash else None
     with path.open("rb") as handle:
         for line_number, raw_line in enumerate(handle, 1):
-            digest.update(raw_line)
+            if digest is not None:
+                digest.update(raw_line)
             try:
                 line = raw_line.decode("utf-8")
             except UnicodeDecodeError as exc:
@@ -277,7 +281,11 @@ def _read_jsonl_with_identity(
                 raise ValueError(f"Replay row {line_number} is not an object: {path}")
             rows.append(value)
     return tuple(rows), {
-        "sha256": "sha256:" + digest.hexdigest(),
+        "sha256": (
+            known_sha256
+            if known_sha256 is not None
+            else "sha256:" + digest.hexdigest()  # type: ignore[union-attr]
+        ),
         "size_bytes": path.stat().st_size,
         "row_count": len(rows),
     }
@@ -554,6 +562,10 @@ class Torus9TrainingAdapter:
         # complete canonical row content still match.  replay_row_id alone is
         # not a semantic cache key because replay rows are mutable mappings.
         self._validated_sample_fingerprints: dict[str, str] = {}
+        # Immutable replay artifacts may carry durable evidence that their
+        # rows already passed semantic validation. This shared restore state
+        # is deliberately independent of any orchestrator implementation.
+        self._trusted_historical_row_ids: set[str] = set()
         self._diagnostic_timing: MutableMapping[str, object] | None = None
         self._progress_callback: Callable[..., None] | None = None
         self.target_identity = {
@@ -992,7 +1004,24 @@ class Torus9TrainingAdapter:
         # here would add an avoidable full-window walk before training.
         return replay.rows
 
+    def _trust_historical_rows(self, rows: Sequence[Mapping[str, object]]) -> None:
+        """Mark rows covered by verified immutable replay evidence as trusted."""
+        row_ids = {str(row.get("replay_row_id", "")) for row in rows}
+        if "" in row_ids or len(row_ids) != len(rows):
+            raise ValueError("Trusted Torus9 replay row IDs are missing or duplicated")
+        self._trusted_historical_row_ids.update(row_ids)
+
     def validate_replay(self, rows: Sequence[Mapping[str, object]]) -> None:
+        """Validate replay structure and deep-check only untrusted rows.
+
+        This is the common production restore boundary used by both legacy
+        continuation and Orchestrator V2. New self-play rows still enter via
+        ``update_replay`` and are fully semantically validated there.
+        """
+        validation_started = time.perf_counter()
+        cache_lookup_elapsed = 0.0
+        row_fingerprint_elapsed = 0.0
+        semantic_fallback_elapsed = 0.0
         previous_generation = 0
         row_ids: set[str] = set()
         for row in rows:
@@ -1012,14 +1041,269 @@ class Torus9TrainingAdapter:
                 raise ValueError("Current Torus9 replay target fingerprint drift")
             if row.get("ownership_target") is None or row.get("score_target") is None:
                 raise ValueError("Current Torus9 replay auxiliary target is missing")
-            cached_fingerprint = self._validated_sample_fingerprints.get(row_id)
-            current_fingerprint = value_fingerprint(row)
-            if cached_fingerprint != current_fingerprint:
-                self.validate_sample(row)
+            lookup_started = time.perf_counter()
+            trusted = row_id in self._trusted_historical_row_ids
+            cached_fingerprint = (
+                None
+                if trusted
+                else self._validated_sample_fingerprints.get(row_id)
+            )
+            cache_lookup_elapsed += time.perf_counter() - lookup_started
+            if not trusted:
+                fingerprint_started = time.perf_counter()
+                current_fingerprint = value_fingerprint(row)
+                row_fingerprint_elapsed += time.perf_counter() - fingerprint_started
+                if cached_fingerprint != current_fingerprint:
+                    semantic_started = time.perf_counter()
+                    self.validate_sample(row)
+                    semantic_fallback_elapsed += time.perf_counter() - semantic_started
             previous_generation = generation
             row_ids.add(row_id)
         if len(rows) > int(self.replay_profile["cap"]):  # type: ignore[index]
             raise ValueError("Current Torus9 replay cap exceeded")
+        if self._diagnostic_timing is not None:
+            total = time.perf_counter() - validation_started
+            self._diagnostic_timing.update({
+                "replay_validation_cache_lookup_wall_time_sec": cache_lookup_elapsed,
+                "replay_validation_per_row_fingerprint_wall_time_sec": row_fingerprint_elapsed,
+                "replay_validation_semantic_fallback_wall_time_sec": semantic_fallback_elapsed,
+                "replay_validation_semantic_fallback_and_cache_update_wall_time_sec": semantic_fallback_elapsed,
+                "replay_validation_structural_and_other_wall_time_sec": max(
+                    0.0,
+                    total
+                    - cache_lookup_elapsed
+                    - row_fingerprint_elapsed
+                    - semantic_fallback_elapsed,
+                ),
+                "replay_validation_accounted_sum_sec": total,
+            })
+
+    @staticmethod
+    def _verified_replay_evidence(
+        identity: Mapping[str, object] | None,
+        digest: Mapping[str, object],
+        *,
+        row_count: int,
+    ) -> tuple[str | None, bool]:
+        """Verify durable rolling-artifact evidence without rebuilding rows."""
+        if identity is None:
+            return None, False
+        expected_sha = str(identity.get("sha256") or identity.get("artifact_sha256") or "")
+        if expected_sha and expected_sha != str(digest.get("sha256", "")):
+            raise ValueError("Current Torus9 replay artifact SHA-256 mismatch")
+        expected_size = identity.get("size_bytes")
+        if expected_size is not None and int(expected_size) != int(digest.get("size_bytes", -1)):
+            raise ValueError("Current Torus9 replay artifact size mismatch")
+        expected_rows = identity.get("row_count")
+        if expected_rows is not None and int(expected_rows) != int(row_count):
+            raise ValueError("Current Torus9 replay artifact row count mismatch")
+        expected_schema = identity.get("validation_schema")
+        if expected_schema not in (None, ARTIFACT_VALIDATION_SCHEMA):
+            raise ValueError("Current Torus9 replay validation schema mismatch")
+        expected_content = identity.get("canonical_replay_fingerprint")
+        trusted = (
+            bool(expected_sha)
+            and expected_size is not None
+            and expected_rows is not None
+            and expected_schema == ARTIFACT_VALIDATION_SCHEMA
+            and expected_content is not None
+        )
+        return (str(expected_content) if trusted else None), trusted
+
+    @staticmethod
+    def _verified_replay_source_evidence(
+        identity: Mapping[str, object] | None,
+        digest: Mapping[str, object],
+        *,
+        generation: int,
+        row_count: int,
+    ) -> bool:
+        """Return whether one fresh artifact can skip per-row semantics."""
+        if identity is None:
+            return False
+        expected_sha = str(identity.get("sha256") or identity.get("artifact_sha256") or "")
+        expected_size = identity.get("size_bytes")
+        expected_rows = identity.get("row_count")
+        if (
+            not expected_sha
+            or expected_sha != str(digest.get("sha256", ""))
+            or expected_size is None
+            or int(expected_size) != int(digest.get("size_bytes", -1))
+            or expected_rows is None
+            or int(expected_rows) != int(row_count)
+            or identity.get("validation_schema") != ARTIFACT_VALIDATION_SCHEMA
+        ):
+            return False
+        raw_component = identity.get("generation_identity")
+        if not isinstance(raw_component, Mapping):
+            return False
+        try:
+            components = _normalize_generation_identities(
+                (raw_component,),
+                label="Torus9 replay source generation identity",
+            )
+        except ValueError:
+            return False
+        component = components[0]
+        if int(component["generation"]) != int(generation):
+            return False
+        if str(component["sha256"]) != expected_sha:
+            return False
+        return int(component.get("row_count", -1)) == int(row_count)
+
+    def _rolling_from_sources(
+        self,
+        sources: Sequence[Path],
+        *,
+        total_evictions: int,
+        generation_identities: Sequence[Mapping[str, object]] | None = None,
+        replay_artifact_identities: Sequence[Mapping[str, object]] | None = None,
+        replay_identity: Mapping[str, object] | None = None,
+    ) -> tuple[Torus9RollingReplay, list[dict[str, object]]]:
+        """Restore exact replay sources through the shared rolling primitive.
+
+        Sources are consumed one at a time. A fresh source is parsed once and
+        appended directly to the rolling buffer; no whole-window grouping or
+        row-copy staging is created. Resolver-verified source identities can
+        therefore skip both the second physical hash and semantic row pass.
+        """
+        replay = Torus9RollingReplay(
+            generations=int(self.replay_profile["generations"]),  # type: ignore[index]
+            maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
+        )
+        replay.total_evictions = int(total_evictions)
+        source_digests: list[dict[str, object]] = []
+        seen_generations: set[int] = set()
+        supplied = {
+            int(component["generation"]): dict(component)
+            for component in _normalize_generation_identities(
+                generation_identities,
+                label="Torus9 referenced replay generation identities",
+            )
+        }
+        source_evidence = tuple(replay_artifact_identities or ())
+
+        def append_generation(
+            generation: int,
+            rows: list[dict[str, object]],
+            digest: Mapping[str, object],
+            identity: Mapping[str, object] | None,
+        ) -> None:
+            if generation in seen_generations:
+                raise ValueError(
+                    f"Referenced Torus9 replay generation M{generation} appears in multiple sources"
+                )
+            source_identity = identity
+            component = (
+                source_identity.get("generation_identity")
+                if isinstance(source_identity, Mapping)
+                else None
+            )
+            if not isinstance(component, Mapping):
+                component = supplied.get(generation)
+            component_valid = False
+            if isinstance(component, Mapping):
+                try:
+                    normalized_component = _normalize_generation_identities(
+                        (component,),
+                        label="Torus9 replay generation identity",
+                    )[0]
+                    component_valid = (
+                        int(normalized_component["generation"]) == int(generation)
+                        and str(normalized_component["sha256"]) == str(digest.get("sha256", ""))
+                        and int(normalized_component.get("row_count", -1)) == len(rows)
+                    )
+                    if component_valid:
+                        component = normalized_component
+                except (TypeError, ValueError):
+                    component_valid = False
+            if not component_valid:
+                component = replay_generation_identity_from_artifact(
+                    generation,
+                    digest.get("sha256"),
+                    len(rows),
+                )
+            else:
+                component = dict(component)
+            trusted = self._verified_replay_source_evidence(
+                source_identity,
+                digest,
+                generation=generation,
+                row_count=len(rows),
+            )
+            if not trusted:
+                for row in rows:
+                    self.validate_sample(row)
+            replay.append_generation(
+                generation,
+                rows,
+                generation_identity=component,
+            )
+            if trusted or not source_identity:
+                # Untrusted sources have just completed the same full semantic
+                # validation used for new rows; only the retained rows need a
+                # trusted marker for the structural pass below.
+                self._trust_historical_rows(rows)
+            seen_generations.add(generation)
+
+        for source_index, source in enumerate(sources):
+            identity = (
+                source_evidence[source_index]
+                if source_index < len(source_evidence)
+                else None
+            )
+            immutable_sha = (
+                str(identity.get("sha256") or identity.get("artifact_sha256"))
+                if isinstance(identity, Mapping)
+                and identity.get("immutable_verified") is True
+                else None
+            )
+            if immutable_sha is None:
+                # Keep the established helper call shape for legacy callers
+                # and tests that replace the full-validation reader.
+                source_rows, digest = _read_jsonl_with_identity(source)
+            else:
+                source_rows, digest = _read_jsonl_with_identity(
+                    source,
+                    compute_hash=False,
+                    known_sha256=immutable_sha,
+                )
+            source_digests.append(digest)
+            current_generation = 0
+            current_rows: list[dict[str, object]] = []
+            generations_in_source: set[int] = set()
+            for row in source_rows:
+                generation = int(row.get("source_generation", 0))
+                if generation <= 0:
+                    raise ValueError("Referenced Torus9 replay generation is malformed")
+                if current_generation and generation < current_generation:
+                    raise ValueError("Referenced Torus9 replay generation ordering drift")
+                if current_generation and generation != current_generation:
+                    append_generation(current_generation, current_rows, digest, identity)
+                    current_rows = []
+                current_generation = generation
+                generations_in_source.add(generation)
+                current_rows.append(row)
+            if current_generation:
+                append_generation(current_generation, current_rows, digest, identity)
+            if source.name.endswith("-fresh.jsonl") and len(generations_in_source) != 1:
+                raise ValueError(
+                    "Referenced Torus9 fresh replay artifact must contain exactly one generation"
+                )
+
+        if not seen_generations:
+            raise ValueError("Referenced Torus9 replay is empty")
+        if replay_identity is not None:
+            schema = _replay_identity_schema_from_payload(replay_identity, None)
+            expected = _replay_fingerprint_from_payload(replay_identity, None)
+            if schema == TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA:
+                if expected is None:
+                    raise ValueError("Torus9 replay composition identity evidence is incomplete")
+                actual = replay.replay_identity_descriptor()
+                if actual["fingerprint"] != expected:
+                    raise ValueError("Current Torus9 replay composition fingerprint mismatch")
+        self._trust_historical_rows(replay.rows)
+        return replay, source_digests
 
     def train(
         self,
@@ -1400,15 +1684,16 @@ class Torus9TrainingAdapter:
                 raise ValueError("Current Torus9 replay composition fingerprint mismatch")
             replay_fingerprint = expected_identity_fingerprint
         validation_started = time.perf_counter()
-        if replay_artifact_identity is None:
-            self.validate_replay(rows)
-        else:
-            # The catalog identity proves that this exact immutable artifact
-            # passed the complete semantic validator at commit time. Populate
-            # the existing row-content cache so the post-append structural
-            # check does not repeat deep validation for historical rows.
-            for row in rows:
-                self._remember_validated_sample(row)
+        trusted_historical = False
+        if replay_artifact_identity is not None and len(replay_sources) == 1:
+            replay_fingerprint, trusted_historical = self._verified_replay_evidence(
+                replay_artifact_identity,
+                replay_digest,
+                row_count=len(rows),
+            )
+        if trusted_historical:
+            self._trust_historical_rows(rows)
+        self.validate_replay(rows)
         if load_timing is not None:
             load_timing["replay_validation_wall_time_sec"] = time.perf_counter() - validation_started
         if not allow_reference and len(rows) != int(metadata["valid_replay_positions"]):

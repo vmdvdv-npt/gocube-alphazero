@@ -199,3 +199,60 @@ def test_v2_parent_identity_reads_checkpoint_ref_sha(tmp_path: Path) -> None:
         parent_path.resolve(),
         parent_ref.sha256,
     )
+
+
+def test_v2_restore_forwards_resolver_replay_evidence_without_rehashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "parent" / "checkpoints" / "M93.pt"
+    replay = tmp_path / "parent" / "replay" / "iter-93-fresh.jsonl"
+    parent.parent.mkdir(parents=True)
+    replay.parent.mkdir(parents=True)
+    parent.write_bytes(b"parent")
+    replay.write_bytes(b"replay")
+    replay_sha = sha256_file(replay)
+    captured: dict[str, object] = {}
+
+    class Adapter:
+        def load_state(self, checkpoint_path: Path, **kwargs: object) -> object:
+            captured.update(kwargs)
+            return object()
+
+    bindings = torus9_run_driver.DriverBindings(
+        training_adapter_factory=lambda **_kwargs: Adapter(),
+        optimizer_steps_per_iteration=1,
+        scientific_validator=lambda _profile, _config: None,
+    )
+    evidence = {
+        "sha256": replay_sha,
+        "size_bytes": replay.stat().st_size,
+        "row_count": 1,
+        "validation_schema": "torus9-replay-validation-v1",
+        "immutable_verified": True,
+    }
+    monkeypatch.setattr(
+        torus9_run_driver,
+        "file_sha256",
+        lambda _path: (_ for _ in ()).throw(
+            AssertionError("V2 restore must reuse resolver identity, not rehash replay")
+        ),
+    )
+
+    torus9_run_driver._prepare_state_v2(
+        root=tmp_path / "output",
+        lineage_id="child",
+        generation=94,
+        profile={},
+        config={},
+        device="cpu",
+        code_identity=object(),  # type: ignore[arg-type]
+        parent_checkpoint=parent,
+        replay_paths=(replay,),
+        parent_sha256="sha256:" + "a" * 64,
+        replay_sha256s=(replay_sha,),
+        replay_artifact_identities=(evidence,),
+        bindings=bindings,
+    )
+
+    assert captured["replay_artifact_identities"] == (evidence,)

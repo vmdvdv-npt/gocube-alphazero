@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from gocube_golden.artifact_catalog import sha256_file
+from gocube_golden.artifact_catalog import (
+    ARTIFACT_VALIDATION_SCHEMA,
+    ArtifactCatalog,
+    sha256_file,
+)
 from gocube_golden.orchestrator_v2.artifact_resolver import (
     ArtifactIntegrityError,
     ArtifactResolutionError,
@@ -22,6 +26,7 @@ from gocube_golden.orchestrator_v2.contracts import (
     EffectiveConfigRef,
 )
 from gocube_golden.provenance import canonical_json
+from gocube_golden.torus9_training import TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA
 
 
 def _write(path: Path, content: bytes) -> str:
@@ -272,6 +277,63 @@ def test_replay_window_is_graph_only_and_oldest_to_newest(tmp_path: Path) -> Non
         "lineage-a", "lineage-a", "lineage-b", "lineage-b"
     ]
     assert resolver.replay_window(parent, 0) == ()
+
+
+def test_replay_window_attaches_catalog_and_checkpoint_evidence(tmp_path: Path) -> None:
+    graph = _make_graph(tmp_path)
+    root = graph.roots["lineage-b"]
+    fresh_path = root / "replay/iter-04-fresh.jsonl"
+    fresh_path.write_text('{"source_generation": 4}\n', encoding="utf-8")
+    fresh_sha = sha256_file(fresh_path)
+    original = CheckpointNode.from_dict(
+        json.loads(checkpoint_node_path(root, graph.refs[4]).read_text())
+    )
+    _rewrite_node(
+        graph,
+        4,
+        CheckpointNode(
+            checkpoint=original.checkpoint,
+            genesis=original.genesis,
+            parent=original.parent,
+            fresh_replay=ArtifactRef("replay/iter-04-fresh.jsonl", fresh_sha),
+            effective_config=original.effective_config,
+            provenance=original.provenance,
+        ),
+    )
+    component = {
+        "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+        "generation": 4,
+        "sha256": fresh_sha,
+        "row_count": 1,
+    }
+    (root / "checkpoints/M4.metadata.json").write_text(
+        json.dumps({
+            "replay_generation_identities": [component],
+            "replay_identity_schema": "torus9-replay-composition-v1",
+            "replay_identity_contract": {"generations": 1, "maximum_positions": 1},
+            "replay_fingerprint": "sha256:" + "4" * 64,
+        }),
+        encoding="utf-8",
+    )
+    catalog = ArtifactCatalog.initialize(
+        root / "runtime/artifact-catalog.json",
+        lineage_id="lineage-b",
+        root=root,
+    )
+    catalog.register_generation(
+        4,
+        [{"path": "replay/iter-04-fresh.jsonl", "sha256": fresh_sha, "size_bytes": fresh_path.stat().st_size}],
+    )
+
+    artifact = ArtifactResolver(graph.runs_root).replay_window(
+        ArtifactResolver(graph.runs_root).checkpoint(graph.refs[4]),
+        1,
+    )[0]
+
+    assert artifact.identity is not None
+    assert artifact.identity["immutable_verified"] is True
+    assert artifact.identity["validation_schema"] == ARTIFACT_VALIDATION_SCHEMA
+    assert artifact.identity["generation_identity"] == component
 
 
 def test_replay_window_missing_and_corrupt_artifacts_fail_closed(tmp_path: Path) -> None:
