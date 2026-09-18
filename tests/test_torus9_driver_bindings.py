@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,6 +65,47 @@ def test_v2_generation_config_accepts_backfilled_execution_seeds() -> None:
     assert config["model_init_seed"] == 202609131001
     assert config["selfplay_master_seed"] == 202609131002
     assert config["training_master_seed"] == 202609131003
+
+
+def test_resume_state_uses_resolved_lineage_without_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AZ_LINEAGE_ID", raising=False)
+    checkpoint = tmp_path / "checkpoints" / "M94.pt"
+    replay = tmp_path / "replay" / "rolling-after-94.jsonl"
+    checkpoint.parent.mkdir(parents=True)
+    replay.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    replay.write_bytes(b"replay")
+
+    loaded_state = SimpleNamespace(
+        optimizer_updates=12,
+        samples_consumed=34,
+        rolling_replay=SimpleNamespace(last_generation=94),
+    )
+    config = {
+        "model_init_seed": 101,
+        "selfplay_master_seed": 202,
+        "training_master_seed": 303,
+    }
+
+    resume_path = base._resume_state(
+        root=tmp_path,
+        lineage_id="torus9-v2-parity-m93-20260918-v1",
+        generation=94,
+        checkpoint=checkpoint,
+        replay=replay,
+        loaded_state=loaded_state,
+        config=config,
+    )
+    payload = json.loads(resume_path.read_text(encoding="utf-8"))
+
+    assert payload["rng"]["training_seed"] == base.derive_seed(
+        303,
+        "torus9-v2-parity-m93-20260918-v1",
+        "training",
+        94,
+    )
 
 
 @pytest.mark.parametrize(

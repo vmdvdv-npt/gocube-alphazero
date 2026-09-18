@@ -1060,6 +1060,7 @@ def _artifact_with_known_identity(
 def _resume_state(
     *,
     root: Path,
+    lineage_id: str,
     generation: int,
     checkpoint: Path,
     replay: Path,
@@ -1091,7 +1092,7 @@ def _resume_state(
             "training_master_seed": int(config["training_master_seed"]),
             "training_seed": derive_seed(
                 int(config["training_master_seed"]),
-                os.environ["AZ_LINEAGE_ID"],
+                lineage_id,
                 "training",
                 generation,
             ),
@@ -1149,6 +1150,7 @@ def _generation_metrics(
 def _publish_generation_result(
     *,
     root: Path,
+    lineage_id: str,
     generation: int,
     profile_fingerprint: str,
     selfplay_metrics: Mapping[str, object],
@@ -1221,6 +1223,7 @@ def _publish_generation_result(
         raise ValueError("Reloaded Torus9 checkpoint generation mismatch")
     resume = _resume_state(
         root=root,
+        lineage_id=lineage_id,
         generation=generation,
         checkpoint=checkpoint,
         replay=replay,
@@ -1587,6 +1590,7 @@ def run_generation(
                 raise ValueError("Committed generation lacks orchestrator self-play metrics")
             return _publish_generation_result(
                 root=root,
+                lineage_id=lineage_id,
                 generation=args.generation,
                 profile_fingerprint=expected_fingerprint,
                 selfplay_metrics=persisted,
@@ -1768,6 +1772,7 @@ def run_generation(
         heartbeat.advance("reload-verification")
         payload = _publish_generation_result(
             root=root,
+            lineage_id=lineage_id,
             generation=args.generation,
             profile_fingerprint=expected_fingerprint,
             selfplay_metrics=selfplay_metrics,
