@@ -20,22 +20,60 @@ _SHA_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMPONENT_RE = re.compile(r"^[^/\\]+$")
 
 
+def _object(value: object, label: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    return value
+
+
+def _required(value: Mapping[str, object], key: str) -> object:
+    if key not in value:
+        raise ValueError(f"{key} is required")
+    return value[key]
+
+
+def _string(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    return value
+
+
+def _integer(value: object, label: str) -> int:
+    if type(value) is not int:
+        raise ValueError(f"{label} must be an integer")
+    return value
+
+
+def _boolean(value: object, label: str) -> bool:
+    if type(value) is not bool:
+        raise ValueError(f"{label} must be a boolean")
+    return value
+
+
+def _optional_string(value: object, label: str) -> str | None:
+    return None if value is None else _string(value, label)
+
+
+def _optional_integer(value: object, label: str) -> int | None:
+    return None if value is None else _integer(value, label)
+
+
 def _component(value: object, label: str) -> str:
-    text = str(value).strip()
+    text = _string(value, label).strip()
     if not text or text in {".", ".."} or not _COMPONENT_RE.fullmatch(text):
         raise ValueError(f"{label} must be one safe path component")
     return text
 
 
 def _sha(value: object, label: str) -> str:
-    text = str(value)
+    text = _string(value, label)
     if not _SHA_RE.fullmatch(text):
         raise ValueError(f"{label} must be canonical sha256:<64 lowercase hex>")
     return text
 
 
 def _path(value: object, label: str) -> str:
-    text = str(value).strip()
+    text = _string(value, label).strip()
     parsed = PurePosixPath(text)
     if not text or parsed.is_absolute() or any(part in {"", ".", ".."} for part in parsed.parts):
         raise ValueError(f"{label} must be a safe relative path")
@@ -70,10 +108,7 @@ def _thaw(value: Any) -> Any:
 
 
 def _map(value: Mapping[str, object], key: str) -> Mapping[str, object]:
-    item = value.get(key)
-    if not isinstance(item, Mapping):
-        raise ValueError(f"{key} must be an object")
-    return item
+    return _object(_required(value, key), key)
 
 
 def contract_fingerprint(payload: Mapping[str, object]) -> str:
@@ -94,7 +129,9 @@ class ArtifactRef:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "ArtifactRef":
-        return cls(str(value["path"]), str(value["sha256"]))
+        payload = _object(value, "artifact")
+        return cls(_string(_required(payload, "path"), "artifact path"),
+                   _string(_required(payload, "sha256"), "artifact sha256"))
 
 
 @dataclass(frozen=True)
@@ -110,9 +147,10 @@ class CheckpointRef:
         object.__setattr__(self, "topology", _component(self.topology, "topology"))
         object.__setattr__(self, "lineage_id", _component(self.lineage_id, "lineage_id"))
         object.__setattr__(self, "checkpoint_id", _component(self.checkpoint_id, "checkpoint_id"))
-        if isinstance(self.generation, bool) or int(self.generation) < 0:
+        generation = _integer(self.generation, "checkpoint generation")
+        if generation < 0:
             raise ValueError("checkpoint generation must be a non-negative integer")
-        object.__setattr__(self, "generation", int(self.generation))
+        object.__setattr__(self, "generation", generation)
         object.__setattr__(self, "path", _path(self.path, "checkpoint path"))
         object.__setattr__(self, "sha256", _sha(self.sha256, "checkpoint sha256"))
 
@@ -123,10 +161,19 @@ class CheckpointRef:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "CheckpointRef":
-        sha = value.get("sha256") or value.get("artifact_sha256")
-        return cls(str(value["topology"]), str(value["lineage_id"]),
-                   str(value["checkpoint_id"]), int(value["generation"]),
-                   str(value["path"]), str(sha or ""))
+        payload = _object(value, "checkpoint")
+        if "sha256" in payload:
+            sha = payload["sha256"]
+        elif "artifact_sha256" in payload:
+            sha = payload["artifact_sha256"]
+        else:
+            raise ValueError("checkpoint sha256 is required")
+        return cls(_string(_required(payload, "topology"), "topology"),
+                   _string(_required(payload, "lineage_id"), "lineage_id"),
+                   _string(_required(payload, "checkpoint_id"), "checkpoint_id"),
+                   _integer(_required(payload, "generation"), "checkpoint generation"),
+                   _string(_required(payload, "path"), "checkpoint path"),
+                   _string(sha, "checkpoint sha256"))
 
 
 @dataclass(frozen=True)
@@ -142,7 +189,9 @@ class EffectiveConfigRef:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "EffectiveConfigRef":
-        return cls(ArtifactRef.from_dict(_map(value, "artifact")), str(value["fingerprint"]))
+        payload = _object(value, "effective config reference")
+        return cls(ArtifactRef.from_dict(_map(payload, "artifact")),
+                   _string(_required(payload, "fingerprint"), "effective config fingerprint"))
 
 
 @dataclass(frozen=True)
@@ -159,6 +208,7 @@ class CheckpointNode:
     def __post_init__(self) -> None:
         if self.schema != CHECKPOINT_NODE_SCHEMA or self.version != CONTRACT_VERSION:
             raise ValueError("unsupported CheckpointNode schema")
+        _boolean(self.genesis, "genesis")
         if self.genesis and self.parent is not None:
             raise ValueError("genesis checkpoint must not declare a parent")
         if not self.genesis:
@@ -185,16 +235,18 @@ class CheckpointNode:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "CheckpointNode":
-        if value.get("schema") != CHECKPOINT_NODE_SCHEMA or value.get("version") != CONTRACT_VERSION:
+        payload = _object(value, "checkpoint node")
+        if payload.get("schema") != CHECKPOINT_NODE_SCHEMA or payload.get("version") != CONTRACT_VERSION:
             raise ValueError("unsupported CheckpointNode schema")
-        if {"ancestors", "replay_references"}.intersection(value):
+        if {"ancestors", "replay_references"}.intersection(payload):
             raise ValueError("CheckpointNode forbids persisted ancestry/replay-chain fields")
-        parent, replay = value.get("parent"), value.get("fresh_replay")
-        return cls(CheckpointRef.from_dict(_map(value, "checkpoint")), bool(value["genesis"]),
-                   CheckpointRef.from_dict(parent) if isinstance(parent, Mapping) else None,
-                   ArtifactRef.from_dict(replay) if isinstance(replay, Mapping) else None,
-                   EffectiveConfigRef.from_dict(_map(value, "effective_config")),
-                   ArtifactRef.from_dict(_map(value, "provenance")))
+        parent, replay = payload.get("parent"), payload.get("fresh_replay")
+        return cls(CheckpointRef.from_dict(_map(payload, "checkpoint")),
+                   _boolean(_required(payload, "genesis"), "genesis"),
+                   None if parent is None else CheckpointRef.from_dict(_object(parent, "parent")),
+                   None if replay is None else ArtifactRef.from_dict(_object(replay, "fresh_replay")),
+                   EffectiveConfigRef.from_dict(_map(payload, "effective_config")),
+                   ArtifactRef.from_dict(_map(payload, "provenance")))
 
 
 @dataclass(frozen=True)
@@ -239,9 +291,10 @@ class EffectiveConfig:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "EffectiveConfig":
-        if value.get("schema") != EFFECTIVE_CONFIG_SCHEMA or value.get("version") != CONTRACT_VERSION:
+        payload = _object(value, "effective config")
+        if payload.get("schema") != EFFECTIVE_CONFIG_SCHEMA or payload.get("version") != CONTRACT_VERSION:
             raise ValueError("unsupported EffectiveConfig schema")
-        return cls(str(value["topology"]), *(_map(value, name) for name in
+        return cls(_string(_required(payload, "topology"), "topology"), *(_map(payload, name) for name in
                    ("compatibility", "self_play", "training", "replay", "execution", "arena", "supervision", "extensions")))
 
 
@@ -285,10 +338,12 @@ class ResolvedBoundary:
     execution_unit_id: str | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "kind", _string(self.kind, "boundary kind"))
         if self.kind == "generation":
-            if self.generation is None or int(self.generation) < 0 or self.execution_unit_id is not None:
+            generation = _optional_integer(self.generation, "boundary generation")
+            if generation is None or generation < 0 or self.execution_unit_id is not None:
                 raise ValueError("generation boundary requires only a non-negative generation")
-            object.__setattr__(self, "generation", int(self.generation))
+            object.__setattr__(self, "generation", generation)
         elif self.kind == "execution_unit":
             if not self.execution_unit_id or self.generation is not None:
                 raise ValueError("execution_unit boundary requires only execution_unit_id")
@@ -302,8 +357,10 @@ class ResolvedBoundary:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "ResolvedBoundary":
-        return cls(str(value["kind"]), int(value["generation"]) if value.get("generation") is not None else None,
-                   str(value["execution_unit_id"]) if value.get("execution_unit_id") is not None else None)
+        payload = _object(value, "resolved boundary")
+        return cls(_string(_required(payload, "kind"), "boundary kind"),
+                   _optional_integer(payload.get("generation"), "boundary generation"),
+                   _optional_string(payload.get("execution_unit_id"), "execution_unit_id"))
 
 
 @dataclass(frozen=True)
@@ -331,8 +388,11 @@ class ParameterChange:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "ParameterChange":
-        return cls(str(value["path"]), value.get("old_value"), value.get("new_value"),
-                   ChangeClass(str(value["change_class"])), ResolvedBoundary.from_dict(_map(value, "resolved_boundary")))
+        payload = _object(value, "parameter change")
+        return cls(_string(_required(payload, "path"), "parameter path"),
+                   _required(payload, "old_value"), _required(payload, "new_value"),
+                   ChangeClass(_string(_required(payload, "change_class"), "change_class")),
+                   ResolvedBoundary.from_dict(_map(payload, "resolved_boundary")))
 
 
 @dataclass(frozen=True)
@@ -351,7 +411,10 @@ class RuntimeAmendment:
             raise ValueError("unsupported RuntimeAmendment schema")
         object.__setattr__(self, "amendment_id", _component(self.amendment_id, "amendment_id"))
         object.__setattr__(self, "run_id", _component(self.run_id, "run_id"))
-        object.__setattr__(self, "requested_changes", tuple(self.requested_changes))
+        changes = tuple(self.requested_changes)
+        if any(not isinstance(change, ParameterChange) for change in changes):
+            raise ValueError("requested_changes must contain ParameterChange objects")
+        object.__setattr__(self, "requested_changes", changes)
         if not self.accepted_at or not self.requested_changes:
             raise ValueError("accepted_at and at least one requested change are required")
         if self.base_effective_config.fingerprint == self.resulting_effective_config.fingerprint:
@@ -370,15 +433,18 @@ class RuntimeAmendment:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "RuntimeAmendment":
-        if value.get("schema") != RUNTIME_AMENDMENT_SCHEMA or value.get("version") != CONTRACT_VERSION:
+        payload = _object(value, "runtime amendment")
+        if payload.get("schema") != RUNTIME_AMENDMENT_SCHEMA or payload.get("version") != CONTRACT_VERSION:
             raise ValueError("unsupported RuntimeAmendment schema")
-        changes = value.get("requested_changes")
+        changes = payload.get("requested_changes")
         if not isinstance(changes, list):
             raise ValueError("requested_changes must be a list")
-        return cls(str(value["amendment_id"]), str(value["run_id"]), str(value["accepted_at"]),
-                   tuple(ParameterChange.from_dict(c) for c in changes if isinstance(c, Mapping)),
-                   EffectiveConfigRef.from_dict(_map(value, "base_effective_config")),
-                   EffectiveConfigRef.from_dict(_map(value, "resulting_effective_config")))
+        return cls(_string(_required(payload, "amendment_id"), "amendment_id"),
+                   _string(_required(payload, "run_id"), "run_id"),
+                   _string(_required(payload, "accepted_at"), "accepted_at"),
+                   tuple(ParameterChange.from_dict(_object(change, "requested change")) for change in changes),
+                   EffectiveConfigRef.from_dict(_map(payload, "base_effective_config")),
+                   EffectiveConfigRef.from_dict(_map(payload, "resulting_effective_config")))
 
 
 class RunMode(str, Enum):
@@ -410,13 +476,15 @@ class ActiveExecution:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "unit_id", _component(self.unit_id, "execution unit id"))
-        if isinstance(self.attempt, bool) or int(self.attempt) < 1:
+        attempt = _integer(self.attempt, "active execution attempt")
+        if attempt < 1:
             raise ValueError("active execution attempt must be >= 1")
-        object.__setattr__(self, "attempt", int(self.attempt))
+        object.__setattr__(self, "attempt", attempt)
         if self.kind is ExecutionKind.GENERATION:
-            if self.generation is None or int(self.generation) < 0 or self.evaluation_fingerprint is not None:
+            generation = _optional_integer(self.generation, "active generation")
+            if generation is None or generation < 0 or self.evaluation_fingerprint is not None:
                 raise ValueError("generation execution requires generation only")
-            object.__setattr__(self, "generation", int(self.generation))
+            object.__setattr__(self, "generation", generation)
         elif self.generation is not None or self.evaluation_fingerprint is None:
             raise ValueError("Arena execution requires evaluation_fingerprint only")
         else:
@@ -430,9 +498,12 @@ class ActiveExecution:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "ActiveExecution":
-        return cls(ExecutionKind(str(value["kind"])), str(value["unit_id"]), int(value["attempt"]),
-                   int(value["generation"]) if value.get("generation") is not None else None,
-                   str(value["evaluation_fingerprint"]) if value.get("evaluation_fingerprint") is not None else None)
+        payload = _object(value, "active execution")
+        return cls(ExecutionKind(_string(_required(payload, "kind"), "execution kind")),
+                   _string(_required(payload, "unit_id"), "execution unit id"),
+                   _integer(_required(payload, "attempt"), "active execution attempt"),
+                   _optional_integer(payload.get("generation"), "active generation"),
+                   _optional_string(payload.get("evaluation_fingerprint"), "evaluation fingerprint"))
 
 
 @dataclass(frozen=True)
@@ -463,11 +534,18 @@ class RunState:
             object.__setattr__(self, "lineage_id", _component(self.lineage_id, "lineage_id"))
         if not self.created_at or not self.updated_at:
             raise ValueError("run state timestamps are required")
-        if isinstance(self.retry_attempt, bool) or int(self.retry_attempt) < 0:
+        retry_attempt = _integer(self.retry_attempt, "retry_attempt")
+        if retry_attempt < 0:
             raise ValueError("retry_attempt must be non-negative")
-        object.__setattr__(self, "retry_attempt", int(self.retry_attempt))
-        object.__setattr__(self, "applied_amendments", tuple(self.applied_amendments))
+        object.__setattr__(self, "retry_attempt", retry_attempt)
+        object.__setattr__(self, "soft_stop_requested", _boolean(self.soft_stop_requested, "soft_stop_requested"))
+        amendments = tuple(self.applied_amendments)
+        if any(not isinstance(amendment, ArtifactRef) for amendment in amendments):
+            raise ValueError("applied_amendments must contain ArtifactRef objects")
+        object.__setattr__(self, "applied_amendments", amendments)
         if self.queued_transition is not None:
+            if not isinstance(self.queued_transition, Mapping):
+                raise ValueError("queued_transition must be an object")
             object.__setattr__(self, "queued_transition", _freeze(self.queued_transition, "queued_transition"))
         if (self.last_committed_checkpoint is None) != (self.generation_commit is None):
             raise ValueError("last committed checkpoint and authoritative commit reference must be recorded together")
@@ -497,22 +575,29 @@ class RunState:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "RunState":
-        if value.get("schema") != RUN_STATE_SCHEMA or value.get("version") != CONTRACT_VERSION:
+        payload = _object(value, "run state")
+        if payload.get("schema") != RUN_STATE_SCHEMA or payload.get("version") != CONTRACT_VERSION:
             raise ValueError("unsupported RunState schema")
-        cp, commit, active = value.get("last_committed_checkpoint"), value.get("generation_commit"), value.get("active_execution")
-        amendments = value.get("applied_amendments", [])
+        cp, commit, active = (payload.get("last_committed_checkpoint"), payload.get("generation_commit"),
+                              payload.get("active_execution"))
+        amendments = payload.get("applied_amendments", [])
         if not isinstance(amendments, list):
             raise ValueError("applied_amendments must be a list")
-        return cls(str(value["run_id"]), RunMode(str(value["mode"])), BusinessState(str(value["state"])),
-                   str(value["lineage_id"]) if value.get("lineage_id") is not None else None,
-                   EffectiveConfigRef.from_dict(_map(value, "base_config")), str(value["created_at"]), str(value["updated_at"]),
-                   CheckpointRef.from_dict(cp) if isinstance(cp, Mapping) else None,
-                   ArtifactRef.from_dict(commit) if isinstance(commit, Mapping) else None,
-                   ActiveExecution.from_dict(active) if isinstance(active, Mapping) else None,
-                   int(value.get("retry_attempt", 0)), bool(value.get("soft_stop_requested", False)),
-                   str(value["pending_required_step"]) if value.get("pending_required_step") is not None else None,
-                   value.get("queued_transition") if isinstance(value.get("queued_transition"), Mapping) else None,
-                   tuple(ArtifactRef.from_dict(a) for a in amendments if isinstance(a, Mapping)))
+        return cls(_string(_required(payload, "run_id"), "run_id"),
+                   RunMode(_string(_required(payload, "mode"), "run mode")),
+                   BusinessState(_string(_required(payload, "state"), "business state")),
+                   _optional_string(payload.get("lineage_id"), "lineage_id"),
+                   EffectiveConfigRef.from_dict(_map(payload, "base_config")),
+                   _string(_required(payload, "created_at"), "created_at"),
+                   _string(_required(payload, "updated_at"), "updated_at"),
+                   None if cp is None else CheckpointRef.from_dict(_object(cp, "last_committed_checkpoint")),
+                   None if commit is None else ArtifactRef.from_dict(_object(commit, "generation_commit")),
+                   None if active is None else ActiveExecution.from_dict(_object(active, "active_execution")),
+                   _integer(payload.get("retry_attempt", 0), "retry_attempt"),
+                   _boolean(payload.get("soft_stop_requested", False), "soft_stop_requested"),
+                   _optional_string(payload.get("pending_required_step"), "pending_required_step"),
+                   None if payload.get("queued_transition") is None else _object(payload["queued_transition"], "queued_transition"),
+                   tuple(ArtifactRef.from_dict(_object(amendment, "applied amendment")) for amendment in amendments))
 
 
 @dataclass(frozen=True)
@@ -530,7 +615,9 @@ class StartsetRef:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "StartsetRef":
-        return cls(str(value["id"]), ArtifactRef.from_dict(_map(value, "artifact")), str(value["fingerprint"]))
+        payload = _object(value, "startset")
+        return cls(_string(_required(payload, "id"), "startset id"), ArtifactRef.from_dict(_map(payload, "artifact")),
+                   _string(_required(payload, "fingerprint"), "startset fingerprint"))
 
 
 @dataclass(frozen=True)
@@ -575,11 +662,13 @@ class EvaluationIdentity:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "EvaluationIdentity":
-        if value.get("schema") != EVALUATION_IDENTITY_SCHEMA or value.get("version") != CONTRACT_VERSION:
+        payload = _object(value, "evaluation identity")
+        if payload.get("schema") != EVALUATION_IDENTITY_SCHEMA or payload.get("version") != CONTRACT_VERSION:
             raise ValueError("unsupported EvaluationIdentity schema")
-        return cls(CheckpointRef.from_dict(_map(value, "candidate")), CheckpointRef.from_dict(_map(value, "reference")),
-                   int(value["games"]), int(value["master_seed"]), StartsetRef.from_dict(_map(value, "startset")),
-                   _map(value, "scientific_contract"), _map(value, "execution_contract"), _map(value, "workload"))
+        return cls(CheckpointRef.from_dict(_map(payload, "candidate")), CheckpointRef.from_dict(_map(payload, "reference")),
+                   _integer(_required(payload, "games"), "games"), _integer(_required(payload, "master_seed"), "master_seed"),
+                   StartsetRef.from_dict(_map(payload, "startset")), _map(payload, "scientific_contract"),
+                   _map(payload, "execution_contract"), _map(payload, "workload"))
 
 
 class EvaluationValidity(str, Enum):

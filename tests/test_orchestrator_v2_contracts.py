@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -73,6 +75,22 @@ def test_checkpoint_node_non_genesis_requires_parent_and_valid_identity():
         )
     with pytest.raises(ValueError, match="sha256"):
         CheckpointRef("torus9", "x", "M1", 1, "checkpoints/M1.pt", "bad")
+
+
+@pytest.mark.parametrize("genesis", ["false", 0, 1, None, [], {}])
+def test_checkpoint_node_parser_rejects_non_boolean_genesis(genesis):
+    payload = node(cp("x", 1), cp("x", 0, SHA_B)).to_dict()
+    payload["genesis"] = genesis
+    with pytest.raises(ValueError, match="genesis.*boolean"):
+        CheckpointNode.from_dict(payload)
+
+
+@pytest.mark.parametrize("field", ["parent", "fresh_replay"])
+def test_checkpoint_node_parser_rejects_malformed_optional_structured_fields(field):
+    payload = node(cp("x", 1), cp("x", 0, SHA_B)).to_dict()
+    payload[field] = "not-an-object"
+    with pytest.raises(ValueError, match=field):
+        CheckpointNode.from_dict(payload)
 
 
 def test_checkpoint_node_schema_has_no_full_ancestry_or_replay_chain():
@@ -153,6 +171,20 @@ def test_runtime_amendment_persists_old_new_boundary_and_is_immutable():
         amendment.run_id = "other"
 
 
+def test_runtime_amendment_parser_rejects_malformed_requested_change():
+    change = ParameterChange(
+        "self_play.mcts_simulations", 128, 256, ChangeClass.NEXT_GENERATION,
+        ResolvedBoundary("generation", generation=122),
+    )
+    payload = RuntimeAmendment(
+        "amend-0001", "run-1", "2026-09-18T06:00:00+00:00", (change,),
+        config_ref(SHA_A, SHA_B), config_ref(SHA_C, SHA_D),
+    ).to_dict()
+    payload["requested_changes"].append("not-an-object")
+    with pytest.raises(ValueError, match="requested change"):
+        RuntimeAmendment.from_dict(payload)
+
+
 def test_runtime_amendment_rejects_unresolved_or_incompatible_change():
     with pytest.raises(ValueError):
         ParameterChange(
@@ -198,6 +230,28 @@ def test_run_state_cannot_self_declare_commit_without_commit_reference():
         generation_commit=artifact("transactions/generation-0084.commit.json", SHA_F),
     )
     assert committed.generation_commit.path.endswith("commit.json")
+
+
+@pytest.mark.parametrize("soft_stop", ["false", 0, 1, None, [], {}])
+def test_run_state_parser_rejects_non_boolean_soft_stop(soft_stop):
+    payload = state().to_dict()
+    payload["soft_stop_requested"] = soft_stop
+    with pytest.raises(ValueError, match="soft_stop_requested.*boolean"):
+        RunState.from_dict(payload)
+
+
+def test_run_state_parser_rejects_malformed_applied_amendment():
+    payload = state().to_dict()
+    payload["applied_amendments"] = ["not-an-object"]
+    with pytest.raises(ValueError, match="applied amendment"):
+        RunState.from_dict(payload)
+
+
+def test_run_state_parser_rejects_malformed_present_queued_transition():
+    payload = state().to_dict()
+    payload["queued_transition"] = "not-an-object"
+    with pytest.raises(ValueError, match="queued_transition"):
+        RunState.from_dict(payload)
 
 
 def identity(**overrides) -> EvaluationIdentity:

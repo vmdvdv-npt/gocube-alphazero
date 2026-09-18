@@ -1,19 +1,22 @@
 # Orchestrator V2 Stage 0 — contracts and legacy artifact audit
 
-Status: **Stage 0 contract freeze**  
+Status: **Stage 0 complete: contracts frozen, live legacy audit executed, strict parsing enforced**
 Date: 2026-09-18  
 Baseline: `main` at `997e981bff21fbad6507b1e3b7f9ab1be36174c4` (`Honor resolved cross-lineage replay sources (#139)`)
 
-This document fixes the persistence contracts that Stage 1 may treat as architecture, not as open design questions. It also records the read-only legacy evidence available during Stage 0.
+This document fixes the persistence contracts that Stage 1 may treat as architecture, not as open design questions. It also records the completed read-only legacy audit of the live run-storage tree.
 
 ## Scope and evidence boundary
 
-Stage 0 did **not** run self-play, training, Arena, migration, or orchestration. It did not move, rewrite, archive, hash-scan, or delete any production artifact.
+Stage 0 did **not** run self-play, training, Arena, migration, or orchestration. The live audit was read-only: it did not move, rewrite, archive, hash-scan, or delete any production artifact.
 
-The repository checkout exposed through GitHub does not contain the live `runs/` tree, and the requested local path `/home/codex/projects/gocube-alphazero` was not mounted in the execution environment. Therefore the artifact audit below is deliberately split into:
+The final audit scanned the mounted live tree on 2026-09-18. It covered 104 run/evaluation directories, 3,035 files, 139 manifests, 118 `generation-N.complete.json` records, 267 `M*.metadata.json` checkpoint metadata records, and 10 artifact catalogs. The detailed classification below focuses on Torus9, including the useful M0-M17, M18-M47, M48-M54, M55-M80, M81+, post-AB, and failed/incomplete continuation records.
+
+The earlier repository-only first pass is retained later in this document for provenance, but its availability/status statements are superseded by section 15. The audit deliberately separates:
 
 1. facts proven by committed durable records, chiefly `docs/experiments/run-storage-migration-20260916.json`, `run-storage-split-legacy-bundles-20260916.json`, `checkpoint-deduplication-20260916.json`, and the migration report; and
-2. facts that **cannot** be claimed until the actual live `runs/*/{active,archive,evaluations}` metadata is scanned read-only.
+2. facts proven by the final live read-only scan; and
+3. facts that remain unproven and therefore fail closed pending explicit bootstrap or stronger durable evidence.
 
 No parent edge is inferred from an `M<number>` name, adjacent generation numbers, a lineage name, directory proximity, or historical expectation. A legacy edge that is not proven by durable metadata fails closed and is classified as requiring explicit bootstrap/mapping until stronger evidence is read.
 
@@ -313,7 +316,9 @@ No immutable fact has two authoritative owners.
 
 ---
 
-# 11. Read-only legacy artifact audit
+# 11. Read-only legacy artifact audit — historical first pass
+
+The subsection below preserves the repository-only evidence and limitation from the initial Stage 0 pass. It is retained for provenance; the final live results in section 15 supersede its availability/status statements.
 
 ## 11.1 What the committed records prove
 
@@ -327,7 +332,7 @@ The committed migration inventory does not provide a per-checkpoint immediate-pa
 
 Consequently Stage 0 cannot honestly classify those nodes as V2-ready merely because `M16.pt` and `M17.pt` coexist and have hashes.
 
-The live post-2026-09-16 production lineages (including later M47/M80+ continuation/experiment history) are not present in the Git tree available to this task, so their generation transactions/provenance/results cannot be inspected here. They remain fail-closed until a live read-only migration scan is performed.
+The live post-2026-09-16 production lineages (including later M47/M80+ continuation/experiment history) were not present in the Git tree available to the initial pass, so their generation transactions/provenance/results could not be inspected in that pass. The final live read-only scan is recorded in section 15.
 
 ## 11.3 Legacy matrix
 
@@ -343,11 +348,11 @@ The live post-2026-09-16 production lineages (including later M47/M80+ continuat
 
 ### V2-ready (A)
 
-None can be proven from the repository-only migration snapshot. This does **not** assert that no live checkpoint is V2-ready; it says the live metadata needed to prove it was unavailable here.
+None could be proven from the repository-only migration snapshot. This did **not** assert that no live checkpoint was V2-ready; it said the live metadata needed to prove it was unavailable in that pass.
 
 ### Deterministically migratable (B)
 
-None can be promoted to B from the committed migration inventory alone because parent + fresh replay + effective config have not all been proven for a specific node. The separate live read-only scan is expected to identify B nodes where generation provenance/result/transaction records supply those fields unambiguously.
+None could be promoted to B from the committed migration inventory alone because parent + fresh replay + effective config had not all been proven for a specific node. The final live read-only scan identifies B nodes where generation provenance/result/transaction records supply those fields unambiguously.
 
 ### Explicit bootstrap/mapping required (C)
 
@@ -414,3 +419,72 @@ open_artifact(ref)
 ```
 
 without another ancestry-schema decision. Legacy data may still need migration/bootstrap **data**, but not a new ancestry **format**.
+
+
+# 15. Final live audit result — 2026-09-18
+
+## 15.1 Scope and method
+
+The final audit was read-only. It inspected lightweight metadata under `runs/torus9/{active,archive,evaluations}`: manifests, checkpoint metadata, generation completion/transaction/result records, provenance/config references, artifact catalogs, evaluation metadata, and filesystem existence. It did not load model weights and did not rehash the full checkpoint corpus. Recorded SHA-256 values were compared with the corresponding artifact-catalog/path records where those records existed.
+
+The live scan covered 104 run/evaluation directories, 3,035 files, 139 manifests, 118 `generation-N.complete.json` records, 267 `M*.metadata.json` checkpoint metadata records, and 10 artifact catalogs. For a migratable node, the evidence chain had to provide the checkpoint identity, one immediate parent identity, a generation-specific fresh replay artifact, and a deterministic effective configuration assembled from durable actual configuration records. A Golden profile name alone was not accepted as effective config.
+
+The audit found no persisted `gocube-checkpoint-node-v2` records and no standalone V2 effective-config artifacts in the live tree. Therefore A is empty. The B classification means that ordinary V2 records can be materialized deterministically from the existing durable metadata; it does not claim that migration has already been performed.
+
+## 15.2 Final A/B/C/D matrix
+
+| Live lineage/range | Durable evidence | Class | Migration disposition |
+|---|---|---:|---|
+| `torus9-golden-v3-20260914-run03`, M0-M17 | Checkpoint metadata and physical SHA exist, but there is no per-node immediate-parent record, no per-node fresh-replay identity, and no per-node effective-config snapshot. | **C** | Requires an explicit bootstrap/mapping for the root and each historical edge/fact that cannot be proven. Never infer the M sequence from names or adjacency. |
+| `torus9-golden-v3-production-20260917-m17`, M18-M47 | Complete records, parent refs, fresh replay/catalog entries, checkpoint metadata, run-spec/profile/config fingerprints, and physical artifacts are present. | **B** | Deterministically migratable; M18 explicitly crosses to M17 in the preceding lineage. Run-spec fingerprint: `sha256:cc427fb3c19afa8c195fa8ae3581979ec1af4b8e3d5eef99b081a0577870ac85`; profile fingerprint: `sha256:36911d01c04e8c77a99146c86b053a68126725998c207332d8e18df269bb1775`. |
+| `torus9-golden-v3-plateau-exit-m47-lr3e4-r6-40k-s128-20260917-v2`, M48-M54 | Complete records and exact parent/fresh replay/config/catalog evidence are present. | **B** | Deterministically migratable; M48 explicitly crosses from production M47. Run-spec fingerprint: `sha256:56fdcdc4ecdb89036cf845654d62a0739b80c8498474757ba2cc6bcf1fb383c4`; profile fingerprint: `sha256:e4b8dde145555a3ba4633faaf273f1211a6e8bb717d04e64fcc7dff2688a2036`. |
+| `torus9-golden-v3-plateau-exit-m54-lr3e4-r6-40k-s128-20260917-v3`, M55-M80 | Complete records and exact parent/fresh replay/config/catalog evidence are present. | **B** | Deterministically migratable; M55 explicitly crosses from plateau-exit v2 M54. It preserves the v2 run-spec/profile fingerprints above. |
+| `torus9-staged-cadence-m80-20260918-v1-g64`, M81-M86 | Complete records, exact parent/fresh replay/catalog evidence, and staged-cadence actual configuration records are present. | **B** | Deterministically migratable; M81 explicitly crosses from plateau-exit v3 M80. Profile fingerprint: `sha256:9d8d00619d7891de860edbd724bcb3c8aea72d475334aacc9b516d5a4c06f2be`. |
+| `torus9-staged-cadence-m80-20260918-v1-g128`, M81-M83 | Complete records, exact parent/fresh replay/catalog evidence, and staged-cadence actual configuration records are present. | **B** | Deterministically migratable; M81 explicitly crosses from plateau-exit v3 M80. |
+| `torus9-staged-cadence-m80-20260918-v1-g192`, M81-M82 | Complete records, exact parent/fresh replay/catalog evidence, and staged-cadence actual configuration records are present. | **B** | Deterministically migratable; M81 explicitly crosses from plateau-exit v3 M80. |
+| `torus9-post-ab-m80-g128-20260918-v1`, M84-M93 | Complete records, exact parent/fresh replay/catalog evidence, and post-AB actual configuration records are present. | **B** | Deterministically migratable; M84 explicitly crosses from staged-cadence g128 M83. Run-spec fingerprint: `sha256:f57ed0cd3aae133f276961a60e5d5fb33c4d29741af919de2785af5bc9d8ddac`. |
+| `torus9-replay80k-m80-g128-20260918-v1`, attempted M81 continuation | Run-level provenance and actual config are present, but no child checkpoint, generation-complete record, fresh replay, or catalog entry exists. The report is `RECOVERY_REQUIRED` while the stale runtime state still says `RUNNING`; the catalog is empty. | **D** | No checkpoint node may be synthesized. Preserve as a failed/incomplete run requiring explicit recovery/resume handling outside this Stage 0 migration. |
+| Archived Stage7 side branches `torus9-stage7-post-pr118-20260916-run01`, `run02`, `run04`, M1 | Each side node has explicit parent metadata, generation completion/fresh replay/config metadata, and physical artifact evidence. | **B**, outside the primary chain | Migratable as independent side branches; each M1 explicitly points to the old M0, but these branches are not silently merged into the primary lineage. |
+| Legacy wrapper/bundle records and any record with conflicting identity evidence | Wrapper metadata is not a canonical node graph. Conflicting SHA, parent, config, replay, or missing-artifact evidence is not repairable by inference. | **D** | Preserve as audit evidence only; do not make wrappers or guessed repairs an ancestry source. |
+
+Summary: **A = 0**; **B = 84 useful primary-chain/arm nodes** (30 + 7 + 26 + 6 + 3 + 2 + 10), plus the three independently migratable Stage7 side branches; **C = M0-M17 and any bootstrap-dependent legacy facts**; **D = wrappers, the incomplete replay80k continuation, and inconsistent records**.
+
+## 15.3 Actual cross-lineage edges
+
+These are the cross-lineage edges proven by durable child metadata. Each entry is a full checkpoint reference on both sides: topology is `torus9`, the lineage is encoded by the directory/lineage id, the generation/checkpoint id is explicit, and the path and SHA-256 are recorded.
+
+| Child full reference | Parent full reference | Evidence |
+|---|---|---|
+| `runs/torus9/active/torus9-golden-v3-production-20260917-m17/checkpoints/M18.pt`, M18, `sha256:571e71def674e8f0acacb47135c85a4e2e5d4a4797df59dd00021453d0b4e14a` | `runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M17.pt`, M17, `sha256:86722afe70fefd1d4a2a408e47c3492c7b6da43e86f283888d8815da5b037e53` | production M18 metadata/complete record |
+| `runs/torus9/active/torus9-golden-v3-plateau-exit-m47-lr3e4-r6-40k-s128-20260917-v2/checkpoints/M48.pt`, M48, `sha256:dcf7c2ec494437b65eaa67bad1bf6eb4d95c0366bee106e4511d1952dbc3c2e9` | `runs/torus9/active/torus9-golden-v3-production-20260917-m17/checkpoints/M47.pt`, M47, `sha256:49671a5c8df991aafd5cbb84ef74230043ac530fcba33615a79603d96ee18b1a` | plateau v2 M48 metadata/complete record |
+| `runs/torus9/active/torus9-golden-v3-plateau-exit-m54-lr3e4-r6-40k-s128-20260917-v3/checkpoints/M55.pt`, M55, `sha256:9fb3eaa41d5f90cdac750396fe7808c6edf53047b15b00f113abe2fb3a428765` | `runs/torus9/active/torus9-golden-v3-plateau-exit-m47-lr3e4-r6-40k-s128-20260917-v2/checkpoints/M54.pt`, M54, `sha256:d72b3d7dc203a0e7ad318bedfa871884aba08386fd3d36bc08469e1615917c63` | plateau v3 M55 metadata/complete record |
+| `runs/torus9/active/torus9-staged-cadence-m80-20260918-v1-g64/checkpoints/M81.pt`, M81, `sha256:ef6a75f458b83dc59577073d60270c7b1c1eadaa56149b2c225593765633445d` | `runs/torus9/active/torus9-golden-v3-plateau-exit-m54-lr3e4-r6-40k-s128-20260917-v3/checkpoints/M80.pt`, M80, `sha256:a3efc33fbbaaa0640deb24bd4d8ba1eeb4563823ee8819487c957b8dacbbe1f` | staged g64 M81 metadata/complete record |
+| `runs/torus9/active/torus9-staged-cadence-m80-20260918-v1-g128/checkpoints/M81.pt`, M81, `sha256:ec14ee1550e6be84abcf6676109cb1346d3f34066411daddc2206b8e5f06d847` | `runs/torus9/active/torus9-golden-v3-plateau-exit-m54-lr3e4-r6-40k-s128-20260917-v3/checkpoints/M80.pt`, M80, `sha256:a3efc33fbbaaa0640deb24bd4d8ba1eeb4563823ee8819487c957b8dacbbe1f` | staged g128 M81 metadata/complete record |
+| `runs/torus9/active/torus9-staged-cadence-m80-20260918-v1-g192/checkpoints/M81.pt`, M81, `sha256:fb0e8b623c527aaa8d0fe9e83ece1527199b8b459d98b2a232687e7f2ba6ef4f` | `runs/torus9/active/torus9-golden-v3-plateau-exit-m54-lr3e4-r6-40k-s128-20260917-v3/checkpoints/M80.pt`, M80, `sha256:a3efc33fbbaaa0640deb24bd4d8ba1eeb4563823ee8819487c957b8dacbbe1f` | staged g192 M81 metadata/complete record |
+| `runs/torus9/active/torus9-post-ab-m80-g128-20260918-v1/checkpoints/M84.pt`, M84, `sha256:8df29e44d8674ab835b0c4e40139e2a2c86e66c6bfb9f47d1b31d3d9a320e18d` | `runs/torus9/active/torus9-staged-cadence-m80-20260918-v1-g128/checkpoints/M83.pt`, M83, `sha256:8cd4429702b236151be2627cff4a11924497cd551490cef1f6c3ecf15c860ee5` | post-AB M84 metadata/complete record |
+| `runs/torus9/archive/torus9-stage7-post-pr118-20260916-run01/checkpoints/M1.pt`, M1, `sha256:a7b9cc5646b3836603d13ce87b8ca6b9aa6306a35e098c324a83eef52325a5e9` | `runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M0.pt`, M0, `sha256:2da9b40576f67eba2fbf4afa1fa7287a71151f1f379723d358cfa2a8bb91c800` | Stage7 side-run01 M1 metadata |
+| `runs/torus9/archive/torus9-stage7-post-pr118-20260916-run02/checkpoints/M1.pt`, M1, `sha256:41db685492590ec6f8166b825f84f4aeb688f7f323d555f46fe6016095967dda` | `runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M0.pt`, M0, `sha256:2da9b40576f67eba2fbf4afa1fa7287a71151f1f379723d358cfa2a8bb91c800` | Stage7 side-run02 M1 metadata |
+| `runs/torus9/archive/torus9-stage7-post-pr118-20260916-run04/checkpoints/M1.pt`, M1, `sha256:503c398e7f4cf96de115ae2c1e2b2b8c04f2944392f20140a956a9df0fcd456f` | `runs/torus9/active/torus9-golden-v3-20260914-run03/checkpoints/M0.pt`, M0, `sha256:2da9b40576f67eba2fbf4afa1fa7287a71151f1f379723d358cfa2a8bb91c800` | Stage7 side-run04 M1 metadata |
+
+No parent edge was inferred from a checkpoint filename, generation adjacency, or directory proximity. The table is migration input evidence; it is not itself a second ancestry database.
+
+## 15.4 Migration and Stage 1 prerequisites
+
+The B rows are ready for a separate, controlled migration that materializes ordinary `CheckpointNode` records and immutable EffectiveConfig artifacts. That migration must preserve each child checkpoint's full identity, the exact parent identity, the generation-specific `iter-N-fresh` artifact (not a rolling replay-window artifact), and the actual effective configuration assembled from durable run-spec/profile/operator/checkpoint records. It must fail closed on any conflict and leave the live run tree unchanged.
+
+The C M0-M17 range still needs an explicit bootstrap decision/mapping. The bootstrap must state the full child reference and full parent reference, including SHA, or explicitly declare the canonical genesis fact where appropriate. M0-M17 must not be upgraded to B merely because the physical files and numeric names are present.
+
+Stage 1 may now consume the frozen contracts and treat the 84 B nodes plus any explicit bootstrap output as migration inputs. Stage 0 does not add an ArtifactResolver, ancestry API implementation, runner, orchestration logic, training/Arena behavior, or production mutation.
+
+
+# 16. Strict durable parsing audit
+
+The contract parsers now reject malformed durable values instead of coercing or silently dropping them:
+
+- required strings, path components, relative paths, SHA-256 values, integers, and booleans are type-checked before validation;
+- optional structured fields (`parent`, `fresh_replay`, `active_execution`, commit/checkpoint refs, and `queued_transition`) reject present values of the wrong type;
+- every element of `requested_changes` and `applied_amendments` is parsed and validated; malformed elements are not skipped;
+- `genesis` and `soft_stop_requested` require JSON booleans, so strings and numeric truthy values cannot change persisted state;
+- legacy `artifact_sha256` is accepted only as the existing checkpoint-reference compatibility alias and is still required to be a string with canonical SHA syntax.
+
+Targeted negative tests cover these cases and the existing contract suite passes: `29 passed` in `tests/test_orchestrator_v2_contracts.py`.
