@@ -13,6 +13,7 @@ from .errors import (
     GenerationFailed,
     IntegrationError,
     InvalidRequest,
+    ServiceBusy,
     TerminalPosition,
     UnsupportedProtocol,
 )
@@ -88,6 +89,7 @@ class GoCubeAlphaZeroService:
         self.generator = generator or GoldenGameGenerator(move_selector=self.move_selector)
         self.device = self.loader.device
         self._generation_lock = Lock()
+        self._move_lock = Lock()
         source_root = Path(__file__).resolve().parents[4]
         self._runtime_identity = {
             "schema": RUNTIME_IDENTITY_SCHEMA,
@@ -105,6 +107,10 @@ class GoCubeAlphaZeroService:
             "service": "gocube-alphazero",
             "device": self.device,
             "runtimeIdentity": dict(self._runtime_identity),
+            "capabilities": {
+                "generateGame": True,
+                "selectMove": True,
+            },
         }
 
     def checkpoints(self) -> dict[str, object]:
@@ -205,19 +211,24 @@ class GoCubeAlphaZeroService:
             mapping=mapping,
         )
 
+        if not self._move_lock.acquire(blocking=False):
+            raise ServiceBusy("Another move selection is already running")
         try:
-            _loaded_descriptor, model = self.loader.load(checkpoint_id)
-            selection = self.move_selector.select_move(
-                state=state,
-                descriptor=descriptor,
-                model=model,
-                mcts_sims=mcts_sims,
-            )
-            action = mapping.golden_action_to_protocol(selection.action)
-        except IntegrationError:
-            raise
-        except Exception as exc:
-            raise GenerationFailed(f"Move selection failed: {exc}") from exc
+            try:
+                _loaded_descriptor, model = self.loader.load(checkpoint_id)
+                selection = self.move_selector.select_move(
+                    state=state,
+                    descriptor=descriptor,
+                    model=model,
+                    mcts_sims=mcts_sims,
+                )
+                action = mapping.golden_action_to_protocol(selection.action)
+            except IntegrationError:
+                raise
+            except Exception as exc:
+                raise GenerationFailed(f"Move selection failed: {exc}") from exc
+        finally:
+            self._move_lock.release()
 
         return {
             "checkpointId": checkpoint_id,
