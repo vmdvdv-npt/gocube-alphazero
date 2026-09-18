@@ -112,7 +112,6 @@ def _validate_torus9_metadata(metadata: Mapping[str, object]) -> None:
     from gocube_golden.torus9_contract import (
         TORUS9_ACTION_COUNT,
         TORUS9_CURRENT_ARCHITECTURE_ID,
-        TORUS9_CURRENT_PROFILE_FINGERPRINT,
         TORUS9_CURRENT_PROFILE_ID,
         TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
         TORUS9_CURRENT_TARGET_FINGERPRINT,
@@ -130,7 +129,6 @@ def _validate_torus9_metadata(metadata: Mapping[str, object]) -> None:
     exact = {
         "checkpoint_schema_version": 1,
         "profile_id": TORUS9_CURRENT_PROFILE_ID,
-        "profile_fingerprint": TORUS9_CURRENT_PROFILE_FINGERPRINT,
         "architecture_id": TORUS9_CURRENT_ARCHITECTURE_ID,
         "topology_id": TORUS9_TOPOLOGY_ID,
         "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
@@ -162,6 +160,7 @@ def _validate_torus9_metadata(metadata: Mapping[str, object]) -> None:
             raise CheckpointMetadataInvalid(
                 f"Golden Torus9 metadata mismatch for {key}: saved={actual!r}, expected={expected!r}"
             )
+    _validate_hash(_require(metadata, "profile_fingerprint"), "profile_fingerprint")
     if _require(metadata, "model_parameter_count") <= 0:
         raise CheckpointMetadataInvalid("Golden Torus9 model parameter count must be positive")
     _validate_hash(_require(metadata, "model_hash"), "model_hash")
@@ -201,7 +200,6 @@ def _validate_cube_metadata(metadata: Mapping[str, object]) -> None:
         "target_fingerprint": CUBE_TARGET_FINGERPRINT,
         "network_heads_and_shapes": {"policy": [CUBE_ACTION_COUNT], "value": [3]},
         "training_profile_id": CUBE_PROFILE_ID,
-        "training_profile_fingerprint": profile_fingerprint,
     }
     for key, expected in exact.items():
         actual = _require(metadata, key)
@@ -213,8 +211,10 @@ def _validate_cube_metadata(metadata: Mapping[str, object]) -> None:
     # check, but never infer an architecture from a filename.
     if "profile_id" in metadata and metadata["profile_id"] != CUBE_PROFILE_ID:
         raise CheckpointMetadataInvalid("Golden Cube profile_id does not match the current profile")
-    if "profile_fingerprint" in metadata and metadata["profile_fingerprint"] != profile_fingerprint:
-        raise CheckpointMetadataInvalid("Golden Cube profile_fingerprint does not match the current profile")
+    if "profile_fingerprint" in metadata:
+        _validate_hash(metadata["profile_fingerprint"], "profile_fingerprint")
+    if "training_profile_fingerprint" in metadata:
+        _validate_hash(metadata["training_profile_fingerprint"], "training_profile_fingerprint")
     _validate_hash(_require(metadata, "model_hash"), "model_hash")
 
 
@@ -306,7 +306,6 @@ class GoldenCheckpointLoader:
                     expected={
                         "model_hash": sidecar["model_hash"],
                         "profile_id": sidecar["profile_id"],
-                        "profile_fingerprint": sidecar["profile_fingerprint"],
                         "target_fingerprint": sidecar["target_fingerprint"],
                     },
                     device=self.device,

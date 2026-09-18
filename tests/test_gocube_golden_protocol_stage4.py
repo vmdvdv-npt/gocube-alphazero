@@ -88,7 +88,31 @@ def test_golden_descriptors_require_matching_scientific_identity():
     golden = _descriptor("same-run@17")
     different_profile = _descriptor("same-run@17", profile_id="gocube-cube4-golden-training-v1")
     assert _compatible(golden, golden)
-    assert not _compatible(golden, different_profile)
+    assert _compatible(golden, different_profile)
+
+
+REAL_RUNS_ROOT = Path(__file__).parents[1] / "runs"
+
+
+@pytest.mark.skipif(
+    not (REAL_RUNS_ROOT / "torus9/active/torus9-post-ab-m80-g128-20260918-v1/checkpoints/M93.pt").is_file(),
+    reason="real Torus9 M93 artifact is not checked out",
+)
+def test_real_publication_catalog_separates_training_provenance_from_serving_contract():
+    catalog = CheckpointCatalog(str(REAL_RUNS_ROOT))
+    expected = {
+        "torus9-golden-v3-production-20260917-m17@47",
+        "torus9-golden-v3-plateau-exit-m47-lr3e4-r6-40k-s128-20260917-v2@54",
+        "torus9-golden-v3-plateau-exit-m54-lr3e4-r6-40k-s128-20260917-v3@80",
+        "torus9-staged-cadence-m80-20260918-v1-g128@83",
+        "torus9-post-ab-m80-g128-20260918-v1@88",
+        "torus9-post-ab-m80-g128-20260918-v1@93",
+    }
+    descriptors = {item.checkpoint_id: item for item in catalog.list()}
+    assert expected <= descriptors.keys()
+    assert all(descriptors[item].published for item in expected)
+    assert len({descriptors[item].profile_fingerprint for item in expected}) == 3
+    assert _compatible(descriptors[min(expected)], descriptors["torus9-post-ab-m80-g128-20260918-v1@93"])
 
 
 def test_lineage_identity_uses_manifest_status_and_legacy_defaults_active(tmp_path: Path):

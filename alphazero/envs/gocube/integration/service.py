@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 from threading import Lock
 
-from .catalog import CheckpointCatalog, CheckpointDescriptor
+from .catalog import CheckpointCatalog, CheckpointDescriptor, is_runtime_compatible
 from .errors import (
     CheckpointIncompatible,
     CheckpointNotFound,
@@ -16,28 +18,40 @@ from .golden_generation import GoldenGameGenerator
 from .golden_models import GoldenCheckpointLoader
 
 PROTOCOL_VERSION = 1
+RUNTIME_IDENTITY_SCHEMA = "gocube-alphazero-runtime-identity-v1"
+
+
+def _runtime_source_fingerprint(source_root: Path) -> str:
+    digest = hashlib.sha256()
+    roots = (source_root / "alphazero" / "envs" / "gocube" / "integration", source_root / "gocube_golden")
+    paths = sorted(
+        path
+        for root in roots
+        if root.is_dir()
+        for path in root.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+    for path in paths:
+        digest.update(str(path.relative_to(source_root)).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
+
+
+def _file_sha256(path: str) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return "sha256:" + digest.hexdigest()
+    except OSError:
+        return None
 
 
 def _compatible(a: CheckpointDescriptor, b: CheckpointDescriptor) -> bool:
-    # Display fields are intentionally not enough for Golden compatibility: a
-    # same-looking board can still have a different scientific topology,
-    # rules, observation or target contract.
-    return all(
-        getattr(a, field, None) == getattr(b, field, None)
-        for field in (
-            "topology",
-            "size",
-            "rule_set",
-            "terminal_adjudicator",
-            "profile_id",
-            "profile_fingerprint",
-            "architecture_id",
-            "rules_fingerprint",
-            "observation_fingerprint",
-            "target_fingerprint",
-            "komi",
-        )
-    )
+    return is_runtime_compatible(a, b)
 
 
 class GoCubeAlphaZeroService:
@@ -49,8 +63,12 @@ class GoCubeAlphaZeroService:
         catalog: CheckpointCatalog | None = None,
         loader: GoldenCheckpointLoader | None = None,
         generator: GoldenGameGenerator | None = None,
+        publication_manifest: str | None = None,
     ):
-        self.catalog = catalog or CheckpointCatalog(checkpoint_dir)
+        self.catalog = catalog or CheckpointCatalog(
+            checkpoint_dir,
+            publication_manifest=publication_manifest,
+        )
         self.loader = loader or GoldenCheckpointLoader(
             self.catalog,
             device=device,
@@ -58,6 +76,15 @@ class GoCubeAlphaZeroService:
         self.generator = generator or GoldenGameGenerator()
         self.device = self.loader.device
         self._generation_lock = Lock()
+        source_root = Path(__file__).resolve().parents[4]
+        self._runtime_identity = {
+            "schema": RUNTIME_IDENTITY_SCHEMA,
+            "sourceRoot": str(source_root),
+            "sourceFingerprint": _runtime_source_fingerprint(source_root),
+            "checkpointDir": self.catalog.checkpoint_dir,
+            "publicationManifest": self.catalog.publication_manifest,
+            "publicationManifestSha256": _file_sha256(self.catalog.publication_manifest),
+        }
 
     def health(self) -> dict[str, object]:
         return {
@@ -65,6 +92,7 @@ class GoCubeAlphaZeroService:
             "status": "ok",
             "service": "gocube-alphazero",
             "device": self.device,
+            "runtimeIdentity": dict(self._runtime_identity),
         }
 
     def checkpoints(self) -> dict[str, object]:

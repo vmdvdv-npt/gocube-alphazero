@@ -151,7 +151,6 @@ def _validate_model(model: object, descriptor: CheckpointDescriptor, mapping: Go
     metadata = model.metadata
     expected = {
         "profile_id": descriptor.profile_id,
-        "profile_fingerprint": descriptor.profile_fingerprint,
         "architecture_id": descriptor.architecture_id,
         "rules_fingerprint": descriptor.rules_fingerprint,
         "observation_fingerprint": descriptor.observation_fingerprint,
@@ -192,7 +191,6 @@ class GoldenGameGenerator:
             "rule_set",
             "terminal_adjudicator",
             "profile_id",
-            "profile_fingerprint",
             "architecture_id",
             "rules_fingerprint",
             "observation_fingerprint",

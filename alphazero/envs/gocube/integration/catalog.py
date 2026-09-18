@@ -5,6 +5,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from .errors import CheckpointCatalogCollision
 
@@ -12,6 +13,10 @@ _GOLDEN_CHECKPOINT_RE = re.compile(r"^M(\d+)\.pt$")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LINEAGE_STATUSES = frozenset({"ACTIVE", "ARCHIVED", "DISCARDED"})
 GOLDEN_TERMINAL_ADJUDICATOR = "golden-graph-area-v1"
+GOLDEN_CHECKPOINT_FORMAT = "golden_pt"
+DEFAULT_PUBLICATION_MANIFEST = (
+    Path(__file__).resolve().parents[4] / "configs/gocube/production_checkpoint_publication.json"
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,9 @@ class CheckpointDescriptor:
     observation_fingerprint: str | None = None
     target_fingerprint: str | None = None
     metadata_path: str | None = None
+    serving_contract_data: Mapping[str, object] | None = None
+    published: bool = False
+    publication_reason: str | None = None
 
     def to_api(self) -> dict[str, object]:
         return {
@@ -50,8 +58,78 @@ class CheckpointDescriptor:
 
 
 class CheckpointCatalog:
-    def __init__(self, checkpoint_dir: str):
+    def __init__(self, checkpoint_dir: str, publication_manifest: str | None = None):
         self.checkpoint_dir = os.path.abspath(checkpoint_dir)
+        selected_manifest = Path(publication_manifest) if publication_manifest else DEFAULT_PUBLICATION_MANIFEST
+        self.publication_manifest = os.path.abspath(str(selected_manifest))
+        self._publication_entries = self._read_publication_manifest(selected_manifest)
+
+    @staticmethod
+    def _read_publication_manifest(path: Path) -> tuple[dict[str, object], ...]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return ()
+        if not isinstance(payload, dict) or payload.get("schema") != "gocube-production-checkpoint-publication-v1":
+            return ()
+        raw_entries = payload.get("entries")
+        if not isinstance(raw_entries, list):
+            return ()
+        entries: list[dict[str, object]] = []
+        for raw in raw_entries:
+            if not isinstance(raw, dict):
+                continue
+            lineage_id = raw.get("lineage_id")
+            topology = raw.get("topology")
+            ranges = raw.get("checkpoint_ranges")
+            if not isinstance(lineage_id, str) or not lineage_id or not isinstance(topology, str):
+                continue
+            normalized_ranges: list[tuple[int, int]] = []
+            if isinstance(ranges, list):
+                for item in ranges:
+                    if (
+                        isinstance(item, list)
+                        and len(item) == 2
+                        and all(isinstance(value, int) and not isinstance(value, bool) for value in item)
+                        and item[0] <= item[1]
+                    ):
+                        normalized_ranges.append((int(item[0]), int(item[1])))
+            if normalized_ranges:
+                entries.append(
+                    {
+                        "lineage_id": lineage_id,
+                        "topology": topology,
+                        "checkpoint_ranges": tuple(normalized_ranges),
+                    }
+                )
+        return tuple(entries)
+
+    def publication_decision(
+        self,
+        *,
+        topology: str,
+        lineage_id: str | None,
+        iteration: int,
+        lineage_status: str,
+    ) -> tuple[bool, str]:
+        if lineage_status == "DISCARDED":
+            return False, "lineage status is DISCARDED"
+        if lineage_id is None:
+            return False, "checkpoint has no canonical lineage_id"
+        if not self._publication_entries:
+            return False, f"publication manifest is missing or invalid: {self.publication_manifest}"
+        publication_topology = {"torus": "torus9", "cube": "cube4"}.get(topology, topology)
+        same_lineage = [
+            entry
+            for entry in self._publication_entries
+            if entry["topology"] == publication_topology and entry["lineage_id"] == lineage_id
+        ]
+        if not same_lineage:
+            return False, f"lineage {lineage_id!r} is not listed in publication manifest"
+        for entry in same_lineage:
+            if any(start <= iteration <= end for start, end in entry["checkpoint_ranges"]):
+                return True, f"published by {self.publication_manifest}"
+        return False, f"iteration M{iteration} is outside the published ranges for {lineage_id!r}"
 
     def list(self) -> list[CheckpointDescriptor]:
         descriptors = self._golden_descriptors()
@@ -88,6 +166,7 @@ class CheckpointCatalog:
         if (
             not isinstance(profile_id, str)
             or not isinstance(profile_fingerprint, str)
+            or not _SHA256_RE.fullmatch(profile_fingerprint)
             or not isinstance(model_hash, str)
             or not _SHA256_RE.fullmatch(model_hash)
         ):
@@ -98,7 +177,6 @@ class CheckpointCatalog:
                 from gocube_golden.torus9_contract import (
                     TORUS9_ACTION_COUNT,
                     TORUS9_CURRENT_ARCHITECTURE_ID,
-                    TORUS9_CURRENT_PROFILE_FINGERPRINT,
                     TORUS9_CURRENT_PROFILE_ID,
                     TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
                     TORUS9_CURRENT_TARGET_FINGERPRINT,
@@ -115,7 +193,6 @@ class CheckpointCatalog:
                 expected = {
                     "checkpoint_schema_version": 1,
                     "profile_id": TORUS9_CURRENT_PROFILE_ID,
-                    "profile_fingerprint": TORUS9_CURRENT_PROFILE_FINGERPRINT,
                     "architecture_id": TORUS9_CURRENT_ARCHITECTURE_ID,
                     "topology_id": TORUS9_TOPOLOGY_ID,
                     "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
@@ -159,7 +236,6 @@ class CheckpointCatalog:
                 expected = {
                     "checkpoint_schema_version": 1,
                     "training_profile_id": CUBE_PROFILE_ID,
-                    "training_profile_fingerprint": profile.get("profile_fingerprint"),
                     "architecture_id": "GoldenCubeGraphNetV1",
                     "topology_id": CUBE4_TOPOLOGY_ID,
                     "topology_fingerprint": CUBE4_TOPOLOGY_FINGERPRINT,
@@ -189,8 +265,6 @@ class CheckpointCatalog:
             if profile_id == "gocube-cube4-golden-training-v1":
                 if metadata.get("profile_id", profile_id) != profile_id:
                     return None
-                if metadata.get("profile_fingerprint", profile_fingerprint) != profile_fingerprint:
-                    return None
         except (KeyError, TypeError, ValueError, ImportError):
             return None
 
@@ -218,6 +292,32 @@ class CheckpointCatalog:
             "observation_fingerprint": observation_fingerprint,
             "target_fingerprint": target_fingerprint,
             "komi": 0.5,
+            "serving_contract": {
+                "checkpoint_format": GOLDEN_CHECKPOINT_FORMAT,
+                "checkpoint_schema_version": metadata.get("checkpoint_schema_version"),
+                "topology": topology,
+                "size": size,
+                "rule_set": "chinese",
+                "terminal_adjudicator": GOLDEN_TERMINAL_ADJUDICATOR,
+                "architecture_id": architecture_id,
+                "architecture_config": metadata.get("architecture_config"),
+                "topology_id": metadata.get("topology_id"),
+                "topology_fingerprint": metadata.get("topology_fingerprint"),
+                "board_size": metadata.get("board_size"),
+                "point_id_order_identity": metadata.get("point_id_order_identity"),
+                "komi": 0.5,
+                "observation_schema_id": metadata.get("observation_schema_id"),
+                "observation_schema_version": metadata.get("observation_schema_version"),
+                "observation_fingerprint": observation_fingerprint,
+                "observation_shape": metadata.get("observation_shape"),
+                "target_contract_id": metadata.get("target_contract_id"),
+                "target_contract_version": metadata.get("target_contract_version"),
+                "target_fingerprint": target_fingerprint,
+                "rules_profile_id": metadata.get("rules_profile_id", metadata.get("rules_id")),
+                "rules_fingerprint": rules_fingerprint,
+                "network_heads_and_shapes": metadata.get("network_heads_and_shapes"),
+                "auxiliary_heads": metadata.get("auxiliary_heads"),
+            },
         }
 
     @staticmethod
@@ -266,6 +366,14 @@ class CheckpointCatalog:
             filename_match = _GOLDEN_CHECKPOINT_RE.fullmatch(os.path.basename(path))
             if filename_match is None or identity["iteration"] != int(filename_match.group(1)):
                 continue
+            published, publication_reason = self.publication_decision(
+                topology=str(identity["topology"]),
+                lineage_id=lineage_id or str(identity["run_name"]),
+                iteration=int(identity["iteration"]),
+                lineage_status=lineage_status,
+            )
+            if not published:
+                continue
             descriptors.append(
                 CheckpointDescriptor(
                     checkpoint_id=f"{identity['run_name']}@{identity['iteration']}",
@@ -288,6 +396,9 @@ class CheckpointCatalog:
                     observation_fingerprint=str(identity["observation_fingerprint"]),
                     target_fingerprint=str(identity["target_fingerprint"]),
                     metadata_path=os.path.abspath(metadata_path),
+                    serving_contract_data=identity.get("serving_contract"),
+                    published=published,
+                    publication_reason=publication_reason,
                 )
             )
         return descriptors
@@ -299,3 +410,25 @@ class CheckpointCatalog:
             if descriptor.checkpoint_id == checkpoint_id:
                 return descriptor
         return None
+
+
+def serving_contract(descriptor: CheckpointDescriptor) -> dict[str, object]:
+    """Return only the artifact identity required by the serving boundary."""
+    if descriptor.serving_contract_data is not None:
+        return dict(descriptor.serving_contract_data)
+    return {
+        "checkpoint_format": GOLDEN_CHECKPOINT_FORMAT,
+        "topology": descriptor.topology,
+        "size": descriptor.size,
+        "rule_set": descriptor.rule_set,
+        "terminal_adjudicator": descriptor.terminal_adjudicator,
+        "architecture_id": descriptor.architecture_id,
+        "rules_fingerprint": descriptor.rules_fingerprint,
+        "observation_fingerprint": descriptor.observation_fingerprint,
+        "target_fingerprint": descriptor.target_fingerprint,
+        "komi": descriptor.komi,
+    }
+
+
+def is_runtime_compatible(a: CheckpointDescriptor, b: CheckpointDescriptor) -> bool:
+    return serving_contract(a) == serving_contract(b)

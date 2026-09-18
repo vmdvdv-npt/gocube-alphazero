@@ -158,6 +158,11 @@ def parse_args(argv=None):
     parser.add_argument("--checkpoint-dir", default=str(RUNS_ROOT))
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument(
+        "--publication-manifest",
+        default=None,
+        help="Explicit checkpoint publication manifest; defaults to the repository production manifest.",
+    )
+    parser.add_argument(
         "--allow-origin",
         action="append",
         default=None,
@@ -170,7 +175,11 @@ def main(argv=None):
     cli = parse_args(argv)
     if not 1 <= cli.port <= 65535:
         raise ValueError("port must be between 1 and 65535")
-    service = GoCubeAlphaZeroService(cli.checkpoint_dir, device=cli.device)
+    service = GoCubeAlphaZeroService(
+        cli.checkpoint_dir,
+        device=cli.device,
+        publication_manifest=cli.publication_manifest,
+    )
     origins = tuple(cli.allow_origin) if cli.allow_origin else DEFAULT_ALLOWED_ORIGINS
     server = ThreadingHTTPServer((cli.host, cli.port), make_handler(service, origins))
     server.daemon_threads = True

@@ -1,0 +1,31 @@
+{
+  "schema": "gocube-production-checkpoint-publication-v1",
+  "description": "Explicit serving publication decisions for verified Torus9 lineages.",
+  "entries": [
+    {
+      "topology": "torus9",
+      "lineage_id": "torus9-golden-v3-production-20260917-m17",
+      "checkpoint_ranges": [[47, 47]]
+    },
+    {
+      "topology": "torus9",
+      "lineage_id": "torus9-golden-v3-plateau-exit-m47-lr3e4-r6-40k-s128-20260917-v2",
+      "checkpoint_ranges": [[48, 54]]
+    },
+    {
+      "topology": "torus9",
+      "lineage_id": "torus9-golden-v3-plateau-exit-m54-lr3e4-r6-40k-s128-20260917-v3",
+      "checkpoint_ranges": [[55, 80]]
+    },
+    {
+      "topology": "torus9",
+      "lineage_id": "torus9-staged-cadence-m80-20260918-v1-g128",
+      "checkpoint_ranges": [[81, 83]]
+    },
+    {
+      "topology": "torus9",
+      "lineage_id": "torus9-post-ab-m80-g128-20260918-v1",
+      "checkpoint_ranges": [[84, 93]]
+    }
+  ]
+}
