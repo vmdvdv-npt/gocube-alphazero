@@ -2,6 +2,7 @@ import http.client
 import json
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from threading import Thread
 
 import pytest
@@ -12,7 +13,9 @@ from alphazero.envs.gocube.integration.errors import (
     GenerationBusy,
     UnsupportedProtocol,
 )
+from alphazero.envs.gocube.integration.catalog import CheckpointCatalog
 from alphazero.envs.gocube.integration.server import make_handler
+from alphazero.envs.gocube.integration.service import GoCubeAlphaZeroService
 
 
 class FakeService:
@@ -90,6 +93,29 @@ def test_health_checkpoints_and_options():
         assert raw == b""
         assert headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
         assert "POST" in headers["Access-Control-Allow-Methods"]
+
+
+@pytest.mark.skipif(
+    not (Path(__file__).parents[1] / "runs/torus9/active/torus9-post-ab-m80-g128-20260918-v1/checkpoints/M93.pt").is_file(),
+    reason="real Torus9 M93 artifact is not checked out",
+)
+def test_real_publication_catalog_is_exposed_by_checkpoints_endpoint():
+    runs_root = Path(__file__).parents[1] / "runs"
+    catalog = CheckpointCatalog(str(runs_root))
+    service = GoCubeAlphaZeroService(str(runs_root), device="cpu", catalog=catalog)
+    expected = {
+        "torus9-golden-v3-production-20260917-m17@47",
+        "torus9-golden-v3-plateau-exit-m47-lr3e4-r6-40k-s128-20260917-v2@54",
+        "torus9-golden-v3-plateau-exit-m54-lr3e4-r6-40k-s128-20260917-v3@80",
+        "torus9-staged-cadence-m80-20260918-v1-g128@83",
+        "torus9-post-ab-m80-g128-20260918-v1@88",
+        "torus9-post-ab-m80-g128-20260918-v1@93",
+    }
+    with running_server(service) as port:
+        status, _, raw = request(port, "GET", "/v1/checkpoints")
+    assert status == 200
+    actual = {item["id"] for item in json_body(raw)["checkpoints"]}
+    assert expected <= actual
 
 
 def test_post_game_and_cors_origin_echo():

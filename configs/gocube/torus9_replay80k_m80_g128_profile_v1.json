@@ -1,0 +1,19 @@
+{
+  "profile_id": "gocube-torus9-golden-v3",
+  "base_profile_path": "torus9_golden_current_v3.json",
+  "experiment": {
+    "kind": "torus9-replay-cap-80k-m80-g128-v1",
+    "purpose": "controlled continuation from canonical M80 with the sole replay-cap change from 40000 to 80000"
+  },
+  "self_play": {
+    "mcts_simulations": 128
+  },
+  "training": {
+    "learning_rate": 0.0003
+  },
+  "replay": {
+    "window": "rolling last 6 generations",
+    "generations": 6,
+    "cap": 80000
+  }
+}
