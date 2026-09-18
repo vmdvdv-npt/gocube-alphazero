@@ -45,6 +45,16 @@ class CheckpointLoadFailed(IntegrationError):
     http_status = 500
 
 
+class InvalidMoveHistory(IntegrationError):
+    code = "invalid_move_history"
+    http_status = 422
+
+
+class TerminalPosition(IntegrationError):
+    code = "terminal_position"
+    http_status = 409
+
+
 class GenerationBusy(IntegrationError):
     code = "generation_busy"
     http_status = 409
