@@ -7,7 +7,10 @@ import pytest
 
 import gocube_golden.run_storage as run_storage
 from gocube_golden.run_storage import CheckpointResolutionError, resolve_checkpoint
-from tools.torus9_run_driver import _parent_replay_reference_paths
+from tools.torus9_run_driver import (
+    _parent_replay_reference_paths,
+    _resolve_parent_replay_reference_paths,
+)
 
 
 def _lineage(
@@ -166,6 +169,79 @@ def test_parent_bootstrap_references_exactly_m42_through_m47(tmp_path: Path) -> 
         "iter-46-fresh.jsonl",
         "iter-47-fresh.jsonl",
     ]
+
+
+def test_parent_bootstrap_resolves_cross_lineage_window_without_copying(tmp_path: Path) -> None:
+    older_root = tmp_path / "older-lineage"
+    winner_root = tmp_path / "winner-lineage"
+    inherited = []
+    for generation in range(78, 81):
+        path = older_root / "replay" / f"iter-{generation:02d}-fresh.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"older-{generation}\n", encoding="utf-8")
+        inherited.append(
+            {
+                "generation": generation,
+                "path": str(path),
+                "sha256": run_storage._sha256_file(path),
+            }
+        )
+    for generation in range(81, 84):
+        path = winner_root / "replay" / f"iter-{generation:02d}-fresh.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"winner-{generation}\n", encoding="utf-8")
+
+    (winner_root / "manifest.json").write_text(
+        json.dumps({"parent_checkpoint": {"replay_references": inherited}}),
+        encoding="utf-8",
+    )
+    paths = _resolve_parent_replay_reference_paths(
+        parent_root=winner_root,
+        generation=84,
+        parent_reference={"lineage_id": "winner-lineage"},
+    )
+
+    assert paths == tuple(
+        [
+            older_root / "replay" / f"iter-{generation:02d}-fresh.jsonl"
+            for generation in range(78, 81)
+        ]
+        + [
+            winner_root / "replay" / f"iter-{generation:02d}-fresh.jsonl"
+            for generation in range(81, 84)
+        ]
+    )
+    assert not (winner_root / "replay" / "iter-78-fresh.jsonl").exists()
+
+
+def test_parent_bootstrap_rejects_cross_lineage_sha_mismatch(tmp_path: Path) -> None:
+    parent_root = tmp_path / "winner-lineage"
+    path = parent_root / "replay" / "iter-78-fresh.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("tampered\n", encoding="utf-8")
+    (parent_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "parent_checkpoint": {
+                    "replay_references": [
+                        {
+                            "generation": 78,
+                            "path": str(path),
+                            "sha256": "sha256:" + "0" * 64,
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="M78 SHA-256 mismatch"):
+        _resolve_parent_replay_reference_paths(
+            parent_root=parent_root,
+            generation=84,
+            parent_reference=None,
+        )
 
 
 def test_downstream_manifest_protects_parent_from_discard(

@@ -662,22 +662,16 @@ def _prepare_state(
         # Bootstrap a full rolling-6 window from immutable parent fresh-replay
         # artifacts. These are references only; no parent dataset is copied.
         parent_root = previous_checkpoint.parents[1]
-        discovered = _parent_replay_reference_paths(parent_root, generation)
+        discovered = _resolve_parent_replay_reference_paths(
+            parent_root=parent_root,
+            generation=generation,
+            parent_reference=parent_reference,
+        )
         if all(path.is_file() for path in discovered):
             parent_replay_paths = discovered
-            existing_references = {
-                int(item["generation"]): str(item.get("sha256", ""))
-                for item in candidate.get("replay_references", [])
-                if isinstance(item, Mapping) and item.get("generation") is not None
-            }
             replay_references = []
             for value, path in zip(range(max(1, generation - 6), generation), discovered):
                 digest = file_sha256(path)
-                expected = existing_references.get(value)
-                if expected and expected != digest:
-                    raise ValueError(
-                        f"Referenced parent fresh replay M{value} SHA-256 mismatch"
-                    )
                 replay_references.append(
                     {"generation": value, "path": str(path), "sha256": digest}
                 )
@@ -769,6 +763,79 @@ def _parent_replay_reference_paths(parent_root: Path, generation: int) -> tuple[
         parent_root / "replay" / f"iter-{value:02d}-fresh.jsonl"
         for value in range(first, int(generation))
     )
+
+
+def _resolve_parent_replay_reference_paths(
+    *,
+    parent_root: Path,
+    generation: int,
+    parent_reference: Mapping[str, object] | None,
+) -> tuple[Path, ...]:
+    """Resolve a rolling fresh-replay window across an external lineage boundary.
+
+    A promoted lineage owns only generations produced after its parent checkpoint.
+    The older part of the bootstrap window therefore remains in the selected
+    checkpoint lineage's parent references.  Resolve those references without
+    copying artifacts, preferring fresh files in the selected lineage and
+    validating every inherited SHA-256 before the adapter sees the dataset.
+    """
+    first = max(1, int(generation) - 6)
+    last = int(generation)
+    inherited: dict[int, Mapping[str, object]] = {}
+    visited_roots: set[Path] = set()
+
+    def collect(entries: object) -> None:
+        if not isinstance(entries, list):
+            return
+        for raw in entries:
+            if not isinstance(raw, Mapping):
+                continue
+            raw_generation = raw.get("generation")
+            raw_path = raw.get("path")
+            if raw_generation is None or not raw_path:
+                continue
+            inherited.setdefault(int(raw_generation), raw)
+
+    # A newer manifest may already carry the complete inherited window.
+    if isinstance(parent_reference, Mapping):
+        collect(parent_reference.get("replay_references"))
+
+    # Walk the selected checkpoint lineage's parent chain so continuation works
+    # for more than one promotion boundary, not just the current A/B handoff.
+    current_root = parent_root.resolve()
+    while current_root not in visited_roots:
+        visited_roots.add(current_root)
+        manifest_path = current_root / "manifest.json"
+        if not manifest_path.is_file():
+            break
+        source_manifest = _read_json(manifest_path)
+        source_parent = source_manifest.get("parent_checkpoint")
+        if not isinstance(source_parent, Mapping):
+            break
+        collect(source_parent.get("replay_references"))
+        source_parent_path = source_parent.get("path")
+        if not source_parent_path:
+            break
+        source_checkpoint = Path(str(source_parent_path)).resolve()
+        current_root = source_checkpoint.parents[1]
+
+    resolved: list[Path] = []
+    for value in range(first, last):
+        local = parent_root / "replay" / f"iter-{value:02d}-fresh.jsonl"
+        known = inherited.get(value)
+        path = local if local.is_file() else (
+            Path(str(known["path"])).resolve() if known is not None else local
+        )
+        if known is not None and known.get("sha256") and path.is_file():
+            expected = str(known["sha256"])
+            actual = file_sha256(path)
+            if actual != expected:
+                raise ValueError(
+                    f"Referenced parent fresh replay M{value} SHA-256 mismatch: "
+                    f"expected {expected}, got {actual}"
+                )
+        resolved.append(path)
+    return tuple(resolved)
 
 
 def _generation_paths(root: Path, generation: int) -> tuple[Path, ...]:
