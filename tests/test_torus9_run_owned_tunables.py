@@ -169,6 +169,28 @@ def test_expanded_parent_replay_uses_exact_m42_through_m47(tmp_path: Path) -> No
     ]
 
 
+def test_expanded_parent_replay_keeps_supplied_cross_lineage_sources(tmp_path: Path) -> None:
+    _root, checkpoint, _fallback = _parent_reference(tmp_path)
+    older_root = tmp_path / "older-lineage" / "replay"
+    supplied = tuple(
+        older_root / f"iter-{generation:02d}-fresh.jsonl" for generation in range(42, 48)
+    )
+    for source in supplied:
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("{}\n", encoding="utf-8")
+
+    adapter = Torus9TrainingAdapter(
+        profile=_run_profile(
+            lr=0.0003,
+            replay_generations=6,
+            replay_cap=40000,
+            simulations=128,
+        )
+    )
+
+    assert adapter._reference_sources(checkpoint, supplied) == supplied
+
+
 def test_parent_rolling_replay_remains_valid_when_child_does_not_expand_scope(
     tmp_path: Path,
 ) -> None:
