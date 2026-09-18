@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -178,3 +179,23 @@ def test_v2_driver_restore_uses_exact_parent_and_replay_without_legacy_discovery
     assert captured["checkpoint"] == parent.resolve()
     assert captured["replay_paths"] == (replay_old.resolve(), replay_new.resolve())
     assert captured["replay_paths_are_authoritative"] is True
+
+
+def test_v2_parent_identity_reads_checkpoint_ref_sha(tmp_path: Path) -> None:
+    parent_path = tmp_path / "parent" / "checkpoints" / "M93.pt"
+    parent_ref = CheckpointRef(
+        topology="torus9",
+        lineage_id="parent",
+        checkpoint_id="M93",
+        generation=93,
+        path="checkpoints/M93.pt",
+        sha256="sha256:" + "a" * 64,
+    )
+    generation_input = SimpleNamespace(
+        parent_checkpoint=SimpleNamespace(path=parent_path, ref=parent_ref)
+    )
+
+    assert torus9_run_driver._v2_parent_checkpoint_identity(generation_input) == (
+        parent_path.resolve(),
+        parent_ref.sha256,
+    )

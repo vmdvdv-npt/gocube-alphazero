@@ -32,6 +32,39 @@ def test_standard_main_passes_default_bindings(monkeypatch: pytest.MonkeyPatch) 
     assert seen["bindings"] is base.DEFAULT_DRIVER_BINDINGS
 
 
+def test_v2_generation_config_accepts_backfilled_execution_seeds() -> None:
+    config = base._v2_generation_config(
+        {
+            "self_play": {"games_per_iteration": 128, "mcts_simulations": 128},
+            "training": {
+                "optimizer_steps_per_iteration": 160,
+                "learning_rate": 0.0003,
+                "optimizer": "Adam",
+                "batch_size": 64,
+            },
+            "replay": {"generations": 6, "cap": 40_000},
+            "execution": {
+                "device": "cuda",
+                "workers": 16,
+                "active_games_per_worker": 4,
+                "active_contexts": 64,
+                "inference_batch_cap": 64,
+                "inference_batch_wait_ms": 1,
+                "coalescing": True,
+                "model_init_seed": 202609131001,
+                "selfplay_master_seed": 202609131002,
+                "training_master_seed": 202609131003,
+            },
+            "extensions": {},
+        }
+    )
+
+    assert config["optimizer_steps_per_iteration"] == 160
+    assert config["model_init_seed"] == 202609131001
+    assert config["selfplay_master_seed"] == 202609131002
+    assert config["training_master_seed"] == 202609131003
+
+
 @pytest.mark.parametrize(
     ("games", "optimizer_steps"),
     ((64, 80), (128, 160), (192, 240)),
