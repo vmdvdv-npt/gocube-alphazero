@@ -14,7 +14,9 @@ from gocube_golden.orchestrator_v2 import (
     GenerationRunner,
     OutputLineage,
     ResolvedGenerationInput,
+    Torus9ProductionGenerationPath,
 )
+from tools import torus9_run_driver
 
 
 def _sha(path: Path) -> str:
@@ -94,3 +96,85 @@ def test_runner_does_not_return_result_when_generation_is_not_committed(tmp_path
 
     with pytest.raises(GenerationNotCommitted, match="did not reach commit"):
         GenerationRunner(production_path).run(resolved)
+
+
+def test_torus9_production_path_forwards_exact_input_and_maps_committed_result(
+    tmp_path: Path,
+):
+    resolved = _resolved_input(tmp_path)
+    checkpoint = tmp_path / "checkpoints" / "M94.pt"
+    marker = tmp_path / "generation-94.complete.json"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"production-checkpoint")
+    marker.write_bytes(b'{"status":"COMPLETED"}\n')
+    captured: list[ResolvedGenerationInput] = []
+
+    def driver(value: ResolvedGenerationInput) -> dict[str, object]:
+        captured.append(value)
+        return {
+            "status": "COMPLETED",
+            "checkpoint_reload_verified": True,
+            "checkpoint": {"path": "checkpoints/M94.pt"},
+            "commit_artifact": {"path": "generation-94.complete.json"},
+        }
+
+    result = GenerationRunner(Torus9ProductionGenerationPath(driver)).run(resolved)
+
+    assert captured == [resolved]
+    assert result.checkpoint.path == "checkpoints/M94.pt"
+    assert result.commit_artifact.path == "generation-94.complete.json"
+
+
+def test_v2_driver_restore_uses_exact_parent_and_replay_without_legacy_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    parent = tmp_path / "parent" / "checkpoints" / "M1.pt"
+    replay_old = tmp_path / "replay" / "iter-01-fresh.jsonl"
+    replay_new = tmp_path / "replay" / "iter-02-fresh.jsonl"
+    parent.parent.mkdir(parents=True)
+    replay_old.parent.mkdir(parents=True)
+    parent.write_bytes(b"parent")
+    replay_old.write_bytes(b"old")
+    replay_new.write_bytes(b"new")
+    captured: dict[str, object] = {}
+
+    class Adapter:
+        profile_fingerprint = "sha256:" + "a" * 64
+
+        def load_state(self, checkpoint_path: Path, **kwargs: object) -> object:
+            captured["checkpoint"] = checkpoint_path
+            captured.update(kwargs)
+            return object()
+
+    bindings = torus9_run_driver.DriverBindings(
+        training_adapter_factory=lambda **_kwargs: Adapter(),
+        optimizer_steps_per_iteration=1,
+        scientific_validator=lambda _profile, _config: None,
+    )
+
+    def fail_legacy_discovery(**_kwargs: object) -> tuple[Path, ...]:
+        raise AssertionError("V2 restore must not invoke legacy replay discovery")
+
+    monkeypatch.setattr(
+        torus9_run_driver,
+        "_resolve_parent_replay_reference_paths",
+        fail_legacy_discovery,
+    )
+    torus9_run_driver._prepare_state_v2(
+        root=tmp_path / "output",
+        lineage_id="child",
+        generation=3,
+        profile={},
+        config={},
+        device="cpu",
+        code_identity=object(),  # type: ignore[arg-type]
+        parent_checkpoint=parent,
+        replay_paths=(replay_old, replay_new),
+        parent_sha256=sha256_file(parent),
+        replay_sha256s=(sha256_file(replay_old), sha256_file(replay_new)),
+        bindings=bindings,
+    )
+
+    assert captured["checkpoint"] == parent.resolve()
+    assert captured["replay_paths"] == (replay_old.resolve(), replay_new.resolve())
+    assert captured["replay_paths_are_authoritative"] is True
