@@ -9,6 +9,7 @@ in the lineage-owned run spec.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -44,8 +45,10 @@ from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_PROFILE_ID,
     TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
+    current_torus9_content_fingerprint,
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
+    profile_fingerprint,
 )
 from gocube_golden.torus9_training import TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA
 from tools.arena_engine import (
@@ -756,6 +759,81 @@ def _prepare_state(
     return adapter, state, previous_checkpoint
 
 
+def _prepare_state_v2(
+    *,
+    root: Path,
+    lineage_id: str,
+    generation: int,
+    profile: Mapping[str, object],
+    config: Mapping[str, object],
+    device: str,
+    code_identity: CodeIdentity,
+    parent_checkpoint: Path,
+    replay_paths: Sequence[Path],
+    parent_sha256: str,
+    replay_sha256s: Sequence[str],
+    bindings: DriverBindings,
+    timing: Mapping[str, object] | None = None,
+) -> tuple[Torus9TrainingAdapter, Any, Path]:
+    """Restore a V2 parent from the resolver's exact immutable inputs.
+
+    This entrypoint intentionally has no manifest, ancestry, or replay-window
+    lookup.  The legacy ``_prepare_state`` remains the V1 compatibility path.
+    """
+    if generation == 1:
+        # Generation one still creates the lineage-owned M0 exactly as the
+        # mature driver does; there is no parent replay to discover yet.
+        return _prepare_state(
+            root=root,
+            lineage_id=lineage_id,
+            generation=generation,
+            profile=profile,
+            config=config,
+            device=device,
+            code_identity=code_identity,
+            timing=timing,
+            bindings=bindings,
+        )
+    if not replay_paths:
+        raise ValueError("V2 generation requires at least one resolved replay artifact")
+    parent_checkpoint = Path(parent_checkpoint).resolve()
+    replay_paths = tuple(Path(path).resolve() for path in replay_paths)
+    if not parent_checkpoint.is_file() or any(not path.is_file() for path in replay_paths):
+        raise FileNotFoundError("Resolved V2 parent checkpoint or replay artifact is missing")
+    if file_sha256(parent_checkpoint) != str(parent_sha256):
+        raise ValueError("Resolved V2 parent checkpoint SHA-256 mismatch")
+    if len(replay_paths) != len(replay_sha256s):
+        raise ValueError("Resolved V2 replay identity count does not match replay list")
+    for path, expected in zip(replay_paths, replay_sha256s):
+        if file_sha256(path) != str(expected):
+            raise ValueError(f"Resolved V2 replay artifact SHA-256 mismatch: {path}")
+
+    adapter = bindings.training_adapter_factory(
+        profile=profile,
+        code_identity=code_identity,
+        base_commit=TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
+    )
+    restore_started = time.perf_counter()
+    state = adapter.load_state(
+        parent_checkpoint,
+        replay_path=replay_paths[-1],
+        replay_paths=replay_paths,
+        device=device,
+        # A V2 parent may be cross-lineage or use a prior compatible profile,
+        # but its source list is already resolved and must not be rediscovered.
+        allow_reference=True,
+        replay_paths_are_authoritative=True,
+        load_timing=timing if isinstance(timing, dict) else None,
+    )
+    if isinstance(timing, dict):
+        timing.setdefault(
+            "restore_previous_state_wall_time_sec",
+            time.perf_counter() - restore_started,
+        )
+        timing["replay_validation_mode"] = "resolved-v2-inputs"
+    return adapter, state, parent_checkpoint
+
+
 def _parent_replay_reference_paths(parent_root: Path, generation: int) -> tuple[Path, ...]:
     """Return the exact six pre-fork fresh replay generations for M48+."""
     first = max(1, int(generation) - 6)
@@ -1071,13 +1149,19 @@ def _publish_generation_result(
     selfplay_metrics: Mapping[str, object],
     config: Mapping[str, object],
     bindings: DriverBindings = DEFAULT_DRIVER_BINDINGS,
+    profile: Mapping[str, object] | None = None,
+    result_path: Path | None = None,
 ) -> dict[str, object]:
     checkpoint = root / "checkpoints" / f"M{generation}.pt"
     replay = root / "replay" / f"rolling-after-{generation:02d}.jsonl"
     summary_path = root / f"iter-{generation:02d}-summary.json"
     marker = root / f"generation-{generation:02d}.complete.json"
     selfplay_path = root / "selfplay" / f"iter-{generation:02d}-games.jsonl"
-    profile_path = Path(os.environ["AZ_PROFILE_PATH"]).resolve()
+    profile_path = (
+        Path(os.environ["AZ_PROFILE_PATH"]).resolve()
+        if profile is None
+        else None
+    )
     marker_payload = _read_json(marker)
     cached_identities: dict[str, Mapping[str, object]] = {}
     marker_fields = {
@@ -1118,7 +1202,7 @@ def _publish_generation_result(
     if marker_payload.get("replay_identity_contract") is not None:
         replay_identity["replay_identity_contract"] = marker_payload["replay_identity_contract"]
     adapter = bindings.training_adapter_factory(
-        profile=load_torus9_current_profile(profile_path)
+        profile=(load_torus9_current_profile(profile_path) if profile is None else profile)
     )
     reload_timing: dict[str, object] = {}
     loaded = adapter.load_state(
@@ -1221,8 +1305,14 @@ def _publish_generation_result(
             selfplay_metrics=selfplay_metrics, training=training
         ),
     }
+    if profile is not None:
+        payload["commit_artifact"] = _artifact(root, marker)
     publication_started = time.perf_counter()
-    result_path = Path(os.environ["AZ_GENERATION_RESULT_PATH"])
+    result_path = (
+        Path(os.environ["AZ_GENERATION_RESULT_PATH"])
+        if result_path is None
+        else Path(result_path)
+    )
     _atomic_json(result_path, payload)
     publication_elapsed = time.perf_counter() - publication_started
     metrics_payload = payload.get("metrics")
@@ -1236,22 +1326,182 @@ def _publish_generation_result(
     return payload
 
 
+def _v2_effective_config(value: object) -> Mapping[str, object]:
+    config = getattr(value, "config", value)
+    if hasattr(config, "to_dict"):
+        config = config.to_dict()
+    if not isinstance(config, Mapping):
+        raise ValueError("V2 effective config must be a resolved EffectiveConfig")
+    return config
+
+
+def _v2_generation_config(value: object) -> dict[str, object]:
+    """Translate the resolved V2 config to the mature driver vocabulary."""
+    effective = _v2_effective_config(value)
+    self_play = _mapping(effective.get("self_play"), "effective_config.self_play")
+    training = _mapping(effective.get("training"), "effective_config.training")
+    replay = _mapping(effective.get("replay"), "effective_config.replay")
+    execution = _mapping(effective.get("execution"), "effective_config.execution")
+    extensions = _mapping(effective.get("extensions", {}), "effective_config.extensions")
+    seeds = _mapping(extensions.get("seeds", extensions), "effective_config.extensions.seeds")
+    workers = int(execution["workers"])
+    active_contexts = int(
+        execution["active_contexts"]
+        if "active_contexts" in execution
+        else execution["total_active_contexts"]
+    )
+    active_games = int(
+        execution.get("active_games_per_worker", max(1, (active_contexts + workers - 1) // workers))
+    )
+    return {
+        "games": int(
+            self_play["games_per_iteration"]
+            if "games_per_iteration" in self_play
+            else self_play["games"]
+        ),
+        "optimizer_steps_per_iteration": int(
+            training["optimizer_steps"]
+            if "optimizer_steps" in training
+            else training["optimizer_steps_per_iteration"]
+        ),
+        "device": str(execution["device"]),
+        "workers": workers,
+        "active_games_per_worker": active_games,
+        "total_active_contexts": active_contexts,
+        "inference_batch_cap": int(execution["inference_batch_cap"]),
+        "inference_batch_wait_ms": float(execution["inference_batch_wait_ms"]),
+        "coalescing": bool(execution.get("coalescing", True)),
+        "heartbeat_interval_seconds": float(extensions.get("heartbeat_interval_seconds", 5.0)),
+        "model_init_seed": int(seeds["model_init_seed"]),
+        "selfplay_master_seed": int(seeds["selfplay_master_seed"]),
+        "training_master_seed": int(seeds["training_master_seed"]),
+        "optimizer": str(training["optimizer"]),
+        "learning_rate": float(training["learning_rate"]),
+        "batch_size": int(training["batch_size"]),
+        "mcts_simulations": int(self_play["mcts_simulations"]),
+        "replay_generations": int(replay["generations"]),
+        "replay_cap": int(replay["cap"]),
+    }
+
+
+def _v2_profile(value: object, config: Mapping[str, object]) -> dict[str, object]:
+    """Bind V2-owned scientific knobs into the existing run-owned profile."""
+    profile = deepcopy(load_torus9_current_profile())
+    profile["experiment"] = {
+        "kind": "orchestrator-v2-resolved-effective-config-v1",
+        "effective_config_fingerprint": getattr(value, "fingerprint", None),
+    }
+    profile["self_play"]["mcts_simulations"] = int(config["mcts_simulations"])
+    profile["training"]["learning_rate"] = float(config["learning_rate"])
+    profile["replay"]["window"] = (
+        f"rolling last {int(config['replay_generations'])} generations"
+    )
+    profile["replay"]["generations"] = int(config["replay_generations"])
+    profile["replay"]["cap"] = int(config["replay_cap"])
+    profile["content_fingerprint"] = current_torus9_content_fingerprint(profile)
+    profile["profile_fingerprint"] = profile_fingerprint(profile)
+    return profile
+
+
+def _v2_adapter_bindings(optimizer_steps: int) -> DriverBindings:
+    """Reuse the existing cadence adapter for the resolved optimizer budget."""
+    from tools.torus9_staged_sims_driver import ExperimentCadenceTrainingAdapter
+
+    class BoundV2TrainingAdapter(ExperimentCadenceTrainingAdapter):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            if args:
+                raise TypeError("V2 Torus9 adapter accepts keyword construction only")
+            super().__init__(optimizer_steps=optimizer_steps, **kwargs)
+
+    BoundV2TrainingAdapter.__name__ = f"V2TrainingAdapter{optimizer_steps}"
+    return DriverBindings(
+        training_adapter_factory=BoundV2TrainingAdapter,
+        optimizer_steps_per_iteration=optimizer_steps,
+        scientific_validator=_validate_v2_bindings,
+    )
+
+
+def _validate_v2_bindings(
+    profile: Mapping[str, object], config: Mapping[str, object]
+) -> None:
+    training = _mapping(profile.get("training"), "profile.training")
+    replay = _mapping(profile.get("replay"), "profile.replay")
+    self_play = _mapping(profile.get("self_play"), "profile.self_play")
+    if str(config["optimizer"]) != "Adam":
+        raise ValueError("V2 Torus9 production driver supports optimizer=Adam only")
+    if int(config["batch_size"]) != 64:
+        raise ValueError("V2 Torus9 production driver requires batch_size=64")
+    if float(training["learning_rate"]) != float(config["learning_rate"]):
+        raise ValueError("V2 Torus9 learning-rate binding drift")
+    if int(self_play["mcts_simulations"]) != int(config["mcts_simulations"]):
+        raise ValueError("V2 Torus9 self-play binding drift")
+    if int(replay["generations"]) != int(config["replay_generations"]):
+        raise ValueError("V2 Torus9 replay-window binding drift")
+    if int(replay["cap"]) != int(config["replay_cap"]):
+        raise ValueError("V2 Torus9 replay-cap binding drift")
+
+
 def run_generation(
     args: argparse.Namespace,
     *,
     bindings: DriverBindings = DEFAULT_DRIVER_BINDINGS,
+    _resolved_input: object | None = None,
 ) -> dict[str, object]:
-    spec = _load_run_spec()
-    config = _generation_config(spec)
-    optimizer_steps = _positive_int(
-        bindings.optimizer_steps_per_iteration,
-        "driver bindings optimizer_steps_per_iteration",
-    )
-    _validate_device(str(config["device"]))
-    root, lineage_id, profile_path, expected_fingerprint, code = _environment(args.generation)
-    profile = _load_profile(profile_path, expected_fingerprint)
-    bindings.scientific_validator(profile, config)
-    heartbeat_path = Path(os.environ["AZ_DRIVER_HEARTBEAT_PATH"])
+    explicit_parent: Path | None = None
+    explicit_replay: tuple[Path, ...] = ()
+    explicit_parent_sha256 = ""
+    explicit_replay_sha256s: tuple[str, ...] = ()
+    result_path: Path
+    if _resolved_input is None:
+        spec = _load_run_spec()
+        config = _generation_config(spec)
+        optimizer_steps = _positive_int(
+            bindings.optimizer_steps_per_iteration,
+            "driver bindings optimizer_steps_per_iteration",
+        )
+        _validate_device(str(config["device"]))
+        root, lineage_id, profile_path, expected_fingerprint, code = _environment(args.generation)
+        profile = _load_profile(profile_path, expected_fingerprint)
+        bindings.scientific_validator(profile, config)
+        heartbeat_path = Path(os.environ["AZ_DRIVER_HEARTBEAT_PATH"])
+        result_path = Path(os.environ["AZ_GENERATION_RESULT_PATH"])
+    else:
+        generation_input = _resolved_input
+        generation = int(getattr(generation_input, "generation"))
+        if generation != int(args.generation):
+            raise ValueError("V2 generation argument disagrees with resolved input")
+        output = getattr(generation_input, "output_lineage")
+        root = Path(getattr(output, "root")).resolve()
+        lineage_id = str(getattr(output, "lineage_id"))
+        config = _v2_generation_config(getattr(generation_input, "effective_config"))
+        optimizer_steps = _positive_int(
+            config["optimizer_steps_per_iteration"],
+            "effective_config.training.optimizer_steps",
+        )
+        bindings = _v2_adapter_bindings(optimizer_steps)
+        _validate_device(str(config["device"]))
+        profile = _v2_profile(getattr(generation_input, "effective_config"), config)
+        expected_fingerprint = current_torus9_profile_fingerprint(profile)
+        bindings.scientific_validator(profile, config)
+        code = _validate_code_pin(root)
+        parent = getattr(generation_input, "parent_checkpoint")
+        explicit_parent = Path(getattr(parent, "path")).resolve()
+        explicit_parent_sha256 = str(getattr(parent, "sha256"))
+        replay_items = tuple(getattr(generation_input, "replay_artifacts"))
+        explicit_replay = tuple(Path(getattr(item, "path")).resolve() for item in replay_items)
+        explicit_replay_sha256s = tuple(str(getattr(item, "sha256")) for item in replay_items)
+        heartbeat_path = Path(
+            os.environ.get(
+                "AZ_DRIVER_HEARTBEAT_PATH",
+                str(root / "runtime" / "heartbeats" / f"generation-{args.generation:04d}.json"),
+            )
+        )
+        result_path = Path(
+            os.environ.get(
+                "AZ_GENERATION_RESULT_PATH",
+                str(root / "runtime" / "results" / f"generation-{args.generation:04d}.json"),
+            )
+        )
     marker = root / f"generation-{args.generation:02d}.complete.json"
 
     with _Heartbeat(
@@ -1259,7 +1509,8 @@ def run_generation(
         args.generation,
         interval=float(config["heartbeat_interval_seconds"]),
     ) as heartbeat:
-        manifest = _read_json(root / "manifest.json")
+        if _resolved_input is None:
+            _read_json(root / "manifest.json")
         if marker.is_file():
             heartbeat.advance("recover-published-generation")
             summary = _read_json(root / f"iter-{args.generation:02d}-summary.json")
@@ -1273,11 +1524,13 @@ def run_generation(
                 selfplay_metrics=persisted,
                 config=config,
                 bindings=bindings,
+                profile=profile if _resolved_input is not None else None,
+                result_path=result_path,
             )
         if args.resume:
             heartbeat.advance("cleanup-uncommitted-generation")
             _cleanup_uncommitted_generation(root, args.generation)
-            Path(os.environ["AZ_GENERATION_RESULT_PATH"]).unlink(missing_ok=True)
+            result_path.unlink(missing_ok=True)
             (root / "runtime" / "resume" / f"generation-{args.generation:04d}.json").unlink(missing_ok=True)
         elif any(path.exists() for path in _generation_paths(root, args.generation)):
             raise FileExistsError("Generation has uncommitted artifacts; use orchestrator resume")
@@ -1285,17 +1538,34 @@ def run_generation(
         heartbeat.advance("load-previous-state", subphase="restore")
         generation_timing: dict[str, object] = {}
         restore_started = time.perf_counter()
-        adapter, state, previous_checkpoint = _prepare_state(
-            root=root,
-            lineage_id=lineage_id,
-            generation=args.generation,
-            profile=profile,
-            config=config,
-            device=str(config["device"]),
-            code_identity=code,
-            timing=generation_timing,
-            bindings=bindings,
-        )
+        if _resolved_input is None:
+            adapter, state, previous_checkpoint = _prepare_state(
+                root=root,
+                lineage_id=lineage_id,
+                generation=args.generation,
+                profile=profile,
+                config=config,
+                device=str(config["device"]),
+                code_identity=code,
+                timing=generation_timing,
+                bindings=bindings,
+            )
+        else:
+            adapter, state, previous_checkpoint = _prepare_state_v2(
+                root=root,
+                lineage_id=lineage_id,
+                generation=args.generation,
+                profile=profile,
+                config=config,
+                device=str(config["device"]),
+                code_identity=code,
+                parent_checkpoint=explicit_parent,
+                replay_paths=explicit_replay,
+                parent_sha256=explicit_parent_sha256,
+                replay_sha256s=explicit_replay_sha256s,
+                timing=generation_timing,
+                bindings=bindings,
+            )
         generation_timing.setdefault(
             "restore_previous_state_wall_time_sec",
             time.perf_counter() - restore_started,
@@ -1433,9 +1703,20 @@ def run_generation(
             selfplay_metrics=selfplay_metrics,
             config=config,
             bindings=bindings,
+            profile=profile if _resolved_input is not None else None,
+            result_path=result_path,
         )
         heartbeat.advance("completed", token=f"generation-M{args.generation}-completed")
         return payload
+
+
+def run_generation_v2(resolved_input: object) -> dict[str, object]:
+    """Run one production generation from resolver-owned V2 inputs."""
+    generation = int(getattr(resolved_input, "generation"))
+    return run_generation(
+        argparse.Namespace(generation=generation, resume=False),
+        _resolved_input=resolved_input,
+    )
 
 
 def _training_snapshot(

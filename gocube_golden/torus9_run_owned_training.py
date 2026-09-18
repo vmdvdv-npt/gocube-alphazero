@@ -362,6 +362,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         replay_paths: Sequence[str | Path] | None = None,
         device: str = "cpu",
         allow_reference: bool = False,
+        replay_paths_are_authoritative: bool = False,
         total_evictions: int = 0,
         replay_artifact_identity: Mapping[str, object] | None = None,
         load_timing: MutableMapping[str, object] | None = None,
@@ -425,9 +426,13 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         replay_path = Path(replay_path)
         fallback_sources = tuple(Path(value) for value in (replay_paths or (replay_path,)))
         sources = (
-            self._reference_sources(checkpoint_path, fallback_sources)
-            if allow_reference
-            else fallback_sources
+            fallback_sources
+            if replay_paths_are_authoritative
+            else (
+                self._reference_sources(checkpoint_path, fallback_sources)
+                if allow_reference
+                else fallback_sources
+            )
         )
         replay_started = time.perf_counter()
         generation_identities = _base._replay_generation_identities_from_payload(
