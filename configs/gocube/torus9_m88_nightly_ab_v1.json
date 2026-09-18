@@ -1,0 +1,108 @@
+{
+  "schema": "gocube-torus9-m88-nightly-ab-v1",
+  "campaign_id": "torus9-m88-nightly-ab-20260919-v1",
+  "base_code_commit": "24d05394746d8008bb2d804a04367ab12f697270",
+  "parent": {
+    "lineage_id": "torus9-post-ab-m80-g128-20260918-v1",
+    "generation": 88
+  },
+  "run_spec_template_path": "configs/gocube/torus9_experiment_arm_template_v1.json",
+  "fixed": {
+    "self_play_mcts_simulations": 128,
+    "optimizer_steps_per_iteration": 160,
+    "replay_generations": 6,
+    "replay_cap": 40000,
+    "batch_size": 64,
+    "komi": 0.5
+  },
+  "arms": [
+    {
+      "id": "games-g128",
+      "group": "games",
+      "games_per_iteration": 128,
+      "iterations": 6,
+      "learning_rate": 0.0003,
+      "profile_path": "configs/gocube/torus9_m88_nightly_lr3e4_profile_v1.json"
+    },
+    {
+      "id": "games-g192",
+      "group": "games",
+      "games_per_iteration": 192,
+      "iterations": 4,
+      "learning_rate": 0.0003,
+      "profile_path": "configs/gocube/torus9_m88_nightly_lr3e4_profile_v1.json"
+    },
+    {
+      "id": "games-g384",
+      "group": "games",
+      "games_per_iteration": 384,
+      "iterations": 2,
+      "learning_rate": 0.0003,
+      "profile_path": "configs/gocube/torus9_m88_nightly_lr3e4_profile_v1.json"
+    },
+    {
+      "id": "lr-low",
+      "group": "learning-rate",
+      "games_per_iteration": 128,
+      "iterations": 3,
+      "learning_rate": 0.0001,
+      "profile_path": "configs/gocube/torus9_m88_nightly_lr1e4_profile_v1.json"
+    },
+    {
+      "id": "lr-current",
+      "group": "learning-rate",
+      "games_per_iteration": 128,
+      "iterations": 3,
+      "learning_rate": 0.0003,
+      "profile_path": "configs/gocube/torus9_m88_nightly_lr3e4_profile_v1.json"
+    },
+    {
+      "id": "lr-high",
+      "group": "learning-rate",
+      "games_per_iteration": 128,
+      "iterations": 3,
+      "learning_rate": 0.001,
+      "profile_path": "configs/gocube/torus9_m88_nightly_lr1e3_profile_v1.json"
+    }
+  ],
+  "arena": {
+    "games": 128,
+    "master_seed": 202609131004,
+    "execution": {
+      "workers": 16,
+      "games_per_worker": 4,
+      "inference_batch_rows": 64,
+      "inference_batch_wait_ms": 1.0,
+      "device": "cuda",
+      "strict_production": true,
+      "min_mean_inference_batch_rows": 0.0,
+      "min_effective_cpu_cores": 0.0,
+      "early_gate_enabled": false,
+      "early_gate_min_forwards": 128,
+      "early_gate_min_wall_sec": 5.0
+    },
+    "scientific_contract": {
+      "simulations": 64,
+      "noise": false,
+      "temperature": 0.0,
+      "fast_search": false,
+      "resign": false,
+      "komi": 0.5,
+      "paired_starts_color_swap": true,
+      "deterministic_tie_break": true,
+      "technical_fail_closed": true
+    }
+  },
+  "evaluations": [
+    {"id": "games-g192-vs-games-g128", "candidate": "games-g192", "reference": "games-g128"},
+    {"id": "games-g384-vs-games-g128", "candidate": "games-g384", "reference": "games-g128"},
+    {"id": "games-g128-vs-parent", "candidate": "games-g128", "reference": "parent"},
+    {"id": "games-g192-vs-parent", "candidate": "games-g192", "reference": "parent"},
+    {"id": "games-g384-vs-parent", "candidate": "games-g384", "reference": "parent"},
+    {"id": "lr-low-vs-lr-current", "candidate": "lr-low", "reference": "lr-current"},
+    {"id": "lr-high-vs-lr-current", "candidate": "lr-high", "reference": "lr-current"},
+    {"id": "lr-low-vs-parent", "candidate": "lr-low", "reference": "parent"},
+    {"id": "lr-current-vs-parent", "candidate": "lr-current", "reference": "parent"},
+    {"id": "lr-high-vs-parent", "candidate": "lr-high", "reference": "parent"}
+  ]
+}
