@@ -1,0 +1,19 @@
+{
+  "profile_id": "gocube-torus9-golden-v3",
+  "base_profile_path": "torus9_golden_current_v3.json",
+  "experiment": {
+    "kind": "torus9-m88-nightly-ab-v1",
+    "purpose": "M88 fixed-160-step games-per-iteration and learning-rate A/B"
+  },
+  "self_play": {
+    "mcts_simulations": 128
+  },
+  "training": {
+    "learning_rate": 0.0001
+  },
+  "replay": {
+    "window": "rolling last 6 generations",
+    "generations": 6,
+    "cap": 40000
+  }
+}
