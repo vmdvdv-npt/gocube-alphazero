@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from threading import Lock
+from typing import Mapping, Sequence
 
 from .catalog import CheckpointCatalog, CheckpointDescriptor, is_runtime_compatible
 from .errors import (
@@ -12,10 +13,19 @@ from .errors import (
     GenerationFailed,
     IntegrationError,
     InvalidRequest,
+    TerminalPosition,
     UnsupportedProtocol,
 )
 from .golden_generation import GoldenGameGenerator
 from .golden_models import GoldenCheckpointLoader
+from .golden_move import (
+    INTERACTIVE_SEARCH_CONTRACT,
+    GoldenMoveSelector,
+    GoldenPositionContract,
+    mapping_for_position,
+    replay_action_history,
+    validate_checkpoint_position_compatibility,
+)
 
 PROTOCOL_VERSION = 1
 RUNTIME_IDENTITY_SCHEMA = "gocube-alphazero-runtime-identity-v1"
@@ -63,6 +73,7 @@ class GoCubeAlphaZeroService:
         catalog: CheckpointCatalog | None = None,
         loader: GoldenCheckpointLoader | None = None,
         generator: GoldenGameGenerator | None = None,
+        move_selector: GoldenMoveSelector | None = None,
         publication_manifest: str | None = None,
     ):
         self.catalog = catalog or CheckpointCatalog(
@@ -73,7 +84,8 @@ class GoCubeAlphaZeroService:
             self.catalog,
             device=device,
         )
-        self.generator = generator or GoldenGameGenerator()
+        self.move_selector = move_selector or GoldenMoveSelector()
+        self.generator = generator or GoldenGameGenerator(move_selector=self.move_selector)
         self.device = self.loader.device
         self._generation_lock = Lock()
         source_root = Path(__file__).resolve().parents[4]
@@ -148,6 +160,76 @@ class GoCubeAlphaZeroService:
                 "topology/rules/model/search contract"
             )
         return black, white, sims
+
+    def select_move(
+        self,
+        *,
+        checkpoint_id: str,
+        topology: str,
+        size: int,
+        rule_set: str,
+        komi: float,
+        history: Sequence[Mapping[str, object]],
+        mcts_sims: int,
+    ) -> dict[str, object]:
+        """Select one move from a request-contained position with no game session state."""
+
+        if not isinstance(checkpoint_id, str) or not checkpoint_id:
+            raise InvalidRequest("checkpointId must be a non-empty string")
+        INTERACTIVE_SEARCH_CONTRACT.settings(mcts_sims)
+        position = GoldenPositionContract(
+            topology=topology,
+            size=size,
+            rule_set=rule_set,
+            komi=komi,
+        )
+        mapping = mapping_for_position(position)
+        state = replay_action_history(
+            topology=position.topology,
+            size=position.size,
+            rule_set=position.rule_set,
+            komi=position.komi,
+            moves=history,
+        )
+        if state.is_terminal:
+            raise TerminalPosition("History already represents a terminal Golden position")
+
+        descriptor = self.catalog.get(checkpoint_id)
+        if descriptor is None:
+            raise CheckpointNotFound(f"Unknown checkpoint: {checkpoint_id}")
+
+        validate_checkpoint_position_compatibility(
+            position=position,
+            state=state,
+            descriptor=descriptor,
+            mapping=mapping,
+        )
+
+        try:
+            _loaded_descriptor, model = self.loader.load(checkpoint_id)
+            selection = self.move_selector.select_move(
+                state=state,
+                descriptor=descriptor,
+                model=model,
+                mcts_sims=mcts_sims,
+            )
+            action = mapping.golden_action_to_protocol(selection.action)
+        except IntegrationError:
+            raise
+        except Exception as exc:
+            raise GenerationFailed(f"Move selection failed: {exc}") from exc
+
+        return {
+            "checkpointId": checkpoint_id,
+            "topology": position.topology,
+            "size": position.size,
+            "ruleSet": position.rule_set,
+            "komi": position.komi,
+            "color": "black" if int(state.side_to_move) == 1 else "white",
+            "action": action,
+            "mctsSims": selection.simulations,
+            "searchProfileId": selection.search_profile_id,
+        }
 
     def generate_game(self, request: object) -> dict[str, object]:
         black, white, sims = self._validate_game_request(request)
