@@ -773,6 +773,8 @@ def _prepare_state_v2(
     parent_sha256: str,
     replay_sha256s: Sequence[str],
     bindings: DriverBindings,
+    replay_artifact_identities: Sequence[Mapping[str, object]] = (),
+    replay_identity: Mapping[str, object] | None = None,
     timing: Mapping[str, object] | None = None,
 ) -> tuple[Torus9TrainingAdapter, Any, Path]:
     """Restore a V2 parent from the resolver's exact immutable inputs.
@@ -800,13 +802,14 @@ def _prepare_state_v2(
     replay_paths = tuple(Path(path).resolve() for path in replay_paths)
     if not parent_checkpoint.is_file() or any(not path.is_file() for path in replay_paths):
         raise FileNotFoundError("Resolved V2 parent checkpoint or replay artifact is missing")
-    if file_sha256(parent_checkpoint) != str(parent_sha256):
-        raise ValueError("Resolved V2 parent checkpoint SHA-256 mismatch")
     if len(replay_paths) != len(replay_sha256s):
         raise ValueError("Resolved V2 replay identity count does not match replay list")
-    for path, expected in zip(replay_paths, replay_sha256s):
-        if file_sha256(path) != str(expected):
-            raise ValueError(f"Resolved V2 replay artifact SHA-256 mismatch: {path}")
+    if replay_artifact_identities and len(replay_artifact_identities) != len(replay_paths):
+        raise ValueError("Resolved V2 replay evidence count does not match replay list")
+    for resolved_sha, identity in zip(replay_sha256s, replay_artifact_identities):
+        evidence_sha = str(identity.get("sha256") or identity.get("artifact_sha256") or "")
+        if evidence_sha and evidence_sha != str(resolved_sha):
+            raise ValueError("Resolved V2 replay evidence SHA-256 mismatch")
 
     adapter = bindings.training_adapter_factory(
         profile=profile,
@@ -823,6 +826,8 @@ def _prepare_state_v2(
         # but its source list is already resolved and must not be rediscovered.
         allow_reference=True,
         replay_paths_are_authoritative=True,
+        replay_artifact_identities=tuple(replay_artifact_identities) or None,
+        replay_identity=replay_identity,
         load_timing=timing if isinstance(timing, dict) else None,
     )
     if isinstance(timing, dict):
@@ -1410,6 +1415,52 @@ def _v2_parent_checkpoint_identity(value: object) -> tuple[Path, str]:
     return Path(getattr(parent, "path")).resolve(), str(getattr(parent.ref, "sha256"))
 
 
+def _v2_replay_artifact_identities(
+    value: object,
+    replay_paths: Sequence[Path],
+) -> tuple[dict[str, object], ...]:
+    """Forward resolver-owned replay evidence without rehashing its files."""
+    artifacts = tuple(getattr(value, "replay_artifacts"))
+    if len(artifacts) != len(replay_paths):
+        raise ValueError("V2 replay artifact identity count does not match replay list")
+    identities: list[dict[str, object]] = []
+    for item, path in zip(artifacts, replay_paths):
+        raw = getattr(item, "identity", None)
+        identity = dict(raw) if isinstance(raw, Mapping) else {}
+        identity.setdefault("path", str(path))
+        identity.setdefault("sha256", str(getattr(item, "sha256")))
+        # Bare path/ref inputs remain fail-closed. Only resolver-attached
+        # evidence can authorize skipping the physical hash.
+        identity["immutable_verified"] = isinstance(raw, Mapping) and bool(
+            identity.get("immutable_verified")
+        )
+        identities.append(identity)
+    return tuple(identities)
+
+
+def _v2_replay_identity(value: object, parent_checkpoint: Path) -> dict[str, object] | None:
+    """Return durable rolling composition evidence from the resolved parent."""
+    explicit = getattr(value, "replay_identity", None)
+    if isinstance(explicit, Mapping):
+        return dict(explicit)
+    metadata_path = parent_checkpoint.with_suffix(".metadata.json")
+    if not metadata_path.is_file():
+        return None
+    metadata = _read_json(metadata_path)
+    result: dict[str, object] = {}
+    if metadata.get("replay_identity_schema") is not None:
+        result["replay_identity_schema"] = metadata["replay_identity_schema"]
+    if metadata.get("replay_identity_contract") is not None:
+        result["replay_identity_contract"] = metadata["replay_identity_contract"]
+    if metadata.get("replay_generation_identities") is not None:
+        result["generation_identities"] = metadata["replay_generation_identities"]
+    if metadata.get("replay_fingerprint") is not None:
+        result["canonical_replay_fingerprint"] = metadata["replay_fingerprint"]
+    if metadata.get("validation_schema") is not None:
+        result["validation_schema"] = metadata["validation_schema"]
+    return result or None
+
+
 def _v2_adapter_bindings(optimizer_steps: int) -> DriverBindings:
     """Reuse the existing cadence adapter for the resolved optimizer budget."""
     from tools.torus9_staged_sims_driver import ExperimentCadenceTrainingAdapter
@@ -1458,6 +1509,8 @@ def run_generation(
     explicit_replay: tuple[Path, ...] = ()
     explicit_parent_sha256 = ""
     explicit_replay_sha256s: tuple[str, ...] = ()
+    explicit_replay_artifact_identities: tuple[dict[str, object], ...] = ()
+    explicit_replay_identity: dict[str, object] | None = None
     result_path: Path
     if _resolved_input is None:
         spec = _load_run_spec()
@@ -1497,6 +1550,14 @@ def run_generation(
         replay_items = tuple(getattr(generation_input, "replay_artifacts"))
         explicit_replay = tuple(Path(getattr(item, "path")).resolve() for item in replay_items)
         explicit_replay_sha256s = tuple(str(getattr(item, "sha256")) for item in replay_items)
+        explicit_replay_artifact_identities = _v2_replay_artifact_identities(
+            generation_input,
+            explicit_replay,
+        )
+        explicit_replay_identity = _v2_replay_identity(
+            generation_input,
+            explicit_parent,
+        )
         heartbeat_path = Path(
             os.environ.get(
                 "AZ_DRIVER_HEARTBEAT_PATH",
@@ -1572,6 +1633,8 @@ def run_generation(
                 replay_sha256s=explicit_replay_sha256s,
                 timing=generation_timing,
                 bindings=bindings,
+                replay_artifact_identities=explicit_replay_artifact_identities,
+                replay_identity=explicit_replay_identity,
             )
         generation_timing.setdefault(
             "restore_previous_state_wall_time_sec",

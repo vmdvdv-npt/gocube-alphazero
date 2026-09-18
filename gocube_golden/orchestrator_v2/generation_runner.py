@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Mapping, Protocol, Sequence
 
 from ..artifact_catalog import sha256_file
 from .artifact_resolver import ResolvedArtifact, ResolvedCheckpointNode, ResolvedEffectiveConfig
@@ -57,6 +57,9 @@ class ResolvedGenerationInput:
     generation: int
     effective_config: ResolvedEffectiveConfig
     output_lineage: OutputLineage
+    # Optional durable rolling-composition evidence from the resolved parent.
+    # Per-source evidence lives on each ``ResolvedArtifact``.
+    replay_identity: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if type(self.generation) is not int or self.generation < 0:

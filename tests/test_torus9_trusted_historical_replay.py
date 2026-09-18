@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+from pathlib import Path
 
 import pytest
 
 import gocube_golden.torus9_run_owned_training as run_owned_training
-from gocube_golden.artifact_catalog import ARTIFACT_VALIDATION_SCHEMA
+from gocube_golden.artifact_catalog import ARTIFACT_VALIDATION_SCHEMA, sha256_file
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_TARGET_FINGERPRINT,
     current_torus9_content_fingerprint,
     load_torus9_current_profile,
     profile_fingerprint,
 )
+from gocube_golden.torus9_training import TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA
 
 
 def _profile():
@@ -132,3 +135,83 @@ def test_untrusted_row_keeps_existing_semantic_validation_boundary(
     adapter.validate_replay((row,))
 
     assert calls == ["M50:game:0:1"]
+
+
+def test_resolved_fresh_sources_skip_historical_semantics_and_preserve_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = run_owned_training.Torus9TrainingAdapter(profile=_profile())
+    paths: list[Path] = []
+    evidence: list[dict[str, object]] = []
+    for generation in (88, 89, 90):
+        row = _row(f"M{generation}:game:0:0")
+        row["source_generation"] = generation
+        path = tmp_path / f"iter-{generation:02d}-fresh.jsonl"
+        path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+        digest = sha256_file(path)
+        paths.append(path)
+        evidence.append(
+            {
+                "path": str(path),
+                "sha256": digest,
+                "size_bytes": path.stat().st_size,
+                "row_count": 1,
+                "validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+                "immutable_verified": True,
+                "generation_identity": {
+                    "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+                    "generation": generation,
+                    "sha256": digest,
+                    "row_count": 1,
+                },
+            }
+        )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("resolved historical sources must not be semantically revalidated")
+
+    monkeypatch.setattr(adapter, "validate_sample", forbidden)
+    monkeypatch.setattr(run_owned_training._base, "value_fingerprint", forbidden)
+
+    replay, _digests = adapter._rolling_from_sources(
+        paths,
+        total_evictions=0,
+        replay_artifact_identities=evidence,
+    )
+
+    assert [row["source_generation"] for row in replay.rows] == [88, 89, 90]
+
+
+def test_incomplete_resolved_source_evidence_uses_full_validation_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = run_owned_training.Torus9TrainingAdapter(profile=_profile())
+    row = _row("M88:game:0:0")
+    path = tmp_path / "iter-88-fresh.jsonl"
+    path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+    digest = sha256_file(path)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        adapter,
+        "validate_sample",
+        lambda sample: calls.append(str(sample["replay_row_id"])),
+    )
+
+    adapter._rolling_from_sources(
+        [path],
+        total_evictions=0,
+        replay_artifact_identities=[
+            {
+                "sha256": digest,
+                "size_bytes": path.stat().st_size,
+                "validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+                "immutable_verified": True,
+                # Missing row_count and generation identity is intentionally
+                # incomplete and must not authorize the trusted path.
+            }
+        ],
+    )
+
+    assert calls == ["M88:game:0:0"]

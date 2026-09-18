@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Union
 
 from .. import run_storage
-from ..artifact_catalog import sha256_file
+from ..artifact_catalog import ArtifactCatalog, sha256_file
 from .contracts import (
     ArtifactRef,
     CheckpointNode,
@@ -55,6 +55,10 @@ class ResolvedArtifact:
     owner_topology: str
     owner_lineage_id: str
     owner_status: str | None = None
+    # Durable catalog/checkpoint evidence, when the owner committed it. The
+    # resolver has already verified ``ref.sha256`` against the physical file;
+    # consumers may use this evidence without hashing the artifact again.
+    identity: Mapping[str, object] | None = None
 
     @property
     def artifact(self) -> ArtifactRef:
@@ -343,6 +347,12 @@ class ArtifactResolver:
                 f"path={path}, exists={str(exists).lower()}, "
                 f"expected SHA={artifact_ref.sha256}, actual SHA={actual or '<missing>'}"
             )
+        identity = self._durable_artifact_identity(
+            artifact_ref,
+            path,
+            owner=owner,
+            owner_context=owner_context,
+        )
         return ResolvedArtifact(
             ref=artifact_ref,
             path=path,
@@ -350,7 +360,86 @@ class ArtifactResolver:
             owner_topology=owner_context.topology,
             owner_lineage_id=owner_context.lineage_id,
             owner_status=owner_context.status,
+            identity=identity,
         )
+
+    def _durable_artifact_identity(
+        self,
+        artifact_ref: ArtifactRef,
+        path: Path,
+        *,
+        owner: Owner,
+        owner_context: _ArtifactOwner,
+    ) -> Mapping[str, object] | None:
+        """Attach existing catalog/metadata evidence to an already-open file."""
+        relative = artifact_ref.path
+        identity: dict[str, object] = {
+            "path": relative,
+            "sha256": artifact_ref.sha256,
+            "immutable_verified": True,
+        }
+        catalog_path = owner_context.root / "runtime" / "artifact-catalog.json"
+        if catalog_path.is_file():
+            try:
+                catalog = ArtifactCatalog.load(catalog_path, root=owner_context.root)
+                catalog_entry = catalog.entries.get(relative)
+            except ValueError as exc:
+                raise ArtifactIntegrityError(
+                    f"Cannot load artifact catalog for resolved artifact: {catalog_path}"
+                ) from exc
+            if isinstance(catalog_entry, Mapping):
+                if str(catalog_entry.get("sha256", "")) != artifact_ref.sha256:
+                    raise ArtifactIntegrityError(
+                        f"Artifact catalog SHA disagrees with resolved artifact: {relative}"
+                    )
+                if int(catalog_entry.get("size_bytes", -1)) != path.stat().st_size:
+                    raise ArtifactIntegrityError(
+                        f"Artifact catalog size disagrees with resolved artifact: {relative}"
+                    )
+                identity.update(dict(catalog_entry))
+                identity["validation_schema"] = catalog.payload.get("validation_schema")
+        fresh_generation: int | None = None
+        name = path.name
+        if name.startswith("iter-") and name.endswith("-fresh.jsonl"):
+            try:
+                fresh_generation = int(name[len("iter-") : -len("-fresh.jsonl")])
+            except ValueError:
+                fresh_generation = None
+        if fresh_generation is not None and isinstance(owner, ResolvedCheckpointNode):
+            metadata_path = owner.path.with_suffix(".metadata.json")
+            if metadata_path.is_file():
+                try:
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ArtifactIntegrityError(
+                        f"Cannot read replay evidence metadata: {metadata_path}"
+                    ) from exc
+                if isinstance(metadata, Mapping):
+                    components = metadata.get("replay_generation_identities")
+                    if isinstance(components, list):
+                        for raw in components:
+                            if not isinstance(raw, Mapping) or int(raw.get("generation", -1)) != fresh_generation:
+                                continue
+                            if str(raw.get("sha256", "")) != artifact_ref.sha256:
+                                raise ArtifactIntegrityError(
+                                    f"Replay generation identity disagrees with resolved artifact: M{fresh_generation}"
+                                )
+                            identity["generation_identity"] = dict(raw)
+                            break
+                    for key in (
+                        "replay_identity_schema",
+                        "replay_identity_contract",
+                        "replay_fingerprint",
+                    ):
+                        if metadata.get(key) is not None:
+                            identity[key] = metadata[key]
+                    if components is not None:
+                        identity["generation_identities"] = components
+        # A size is useful for the downstream evidence check even when the
+        # catalog is absent, but validation_schema remains absent so restore
+        # correctly falls back to the existing full-validation path.
+        identity.setdefault("size_bytes", path.stat().st_size)
+        return identity
 
     def _resolve_effective_config(
         self,
