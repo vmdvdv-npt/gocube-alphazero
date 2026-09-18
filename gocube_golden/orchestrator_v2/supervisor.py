@@ -633,8 +633,7 @@ class SupervisorV2:
     ) -> None:
         while True:
             if self._has_commit(active.generation):
-                if process_group_exists(active.process_group):
-                    self._terminate_group(active, reason="commit marker published", process=process)
+                self._drain_committed_child(active, process)
                 clear_active_child(self.active_child_path)
                 return
 
@@ -653,6 +652,36 @@ class SupervisorV2:
                     reasons.append("progress heartbeat missing or stale")
                 raise TechnicalFailure("; ".join(reasons))
             self.sleeper(self.policy.poll_interval_seconds)
+
+    def _drain_committed_child(
+        self,
+        active: ActiveChild,
+        process: subprocess.Popen[bytes] | subprocess.Popen[str] | None,
+    ) -> None:
+        """Let a committed child finish its post-marker publication work.
+
+        The generation commit marker is written before the driver publishes
+        its small result record.  Killing the process group as soon as the
+        marker appears can therefore leave a committed generation without
+        its result evidence.  Drain the leader (or the reattached group) for
+        the bounded termination grace, then clean up any surviving descendants
+        with the same scoped ownership checks.
+        """
+        timeout = max(0.0, float(self.policy.termination_grace_seconds))
+        if process is not None:
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            deadline = time.monotonic() + timeout
+            while process_group_exists(active.process_group):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                self.sleeper(min(self.policy.poll_interval_seconds, remaining))
+        if process_group_exists(active.process_group):
+            self._terminate_group(active, reason="committed child did not drain", process=process)
 
     def _heartbeat_timestamp(self, path: Path, field: str, now: float) -> float | None:
         del now
