@@ -1404,6 +1404,12 @@ def _v2_profile(value: object, config: Mapping[str, object]) -> dict[str, object
     return profile
 
 
+def _v2_parent_checkpoint_identity(value: object) -> tuple[Path, str]:
+    """Extract the resolved parent path and immutable identity for V2 restore."""
+    parent = getattr(value, "parent_checkpoint")
+    return Path(getattr(parent, "path")).resolve(), str(getattr(parent.ref, "sha256"))
+
+
 def _v2_adapter_bindings(optimizer_steps: int) -> DriverBindings:
     """Reuse the existing cadence adapter for the resolved optimizer budget."""
     from tools.torus9_staged_sims_driver import ExperimentCadenceTrainingAdapter
@@ -1485,9 +1491,9 @@ def run_generation(
         expected_fingerprint = current_torus9_profile_fingerprint(profile)
         bindings.scientific_validator(profile, config)
         code = _validate_code_pin(root)
-        parent = getattr(generation_input, "parent_checkpoint")
-        explicit_parent = Path(getattr(parent, "path")).resolve()
-        explicit_parent_sha256 = str(getattr(parent, "sha256"))
+        explicit_parent, explicit_parent_sha256 = _v2_parent_checkpoint_identity(
+            generation_input
+        )
         replay_items = tuple(getattr(generation_input, "replay_artifacts"))
         explicit_replay = tuple(Path(getattr(item, "path")).resolve() for item in replay_items)
         explicit_replay_sha256s = tuple(str(getattr(item, "sha256")) for item in replay_items)
