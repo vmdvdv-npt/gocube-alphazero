@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Mapping, Sequence
 
 from .catalog import CheckpointCatalog, CheckpointDescriptor, is_runtime_compatible
@@ -27,6 +27,7 @@ from .golden_move import (
     replay_action_history,
     validate_checkpoint_position_compatibility,
 )
+from .model_cache import BoundedModelCache
 
 PROTOCOL_VERSION = 1
 RUNTIME_IDENTITY_SCHEMA = "gocube-alphazero-runtime-identity-v1"
@@ -76,20 +77,27 @@ class GoCubeAlphaZeroService:
         generator: GoldenGameGenerator | None = None,
         move_selector: GoldenMoveSelector | None = None,
         publication_manifest: str | None = None,
+        model_cache_size: int = 2,
+        move_concurrency: int = 1,
     ):
         self.catalog = catalog or CheckpointCatalog(
             checkpoint_dir,
             publication_manifest=publication_manifest,
         )
+        self.model_cache = BoundedModelCache(max_entries=model_cache_size)
         self.loader = loader or GoldenCheckpointLoader(
             self.catalog,
             device=device,
+            cache=self.model_cache,
         )
         self.move_selector = move_selector or GoldenMoveSelector()
         self.generator = generator or GoldenGameGenerator(move_selector=self.move_selector)
         self.device = self.loader.device
         self._generation_lock = Lock()
-        self._move_lock = Lock()
+        if isinstance(move_concurrency, bool) or not isinstance(move_concurrency, int) or move_concurrency < 1:
+            raise ValueError("move concurrency must be an integer >= 1")
+        self.move_concurrency = move_concurrency
+        self._move_capacity = BoundedSemaphore(move_concurrency)
         source_root = Path(__file__).resolve().parents[4]
         self._runtime_identity = {
             "schema": RUNTIME_IDENTITY_SCHEMA,
@@ -211,8 +219,8 @@ class GoCubeAlphaZeroService:
             mapping=mapping,
         )
 
-        if not self._move_lock.acquire(blocking=False):
-            raise ServiceBusy("Another move selection is already running")
+        if not self._move_capacity.acquire(blocking=False):
+            raise ServiceBusy("Move search capacity is exhausted")
         try:
             try:
                 _loaded_descriptor, model = self.loader.load(checkpoint_id)
@@ -228,7 +236,7 @@ class GoCubeAlphaZeroService:
             except Exception as exc:
                 raise GenerationFailed(f"Move selection failed: {exc}") from exc
         finally:
-            self._move_lock.release()
+            self._move_capacity.release()
 
         return {
             "checkpointId": checkpoint_id,
