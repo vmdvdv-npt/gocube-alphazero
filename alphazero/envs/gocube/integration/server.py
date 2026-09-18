@@ -34,6 +34,7 @@ DEFAULT_ALLOWED_ORIGINS = (
     "http://127.0.0.1:4173",
 )
 MAX_REQUEST_BYTES = 64 * 1024
+MAX_MOVE_REQUEST_BYTES = 1024 * 1024
 
 
 def _error_payload(error: IntegrationError) -> dict[str, object]:
@@ -239,7 +240,8 @@ def make_handler(service: GoCubeAlphaZeroService, allowed_origins=DEFAULT_ALLOWE
             except ValueError:
                 self._send_error(InvalidRequest("Content-Length must be an integer"))
                 return
-            if length < 0 or length > MAX_REQUEST_BYTES:
+            max_request_bytes = MAX_MOVE_REQUEST_BYTES if path == "/v1/move" else MAX_REQUEST_BYTES
+            if length < 0 or length > max_request_bytes:
                 self._send_error(InvalidRequest("Request body is too large"))
                 return
 
@@ -289,6 +291,18 @@ def parse_args(argv=None):
     parser.add_argument("--checkpoint-dir", default=str(RUNS_ROOT))
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument(
+        "--model-cache-size",
+        type=int,
+        default=2,
+        help="Maximum number of loaded checkpoint models retained by the service.",
+    )
+    parser.add_argument(
+        "--move-concurrency",
+        type=int,
+        default=1,
+        help="Maximum number of concurrent /v1/move searches.",
+    )
+    parser.add_argument(
         "--publication-manifest",
         default=None,
         help="Explicit checkpoint publication manifest; defaults to the repository production manifest.",
@@ -306,10 +320,16 @@ def main(argv=None):
     cli = parse_args(argv)
     if not 1 <= cli.port <= 65535:
         raise ValueError("port must be between 1 and 65535")
+    if cli.model_cache_size < 1:
+        raise ValueError("model-cache-size must be >= 1")
+    if cli.move_concurrency < 1:
+        raise ValueError("move-concurrency must be >= 1")
     service = GoCubeAlphaZeroService(
         cli.checkpoint_dir,
         device=cli.device,
         publication_manifest=cli.publication_manifest,
+        model_cache_size=cli.model_cache_size,
+        move_concurrency=cli.move_concurrency,
     )
     origins = tuple(cli.allow_origin) if cli.allow_origin else DEFAULT_ALLOWED_ORIGINS
     server = ThreadingHTTPServer((cli.host, cli.port), make_handler(service, origins))
