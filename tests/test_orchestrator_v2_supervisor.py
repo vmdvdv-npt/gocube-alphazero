@@ -186,6 +186,38 @@ def test_one_retry_repeats_same_generation_then_commits(tmp_path: Path) -> None:
     assert not supervisor.active_child_path.exists()
 
 
+def test_commit_marker_drains_child_publication_before_cleanup(tmp_path: Path) -> None:
+    lineage_id = "lineage"
+    marker = tmp_path / "generation-01.complete.json"
+    result = tmp_path / "post-commit-result.json"
+    script = (
+        "import json, time; from pathlib import Path; "
+        f"Path({str(marker)!r}).write_text(json.dumps({{'schema':'training-generation-commit-v1','generation':1,'run_id':{lineage_id!r}}})); "
+        "time.sleep(0.15); "
+        f"Path({str(result)!r}).write_text('published')"
+    )
+
+    def launcher(_request):
+        return subprocess.Popen([sys.executable, "-c", script], start_new_session=True)
+
+    supervisor = SupervisorV2(
+        tmp_path,
+        lineage_id=lineage_id,
+        launcher=launcher,
+        policy=SupervisorPolicy(
+            heartbeat_grace_seconds=5.0,
+            poll_interval_seconds=0.01,
+            termination_grace_seconds=1.0,
+        ),
+    )
+
+    supervision = supervisor.run_once()
+
+    assert supervision.status is SupervisorStatus.COMMITTED
+    assert result.read_text(encoding="utf-8") == "published"
+    assert not supervisor.active_child_path.exists()
+
+
 def test_second_technical_failure_stops_without_third_start(tmp_path: Path) -> None:
     calls: list[tuple[int, int]] = []
 
