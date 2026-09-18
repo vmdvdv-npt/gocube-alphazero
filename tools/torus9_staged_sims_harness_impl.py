@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from typing import Mapping, Sequence
@@ -756,13 +757,22 @@ def _existing_arena(
         raise ValueError("Expected evaluation identity fingerprint is internally inconsistent")
     if saved_payload != dict(expected_identity) or saved_fingerprint != expected_fingerprint:
         raise _identity_mismatch(output, "persisted payload does not match current contract")
+    if str(record.get("evaluation_id")) != output.name:
+        raise _identity_mismatch(output, "persisted evaluation ID disagrees with directory")
 
     summary_path = output / "summary.json"
     provenance_path = output / "provenance.json"
-    if not summary_path.is_file() or not provenance_path.is_file():
-        raise RuntimeError(f"Incomplete evaluation directory: {output}")
-    summary = _read_json(summary_path)
-    provenance = _read_json(provenance_path)
+    manifest_path = output / "manifest.json"
+    if not all(path.is_file() for path in (summary_path, provenance_path, manifest_path)):
+        return None
+    try:
+        summary = _read_json(summary_path)
+        provenance = _read_json(provenance_path)
+        manifest = _read_json(manifest_path)
+    except (OSError, ValueError) as exc:
+        raise _identity_mismatch(output, "malformed committed evaluation artifact") from exc
+    if str(manifest.get("run_id")) != output.name:
+        raise _identity_mismatch(output, "Arena manifest run ID disagrees with evaluation ID")
     expected_candidate = _mapping(expected_identity.get("candidate"), "identity.candidate")
     expected_reference = _mapping(expected_identity.get("reference"), "identity.reference")
     if (
@@ -825,6 +835,11 @@ def _compare(
     existing = _existing_arena(output, identity, fingerprint)
     if existing is not None:
         return existing
+
+    if output.exists():
+        if output.is_symlink() or not output.is_dir():
+            raise _identity_mismatch(output, "interrupted evaluation path is not a directory")
+        shutil.rmtree(output)
 
     _write_evaluation_identity(output, run_id, identity, fingerprint)
     result = run_arena(

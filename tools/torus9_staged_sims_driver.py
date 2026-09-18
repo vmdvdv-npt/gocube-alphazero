@@ -7,7 +7,13 @@ Torus9 scientific/execution boundaries and applies the declared Adam work.
 """
 from __future__ import annotations
 
+from pathlib import Path
+import sys
 from typing import Any, Mapping, Sequence
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from gocube_golden.torus9 import Torus9TrainingAdapter
 from training_engine import value_fingerprint
@@ -48,12 +54,23 @@ class ExperimentCadenceTrainingAdapter(Torus9TrainingAdapter):
         trainer = state.adapter_state
         count = self.cadence_optimizer_steps * BATCH_SIZE
         indices = trainer._sample_indices(len(rows), seed=int(seed), count=count)
+
+        def training_progress(completed: int, total: int) -> None:
+            self._report_progress(
+                "training",
+                completed,
+                total,
+                "optimizer_steps",
+                "optimizer",
+            )
+
         metrics = dict(
             trainer.train_fixed_budget(
                 rows,
                 seed=int(seed),
                 validate_samples=False,
                 timing=self._diagnostic_timing,
+                progress_callback=training_progress,
             )
         )
         if self._diagnostic_timing is not None:
