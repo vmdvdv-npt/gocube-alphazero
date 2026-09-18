@@ -305,6 +305,7 @@ def install_operator_policy() -> None:
         phase: str,
     ) -> int:
         from .orchestrator import _render_command, atomic_write_json, parse_utc, utc_now
+        from .process_supervision import clear_active_child, start_owned_child, write_active_child
         import subprocess
 
         rendered = _render_command(
@@ -320,13 +321,13 @@ def install_operator_policy() -> None:
         getattr(self, "events").emit(
             "INFO", f"Starting {phase}", generation=generation, argv=rendered
         )
-        process = subprocess.Popen(
+        process = start_owned_child(
             rendered,
             cwd=getattr(self, "repo_root"),
             env=getattr(self, "_driver_env")(generation, resume=resume, phase=phase),
-            start_new_session=True,
+            popen=subprocess.Popen,
         )
-        atomic_write_json(
+        write_active_child(
             getattr(self, "active_child_path"),
             {
                 "schema": prod.ACTIVE_CHILD_SCHEMA,
@@ -391,7 +392,7 @@ def install_operator_policy() -> None:
                         reason="supervisor monitor exited before child process group was fully reaped",
                     )
             finally:
-                getattr(self, "active_child_path").unlink(missing_ok=True)
+                clear_active_child(getattr(self, "active_child_path"))
 
     def retry_generation_without_operational_stop(self: object, generation: int) -> None:
         supervision = getattr(self, "supervision")
