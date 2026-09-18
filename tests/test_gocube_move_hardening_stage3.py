@@ -31,7 +31,7 @@ from gocube_golden.arena_contract import SEARCH_IMPLEMENTATION_ID
 from gocube_golden.state import PASS
 
 
-def _descriptor(checkpoint_id: str = "torus-cache@1", *, path: str | None = None) -> CheckpointDescriptor:
+def _descriptor(checkpoint_id: str = "torus-cache@1") -> CheckpointDescriptor:
     position = GoldenPositionContract(
         topology="torus",
         size=9,
@@ -52,7 +52,7 @@ def _descriptor(checkpoint_id: str = "torus-cache@1", *, path: str | None = None
         rule_set="chinese",
         komi=0.5,
         terminal_adjudicator="golden-graph-area-v1",
-        path=path or f"/tmp/{checkpoint_id.replace('@', '-')}.pt",
+        path=f"/tmp/{checkpoint_id.replace('@', '-')}.pt",
         profile_id="test-torus-profile",
         architecture_id=architecture_id,
         rules_fingerprint=state.rules_fingerprint,
@@ -107,7 +107,6 @@ def test_service_owned_cache_reuses_one_loaded_model_across_50_requests():
         return loaded_model
 
     service.loader._load_uncached = fake_uncached
-
     models = [service.loader.load(descriptor.checkpoint_id)[1] for _ in range(50)]
 
     assert service.loader.cache is service.model_cache
@@ -133,7 +132,6 @@ def test_service_cache_does_not_confuse_different_checkpoints():
         return models.setdefault(descriptor.checkpoint_id, object())
 
     service.loader._load_uncached = fake_uncached
-
     first_model = service.loader.load(first.checkpoint_id)[1]
     second_model = service.loader.load(second.checkpoint_id)[1]
     repeated_first_model = service.loader.load(first.checkpoint_id)[1]
@@ -162,7 +160,6 @@ def test_model_cache_is_bounded_and_evicts_lru_entry():
 
     assert len(cache) == 2
     assert cache.keys() == (key_a, key_c)
-
     cache.get_or_load(key_b, lambda: load("b-reload"))
     assert len(cache) == 2
     assert calls == ["a", "b", "c", "b-reload"]
@@ -281,14 +278,23 @@ def running_server(service):
         thread.join(timeout=2)
 
 
-def raw_request(port: int, path: str, body: bytes):
+def raw_request(
+    port: int,
+    path: str,
+    body: bytes,
+    *,
+    declared_length: int | None = None,
+):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
-    connection.request(
-        "POST",
-        path,
-        body=body,
-        headers={"Content-Type": "application/json", "Content-Length": str(len(body))},
+    connection.putrequest("POST", path)
+    connection.putheader("Content-Type", "application/json")
+    connection.putheader(
+        "Content-Length",
+        str(len(body) if declared_length is None else declared_length),
     )
+    connection.endheaders()
+    if body:
+        connection.send(body)
     response = connection.getresponse()
     raw = response.read()
     result = response.status, json.loads(raw.decode("utf-8")) if raw else None
@@ -329,11 +335,14 @@ def test_move_request_can_exceed_legacy_64k_limit_within_endpoint_bound():
 
 def test_oversized_move_request_is_controlled_4xx():
     service = HttpProbeService()
-    body = move_body("x" * MAX_MOVE_REQUEST_BYTES)
-    assert len(body) > MAX_MOVE_REQUEST_BYTES
 
     with running_server(service) as port:
-        status, response = raw_request(port, "/v1/move", body)
+        status, response = raw_request(
+            port,
+            "/v1/move",
+            b"",
+            declared_length=MAX_MOVE_REQUEST_BYTES + 1,
+        )
 
     assert 400 <= status < 500
     assert response["error"]["code"] == "invalid_request"
@@ -342,19 +351,14 @@ def test_oversized_move_request_is_controlled_4xx():
 
 def test_games_endpoint_keeps_legacy_64k_request_limit():
     service = HttpProbeService()
-    body = json.dumps(
-        {
-            "protocolVersion": 1,
-            "blackCheckpointId": "a",
-            "whiteCheckpointId": "a",
-            "mctsSims": 1,
-            "padding": "x" * MAX_REQUEST_BYTES,
-        }
-    ).encode("utf-8")
-    assert len(body) > MAX_REQUEST_BYTES
 
     with running_server(service) as port:
-        status, response = raw_request(port, "/v1/games", body)
+        status, response = raw_request(
+            port,
+            "/v1/games",
+            b"",
+            declared_length=MAX_REQUEST_BYTES + 1,
+        )
 
     assert 400 <= status < 500
     assert response["error"]["code"] == "invalid_request"
