@@ -113,6 +113,10 @@ def _write_existing_arena(
         + "\n",
         encoding="utf-8",
     )
+    (output / "manifest.json").write_text(
+        json.dumps({"run_id": run_id}) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _healthy_telemetry(status: str = "HEALTHY") -> dict[str, object]:
