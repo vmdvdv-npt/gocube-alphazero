@@ -2,14 +2,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
+from gocube_golden.arena_contract import SEARCH_IMPLEMENTATION_ID
 from gocube_golden.run_storage import RUNS_ROOT
 
-from .errors import IntegrationError, InvalidRequest
+from .errors import (
+    CheckpointLoadFailed,
+    GenerationBusy,
+    GenerationFailed,
+    IntegrationError,
+    InvalidMoveHistory,
+    InvalidRequest,
+    PositionInvalid,
+    PositionTerminal,
+    SearchFailed,
+    ServiceBusy,
+    TerminalPosition,
+    UnsupportedProtocol,
+)
 from .service import GoCubeAlphaZeroService, PROTOCOL_VERSION
 
 DEFAULT_ALLOWED_ORIGINS = (
@@ -25,6 +40,110 @@ def _error_payload(error: IntegrationError) -> dict[str, object]:
     return {
         "protocolVersion": PROTOCOL_VERSION,
         "error": {"code": error.code, "message": error.message},
+    }
+
+
+def _validate_move_request(request: object) -> dict[str, object]:
+    if not isinstance(request, dict):
+        raise InvalidRequest("Request body must be a JSON object")
+
+    required = {"protocolVersion", "requestId", "checkpointId", "mctsSims", "position"}
+    missing = sorted(required - set(request))
+    unknown = sorted(set(request) - required)
+    if missing:
+        raise InvalidRequest(f"Missing request fields: {', '.join(missing)}")
+    if unknown:
+        raise InvalidRequest(f"Unknown request fields: {', '.join(unknown)}")
+
+    protocol = request["protocolVersion"]
+    if not isinstance(protocol, int) or isinstance(protocol, bool):
+        raise InvalidRequest("protocolVersion must be an integer")
+    if protocol != PROTOCOL_VERSION:
+        raise UnsupportedProtocol(f"Unsupported protocolVersion: {protocol}")
+
+    request_id = request["requestId"]
+    if not isinstance(request_id, str):
+        raise InvalidRequest("requestId must be a string")
+
+    checkpoint_id = request["checkpointId"]
+    if not isinstance(checkpoint_id, str) or not checkpoint_id:
+        raise InvalidRequest("checkpointId must be a non-empty string")
+
+    mcts_sims = request["mctsSims"]
+    if not isinstance(mcts_sims, int) or isinstance(mcts_sims, bool) or mcts_sims < 1:
+        raise InvalidRequest("mctsSims must be an integer >= 1")
+
+    position = request["position"]
+    if not isinstance(position, dict):
+        raise InvalidRequest("position must be an object")
+    position_required = {"topology", "size", "ruleSet", "komi", "moves"}
+    missing_position = sorted(position_required - set(position))
+    unknown_position = sorted(set(position) - position_required)
+    if missing_position:
+        raise InvalidRequest(f"Missing position fields: {', '.join(missing_position)}")
+    if unknown_position:
+        raise InvalidRequest(f"Unknown position fields: {', '.join(unknown_position)}")
+
+    topology = position["topology"]
+    if not isinstance(topology, str) or not topology:
+        raise InvalidRequest("position.topology must be a non-empty string")
+    size = position["size"]
+    if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+        raise InvalidRequest("position.size must be an integer >= 1")
+    rule_set = position["ruleSet"]
+    if not isinstance(rule_set, str) or not rule_set:
+        raise InvalidRequest("position.ruleSet must be a non-empty string")
+    komi = position["komi"]
+    if isinstance(komi, bool) or not isinstance(komi, (int, float)) or not math.isfinite(float(komi)):
+        raise InvalidRequest("position.komi must be a finite number")
+    moves = position["moves"]
+    if not isinstance(moves, list):
+        raise InvalidRequest("position.moves must be an array")
+
+    return {
+        "requestId": request_id,
+        "checkpointId": checkpoint_id,
+        "mctsSims": mcts_sims,
+        "moves": moves,
+        "serviceArgs": {
+            "checkpoint_id": checkpoint_id,
+            "topology": topology,
+            "size": size,
+            "rule_set": rule_set,
+            "komi": float(komi),
+            "history": moves,
+            "mcts_sims": mcts_sims,
+        },
+    }
+
+
+def _move_error(error: IntegrationError) -> IntegrationError:
+    if isinstance(error, InvalidMoveHistory):
+        return PositionInvalid("Position history is invalid")
+    if isinstance(error, TerminalPosition):
+        return PositionTerminal("Position is terminal")
+    if isinstance(error, GenerationBusy):
+        return ServiceBusy("Move service is busy")
+    if isinstance(error, (GenerationFailed, CheckpointLoadFailed)):
+        return SearchFailed("Move search failed")
+    return error
+
+
+def _move_response(dto: dict[str, object], selected: dict[str, object]) -> dict[str, object]:
+    moves = dto["moves"]
+    assert isinstance(moves, list)
+    return {
+        "protocolVersion": PROTOCOL_VERSION,
+        "requestId": dto["requestId"],
+        "checkpointId": dto["checkpointId"],
+        "mctsSims": dto["mctsSims"],
+        "moveNumber": len(moves) + 1,
+        "color": selected["color"],
+        "action": selected["action"],
+        "search": {
+            "simulations": selected["mctsSims"],
+            "implementationId": SEARCH_IMPLEMENTATION_ID,
+        },
     }
 
 
@@ -106,7 +225,7 @@ def make_handler(service: GoCubeAlphaZeroService, allowed_origins=DEFAULT_ALLOWE
             if not self._require_origin():
                 return
             path = urlsplit(self.path).path
-            if path != "/v1/games":
+            if path not in {"/v1/games", "/v1/move"}:
                 self._send_error(InvalidRequest(f"Unknown endpoint: {path}"))
                 return
 
@@ -131,22 +250,34 @@ def make_handler(service: GoCubeAlphaZeroService, allowed_origins=DEFAULT_ALLOWE
                 self._send_error(InvalidRequest("Request body must contain valid UTF-8 JSON"))
                 return
 
+            if path == "/v1/games":
+                try:
+                    self._send_json(200, service.generate_game(request))
+                except IntegrationError as exc:
+                    self._send_error(exc)
+                except Exception:
+                    traceback.print_exc(file=sys.stderr)
+                    self._send_json(
+                        500,
+                        {
+                            "protocolVersion": PROTOCOL_VERSION,
+                            "error": {
+                                "code": "generation_failed",
+                                "message": "Internal game generation failure",
+                            },
+                        },
+                    )
+                return
+
             try:
-                self._send_json(200, service.generate_game(request))
+                dto = _validate_move_request(request)
+                selected = service.select_move(**dto["serviceArgs"])
+                self._send_json(200, _move_response(dto, selected))
             except IntegrationError as exc:
-                self._send_error(exc)
+                self._send_error(_move_error(exc))
             except Exception:
                 traceback.print_exc(file=sys.stderr)
-                self._send_json(
-                    500,
-                    {
-                        "protocolVersion": PROTOCOL_VERSION,
-                        "error": {
-                            "code": "generation_failed",
-                            "message": "Internal game generation failure",
-                        },
-                    },
-                )
+                self._send_error(SearchFailed("Internal move selection failure"))
 
     return Handler
 

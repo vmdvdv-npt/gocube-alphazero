@@ -55,11 +55,31 @@ class TerminalPosition(IntegrationError):
     http_status = 409
 
 
+class PositionInvalid(IntegrationError):
+    code = "position_invalid"
+    http_status = 422
+
+
+class PositionTerminal(IntegrationError):
+    code = "position_terminal"
+    http_status = 409
+
+
 class GenerationBusy(IntegrationError):
     code = "generation_busy"
     http_status = 409
 
 
+class ServiceBusy(IntegrationError):
+    code = "service_busy"
+    http_status = 503
+
+
 class GenerationFailed(IntegrationError):
     code = "generation_failed"
+    http_status = 500
+
+
+class SearchFailed(IntegrationError):
+    code = "search_failed"
     http_status = 500
