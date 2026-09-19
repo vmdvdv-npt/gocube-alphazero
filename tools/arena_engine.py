@@ -69,6 +69,10 @@ class ArenaExecutionConfig:
     inference_batch_wait_ms: float = DEFAULT_INFERENCE_BATCH_WAIT_MS
     device: str = "cuda"
     strict_production: bool = True
+    # Explicit wiring/monitoring acceptance may use a smaller game count while
+    # retaining the strict CUDA, worker, lane, technical, and performance
+    # checks. Normal production workloads keep the historical 64-game gate.
+    monitoring_acceptance: bool = False
     min_mean_inference_batch_rows: float = DEFAULT_NON_STANDARD_MIN_MEAN_INFERENCE_BATCH_ROWS
     min_effective_cpu_cores: float = MIN_EFFECTIVE_CPU_CORES
     early_gate_enabled: bool = True

@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -23,6 +22,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from gocube_golden.artifact_catalog import ARTIFACT_VALIDATION_SCHEMA
+from gocube_golden.arena_identity import (
+    EVALUATION_IDENTITY_FILENAME,
+    EVALUATION_IDENTITY_RECORD_SCHEMA,
+    canonical_evaluation_json,
+    evaluation_fingerprint,
+    load_reusable_evaluation,
+    stamp_evaluation_identity_metadata,
+    write_evaluation_identity,
+)
 from gocube_golden.operator_policy import install_operator_policy
 from gocube_golden.provenance import file_sha256
 from gocube_golden.run_spec import StrictProductionTrainingOrchestrator, StrictRunSpec
@@ -44,8 +52,6 @@ from tools.arena_profiles.torus9 import PROFILE as TORUS9_ARENA_PROFILE
 EXPERIMENT_SPEC_SCHEMA = "gocube-torus9-experiment-v1"
 DEFAULT_EXPERIMENT_SPEC = "configs/gocube/torus9_staged_cadence_experiment_v1.json"
 EVALUATION_IDENTITY_SCHEMA = "gocube-arena-evaluation-identity-v1"
-EVALUATION_IDENTITY_RECORD_SCHEMA = "gocube-arena-evaluation-identity-record-v1"
-EVALUATION_IDENTITY_FILENAME = "evaluation-identity.json"
 EVALUATION_IDENTITY_HASH_PREFIX = 12
 
 
@@ -425,19 +431,11 @@ def _checkpoint_identity_payload(reference: Mapping[str, object]) -> dict[str, o
 
 
 def _canonical_evaluation_json(payload: Mapping[str, object]) -> str:
-    return json.dumps(
-        dict(payload),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
+    return canonical_evaluation_json(payload)
 
 
 def _evaluation_fingerprint(payload: Mapping[str, object]) -> str:
-    return hashlib.sha256(
-        _canonical_evaluation_json(payload).encode("utf-8")
-    ).hexdigest()
+    return evaluation_fingerprint(payload)
 
 
 def _build_evaluation_identity(
@@ -510,18 +508,7 @@ def _write_evaluation_identity(
     identity: Mapping[str, object],
     fingerprint: str,
 ) -> None:
-    if _evaluation_fingerprint(identity) != fingerprint:
-        raise ValueError("Evaluation identity fingerprint is internally inconsistent")
-    output.mkdir(parents=True, exist_ok=False)
-    _write_json(
-        output / EVALUATION_IDENTITY_FILENAME,
-        {
-            "schema": EVALUATION_IDENTITY_RECORD_SCHEMA,
-            "evaluation_id": run_id,
-            "fingerprint": fingerprint,
-            "identity": dict(identity),
-        },
-    )
+    write_evaluation_identity(output, run_id, identity, fingerprint)
 
 
 def _stamp_evaluation_identity_metadata(
@@ -529,38 +516,17 @@ def _stamp_evaluation_identity_metadata(
     run_id: str,
     fingerprint: str,
 ) -> None:
-    marker = {
-        "schema": EVALUATION_IDENTITY_SCHEMA,
-        "path": EVALUATION_IDENTITY_FILENAME,
-        "fingerprint": fingerprint,
-    }
-    for filename in ("provenance.json", "manifest.json"):
-        path = output / filename
-        if not path.is_file():
-            continue
-        payload = _read_json(path)
-        payload["evaluation_id"] = run_id
-        payload["evaluation_identity"] = marker
-        _write_json(path, payload)
+    stamp_evaluation_identity_metadata(
+        output,
+        run_id,
+        fingerprint,
+        identity_schema=EVALUATION_IDENTITY_SCHEMA,
+    )
 
 
 def _identity_mismatch(output: Path, detail: str) -> RuntimeError:
     return RuntimeError(
         f"evaluation identity/contract mismatch: {detail}: {output}"
-    )
-
-
-def _provenance_checkpoint_matches(
-    actual: object,
-    expected: Mapping[str, object],
-) -> bool:
-    if not isinstance(actual, Mapping):
-        return False
-    return (
-        str(actual.get("lineage_id")) == str(expected["lineage_id"])
-        and int(actual.get("generation", -1)) == int(expected["generation"])
-        and str(actual.get("artifact_sha256") or actual.get("sha256"))
-        == str(expected["checkpoint_sha256"])
     )
 
 
@@ -731,92 +697,18 @@ def _existing_arena(
 ) -> dict[str, object] | None:
     if not output.exists():
         return None
-    identity_path = output / EVALUATION_IDENTITY_FILENAME
-    if not identity_path.is_file():
-        raise _identity_mismatch(output, "missing persisted evaluation identity")
     try:
-        record = _read_json(identity_path)
-    except (OSError, ValueError) as exc:
-        raise _identity_mismatch(output, "malformed persisted evaluation identity") from exc
-    if record.get("schema") != EVALUATION_IDENTITY_RECORD_SCHEMA:
-        raise _identity_mismatch(output, "unsupported persisted identity schema")
-    saved_identity = record.get("identity")
-    saved_fingerprint = record.get("fingerprint")
-    if not isinstance(saved_identity, Mapping) or not isinstance(saved_fingerprint, str):
-        raise _identity_mismatch(output, "malformed persisted identity payload")
-    saved_payload = dict(saved_identity)
-    try:
-        recomputed = _evaluation_fingerprint(saved_payload)
-    except (TypeError, ValueError) as exc:
-        raise _identity_mismatch(output, "non-canonical persisted identity payload") from exc
-    if recomputed != saved_fingerprint:
-        raise _identity_mismatch(
-            output, "persisted full fingerprint does not match canonical payload"
+        return load_reusable_evaluation(
+            output,
+            expected_identity,
+            expected_fingerprint,
         )
-    if _evaluation_fingerprint(expected_identity) != expected_fingerprint:
-        raise ValueError("Expected evaluation identity fingerprint is internally inconsistent")
-    if saved_payload != dict(expected_identity) or saved_fingerprint != expected_fingerprint:
-        raise _identity_mismatch(output, "persisted payload does not match current contract")
-    if str(record.get("evaluation_id")) != output.name:
-        raise _identity_mismatch(output, "persisted evaluation ID disagrees with directory")
-
-    summary_path = output / "summary.json"
-    provenance_path = output / "provenance.json"
-    manifest_path = output / "manifest.json"
-    if not all(path.is_file() for path in (summary_path, provenance_path, manifest_path)):
-        return None
-    try:
-        summary = _read_json(summary_path)
-        provenance = _read_json(provenance_path)
-        manifest = _read_json(manifest_path)
-    except (OSError, ValueError) as exc:
-        raise _identity_mismatch(output, "malformed committed evaluation artifact") from exc
-    if str(manifest.get("run_id")) != output.name:
-        raise _identity_mismatch(output, "Arena manifest run ID disagrees with evaluation ID")
-    expected_candidate = _mapping(expected_identity.get("candidate"), "identity.candidate")
-    expected_reference = _mapping(expected_identity.get("reference"), "identity.reference")
-    if (
-        not _provenance_checkpoint_matches(provenance.get("candidate"), expected_candidate)
-        or not _provenance_checkpoint_matches(provenance.get("reference"), expected_reference)
-        or int(summary.get("games", -1)) != int(expected_identity["games"])
-        or str(provenance.get("profile")) != str(expected_identity["profile"])
-        or int(provenance.get("master_seed", -1)) != int(expected_identity["master_seed"])
-    ):
-        raise _identity_mismatch(output, "Arena result metadata disagrees with persisted identity")
-
-    telemetry = summary.get("telemetry")
-    if not isinstance(telemetry, Mapping):
-        raise RuntimeError(
-            f"Existing evaluation failed production validity/performance gates: "
-            f"malformed telemetry: {output}"
-        )
-    technical_games = telemetry.get("technical_games")
-    if isinstance(technical_games, bool) or not isinstance(technical_games, int):
-        raise RuntimeError(
-            f"Existing evaluation failed production validity/performance gates: "
-            f"malformed technical_games: {output}"
-        )
-    if technical_games != 0:
-        raise ValueError(f"Existing Arena has technical outcomes: {output}")
-    performance_status = telemetry.get("performance_status")
-    performance_failures = telemetry.get("performance_failures")
-    if not isinstance(performance_status, str) or not performance_status.strip():
-        raise RuntimeError(
-            f"Existing evaluation failed production validity/performance gates: "
-            f"malformed performance_status: {output}"
-        )
-    if not isinstance(performance_failures, list):
-        raise RuntimeError(
-            f"Existing evaluation failed production validity/performance gates: "
-            f"malformed performance_failures: {output}"
-        )
-    if performance_status.strip().upper() == "CRITICAL" or performance_failures:
-        raise RuntimeError(
-            "Existing evaluation failed production validity/performance gates: "
-            f"performance_status={performance_status!r}, "
-            f"performance_failures={performance_failures!r}: {output}"
-        )
-    return summary
+    except RuntimeError as exc:
+        # Keep the staged harness's established public error wording while the
+        # actual validation lives in the shared identity primitive.
+        if str(exc).startswith("evaluation identity/contract mismatch:"):
+            raise
+        raise
 
 
 def _compare(

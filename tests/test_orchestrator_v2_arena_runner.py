@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+from dataclasses import replace
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+from gocube_golden.orchestrator_v2 import (
+    ArenaRunRequest,
+    ArenaRunner,
+    ResolvedCheckpointNode,
+    torus9_startset_ref,
+)
+from gocube_golden.orchestrator_v2.contracts import (
+    ArtifactRef,
+    CheckpointNode,
+    CheckpointRef,
+    EffectiveConfigRef,
+)
+from tools.arena_engine import ArenaExecutionConfig
+
+
+SHA_A = "sha256:" + "a" * 64
+SHA_B = "sha256:" + "b" * 64
+
+
+def _resolved(tmp_path: Path, lineage: str, generation: int, sha: str) -> ResolvedCheckpointNode:
+    path = tmp_path / lineage / "checkpoints" / f"M{generation}.pt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(f"checkpoint-{lineage}-{generation}".encode())
+    checkpoint = CheckpointRef(
+        "torus9",
+        lineage,
+        f"M{generation}",
+        generation,
+        f"checkpoints/M{generation}.pt",
+        sha,
+    )
+    node = CheckpointNode(
+        checkpoint=checkpoint,
+        genesis=True,
+        parent=None,
+        fresh_replay=None,
+        effective_config=EffectiveConfigRef(
+            ArtifactRef("metadata/effective.json", SHA_A),
+            SHA_B,
+        ),
+        provenance=ArtifactRef("metadata/provenance.json", SHA_A),
+    )
+    return ResolvedCheckpointNode(
+        node=node,
+        checkpoint=SimpleNamespace(path=path),  # type: ignore[arg-type]
+        effective_config=SimpleNamespace(),  # type: ignore[arg-type]
+        provenance=SimpleNamespace(),  # type: ignore[arg-type]
+        owner_root=path.parents[1],
+        owner_status="ACTIVE",
+    )
+
+
+def _config() -> ArenaExecutionConfig:
+    return ArenaExecutionConfig(
+        games=16,
+        workers=16,
+        games_per_worker=4,
+        inference_batch_rows=64,
+        inference_batch_wait_ms=1.0,
+        device="cpu",
+        strict_production=False,
+        min_mean_inference_batch_rows=0.0,
+        min_effective_cpu_cores=0.0,
+        early_gate_enabled=False,
+    )
+
+
+def _request(tmp_path: Path) -> ArenaRunRequest:
+    return ArenaRunRequest(
+        candidate=_resolved(tmp_path, "candidate", 95, SHA_A),
+        reference=_resolved(tmp_path, "reference", 90, SHA_B),
+        master_seed=202609131004,
+        startset=torus9_startset_ref(master_seed=202609131004, games=16),
+        config=_config(),
+    )
+
+
+def _fake_engine(**kwargs: object) -> dict[str, object]:
+    output = kwargs["output_dir"]
+    assert isinstance(output, Path)
+    run_id = str(kwargs["run_id"])
+    summary = {
+        "games": 16,
+        "W/L/D": [8, 8, 0],
+        "telemetry": {
+            "technical_games": 0,
+            "performance_status": "HEALTHY",
+            "performance_failures": [],
+        },
+    }
+    (output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (output / "manifest.json").write_text(json.dumps({"run_id": run_id}), encoding="utf-8")
+    return summary
+
+
+def test_runner_forwards_resolved_paths_and_persists_full_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def engine(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return _fake_engine(**kwargs)
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    request = _request(tmp_path)
+    result = ArenaRunner(engine=engine).run(request)
+
+    assert captured["candidate_path"] == request.candidate.path
+    assert captured["reference_path"] == request.reference.path
+    assert result.wld == (8, 8, 0)
+    assert result.validity == "VALID"
+    assert result.identity.candidate.to_dict() == request.candidate.ref.to_dict()
+    assert result.identity.reference.to_dict() == request.reference.ref.to_dict()
+    assert result.identity.startset.to_dict() == request.startset.to_dict()
+    assert result.identity.games == 16
+    assert (result.output_dir / "evaluation-identity.json").is_file()
+    assert not (result.output_dir / "checkpoints").exists()
+
+
+def test_runner_reuses_only_matching_complete_result(tmp_path: Path, monkeypatch) -> None:
+    calls: list[int] = []
+
+    def engine(**kwargs: object) -> dict[str, object]:
+        calls.append(1)
+        return _fake_engine(**kwargs)
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    runner = ArenaRunner(engine=engine)
+    request = _request(tmp_path)
+    first = runner.run(request)
+    second = runner.run(request)
+
+    assert calls == [1]
+    assert first.evaluation_id == second.evaluation_id
+    assert second.validity == "VALID"
+
+
+def test_identity_changes_for_seed_startset_and_full_arena_contract(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    base = ArenaRunner._identity(request).fingerprint
+    assert ArenaRunner._identity(replace(request, master_seed=request.master_seed + 1)).fingerprint != base
+    assert ArenaRunner._identity(
+        replace(request, startset=torus9_startset_ref(master_seed=7, games=16))
+    ).fingerprint != base
+    changed = dict(request.execution_contract or {})
+    changed["inference_batch_wait_ms"] = 2.0
+    assert ArenaRunner._identity(replace(request, execution_contract=changed)).fingerprint != base
