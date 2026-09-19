@@ -245,13 +245,18 @@ class ProductionArmExecutionPath:
             marker = root / f"generation-{generation:02d}.complete.json"
             recovering_committed_generation = marker.is_file()
 
-            replay = self.resolver.replay_window(current, replay_count)
+            replay_selection = self.resolver.resolve_replay_window(
+                current,
+                replay_count,
+                effective_config=effective,
+            )
             resolved = ResolvedGenerationInput(
                 parent_checkpoint=current,
-                replay_artifacts=replay,
+                replay_artifacts=replay_selection.artifacts,
                 generation=generation,
                 effective_config=effective,
                 output_lineage=output,
+                replay_identity=replay_selection.identity,
             )
             current = self._run_supervised_generation(
                 resolved,

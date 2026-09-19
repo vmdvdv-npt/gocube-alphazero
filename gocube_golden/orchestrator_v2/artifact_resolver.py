@@ -17,10 +17,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 from typing import Union
 
 from .. import run_storage
 from ..artifact_catalog import ArtifactCatalog, sha256_file
+from ..provenance import sha256_fingerprint
 from .contracts import (
     ArtifactRef,
     CheckpointNode,
@@ -151,6 +153,28 @@ class ResolvedCheckpointNode:
 
 
 @dataclass(frozen=True)
+class ResolvedReplaySelection:
+    """The one replay restore source selected from the resolved graph.
+
+    ``artifacts`` contains either the graph-derived fresh window or one
+    committed rolling artifact. The selection is explicit so the child
+    driver never has to rediscover which representation was chosen.
+    """
+
+    artifacts: tuple[ResolvedArtifact, ...]
+    source: str
+    identity: Mapping[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        if self.source not in {"fresh-window", "rolling-replay"}:
+            raise ValueError("replay selection source is invalid")
+
+    @property
+    def uses_rolling_replay(self) -> bool:
+        return self.source == "rolling-replay"
+
+
+@dataclass(frozen=True)
 class _ArtifactOwner:
     root: Path
     topology: str
@@ -159,6 +183,11 @@ class _ArtifactOwner:
 
 
 Owner = Union[ResolvedCheckpointNode, run_storage.ResolvedCheckpoint, CheckpointRef, _ArtifactOwner]
+
+
+_TORUS9_REPLAY_COMPOSITION_SCHEMA = "torus9-replay-composition-v1"
+_TORUS9_REPLAY_GENERATION_SCHEMA = "torus9-replay-generation-artifact-v1"
+_TORUS9_REPLAY_SELECTION_CONTRACT = "rolling-recent-generations-then-last-cap-v1"
 
 
 def checkpoint_node_path(owner_root: str | Path, checkpoint: CheckpointRef) -> Path:
@@ -293,6 +322,83 @@ class ArtifactResolver:
         count: int,
     ) -> tuple[ResolvedArtifact, ...]:
         """Open ``count`` fresh replays from ``parent``, ordered oldest-to-newest."""
+        return self._fresh_replay_window(parent, count)
+
+    def resolve_replay_window(
+        self,
+        parent: ResolvedCheckpointNode,
+        count: int,
+        *,
+        effective_config: ResolvedEffectiveConfig | EffectiveConfig | Mapping[str, object] | None = None,
+    ) -> ResolvedReplaySelection:
+        """Resolve a replay window and select a trusted materialized restore.
+
+        The fresh window is always resolved from the checkpoint graph first.
+        A rolling file can replace it only after its committed identity and
+        composition are proven equivalent to that graph window and the
+        requested replay policy. Any unavailable/incompatible optimization
+        simply returns the fresh window; a present but corrupt immutable
+        identity fails closed.
+        """
+        fresh = self._fresh_replay_window(parent, count)
+        if effective_config is None or not fresh:
+            return ResolvedReplaySelection(fresh, "fresh-window")
+
+        scope = self._replay_scope(effective_config)
+        if scope is None or scope[0] != int(count):
+            return ResolvedReplaySelection(fresh, "fresh-window")
+
+        expected = self._expected_replay_identity(fresh, generations=scope[0], cap=scope[1])
+        if expected is None:
+            # Without graph-derived generation identities there is no safe
+            # composition comparison, so the established fresh path remains
+            # the fail-closed fallback.
+            return ResolvedReplaySelection(fresh, "fresh-window")
+
+        rolling = self._committed_rolling_replay(parent)
+        if rolling is None:
+            return ResolvedReplaySelection(fresh, "fresh-window", expected)
+        rolling_artifact, rolling_identity = rolling
+
+        contract = rolling_identity.get("replay_identity_contract")
+        if not isinstance(contract, Mapping):
+            # Old/non-Torus9 rolling artifacts are not eligible for the V2
+            # optimization, but the graph-derived restore remains valid.
+            return ResolvedReplaySelection(fresh, "fresh-window", expected)
+        try:
+            contract_generations = int(contract.get("generations", -1))
+            contract_cap = int(contract.get("maximum_positions", -1))
+        except (TypeError, ValueError) as exc:
+            raise ArtifactIntegrityError("Committed rolling replay contract is malformed") from exc
+        if contract_generations != scope[0] or contract_cap != scope[1]:
+            return ResolvedReplaySelection(fresh, "fresh-window", expected)
+
+        if rolling_identity.get("replay_identity_schema") != _TORUS9_REPLAY_COMPOSITION_SCHEMA:
+            return ResolvedReplaySelection(fresh, "fresh-window", expected)
+        if dict(contract) != dict(expected["replay_identity_contract"]):
+            raise ArtifactIntegrityError(
+                "Committed rolling replay selection contract does not match the requested policy"
+            )
+        if not self._same_replay_composition(
+            rolling_identity.get("generation_identities"),
+            expected.get("generation_identities"),
+        ):
+            raise ArtifactIntegrityError(
+                "Committed rolling replay composition does not match the checkpoint graph window"
+            )
+        actual_fingerprint = rolling_identity.get("canonical_replay_fingerprint")
+        if actual_fingerprint != expected.get("canonical_replay_fingerprint"):
+            raise ArtifactIntegrityError(
+                "Committed rolling replay composition fingerprint does not match the checkpoint graph window"
+            )
+        return ResolvedReplaySelection((rolling_artifact,), "rolling-replay", rolling_identity)
+
+    def _fresh_replay_window(
+        self,
+        parent: ResolvedCheckpointNode,
+        count: int,
+    ) -> tuple[ResolvedArtifact, ...]:
+        """Open graph-owned fresh replay artifacts, oldest-to-newest."""
         requested = self._count(count, label="replay window count")
         self._require_resolved_node(parent)
         if requested == 0:
@@ -321,6 +427,195 @@ class ArtifactResolver:
                 )
             current = next_checkpoint
         return tuple(reversed(newest_to_oldest))
+
+    @staticmethod
+    def _replay_scope(
+        effective_config: ResolvedEffectiveConfig | EffectiveConfig | Mapping[str, object],
+    ) -> tuple[int, int] | None:
+        config = getattr(effective_config, "config", effective_config)
+        replay = getattr(config, "replay", None)
+        if replay is None and isinstance(config, Mapping):
+            replay = config.get("replay")
+        if not isinstance(replay, Mapping):
+            return None
+        raw_generations = replay.get("generations", replay.get("window"))
+        raw_cap = replay.get("cap")
+        if raw_generations is None or raw_cap is None:
+            return None
+        if isinstance(raw_generations, str):
+            match = re.search(r"\b(\d+)\b", raw_generations)
+            if match is None:
+                return None
+            raw_generations = match.group(1)
+        try:
+            generations, cap = int(raw_generations), int(raw_cap)
+        except (TypeError, ValueError):
+            return None
+        if generations <= 0 or cap <= 0:
+            return None
+        return generations, cap
+
+    @staticmethod
+    def _expected_replay_identity(
+        fresh: tuple[ResolvedArtifact, ...],
+        *,
+        generations: int,
+        cap: int,
+    ) -> dict[str, object] | None:
+        components: list[dict[str, object]] = []
+        for artifact in fresh:
+            identity = artifact.identity
+            component = identity.get("generation_identity") if isinstance(identity, Mapping) else None
+            if not isinstance(component, Mapping):
+                return None
+            if component.get("schema") != _TORUS9_REPLAY_GENERATION_SCHEMA:
+                return None
+            try:
+                generation = int(component["generation"])
+                row_count = int(component["row_count"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            sha256 = str(component.get("sha256", ""))
+            if generation <= 0 or row_count < 0 or not sha256.startswith("sha256:"):
+                return None
+            components.append(
+                {
+                    "schema": _TORUS9_REPLAY_GENERATION_SCHEMA,
+                    "generation": generation,
+                    "sha256": sha256,
+                    "row_count": row_count,
+                }
+            )
+        if not components or [int(item["generation"]) for item in components] != sorted(
+            {int(item["generation"]) for item in components}
+        ):
+            return None
+        # Match Torus9RollingReplay's deterministic cap eviction policy using
+        # only durable row counts; no historical replay rows are inspected.
+        retained: dict[int, int] = {}
+        for component in components:
+            generation = int(component["generation"])
+            retained[generation] = int(component["row_count"])
+            total = sum(retained.values())
+            for oldest in sorted(tuple(retained)):
+                if total <= cap:
+                    break
+                removed = min(retained[oldest], total - cap)
+                retained[oldest] -= removed
+                total -= removed
+                if retained[oldest] == 0:
+                    del retained[oldest]
+        final_components = [
+            {
+                **component,
+                "retained_row_count": retained[int(component["generation"])],
+            }
+            for component in components
+            if int(component["generation"]) in retained
+        ]
+        contract = {
+            "selection": _TORUS9_REPLAY_SELECTION_CONTRACT,
+            "generations": int(generations),
+            "maximum_positions": int(cap),
+        }
+        payload = {
+            "schema": _TORUS9_REPLAY_COMPOSITION_SCHEMA,
+            "contract": contract,
+            "components": final_components,
+        }
+        return {
+            "replay_identity_schema": _TORUS9_REPLAY_COMPOSITION_SCHEMA,
+            "replay_identity_contract": contract,
+            "generation_identities": final_components,
+            "canonical_replay_fingerprint": sha256_fingerprint(payload),
+        }
+
+    @staticmethod
+    def _same_replay_composition(actual: object, expected: object) -> bool:
+        if not isinstance(actual, list) or not isinstance(expected, list):
+            return False
+        return [dict(item) for item in actual if isinstance(item, Mapping)] == [
+            dict(item) for item in expected if isinstance(item, Mapping)
+        ] and all(isinstance(item, Mapping) for item in actual) and all(
+            isinstance(item, Mapping) for item in expected
+        )
+
+    def _committed_rolling_replay(
+        self,
+        parent: ResolvedCheckpointNode,
+    ) -> tuple[ResolvedArtifact, Mapping[str, object]] | None:
+        """Return the parent's committed rolling replay, if evidenced."""
+        relative = f"replay/rolling-after-{parent.generation:02d}.jsonl"
+        catalog_path = parent.owner_root / "runtime" / "artifact-catalog.json"
+        if catalog_path.is_file():
+            try:
+                catalog = ArtifactCatalog.load(catalog_path, root=parent.owner_root)
+            except ValueError as exc:
+                raise ArtifactIntegrityError(
+                    f"Cannot load rolling replay artifact catalog: {catalog_path}"
+                ) from exc
+            if catalog.payload.get("lineage_id") != parent.lineage_id:
+                raise ArtifactIntegrityError("Rolling replay catalog lineage does not belong to parent")
+            entry = catalog.entries.get(relative)
+            if isinstance(entry, Mapping):
+                sha256 = str(entry.get("sha256", ""))
+                if not sha256.startswith("sha256:"):
+                    raise ArtifactIntegrityError("Committed rolling replay catalog SHA is malformed")
+                artifact = self.open_artifact(ArtifactRef(relative, sha256), owner=parent)
+                identity = dict(artifact.identity or {})
+                identity["committed"] = True
+                return artifact, identity
+
+        # V2 production lineages historically did not publish a catalog. Their
+        # commit marker is already referenced by the immutable V2 provenance,
+        # so use that existing commit evidence instead of inventing a second
+        # replay-discovery mechanism.
+        try:
+            provenance = json.loads(parent.provenance.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ArtifactIntegrityError(
+                f"Cannot read parent V2 provenance for rolling replay: {parent.provenance.path}"
+            ) from exc
+        if not isinstance(provenance, Mapping) or not isinstance(provenance.get("generation_commit"), Mapping):
+            return None
+        try:
+            commit_ref = ArtifactRef.from_dict(provenance["generation_commit"])  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise ArtifactIntegrityError("Parent V2 provenance has an invalid generation commit reference") from exc
+        commit_artifact = self.open_artifact(commit_ref, owner=parent)
+        try:
+            marker = json.loads(commit_artifact.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ArtifactIntegrityError(
+                f"Cannot read committed generation marker: {commit_artifact.path}"
+            ) from exc
+        if not isinstance(marker, Mapping):
+            raise ArtifactIntegrityError("Parent generation marker is not an object")
+        try:
+            marker_generation = int(marker.get("generation", -1))
+        except (TypeError, ValueError) as exc:
+            raise ArtifactIntegrityError("Parent generation marker generation is malformed") from exc
+        if marker_generation != parent.generation:
+            raise ArtifactIntegrityError("Parent generation marker does not match checkpoint generation")
+        rolling_sha = str(marker.get("rolling_replay_sha256", ""))
+        if not rolling_sha.startswith("sha256:"):
+            raise ArtifactIntegrityError("Parent generation marker has no rolling replay SHA")
+        artifact = self.open_artifact(ArtifactRef(relative, rolling_sha), owner=parent)
+        identity = dict(artifact.identity or {})
+        identity.update(
+            {
+                "committed": True,
+                "commit_artifact": commit_ref.to_dict(),
+                "row_count": marker.get("replay_row_count"),
+                "source_generations": marker.get("replay_generations"),
+                "canonical_replay_fingerprint": marker.get("replay_fingerprint"),
+                "validation_schema": marker.get("validation_schema"),
+                "replay_identity_schema": marker.get("replay_identity_schema"),
+                "generation_identities": marker.get("replay_identity_components"),
+                "replay_identity_contract": marker.get("replay_identity_contract"),
+            }
+        )
+        return artifact, identity
 
     def open_artifact(
         self,
@@ -723,6 +1018,7 @@ __all__ = [
     "ResolvedArtifact",
     "ResolvedEffectiveConfig",
     "ResolvedCheckpointNode",
+    "ResolvedReplaySelection",
     "checkpoint_node_path",
     "ArtifactResolver",
 ]

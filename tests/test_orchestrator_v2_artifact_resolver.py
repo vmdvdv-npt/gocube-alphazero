@@ -25,7 +25,7 @@ from gocube_golden.orchestrator_v2.contracts import (
     EffectiveConfig,
     EffectiveConfigRef,
 )
-from gocube_golden.provenance import canonical_json
+from gocube_golden.provenance import canonical_json, sha256_fingerprint
 from gocube_golden.torus9_training import TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA
 
 
@@ -130,6 +130,96 @@ def _make_graph(tmp_path: Path, *, archive_lineage_b: bool = False) -> Synthetic
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(node.to_dict()), encoding="utf-8")
     return SyntheticGraph(runs_root, refs, roots)
+
+
+def _install_committed_rolling(
+    graph: SyntheticGraph,
+    *,
+    generation: int = 4,
+    generations: int = 3,
+    cap: int = 8,
+    wrong_rolling_sha: bool = False,
+    wrong_composition: bool = False,
+) -> tuple[ArtifactResolver, object]:
+    """Install V1-compatible catalog evidence for a synthetic parent rolling file."""
+    resolver = ArtifactResolver(graph.runs_root)
+    parent = resolver.checkpoint(graph.refs[generation])
+    fresh = resolver.replay_window(parent, generations)
+    fresh_generations = list(range(generation - generations + 1, generation + 1))
+    components = [
+        {
+            "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+            "generation": fresh_generation,
+            "sha256": artifact.sha256,
+            "row_count": 1,
+            "retained_row_count": 1,
+        }
+        for fresh_generation, artifact in zip(fresh_generations, fresh)
+    ]
+    contract = {
+        "selection": "rolling-recent-generations-then-last-cap-v1",
+        "generations": generations,
+        "maximum_positions": cap,
+    }
+    composition_payload = {
+        "schema": "torus9-replay-composition-v1",
+        "contract": contract,
+        "components": components,
+    }
+    composition_fingerprint = sha256_fingerprint(composition_payload)
+    rolling_path = graph.roots[parent.lineage_id] / "replay" / f"rolling-after-{generation:02d}.jsonl"
+    rolling_sha = _write(rolling_path, b'{"source_generation":4}\n')
+    rolling_components = [dict(component) for component in components]
+    if wrong_composition:
+        rolling_components = [
+            dict(rolling_components[0], sha256="sha256:" + "f" * 64),
+            *rolling_components[1:],
+        ]
+        composition_payload["components"] = rolling_components
+        composition_fingerprint = sha256_fingerprint(composition_payload)
+    rolling_entry = {
+        "path": rolling_path.relative_to(graph.roots[parent.lineage_id]).as_posix(),
+        "sha256": ("sha256:" + "e" * 64) if wrong_rolling_sha else rolling_sha,
+        "size_bytes": rolling_path.stat().st_size,
+        "row_count": generations,
+        "source_generations": list(range(generation - generations + 1, generation + 1)),
+        "canonical_replay_fingerprint": composition_fingerprint,
+        "validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+        "replay_identity_schema": "torus9-replay-composition-v1",
+        "generation_identities": rolling_components,
+        "replay_identity_contract": contract,
+    }
+    for lineage, root in graph.roots.items():
+        catalog = ArtifactCatalog.initialize(
+            root / "runtime/artifact-catalog.json",
+            lineage_id=lineage,
+            root=root,
+        )
+        catalog_artifacts: dict[int, list[dict[str, object]]] = {}
+        for fresh_generation, artifact in zip(fresh_generations, fresh):
+            if artifact.owner_lineage_id != lineage:
+                continue
+            component = next(
+                item for item in components if int(item["generation"]) == fresh_generation
+            )
+            catalog_artifacts.setdefault(int(component["generation"]), []).append(
+                {
+                    "path": artifact.ref.path,
+                    "sha256": artifact.sha256,
+                    "size_bytes": artifact.path.stat().st_size,
+                    "generation_identity": component,
+                }
+            )
+        if lineage == parent.lineage_id:
+            catalog_artifacts.setdefault(generation, []).append(rolling_entry)
+        for catalog_generation, artifacts in sorted(catalog_artifacts.items()):
+            catalog.register_generation(catalog_generation, artifacts)
+    config = EffectiveConfig(
+        topology="torus9",
+        compatibility={"rules": "synthetic", "board": "tiny"},
+        replay={"generations": generations, "cap": cap},
+    )
+    return resolver, (parent, config, rolling_path, rolling_entry)
 
 
 def _rewrite_node(graph: SyntheticGraph, generation: int, node: CheckpointNode) -> None:
@@ -351,6 +441,88 @@ def test_replay_window_missing_and_corrupt_artifacts_fail_closed(tmp_path: Path)
         ArtifactResolver(graph.runs_root).replay_window(
             ArtifactResolver(graph.runs_root).checkpoint(graph.refs[4]), 3
         )
+
+
+def test_compatible_parent_rolling_replay_is_selected_as_one_restore_artifact(tmp_path: Path) -> None:
+    graph = _make_graph(tmp_path)
+    resolver, (parent, config, rolling_path, _entry) = _install_committed_rolling(graph)
+
+    selection = resolver.resolve_replay_window(parent, 3, effective_config=config)
+
+    assert selection.source == "rolling-replay"
+    assert len(selection.artifacts) == 1
+    assert selection.artifacts[0].path == rolling_path.resolve()
+    assert selection.artifacts[0].owner_lineage_id == parent.lineage_id
+    assert selection.identity["replay_identity_contract"] == {
+        "selection": "rolling-recent-generations-then-last-cap-v1",
+        "generations": 3,
+        "maximum_positions": 8,
+    }
+
+
+def test_changed_replay_scope_falls_back_to_graph_fresh_window(tmp_path: Path) -> None:
+    graph = _make_graph(tmp_path)
+    resolver, (parent, _config, _rolling_path, _entry) = _install_committed_rolling(graph)
+    changed = EffectiveConfig(
+        topology="torus9",
+        compatibility={"rules": "synthetic", "board": "tiny"},
+        replay={"generations": 2, "cap": 8},
+    )
+
+    selection = resolver.resolve_replay_window(parent, 2, effective_config=changed)
+
+    assert selection.source == "fresh-window"
+    assert len(selection.artifacts) == 2
+    assert all("fresh-M" in artifact.path.name for artifact in selection.artifacts)
+
+
+def test_changed_replay_cap_falls_back_to_graph_fresh_window(tmp_path: Path) -> None:
+    graph = _make_graph(tmp_path)
+    resolver, (parent, _config, _rolling_path, _entry) = _install_committed_rolling(graph)
+    changed = EffectiveConfig(
+        topology="torus9",
+        compatibility={"rules": "synthetic", "board": "tiny"},
+        replay={"generations": 3, "cap": 7},
+    )
+
+    selection = resolver.resolve_replay_window(parent, 3, effective_config=changed)
+
+    assert selection.source == "fresh-window"
+    assert len(selection.artifacts) == 3
+    assert all("fresh-M" in artifact.path.name for artifact in selection.artifacts)
+
+
+def test_rolling_replay_wrong_sha_fails_closed(tmp_path: Path) -> None:
+    graph = _make_graph(tmp_path)
+    resolver, (parent, config, _rolling_path, _entry) = _install_committed_rolling(
+        graph, wrong_rolling_sha=True
+    )
+
+    with pytest.raises(ArtifactIntegrityError, match="expected SHA"):
+        resolver.resolve_replay_window(parent, 3, effective_config=config)
+
+
+def test_rolling_replay_wrong_composition_fails_closed(tmp_path: Path) -> None:
+    graph = _make_graph(tmp_path)
+    resolver, (parent, config, _rolling_path, _entry) = _install_committed_rolling(
+        graph, wrong_composition=True
+    )
+
+    with pytest.raises(ArtifactIntegrityError, match="composition"):
+        resolver.resolve_replay_window(parent, 3, effective_config=config)
+
+
+def test_cross_lineage_parent_rolling_replay_is_referenced_without_copy(tmp_path: Path) -> None:
+    graph = _make_graph(tmp_path)
+    resolver, (parent, config, rolling_path, _entry) = _install_committed_rolling(graph)
+    child_root = graph.roots["lineage-a"] / "child-output"
+
+    selection = resolver.resolve_replay_window(parent, 3, effective_config=config)
+
+    assert parent.lineage_id == "lineage-b"
+    assert selection.artifacts[0].path == rolling_path.resolve()
+    assert selection.artifacts[0].owner_root == graph.roots["lineage-b"].resolve()
+    assert not (child_root / rolling_path.name).exists()
 
 
 def test_effective_config_sha_fingerprint_and_topology_are_verified(tmp_path: Path) -> None:

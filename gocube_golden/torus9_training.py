@@ -62,6 +62,11 @@ TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA = "torus9-replay-composition-v1"
 TORUS9_REPLAY_SELECTION_CONTRACT = "rolling-recent-generations-then-last-cap-v1"
 
 
+def _is_materialized_rolling_source(path: Path) -> bool:
+    """Recognize only the committed rolling artifact naming convention."""
+    return path.name.startswith("rolling-after-") and path.name.endswith(".jsonl")
+
+
 def _normalize_generation_identities(
     value: object,
     *,
@@ -1190,6 +1195,7 @@ class Torus9TrainingAdapter:
             )
         }
         source_evidence = tuple(replay_artifact_identities or ())
+        materialized_source_indexes: list[int] = []
 
         def append_generation(
             generation: int,
@@ -1202,11 +1208,34 @@ class Torus9TrainingAdapter:
                     f"Referenced Torus9 replay generation M{generation} appears in multiple sources"
                 )
             source_identity = identity
+            materialized = (
+                isinstance(source_identity, Mapping)
+                and source_identity.get("replay_identity_schema")
+                == TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA
+                and _is_materialized_rolling_source(source)
+            )
             component = (
                 source_identity.get("generation_identity")
                 if isinstance(source_identity, Mapping)
                 else None
             )
+            if (
+                materialized
+                and not isinstance(component, Mapping)
+                and isinstance(source_identity, Mapping)
+            ):
+                materialized_components = _normalize_generation_identities(
+                    source_identity.get("generation_identities"),
+                    label="Torus9 materialized replay generation identities",
+                )
+                component = next(
+                    (
+                        candidate
+                        for candidate in materialized_components
+                        if int(candidate["generation"]) == int(generation)
+                    ),
+                    None,
+                )
             if not isinstance(component, Mapping):
                 component = supplied.get(generation)
             component_valid = False
@@ -1216,11 +1245,19 @@ class Torus9TrainingAdapter:
                         (component,),
                         label="Torus9 replay generation identity",
                     )[0]
-                    component_valid = (
-                        int(normalized_component["generation"]) == int(generation)
-                        and str(normalized_component["sha256"]) == str(digest.get("sha256", ""))
-                        and int(normalized_component.get("row_count", -1)) == len(rows)
-                    )
+                    component_valid = int(normalized_component["generation"]) == int(generation)
+                    if materialized:
+                        declared_rows = int(normalized_component.get("row_count", -1))
+                        retained_rows = int(normalized_component.get("retained_row_count", -1))
+                        component_valid = component_valid and (
+                            declared_rows == len(rows) or retained_rows == len(rows)
+                        )
+                    else:
+                        component_valid = component_valid and (
+                            str(normalized_component["sha256"])
+                            == str(digest.get("sha256", ""))
+                            and int(normalized_component.get("row_count", -1)) == len(rows)
+                        )
                     if component_valid:
                         component = normalized_component
                 except (TypeError, ValueError):
@@ -1233,15 +1270,20 @@ class Torus9TrainingAdapter:
                 )
             else:
                 component = dict(component)
-            trusted = self._verified_replay_source_evidence(
-                source_identity,
-                digest,
-                generation=generation,
-                row_count=len(rows),
+            trusted = (
+                False
+                if materialized
+                else self._verified_replay_source_evidence(
+                    source_identity,
+                    digest,
+                    generation=generation,
+                    row_count=len(rows),
+                )
             )
             if not trusted:
-                for row in rows:
-                    self.validate_sample(row)
+                if not materialized:
+                    for row in rows:
+                        self.validate_sample(row)
             replay.append_generation(
                 generation,
                 rows,
@@ -1294,6 +1336,13 @@ class Torus9TrainingAdapter:
                 current_rows.append(row)
             if current_generation:
                 append_generation(current_generation, current_rows, digest, identity)
+            if (
+                isinstance(identity, Mapping)
+                and identity.get("replay_identity_schema")
+                == TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA
+                and _is_materialized_rolling_source(source)
+            ):
+                materialized_source_indexes.append(source_index)
             if source.name.endswith("-fresh.jsonl") and len(generations_in_source) != 1:
                 raise ValueError(
                     "Referenced Torus9 fresh replay artifact must contain exactly one generation"
@@ -1301,6 +1350,29 @@ class Torus9TrainingAdapter:
 
         if not seen_generations:
             raise ValueError("Referenced Torus9 replay is empty")
+        if materialized_source_indexes:
+            if len(materialized_source_indexes) != 1:
+                raise ValueError("Torus9 materialized replay restore requires one rolling source")
+            source_index = materialized_source_indexes[0]
+            source_identity = source_evidence[source_index]
+            source_digest = source_digests[source_index]
+            expected_sha = str(
+                source_identity.get("sha256")
+                or source_identity.get("artifact_sha256")
+                or ""
+            )
+            if (
+                source_identity.get("immutable_verified") is not True
+                or not expected_sha
+                or expected_sha != str(source_digest.get("sha256", ""))
+                or source_identity.get("validation_schema") != ARTIFACT_VALIDATION_SCHEMA
+                or source_identity.get("row_count") is None
+                or int(source_identity["row_count"]) != len(replay.rows)
+                or not isinstance(source_identity.get("generation_identities"), Sequence)
+            ):
+                raise ValueError("Torus9 materialized replay identity evidence is incomplete")
+            replay_identity = replay_identity or source_identity
+
         if replay_identity is not None:
             schema = _replay_identity_schema_from_payload(replay_identity, None)
             expected = _replay_fingerprint_from_payload(replay_identity, None)
