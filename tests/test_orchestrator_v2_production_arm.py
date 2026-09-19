@@ -10,6 +10,7 @@ from gocube_golden.orchestrator_v2 import (
     EffectiveConfig,
     EffectiveConfigRef,
     ProductionArmExecutionPath,
+    SupervisorPolicy,
 )
 from gocube_golden.orchestrator_v2 import production_arm
 from gocube_golden.provenance import canonical_json
@@ -107,4 +108,20 @@ def test_child_deserialization_does_not_rehash_replay_artifacts(tmp_path, monkey
 
 
 def test_production_arm_uses_standard_supervisor_policy_by_default():
-    assert ProductionArmExecutionPath().supervisor_policy is None
+    path = ProductionArmExecutionPath()
+
+    # The public override remains unset, while the real production seam gives
+    # post-commit result publication enough bounded time to finish.
+    assert path.supervisor_policy is None
+    assert (
+        path._effective_supervisor_policy().committed_drain_seconds
+        == 15 * 60.0
+    )
+
+
+def test_production_arm_preserves_explicit_supervisor_policy():
+    policy = SupervisorPolicy(committed_drain_seconds=7.0)
+
+    path = ProductionArmExecutionPath(supervisor_policy=policy)
+
+    assert path._effective_supervisor_policy() is policy
