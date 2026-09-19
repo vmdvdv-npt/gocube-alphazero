@@ -273,6 +273,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
             }
         else:
             source_rows, replay_digest = _base._read_jsonl_with_identity(sources[0])
+            source_digests = [replay_digest]
             rows = list(source_rows)
             replay = _base.Torus9RollingReplay.from_persisted_rows(
                 rows,
@@ -284,6 +285,15 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
 
         if load_timing is not None:
             load_timing["replay_file_load_wall_time_sec"] = time.perf_counter() - replay_started
+            load_timing["replay_files_parsed"] = len(source_digests)
+            load_timing["replay_bytes_parsed"] = sum(
+                int(item.get("size_bytes", 0)) for item in source_digests
+            )
+            load_timing["restore_source"] = (
+                "rolling-replay"
+                if len(sources) == 1 and sources[0].name.startswith("rolling-after-")
+                else "fresh-window"
+            )
 
         replay_fingerprint: str | None = None
         trusted_historical = False

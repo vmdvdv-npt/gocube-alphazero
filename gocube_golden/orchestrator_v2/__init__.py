@@ -10,6 +10,7 @@ from .artifact_resolver import (  # noqa: F401
     ResolvedArtifact,
     ResolvedCheckpointNode,
     ResolvedEffectiveConfig,
+    ResolvedReplaySelection,
     checkpoint_node_path,
 )
 from .generation_runner import (  # noqa: F401

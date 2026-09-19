@@ -183,6 +183,89 @@ def test_resolved_fresh_sources_skip_historical_semantics_and_preserve_order(
     assert [row["source_generation"] for row in replay.rows] == [88, 89, 90]
 
 
+def test_materialized_rolling_source_parses_once_and_skips_historical_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fresh_adapter = run_owned_training.Torus9TrainingAdapter(profile=_profile())
+    rows = tuple(
+        _row(f"M{generation}:game:0:0") | {"source_generation": generation}
+        for generation in (88, 89, 90)
+    )
+    fresh_paths: list[Path] = []
+    fresh_evidence: list[dict[str, object]] = []
+    for generation, row in zip((88, 89, 90), rows):
+        path = tmp_path / f"iter-{generation:02d}-fresh.jsonl"
+        path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+        digest = sha256_file(path)
+        fresh_paths.append(path)
+        fresh_evidence.append(
+            {
+                "path": str(path),
+                "sha256": digest,
+                "size_bytes": path.stat().st_size,
+                "row_count": 1,
+                "validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+                "immutable_verified": True,
+                "generation_identity": {
+                    "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+                    "generation": generation,
+                    "sha256": digest,
+                    "row_count": 1,
+                },
+            }
+        )
+    fresh_replay, _fresh_digests = fresh_adapter._rolling_from_sources(
+        fresh_paths,
+        total_evictions=0,
+        replay_artifact_identities=fresh_evidence,
+    )
+    descriptor = fresh_replay.replay_identity_descriptor()
+    path = tmp_path / "rolling-after-90.jsonl"
+    path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    digest = sha256_file(path)
+    evidence = {
+        "path": str(path),
+        "sha256": digest,
+        "size_bytes": path.stat().st_size,
+        "row_count": len(rows),
+        "validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+        "immutable_verified": True,
+        "replay_identity_schema": descriptor["schema"],
+        "replay_identity_contract": descriptor["contract"],
+        "generation_identities": descriptor["components"],
+        "canonical_replay_fingerprint": descriptor["fingerprint"],
+    }
+    calls: list[str] = []
+    adapter = run_owned_training.Torus9TrainingAdapter(profile=_profile())
+    monkeypatch.setattr(
+        adapter,
+        "validate_sample",
+        lambda sample: calls.append(str(sample["replay_row_id"])),
+    )
+
+    restored, digests = adapter._rolling_from_sources(
+        [path],
+        total_evictions=0,
+        generation_identities=descriptor["components"],  # type: ignore[arg-type]
+        replay_artifact_identities=[evidence],
+        replay_identity={
+            "replay_identity_schema": descriptor["schema"],
+            "replay_identity_contract": descriptor["contract"],
+            "generation_identities": descriptor["components"],
+            "canonical_replay_fingerprint": descriptor["fingerprint"],
+        },
+    )
+
+    assert list(restored.rows) == list(fresh_replay.rows) == list(rows)
+    assert calls == []
+    assert len(digests) == 1
+    assert digests[0]["size_bytes"] == path.stat().st_size
+
+
 def test_incomplete_resolved_source_evidence_uses_full_validation_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
