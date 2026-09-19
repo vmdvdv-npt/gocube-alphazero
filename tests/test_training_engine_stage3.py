@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from training_engine import CheckpointContext, TrainingEngine, TrainingState
+from training_engine import CheckpointContext, CommitPreparation, TrainingEngine, TrainingState
 from gocube_golden.torus9_training import (
     Torus9CurrentGraphNet,
     Torus9RollingReplay,
@@ -138,6 +138,31 @@ def test_generic_engine_commits_all_artifacts_and_state(tmp_path: Path):
     assert (tmp_path / "checkpoints/M1.metadata.json").is_file()
     assert (tmp_path / "generation-01.complete.json").is_file()
     assert not list(tmp_path.rglob("*.tmp*"))
+
+
+def test_commit_preparation_runs_before_final_marker_fence(tmp_path: Path):
+    observed: list[CommitPreparation] = []
+
+    def prepare(value: CommitPreparation) -> None:
+        observed.append(value)
+        assert not value.marker_path.exists()
+        assert value.artifact_paths["checkpoint"].is_file()
+        assert value.artifact_paths["fresh_replay"].is_file()
+        assert value.marker_sha256.startswith("sha256:")
+
+    TrainingEngine(_FakeAdapter()).run_iteration(
+        state=_fake_state(),
+        generation=1,
+        output_dir=tmp_path,
+        run_id="fake-run",
+        records=({"valid": True},),
+        training_seed=17,
+        device="cpu",
+        prepare_commit=prepare,
+    )
+
+    assert len(observed) == 1
+    assert (tmp_path / "generation-01.complete.json").is_file()
 
 
 @pytest.mark.parametrize("failure", ["replay", "train", "save", "verify"])

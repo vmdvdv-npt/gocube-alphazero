@@ -7,11 +7,15 @@ They intentionally contain no orchestration policy or replay-selection logic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+from pathlib import Path
 from pathlib import PurePosixPath
 import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from .artifact_catalog import ArtifactCatalog, sha256_file
+from .process_supervision import atomic_write_text
 from .provenance import canonical_json, sha256_fingerprint
 
 
@@ -292,6 +296,240 @@ class EffectiveConfig:
                    ("compatibility", "self_play", "training", "replay", "execution", "arena", "supervision", "extensions")))
 
 
+def _graph_node_path(root: Path, checkpoint: CheckpointRef) -> Path:
+    return root / "metadata" / "checkpoints" / f"{checkpoint.checkpoint_id}.json"
+
+
+def _owned_path(root: Path, relative: str, label: str) -> Path:
+    path = (root / relative).resolve()
+    try:
+        path.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes lineage root: {relative}") from exc
+    return path
+
+
+def _write_immutable_json(path: Path, payload: Mapping[str, object]) -> None:
+    content = canonical_json(dict(payload)) + "\n"
+    if path.is_file():
+        if path.read_text(encoding="utf-8") != content:
+            raise ValueError(f"Refusing to overwrite immutable graph artifact: {path}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, content)
+
+
+def _read_object(path: Path, label: str) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read {label}: {path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be an object: {path}")
+    return payload
+
+
+def _artifact_identity(path: Path, root: Path, *, sha256: str | None = None) -> dict[str, object]:
+    return {
+        "path": path.resolve().relative_to(root.resolve()).as_posix(),
+        "sha256": sha256 or sha256_file(path),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def publish_checkpoint_graph(
+    *,
+    root: str | Path,
+    parent: CheckpointRef,
+    checkpoint: CheckpointRef,
+    fresh_replay: ArtifactRef,
+    effective_config: EffectiveConfigRef,
+    generation_commit: ArtifactRef,
+    artifact_identities: Mapping[str, Mapping[str, object]] | None = None,
+    checkpoint_reload_verified: bool = True,
+) -> CheckpointNode:
+    """Publish graph evidence before the generation completion fence.
+
+    All inputs are already immutable identities.  The completion marker is
+    deliberately referenced but not required to exist yet; its atomic rename
+    is performed by the caller only after this function returns successfully.
+    """
+    lineage_root = Path(root).resolve()
+    if checkpoint.generation != parent.generation + 1:
+        raise ValueError("checkpoint is not an immediate child of parent")
+    if checkpoint.lineage_id != str(_read_object(lineage_root / "manifest.json", "lineage manifest").get("lineage_id")):
+        raise ValueError("checkpoint lineage does not match manifest")
+    for ref, label in (
+        (checkpoint, "checkpoint"),
+        (fresh_replay, "fresh replay"),
+        (effective_config.artifact, "effective config"),
+    ):
+        path = _owned_path(lineage_root, ref.path, label)
+        if not path.is_file() or sha256_file(path) != ref.sha256:
+            raise ValueError(f"{label} identity is not ready for commit: {path}")
+
+    provenance_path = lineage_root / "metadata" / "provenance-v2" / f"M{checkpoint.generation}.json"
+    node_path = _graph_node_path(lineage_root, checkpoint)
+    artifact_payload = {
+        name: dict(identity)
+        for name, identity in (artifact_identities or {}).items()
+    }
+    provenance_payload: dict[str, object] = {
+        "schema": "gocube-orchestrator-v2-production-provenance-v2",
+        "version": 2,
+        "checkpoint": checkpoint.to_dict(),
+        "immediate_parent": parent.to_dict(),
+        "fresh_replay": fresh_replay.to_dict(),
+        "generation_commit": generation_commit.to_dict(),
+        "effective_config": effective_config.to_dict(),
+        "checkpoint_reload_verified": bool(checkpoint_reload_verified),
+        "artifact_identities": artifact_payload,
+    }
+    _write_immutable_json(provenance_path, provenance_payload)
+    provenance = ArtifactRef(
+        provenance_path.relative_to(lineage_root).as_posix(),
+        sha256_file(provenance_path),
+    )
+    node = CheckpointNode(
+        checkpoint=checkpoint,
+        genesis=False,
+        parent=parent,
+        fresh_replay=fresh_replay,
+        effective_config=effective_config,
+        provenance=provenance,
+    )
+    _write_immutable_json(node_path, node.to_dict())
+
+    manifest_path = lineage_root / "manifest.json"
+    manifest = _read_object(manifest_path, "lineage manifest")
+    if manifest.get("lineage_id") != checkpoint.lineage_id or manifest.get("topology") != checkpoint.topology:
+        raise ValueError("lineage manifest owner does not match checkpoint")
+    if manifest.get("parent_checkpoint") != parent.to_dict():
+        raise ValueError("lineage manifest parent changed during graph publication")
+    hashes = manifest.get("checkpoint_hashes")
+    if not isinstance(hashes, Mapping):
+        raise ValueError("lineage manifest checkpoint_hashes is malformed")
+    updated = dict(manifest)
+    updated_hashes = dict(hashes)
+    updated_hashes[checkpoint.path] = checkpoint.sha256
+    updated["checkpoint_hashes"] = updated_hashes
+    commits = updated.get("generation_commits")
+    if not isinstance(commits, Mapping):
+        commits = {}
+    updated_commits = dict(commits)
+    updated_commits[str(checkpoint.generation)] = generation_commit.to_dict()
+    updated["generation_commits"] = updated_commits
+    updated["effective_config"] = effective_config.to_dict()
+    atomic_write_text(manifest_path, canonical_json(updated) + "\n")
+
+    catalog_path = lineage_root / "runtime" / "artifact-catalog.json"
+    catalog = (
+        ArtifactCatalog.load(catalog_path, root=lineage_root)
+        if catalog_path.is_file()
+        else ArtifactCatalog.initialize(
+            catalog_path,
+            lineage_id=checkpoint.lineage_id,
+            root=lineage_root,
+        )
+    )
+    catalog_items = [
+        identity
+        for name, identity in artifact_payload.items()
+        if name != "completion_marker"
+    ]
+    catalog_items.extend(
+        (
+            _artifact_identity(provenance_path, lineage_root),
+            _artifact_identity(node_path, lineage_root),
+        )
+    )
+    catalog.register_generation(checkpoint.generation, catalog_items)
+    return node
+
+
+def validate_generation_commit(
+    *,
+    root: str | Path,
+    lineage_id: str,
+    generation: int,
+) -> CheckpointNode:
+    """Validate the evidence behind a completion marker, fail-closed."""
+    lineage_root = Path(root).resolve()
+    marker_path = lineage_root / f"generation-{generation:02d}.complete.json"
+    marker = _read_object(marker_path, "generation completion marker")
+    if int(marker.get("generation", -1)) != int(generation):
+        raise ValueError("completion marker generation mismatch")
+    if str(marker.get("lineage_id", marker.get("run_id", lineage_id))) != lineage_id:
+        raise ValueError("completion marker lineage mismatch")
+    required_marker_fields = (
+        "checkpoint_sha256",
+        "fresh_replay_sha256",
+        "rolling_replay_sha256",
+        "checkpoint_metadata_sha256",
+        "training_metrics_sha256",
+        "summary_sha256",
+    )
+    if any(not str(marker.get(field, "")).startswith("sha256:") for field in required_marker_fields):
+        raise ValueError("completion marker lacks mandatory artifact identities")
+
+    node_path = lineage_root / "metadata" / "checkpoints" / f"M{generation}.json"
+    node_payload = _read_object(node_path, "CheckpointNode")
+    node = CheckpointNode.from_dict(node_payload)
+    if node.checkpoint.lineage_id != lineage_id or node.checkpoint.generation != generation:
+        raise ValueError("CheckpointNode does not belong to committed generation")
+    checkpoint_path = _owned_path(lineage_root, node.checkpoint.path, "checkpoint")
+    fresh_path = None if node.fresh_replay is None else _owned_path(lineage_root, node.fresh_replay.path, "fresh replay")
+    if not checkpoint_path.is_file() or sha256_file(checkpoint_path) != node.checkpoint.sha256:
+        raise ValueError("CheckpointNode checkpoint identity is not physically valid")
+    if fresh_path is None or not fresh_path.is_file() or sha256_file(fresh_path) != node.fresh_replay.sha256:
+        raise ValueError("CheckpointNode fresh replay identity is not physically valid")
+    if str(marker["checkpoint_sha256"]) != node.checkpoint.sha256 or str(marker["fresh_replay_sha256"]) != node.fresh_replay.sha256:
+        raise ValueError("completion marker disagrees with CheckpointNode")
+    marker_artifacts = {
+        "rolling_replay_sha256": lineage_root / "replay" / f"rolling-after-{generation:02d}.jsonl",
+        "checkpoint_metadata_sha256": checkpoint_path.with_suffix(".metadata.json"),
+        "training_metrics_sha256": lineage_root / "training" / f"iter-{generation:02d}.json",
+        "summary_sha256": lineage_root / f"iter-{generation:02d}-summary.json",
+    }
+    for field, path in marker_artifacts.items():
+        if not path.is_file() or sha256_file(path) != str(marker[field]):
+            raise ValueError(f"completion marker artifact identity is invalid: {field}")
+
+    provenance_path = _owned_path(lineage_root, node.provenance.path, "provenance")
+    if not provenance_path.is_file() or sha256_file(provenance_path) != node.provenance.sha256:
+        raise ValueError("CheckpointNode provenance is missing or has the wrong identity")
+    provenance = _read_object(provenance_path, "generation provenance")
+    if provenance.get("checkpoint") != node.checkpoint.to_dict():
+        raise ValueError("generation provenance checkpoint mismatch")
+    if provenance.get("immediate_parent") != (None if node.parent is None else node.parent.to_dict()):
+        raise ValueError("generation provenance parent mismatch")
+    if provenance.get("fresh_replay") != node.fresh_replay.to_dict():
+        raise ValueError("generation provenance replay mismatch")
+    if provenance.get("effective_config") != node.effective_config.to_dict():
+        raise ValueError("generation provenance config mismatch")
+    commit_ref = ArtifactRef.from_dict(provenance.get("generation_commit", {}))
+    if commit_ref.path != marker_path.relative_to(lineage_root).as_posix() or commit_ref.sha256 != sha256_file(marker_path):
+        raise ValueError("generation provenance commit marker mismatch")
+    if provenance.get("checkpoint_reload_verified") is not True:
+        raise ValueError("checkpoint reload was not verified before commit")
+
+    config_path = _owned_path(lineage_root, node.effective_config.artifact.path, "effective config")
+    if not config_path.is_file() or sha256_file(config_path) != node.effective_config.artifact.sha256:
+        raise ValueError("effective config evidence is missing or invalid")
+    manifest = _read_object(lineage_root / "manifest.json", "lineage manifest")
+    hashes = manifest.get("checkpoint_hashes")
+    if manifest.get("lineage_id") != lineage_id or not isinstance(hashes, Mapping):
+        raise ValueError("lineage manifest is not valid commit evidence")
+    if hashes.get(node.checkpoint.path) != node.checkpoint.sha256:
+        raise ValueError("lineage manifest does not contain the committed checkpoint identity")
+    catalog_path = lineage_root / "runtime" / "artifact-catalog.json"
+    if catalog_path.is_file():
+        catalog = ArtifactCatalog.load(catalog_path, root=lineage_root)
+        if str(catalog.entries.get(node.checkpoint.path, {}).get("sha256", "")) != node.checkpoint.sha256:
+            raise ValueError("artifact catalog does not contain the committed checkpoint")
+    return node
+
+
 __all__ = [
     "CHECKPOINT_NODE_SCHEMA",
     "EFFECTIVE_CONFIG_SCHEMA",
@@ -302,4 +540,6 @@ __all__ = [
     "CheckpointNode",
     "EffectiveConfig",
     "contract_fingerprint",
+    "publish_checkpoint_graph",
+    "validate_generation_commit",
 ]

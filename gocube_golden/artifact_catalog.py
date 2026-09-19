@@ -218,6 +218,29 @@ class ArtifactCatalog:
         self._write()
         return self.fingerprint
 
+    def discard_generation(self, generation: int) -> None:
+        """Remove pre-fence evidence for an interrupted generation."""
+        key = str(int(generation))
+        generations = dict(self._payload.get("generations", {}))
+        record = generations.pop(key, None)
+        if record is None:
+            return
+        referenced: set[str] = set()
+        for other in generations.values():
+            if isinstance(other, Mapping):
+                paths = other.get("artifact_paths", ())
+                if isinstance(paths, Sequence):
+                    referenced.update(str(path) for path in paths)
+        entries = dict(self.entries)
+        paths = record.get("artifact_paths", ()) if isinstance(record, Mapping) else ()
+        if isinstance(paths, Sequence):
+            for path in paths:
+                if str(path) not in referenced:
+                    entries.pop(str(path), None)
+        self._payload["entries"] = entries
+        self._payload["generations"] = generations
+        self._write()
+
     def verify(self, paths: Sequence[str | Path]) -> dict[str, str]:
         """Verify only selected committed files and return their SHA values."""
         verified: dict[str, str] = {}

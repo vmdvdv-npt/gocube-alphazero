@@ -38,6 +38,7 @@ from ..process_supervision import (
     timestamp_seconds,
     write_active_child,
 )
+from ..artifact_graph import validate_generation_commit
 
 
 SUPERVISOR_SCHEMA = "gocube-orchestrator-supervisor-v2"
@@ -76,16 +77,13 @@ class SupervisorPolicy:
     The production defaults are deliberately fixed to five minutes of
     heartbeat grace and exactly one retry of the same generation.  A shorter
     grace is useful for unit tests; more than one retry is rejected so a
-    caller cannot accidentally turn this into an unbounded loop.  The
-    committed drain defaults to the existing termination grace; a longer
-    drain is an explicit operator choice.
+    caller cannot accidentally turn this into an unbounded loop.
     """
 
     heartbeat_grace_seconds: float = 5 * 60.0
     max_retries: int = 1
     poll_interval_seconds: float = 1.0
     termination_grace_seconds: float = 5.0
-    committed_drain_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if self.heartbeat_grace_seconds < 0:
@@ -96,8 +94,6 @@ class SupervisorPolicy:
             raise ValueError("poll_interval_seconds must be non-negative")
         if self.termination_grace_seconds < 0:
             raise ValueError("termination_grace_seconds must be non-negative")
-        if self.committed_drain_seconds is not None and self.committed_drain_seconds < 0:
-            raise ValueError("committed_drain_seconds must be non-negative")
 
     @property
     def max_attempts(self) -> int:
@@ -349,6 +345,16 @@ class SupervisorV2:
                 owner = payload.get(owner_key)
                 if owner is not None and str(owner) != self.lineage_id:
                     raise SupervisorIntegrityError(f"commit marker ownership mismatch: {path}")
+            try:
+                validate_generation_commit(
+                    root=self.root,
+                    lineage_id=self.lineage_id,
+                    generation=generation,
+                )
+            except (OSError, TypeError, ValueError) as exc:
+                raise SupervisorIntegrityError(
+                    f"commit marker lacks valid graph/provenance evidence: {path}"
+                ) from exc
             markers.append(CommitMarker(generation=generation, path=path, payload=payload))
         if not markers:
             return None
@@ -361,7 +367,21 @@ class SupervisorV2:
         This method is read-only.  In particular, a plan for generation M95
         does not launch M95.
         """
-        committed = self.last_committed()
+        try:
+            committed = self.last_committed()
+        except SupervisorIntegrityError as exc:
+            generation = (
+                self.target_generation
+                if self.target_generation is not None
+                else (self.initial_committed_generation or 0) + 1
+            )
+            return RecoveryPlan(
+                action=SupervisorAction.STOP,
+                generation=generation,
+                last_committed_generation=self.initial_committed_generation,
+                attempt=1,
+                reason=str(exc),
+            )
         committed_generation = committed.generation if committed is not None else None
         baseline = self.initial_committed_generation
         if committed_generation is None:
@@ -717,21 +737,8 @@ class SupervisorV2:
         active: ActiveChild,
         process: subprocess.Popen[bytes] | subprocess.Popen[str] | None,
     ) -> None:
-        """Let a committed child finish its post-marker publication work.
-
-        The generation commit marker is written before the driver publishes
-        its small result record.  Killing the process group as soon as the
-        marker appears can therefore leave a committed generation without
-        its result evidence.  Drain the leader (or the reattached group) for
-        the bounded termination grace, then clean up any surviving descendants
-        with the same scoped ownership checks.
-        """
-        drain_seconds = (
-            self.policy.termination_grace_seconds
-            if self.policy.committed_drain_seconds is None
-            else self.policy.committed_drain_seconds
-        )
-        timeout = max(0.0, float(drain_seconds))
+        """Perform ordinary bounded process cleanup after the commit fence."""
+        timeout = max(0.0, float(self.policy.termination_grace_seconds))
         if process is not None:
             try:
                 process.wait(timeout=timeout)
@@ -797,7 +804,10 @@ class SupervisorV2:
             raise SupervisorIntegrityError(str(exc)) from exc
 
     def _write_stop(self, generation: int, attempt: int, reason: str) -> None:
-        committed = self.last_committed()
+        try:
+            committed = self.last_committed()
+        except SupervisorIntegrityError:
+            committed = None
         atomic_write_json(
             self.stop_path,
             {

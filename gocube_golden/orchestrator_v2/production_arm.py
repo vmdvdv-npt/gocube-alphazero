@@ -16,6 +16,7 @@ from pathlib import Path
 import sys
 
 from ..artifact_catalog import sha256_file
+from ..artifact_graph import validate_generation_commit
 from ..process_supervision import atomic_write_text
 from ..provenance import canonical_json
 from .artifact_resolver import (
@@ -31,14 +32,7 @@ from .supervisor import SupervisorPolicy, SupervisorStatus, SupervisorV2
 from .torus9_production import (
     Torus9ProductionGenerationPath,
     Torus9ProductionLineage,
-    V2CheckpointPublisher,
 )
-
-
-# A committed generation still has to publish its result record.  That
-# production step is deliberately bounded, but can be much longer than the
-# ordinary process-cleanup grace period.
-PRODUCTION_COMMITTED_DRAIN_SECONDS = 15 * 60.0
 
 
 def _read_json(path: Path) -> Mapping[str, object]:
@@ -164,9 +158,7 @@ class ProductionArmExecutionPath:
         )
 
     def _effective_supervisor_policy(self) -> SupervisorPolicy:
-        return self.supervisor_policy or SupervisorPolicy(
-            committed_drain_seconds=PRODUCTION_COMMITTED_DRAIN_SECONDS
-        )
+        return self.supervisor_policy or SupervisorPolicy()
 
     def run_arm(self, request: ArmExecutionRequest) -> ArmExecutionResult:
         if request.topology != "torus9":
@@ -187,16 +179,26 @@ class ProductionArmExecutionPath:
         while current.generation < target:
             generation = current.generation + 1
             node_path = root / "metadata" / "checkpoints" / f"M{generation}.json"
-            if node_path.is_file():
+            marker = root / f"generation-{generation:02d}.complete.json"
+            if marker.is_file():
+                try:
+                    validate_generation_commit(
+                        root=root,
+                        lineage_id=lineage_id,
+                        generation=generation,
+                    )
+                except (OSError, TypeError, ValueError) as exc:
+                    raise RuntimeError(
+                        f"generation M{generation} has a completion marker without valid graph evidence"
+                    ) from exc
+                if not node_path.is_file():
+                    raise RuntimeError(f"committed generation M{generation} has no CheckpointNode")
                 node = _read_json(node_path)
                 checkpoint = self.resolver.checkpoint(node["checkpoint"])  # type: ignore[arg-type]
                 if checkpoint.node.parent != current.ref:
                     raise ValueError(f"resumed generation {generation} does not descend from current parent")
                 current = checkpoint
                 continue
-
-            marker = root / f"generation-{generation:02d}.complete.json"
-            recovering_committed_generation = marker.is_file()
 
             resolved = ResolvedGenerationInput(
                 parent_checkpoint=current,
@@ -207,7 +209,6 @@ class ProductionArmExecutionPath:
             current = self._run_supervised_generation(
                 resolved,
                 root,
-                recovering_committed_generation=recovering_committed_generation,
             )
 
         return ArmExecutionResult(final_checkpoint=current)
@@ -216,8 +217,6 @@ class ProductionArmExecutionPath:
         self,
         resolved: ResolvedGenerationInput,
         root: Path,
-        *,
-        recovering_committed_generation: bool = False,
     ) -> ResolvedCheckpointNode:
         generation = resolved.generation
         input_path = root / "runtime" / "v2-inputs" / f"generation-{generation:04d}.json"
@@ -253,7 +252,6 @@ class ProductionArmExecutionPath:
             root,
             lineage_id=resolved.output_lineage.lineage_id,
             initial_committed_generation=resolved.parent_checkpoint.generation,
-            target_generation=(resolved.generation if recovering_committed_generation else None),
             command=child_command,
             cwd=self.repo_root,
             env=env,

@@ -102,9 +102,12 @@ def test_torus9_production_path_forwards_exact_input_and_maps_committed_result(
 ):
     resolved = _resolved_input(tmp_path)
     checkpoint = tmp_path / "checkpoints" / "M94.pt"
+    fresh_replay = tmp_path / "replay" / "iter-94-fresh.jsonl"
     marker = tmp_path / "generation-94.complete.json"
     checkpoint.parent.mkdir(parents=True)
+    fresh_replay.parent.mkdir(parents=True)
     checkpoint.write_bytes(b"production-checkpoint")
+    fresh_replay.write_bytes(b"fresh-replay")
     marker.write_bytes(b'{"status":"COMPLETED"}\n')
     captured: list[ResolvedGenerationInput] = []
 
@@ -114,6 +117,7 @@ def test_torus9_production_path_forwards_exact_input_and_maps_committed_result(
             "status": "COMPLETED",
             "checkpoint_reload_verified": True,
             "checkpoint": {"path": "checkpoints/M94.pt"},
+            "fresh_replay": {"path": "replay/iter-94-fresh.jsonl"},
             "commit_artifact": {"path": "generation-94.complete.json"},
         }
 
