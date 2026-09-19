@@ -404,7 +404,11 @@ def publish_checkpoint_graph(
     manifest = _read_object(manifest_path, "lineage manifest")
     if manifest.get("lineage_id") != checkpoint.lineage_id or manifest.get("topology") != checkpoint.topology:
         raise ValueError("lineage manifest owner does not match checkpoint")
-    if manifest.get("parent_checkpoint") != parent.to_dict():
+    # ``manifest.parent_checkpoint`` identifies the immutable parent at the
+    # lineage boundary.  After the first generation, the immediate parent is
+    # the preceding same-lineage CheckpointNode and is intentionally not
+    # promoted into that lineage-root field.
+    if parent.lineage_id != checkpoint.lineage_id and manifest.get("parent_checkpoint") != parent.to_dict():
         raise ValueError("lineage manifest parent changed during graph publication")
     hashes = manifest.get("checkpoint_hashes")
     if not isinstance(hashes, Mapping):
