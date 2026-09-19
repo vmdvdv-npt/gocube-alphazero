@@ -190,6 +190,7 @@ class ArenaRunner:
                 identity.to_dict(),
                 fingerprint,
                 allow_legacy_synthetic=self.engine is not production_arena,
+                allow_completed_non_valid=True,
             )
             if existing is not None:
                 return ArenaRunResult(

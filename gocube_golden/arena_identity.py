@@ -159,6 +159,7 @@ def load_reusable_evaluation(
     expected_fingerprint: str,
     *,
     allow_legacy_synthetic: bool = False,
+    allow_completed_non_valid: bool = False,
 ) -> dict[str, object] | None:
     """Validate a complete prior result, or return ``None`` for an interrupted one."""
     identity_path = output / EVALUATION_IDENTITY_FILENAME
@@ -250,11 +251,27 @@ def load_reusable_evaluation(
         )
 
     persisted_validity = summary.get("validity")
-    if persisted_validity is not None and str(persisted_validity).upper() != "VALID":
-        raise RuntimeError(
-            "Existing evaluation failed production validity/performance gates: "
-            f"validity={persisted_validity!r}: {output}"
-        )
+    if persisted_validity is not None:
+        if not isinstance(persisted_validity, str) or persisted_validity.upper() not in {
+            "VALID",
+            "TECHNICAL",
+            "CRITICAL",
+            "INVALID",
+        }:
+            raise RuntimeError(
+                "evaluation identity/contract mismatch: malformed persisted Arena validity: "
+                f"{output}"
+            )
+        if persisted_validity.upper() != "VALID":
+            if not allow_completed_non_valid:
+                raise RuntimeError(
+                    "Existing evaluation failed production validity/performance gates: "
+                    f"validity={persisted_validity!r}: {output}"
+                )
+            # Production Arena has already normalized the result. A technical,
+            # critical, or invalid completed evaluation is reusable evidence;
+            # it must be returned to ExperimentRunner instead of rerun.
+            return summary
 
     telemetry = summary.get("telemetry")
     if not isinstance(telemetry, Mapping):
@@ -266,8 +283,6 @@ def load_reusable_evaluation(
         raise RuntimeError(
             f"Existing evaluation failed production validity/performance gates: malformed technical_games: {output}"
         )
-    if technical_games != 0:
-        raise ValueError(f"Existing Arena has technical outcomes: {output}")
     performance_status = telemetry.get("performance_status")
     performance_failures = telemetry.get("performance_failures")
     if not isinstance(performance_status, str) or not performance_status.strip():
@@ -278,7 +293,11 @@ def load_reusable_evaluation(
         raise RuntimeError(
             f"Existing evaluation failed production validity/performance gates: malformed performance_failures: {output}"
         )
-    if performance_status.strip().upper() == "CRITICAL" or performance_failures:
+    if not allow_completed_non_valid and (
+        technical_games != 0
+        or performance_status.strip().upper() == "CRITICAL"
+        or performance_failures
+    ):
         raise RuntimeError(
             "Existing evaluation failed production validity/performance gates: "
             f"performance_status={performance_status!r}, performance_failures={performance_failures!r}: {output}"

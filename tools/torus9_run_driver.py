@@ -40,13 +40,13 @@ from gocube_golden.run_storage import (
     resolve_checkpoint,
 )
 from gocube_golden.artifact_catalog import ArtifactCatalog, ARTIFACT_VALIDATION_SCHEMA
-from gocube_golden.orchestrator_v2.artifact_resolver import (
+from gocube_golden.artifact_resolver import (
     ArtifactIntegrityError,
     ArtifactResolver,
     ResolvedArtifact,
     ResolvedCheckpointNode,
 )
-from gocube_golden.orchestrator_v2.contracts import ArtifactRef
+from gocube_golden.artifact_graph import ArtifactRef
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
     Torus9SelfPlaySearchContract,
