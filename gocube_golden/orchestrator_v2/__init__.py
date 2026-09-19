@@ -35,6 +35,7 @@ from .supervisor import (  # noqa: F401
     SupervisorIntegrityError,
     SupervisorPolicy,
     SupervisorStatus,
+    SupervisorStopped,
     SupervisorV2,
     SupervisionResult,
     TechnicalFailure,
@@ -45,4 +46,14 @@ from .arena_runner import (  # noqa: F401
     ArenaRunner,
     ArenaRunnerV2,
     torus9_startset_ref,
+)
+from .experiment_runner import (  # noqa: F401
+    EXPERIMENT_RUNNER_SCHEMA,
+    EXPERIMENT_STATE_SCHEMA,
+    ExperimentArmConfig,
+    ExperimentConfig,
+    ExperimentRunResult,
+    ExperimentRunner,
+    ExperimentRunnerError,
+    ExperimentRunnerV2,
 )

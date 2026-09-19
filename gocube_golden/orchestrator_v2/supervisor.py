@@ -69,6 +69,10 @@ class TechnicalFailure(RuntimeError):
     """One child attempt failed before producing its commit marker."""
 
 
+class SupervisorStopped(RuntimeError):
+    """The durable supervisor state says that no more work may be started."""
+
+
 @dataclass(frozen=True)
 class SupervisorPolicy:
     """Bounded technical-failure policy.
@@ -502,6 +506,77 @@ class SupervisorV2:
 
         raise AssertionError("bounded supervisor loop did not return")
 
+    def run_callable(self, generation: int, execute: Callable[[], object]) -> object:
+        """Run one already-bound generation callback under V2 retry semantics.
+
+        The normal production path uses :meth:`run_once` and a private child
+        process.  Small orchestration integrations (including synthetic
+        acceptance tests) already own a callable ``GenerationRunner`` boundary
+        and do not need a second process launcher.  This method keeps the same
+        durable intent, bounded retry, commit-marker, and STOP rules for that
+        case.  A production callback should publish the usual root-level
+        ``generation-N.complete.json`` marker.  For a small injected
+        ``GenerationRunner`` boundary, a returned object with a matching
+        integer ``generation`` is accepted and the supervisor publishes that
+        marker itself.
+        """
+        if type(generation) is not int or generation < 0:
+            raise ValueError("generation must be a non-negative integer")
+        plan = self.plan()
+        if plan.action is SupervisorAction.STOP:
+            raise SupervisorStopped(
+                f"lineage {self.lineage_id} is stopped: {plan.reason}"
+            )
+        if plan.generation != generation:
+            raise SupervisorIntegrityError(
+                f"callable generation disagrees with recovery plan: "
+                f"planned={plan.generation}, requested={generation}"
+            )
+
+        attempt = plan.attempt
+        while attempt <= self.policy.max_attempts:
+            self._write_intent(generation, attempt)
+            try:
+                result = execute()
+                committed = self.last_committed()
+                if committed is None and getattr(result, "generation", None) == generation:
+                    atomic_write_json(
+                        self.root / f"generation-{generation:02d}.complete.json",
+                        {
+                            "schema": "gocube-orchestrator-v2-callable-commit-v1",
+                            "lineage_id": self.lineage_id,
+                            "generation": generation,
+                        },
+                    )
+                    committed = self.last_committed()
+                if committed is None or committed.generation < generation:
+                    raise TechnicalFailure(
+                        f"generation {generation} callback exited without its commit marker"
+                    )
+                self._clear_runtime_identity()
+                return result
+            except SupervisorIntegrityError:
+                self._write_stop(generation, attempt, "callable supervisor integrity failure")
+                raise
+            except Exception as exc:
+                committed = self.last_committed()
+                if committed is not None and committed.generation >= generation:
+                    # The callback may have completed publication and failed
+                    # only while returning its result.  Do not rerun a
+                    # generation whose durable commit is already present.
+                    self._clear_runtime_identity()
+                    raise TechnicalFailure(
+                        f"generation {generation} committed but callback did not return a result"
+                    ) from exc
+                if attempt >= self.policy.max_attempts:
+                    self._write_stop(generation, attempt, str(exc))
+                    raise TechnicalFailure(
+                        f"generation {generation} exhausted callable retry budget"
+                    ) from exc
+                attempt += 1
+
+        raise AssertionError("bounded callable supervisor loop did not return")
+
     def heartbeat_status(self, child: ActiveChild, *, now: float | None = None) -> HeartbeatStatus:
         """Return independent liveness/progress freshness for a child."""
         current = self.clock() if now is None else float(now)
@@ -766,6 +841,7 @@ __all__ = [
     "SupervisorIntegrityError",
     "SupervisorPolicy",
     "SupervisorStatus",
+    "SupervisorStopped",
     "SupervisorV2",
     "SupervisionResult",
     "TechnicalFailure",
