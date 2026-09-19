@@ -39,3 +39,10 @@ from .supervisor import (  # noqa: F401
     SupervisionResult,
     TechnicalFailure,
 )
+from .arena_runner import (  # noqa: F401
+    ArenaRunRequest,
+    ArenaRunResult,
+    ArenaRunner,
+    ArenaRunnerV2,
+    torus9_startset_ref,
+)
