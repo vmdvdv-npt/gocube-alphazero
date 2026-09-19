@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 
@@ -8,6 +8,8 @@ from gocube_golden import run_storage
 from gocube_golden.artifact_catalog import sha256_file
 from gocube_golden.orchestrator_v2 import (
     ArenaRunner,
+    ArmExecutionRequest,
+    ArmExecutionResult,
     ArtifactRef,
     ArtifactResolver,
     CheckpointNode,
@@ -17,9 +19,6 @@ from gocube_golden.orchestrator_v2 import (
     ExperimentArmConfig,
     ExperimentConfig,
     ExperimentRunnerV2,
-    GenerationExecutionResult,
-    GenerationRunner,
-    SupervisorPolicy,
     checkpoint_node_path,
 )
 from tools.arena_engine import ArenaExecutionConfig
@@ -69,7 +68,7 @@ def _make_parent(tmp_path: Path) -> SyntheticParent:
     provenance_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(config.to_dict(), sort_keys=True), encoding="utf-8")
     checkpoint_path.write_bytes(b"shared-parent-checkpoint")
-    provenance_path.write_text("{\"synthetic\":true}\n", encoding="utf-8")
+    provenance_path.write_text('{"synthetic":true}\n', encoding="utf-8")
     config_ref = EffectiveConfigRef(
         ArtifactRef("metadata/config/effective.json", sha256_file(config_path)),
         config.fingerprint,
@@ -95,50 +94,110 @@ def _make_parent(tmp_path: Path) -> SyntheticParent:
 
 
 @dataclass
-class FakeGenerationPath:
-    calls: list[object]
+class FakeArmExecutionPath:
+    """Synthetic replacement for the complete arm execution interface."""
 
-    def run_generation(self, resolved_input):
-        self.calls.append(resolved_input)
-        root = resolved_input.output_lineage.root
-        generation = resolved_input.generation
-        checkpoint = root / "checkpoints" / f"M{generation}.pt"
-        replay = root / "replay" / f"iter-{generation:02d}-fresh.jsonl"
-        marker = root / f"generation-{generation:02d}.complete.json"
-        checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        replay.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint.write_bytes(
-            f"{resolved_input.output_lineage.lineage_id}:M{generation}".encode()
+    experiment_root: Path
+    resolver: ArtifactResolver
+    calls: list[ArmExecutionRequest] = field(default_factory=list)
+
+    def run_arm(self, request: ArmExecutionRequest) -> ArmExecutionResult:
+        self.calls.append(request)
+        arm = request.arm
+        lineage_id = arm.lineage_id or f"{request.experiment_id}-{arm.arm_id}"
+        root = self.experiment_root / "runs" / request.topology / "active" / lineage_id
+        config = arm.effective_config
+        manifest = {
+            "lineage_id": lineage_id,
+            "topology": request.topology,
+            "status": "ACTIVE",
+            "parent_checkpoint": request.common_parent.ref.to_dict(),
+            "git_commit": "synthetic-arm-path",
+            "config_fingerprint": config.fingerprint,
+            "created_at": "2026-09-19T00:00:00+00:00",
+            "checkpoint_hashes": {},
+        }
+        run_storage.ensure_lineage_layout(
+            root,
+            manifest=manifest,
+            extra_directories=("metadata", "replay"),
         )
-        replay.write_text(f"fresh-{generation}\n", encoding="utf-8")
-        marker.write_text(
-            json.dumps(
-                {"generation": generation, "lineage_id": resolved_input.output_lineage.lineage_id}
-            ),
-            encoding="utf-8",
+        config_path = root / "metadata" / "config" / "effective.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config.to_dict(), sort_keys=True), encoding="utf-8")
+        config_ref = EffectiveConfigRef(
+            ArtifactRef("metadata/config/effective.json", sha256_file(config_path)),
+            config.fingerprint,
         )
-        return GenerationExecutionResult(
-            generation=generation,
-            committed=True,
-            checkpoint=CheckpointRef(
-                "torus9",
-                resolved_input.output_lineage.lineage_id,
+
+        current = request.common_parent
+        for generation in range(
+            request.common_parent.generation + 1,
+            request.common_parent.generation + arm.generations + 1,
+        ):
+            checkpoint_path = root / "checkpoints" / f"M{generation}.pt"
+            replay_path = root / "replay" / f"iter-{generation:02d}-fresh.jsonl"
+            provenance_path = root / "metadata" / "provenance" / f"M{generation}.json"
+            marker_path = root / f"generation-{generation:02d}.complete.json"
+            checkpoint_path.write_bytes(f"{lineage_id}:M{generation}".encode())
+            replay_path.write_text(f"fresh-{lineage_id}-{generation}\n", encoding="utf-8")
+            checkpoint = CheckpointRef(
+                request.topology,
+                lineage_id,
                 f"M{generation}",
                 generation,
                 f"checkpoints/M{generation}.pt",
-                sha256_file(checkpoint),
-            ),
-            commit_artifact=ArtifactRef(
-                marker.relative_to(root).as_posix(),
-                sha256_file(marker),
-            ),
-        )
+                sha256_file(checkpoint_path),
+            )
+            fresh_replay = ArtifactRef(
+                replay_path.relative_to(root).as_posix(),
+                sha256_file(replay_path),
+            )
+            provenance_path.parent.mkdir(parents=True, exist_ok=True)
+            provenance_path.write_text(
+                json.dumps(
+                    {
+                        "synthetic": True,
+                        "checkpoint": checkpoint.to_dict(),
+                        "parent": current.ref.to_dict(),
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            provenance = ArtifactRef(
+                provenance_path.relative_to(root).as_posix(),
+                sha256_file(provenance_path),
+            )
+            node = CheckpointNode(
+                checkpoint=checkpoint,
+                genesis=False,
+                parent=current.ref,
+                fresh_replay=fresh_replay,
+                effective_config=config_ref,
+                provenance=provenance,
+            )
+            node_path = checkpoint_node_path(root, checkpoint)
+            node_path.parent.mkdir(parents=True, exist_ok=True)
+            node_path.write_text(json.dumps(node.to_dict(), sort_keys=True), encoding="utf-8")
+            marker_path.write_text(
+                json.dumps({"generation": generation, "lineage_id": lineage_id}),
+                encoding="utf-8",
+            )
+            manifest_path = root / "manifest.json"
+            stored_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            hashes = dict(stored_manifest["checkpoint_hashes"])
+            hashes[checkpoint.path] = checkpoint.sha256
+            stored_manifest["checkpoint_hashes"] = hashes
+            manifest_path.write_text(json.dumps(stored_manifest), encoding="utf-8")
+            current = self.resolver.checkpoint(checkpoint)
+        return ArmExecutionResult(final_checkpoint=current)
 
 
 def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monkeypatch):
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")
-    generation_path = FakeGenerationPath([])
+    arm_path = FakeArmExecutionPath(tmp_path, resolver)
     arena_calls: list[dict[str, object]] = []
 
     def fake_arena(**kwargs: object) -> dict[str, object]:
@@ -189,15 +248,16 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     runner = ExperimentRunnerV2(
         experiment_config,
         resolver=resolver,
-        generation_runner=GenerationRunner(generation_path),
+        arm_execution_path=arm_path,
         arena_runner=ArenaRunner(engine=fake_arena),
-        supervisor_policy=SupervisorPolicy(max_retries=0, poll_interval_seconds=0.0),
         experiment_root=tmp_path / "experiment-state",
     )
 
     first = runner.run()
     assert first.state == "STOPPED"
-    assert len(generation_path.calls) == 4
+    assert len(arm_path.calls) == 2
+    assert [call.arm.generations for call in arm_path.calls] == [2, 2]
+    assert all(call.common_parent.ref == parent.ref for call in arm_path.calls)
     assert len(arena_calls) == 1
 
     a = first.final_checkpoints["A"]
@@ -210,14 +270,12 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     assert resolver.ancestor(a, 2).lineage_id == "parent"
     assert not (tmp_path / "runs" / "torus9" / "active" / "synthetic-ab-A" / "checkpoints" / "M0.pt").exists()
     assert not (tmp_path / "runs" / "torus9" / "active" / "synthetic-ab-B" / "checkpoints" / "M0.pt").exists()
-    assert resolver.ancestor(a, 2).ref == parent.ref
-    assert resolver.ancestor(b, 2).ref == parent.ref
     assert arena_calls[0]["candidate_path"] == a.path
     assert arena_calls[0]["reference_path"] == b.path
 
     resumed = runner.run()
     assert resumed.state == "STOPPED"
-    assert len(generation_path.calls) == 4
+    assert len(arm_path.calls) == 2
     assert len(arena_calls) == 1
     assert resumed.arena.identity.candidate == a.ref
     assert resumed.arena.identity.reference == b.ref

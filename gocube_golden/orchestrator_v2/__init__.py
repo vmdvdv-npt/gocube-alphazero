@@ -35,7 +35,6 @@ from .supervisor import (  # noqa: F401
     SupervisorIntegrityError,
     SupervisorPolicy,
     SupervisorStatus,
-    SupervisorStopped,
     SupervisorV2,
     SupervisionResult,
     TechnicalFailure,
@@ -50,6 +49,9 @@ from .arena_runner import (  # noqa: F401
 from .experiment_runner import (  # noqa: F401
     EXPERIMENT_RUNNER_SCHEMA,
     EXPERIMENT_STATE_SCHEMA,
+    ArmExecutionPath,
+    ArmExecutionRequest,
+    ArmExecutionResult,
     ExperimentArmConfig,
     ExperimentConfig,
     ExperimentRunResult,
