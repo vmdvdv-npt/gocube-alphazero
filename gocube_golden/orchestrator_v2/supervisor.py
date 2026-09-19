@@ -557,6 +557,12 @@ class SupervisorV2:
         current = self.clock() if now is None else float(now)
         liveness_at = self._heartbeat_timestamp(child.liveness_path, "liveness_at", current)
         progress_at = self._heartbeat_timestamp(child.progress_path, "progress_at", current)
+        restore_phase = False
+        try:
+            heartbeat = read_json(child.progress_path)
+            restore_phase = heartbeat.get("phase") == "load-previous-state"
+        except (OSError, ValueError):
+            pass
         grace = self.policy.heartbeat_grace_seconds
         # A newly started child gets the full grace window to publish its
         # first heartbeat.  Liveness and progress get that grace independently.
@@ -567,7 +573,10 @@ class SupervisorV2:
             liveness_age_seconds=liveness_age,
             progress_age_seconds=progress_age,
             liveness_stale=liveness_age >= grace,
-            progress_stale=progress_age >= grace,
+            # Parent/replay restore is a bounded but potentially long I/O
+            # phase. Its dedicated liveness heartbeat remains authoritative
+            # until semantic progress resumes after restore completes.
+            progress_stale=progress_age >= grace and not restore_phase,
         )
 
     def _read_intent(self) -> dict[str, object] | None:

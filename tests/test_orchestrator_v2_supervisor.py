@@ -195,6 +195,35 @@ def test_missing_liveness_and_progress_each_get_five_minute_grace(tmp_path: Path
     assert after_grace.progress_stale
 
 
+def test_long_parent_restore_uses_live_heartbeat_until_progress_resumes(tmp_path: Path) -> None:
+    heartbeat = tmp_path / "runtime" / "heartbeats" / "generation-0096.json"
+    atomic_write_json(
+        heartbeat,
+        {
+            "schema": "gocube-training-driver-heartbeat-v2",
+            "liveness_at": 1_601.0,
+            "progress_at": 1.0,
+            "phase": "load-previous-state",
+        },
+    )
+    child = ActiveChild(
+        lineage_id="lineage",
+        generation=96,
+        attempt=1,
+        execution_unit_id="unit",
+        pid=2,
+        process_group=3,
+        started_at=1_000.0,
+        liveness_path=heartbeat,
+        progress_path=heartbeat,
+    )
+
+    health = _supervisor(tmp_path).heartbeat_status(child, now=1_300.0 + 301.0)
+
+    assert not health.liveness_stale
+    assert not health.progress_stale
+
+
 def test_one_retry_repeats_same_generation_then_commits(tmp_path: Path) -> None:
     calls: list[tuple[int, int]] = []
     lineage_id = "lineage"

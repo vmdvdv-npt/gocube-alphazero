@@ -35,6 +35,12 @@ from .torus9_production import (
 )
 
 
+# A committed generation still has to reload its rolling replay and publish
+# the result record.  That production step is deliberately bounded, but can
+# be much longer than the ordinary process-cleanup grace period.
+PRODUCTION_COMMITTED_DRAIN_SECONDS = 15 * 60.0
+
+
 def _read_json(path: Path) -> Mapping[str, object]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
@@ -203,6 +209,11 @@ class ProductionArmExecutionPath:
             repo_root=self.repo_root,
         )
 
+    def _effective_supervisor_policy(self) -> SupervisorPolicy:
+        return self.supervisor_policy or SupervisorPolicy(
+            committed_drain_seconds=PRODUCTION_COMMITTED_DRAIN_SECONDS
+        )
+
     def run_arm(self, request: ArmExecutionRequest) -> ArmExecutionResult:
         if request.topology != "torus9":
             raise ValueError("ProductionArmExecutionPath currently supports topology=torus9 only")
@@ -295,7 +306,7 @@ class ProductionArmExecutionPath:
             command=child_command,
             cwd=self.repo_root,
             env=env,
-            policy=self.supervisor_policy,
+            policy=self._effective_supervisor_policy(),
         )
         result = supervisor.run_once()
         if result.status is not SupervisorStatus.COMMITTED:

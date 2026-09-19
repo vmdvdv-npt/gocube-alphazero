@@ -776,6 +776,7 @@ def _prepare_state_v2(
     replay_artifact_identities: Sequence[Mapping[str, object]] = (),
     replay_identity: Mapping[str, object] | None = None,
     timing: Mapping[str, object] | None = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> tuple[Torus9TrainingAdapter, Any, Path]:
     """Restore a V2 parent from the resolver's exact immutable inputs.
 
@@ -816,6 +817,8 @@ def _prepare_state_v2(
         code_identity=code_identity,
         base_commit=TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     )
+    if progress_callback is not None:
+        adapter.set_progress_callback(progress_callback)
     restore_started = time.perf_counter()
     state = adapter.load_state(
         parent_checkpoint,
@@ -1644,6 +1647,7 @@ def run_generation(
                 bindings=bindings,
                 replay_artifact_identities=explicit_replay_artifact_identities,
                 replay_identity=explicit_replay_identity,
+                progress_callback=heartbeat.advance,
             )
         generation_timing.setdefault(
             "restore_previous_state_wall_time_sec",

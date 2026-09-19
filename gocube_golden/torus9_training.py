@@ -262,10 +262,13 @@ def _read_jsonl_with_identity(
     *,
     compute_hash: bool = True,
     known_sha256: str | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[tuple[dict[str, object], ...], dict[str, object]]:
     """Parse JSONL and optionally reuse a resolver-verified byte identity."""
     rows: list[dict[str, object]] = []
     digest = hashlib.sha256() if compute_hash else None
+    total_bytes = path.stat().st_size
+    last_progress_bytes = 0
     with path.open("rb") as handle:
         for line_number, raw_line in enumerate(handle, 1):
             if digest is not None:
@@ -280,6 +283,11 @@ def _read_jsonl_with_identity(
             if not isinstance(value, dict):
                 raise ValueError(f"Replay row {line_number} is not an object: {path}")
             rows.append(value)
+            if progress_callback is not None:
+                bytes_read = handle.tell()
+                if bytes_read == total_bytes or bytes_read - last_progress_bytes >= 1 << 20:
+                    progress_callback(bytes_read, total_bytes)
+                    last_progress_bytes = bytes_read
     return tuple(rows), {
         "sha256": (
             known_sha256
@@ -1617,8 +1625,21 @@ class Torus9TrainingAdapter:
         replay_sources = tuple(Path(value) for value in (replay_paths or (replay_path,)))
         rows_list: list[dict[str, object]] = []
         source_digests = []
+
+        def restore_progress(completed: int, total: int) -> None:
+            self._report_progress(
+                "load-previous-state",
+                completed,
+                max(1, total),
+                "bytes",
+                "replay-file-load",
+            )
+
         for source in replay_sources:
-            source_rows, source_digest = _read_jsonl_with_identity(source)
+            source_rows, source_digest = _read_jsonl_with_identity(
+                source,
+                progress_callback=restore_progress,
+            )
             rows_list.extend(source_rows)
             source_digests.append(source_digest)
         rows = rows_list
