@@ -1,8 +1,4 @@
-"""Immutable plan and winner contracts for ExperimentRunner V2.
-
-This module contains only declarative experiment data.  Execution remains in
-the existing ``ArmExecutionPath`` and ``ArenaRunnerV2`` seams.
-"""
+"""Immutable plan and winner contracts for ExperimentRunner V2."""
 
 from __future__ import annotations
 

@@ -10,8 +10,6 @@ from gocube_golden import run_storage
 from gocube_golden.artifact_catalog import sha256_file
 from gocube_golden.orchestrator_v2 import (
     ArenaRunner,
-    ArmExecutionRequest,
-    ArmExecutionResult,
     ArtifactRef,
     ArtifactResolver,
     CheckpointNode,
@@ -24,6 +22,9 @@ from gocube_golden.orchestrator_v2 import (
     ExperimentRunnerV2,
     ExperimentRunnerError,
     ExperimentStage2Config,
+    OutputLineage,
+    ResolvedArtifact,
+    ResolvedEffectiveConfig,
     checkpoint_node_path,
 )
 from tools.arena_engine import ArenaExecutionConfig
@@ -99,25 +100,36 @@ def _make_parent(tmp_path: Path) -> SyntheticParent:
 
 
 @dataclass
-class FakeArmExecutionPath:
-    """Synthetic replacement for the complete arm execution interface."""
+class SyntheticTrainOne:
+    """Synthetic lineage factory plus strict one-generation callable."""
 
     experiment_root: Path
     resolver: ArtifactResolver
-    calls: list[ArmExecutionRequest] = field(default_factory=list)
+    calls: list[object] = field(default_factory=list)
+    active_arm: ExperimentArmConfig | None = None
+    active_parent: object | None = None
 
-    def run_arm(self, request: ArmExecutionRequest) -> ArmExecutionResult:
-        self.calls.append(request)
-        arm = request.arm
-        lineage_id = arm.lineage_id or f"{request.experiment_id}-{arm.arm_id}"
-        root = self.experiment_root / "runs" / request.topology / "active" / lineage_id
+    def prepare(
+        self,
+        *,
+        topology: str,
+        lineage_id: str,
+        parent,
+        effective_config,
+        experiment_id: str,
+        arm_id: str,
+    ) -> tuple[Path, ResolvedEffectiveConfig]:
+        arm = ExperimentArmConfig(arm_id, 1, effective_config, lineage_id=lineage_id)
+        self.active_arm = arm
+        self.active_parent = parent
+        root = self.resolver.runs_root / topology / "active" / lineage_id
         config = arm.effective_config
         manifest = {
             "lineage_id": lineage_id,
-            "topology": request.topology,
+            "topology": topology,
             "status": "ACTIVE",
-            "parent_checkpoint": request.common_parent.ref.to_dict(),
-            "git_commit": "synthetic-arm-path",
+            "parent_checkpoint": parent.ref.to_dict(),
+            "git_commit": "synthetic-train-one",
             "config_fingerprint": config.fingerprint,
             "created_at": "2026-09-19T00:00:00+00:00",
             "checkpoint_hashes": {},
@@ -134,75 +146,72 @@ class FakeArmExecutionPath:
             ArtifactRef("metadata/config/effective.json", sha256_file(config_path)),
             config.fingerprint,
         )
+        resolved_artifact = ResolvedArtifact(
+            ref=config_ref.artifact,
+            path=config_path,
+            owner_root=root,
+            owner_topology=topology,
+            owner_lineage_id=lineage_id,
+            owner_status="ACTIVE",
+            identity={"immutable_verified": True},
+        )
+        return root, ResolvedEffectiveConfig(config_ref, resolved_artifact, config)
 
-        current = request.common_parent
-        for generation in range(
-            request.common_parent.generation + 1,
-            request.common_parent.generation + arm.generations + 1,
-        ):
-            checkpoint_path = root / "checkpoints" / f"M{generation}.pt"
-            replay_path = root / "replay" / f"iter-{generation:02d}-fresh.jsonl"
-            provenance_path = root / "metadata" / "provenance" / f"M{generation}.json"
-            marker_path = root / f"generation-{generation:02d}.complete.json"
-            checkpoint_path.write_bytes(f"{lineage_id}:M{generation}".encode())
-            replay_path.write_text(f"fresh-{lineage_id}-{generation}\n", encoding="utf-8")
-            checkpoint = CheckpointRef(
-                request.topology,
-                lineage_id,
-                f"M{generation}",
-                generation,
-                f"checkpoints/M{generation}.pt",
-                sha256_file(checkpoint_path),
-            )
-            fresh_replay = ArtifactRef(
-                replay_path.relative_to(root).as_posix(),
-                sha256_file(replay_path),
-            )
-            provenance_path.parent.mkdir(parents=True, exist_ok=True)
-            provenance_path.write_text(
-                json.dumps(
-                    {
-                        "synthetic": True,
-                        "checkpoint": checkpoint.to_dict(),
-                        "parent": current.ref.to_dict(),
-                    },
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
-            )
-            provenance = ArtifactRef(
-                provenance_path.relative_to(root).as_posix(),
-                sha256_file(provenance_path),
-            )
-            node = CheckpointNode(
-                checkpoint=checkpoint,
-                genesis=False,
-                parent=current.ref,
-                fresh_replay=fresh_replay,
-                effective_config=config_ref,
-                provenance=provenance,
-            )
-            node_path = checkpoint_node_path(root, checkpoint)
-            node_path.parent.mkdir(parents=True, exist_ok=True)
-            node_path.write_text(json.dumps(node.to_dict(), sort_keys=True), encoding="utf-8")
-            marker_path.write_text(
-                json.dumps({"generation": generation, "lineage_id": lineage_id}),
-                encoding="utf-8",
-            )
-            manifest_path = root / "manifest.json"
-            stored_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            hashes = dict(stored_manifest["checkpoint_hashes"])
-            hashes[checkpoint.path] = checkpoint.sha256
-            stored_manifest["checkpoint_hashes"] = hashes
-            manifest_path.write_text(json.dumps(stored_manifest), encoding="utf-8")
-            current = self.resolver.checkpoint(checkpoint)
-        return ArmExecutionResult(final_checkpoint=current)
+    def __call__(self, *, parent, config, output_lineage: OutputLineage):
+        generation = parent.generation + 1
+        if not any(call.arm.arm_id == self.active_arm.arm_id for call in self.calls):
+            self.calls.append(type("ArmCall", (), {"arm": self.active_arm, "common_parent": self.active_parent})())
+        checkpoint_path = output_lineage.root / "checkpoints" / f"M{generation}.pt"
+        replay_path = output_lineage.root / "replay" / f"iter-{generation:02d}-fresh.jsonl"
+        provenance_path = output_lineage.root / "metadata" / "provenance" / f"M{generation}.json"
+        marker_path = output_lineage.root / f"generation-{generation:02d}.complete.json"
+        if marker_path.is_file():
+            node = json.loads((output_lineage.root / "metadata" / "checkpoints" / f"M{generation}.json").read_text())
+            return self.resolver.checkpoint(node["checkpoint"])
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        replay_path.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint_path.write_bytes(f"{output_lineage.lineage_id}:M{generation}".encode())
+        replay_path.write_text(f"fresh-{output_lineage.lineage_id}-{generation}\n", encoding="utf-8")
+        checkpoint = CheckpointRef(
+            output_lineage.topology,
+            output_lineage.lineage_id,
+            f"M{generation}",
+            generation,
+            f"checkpoints/M{generation}.pt",
+            sha256_file(checkpoint_path),
+        )
+        fresh_replay = ArtifactRef(replay_path.relative_to(output_lineage.root).as_posix(), sha256_file(replay_path))
+        provenance_path.parent.mkdir(parents=True, exist_ok=True)
+        provenance_path.write_text(
+            json.dumps({"synthetic": True, "checkpoint": checkpoint.to_dict(), "parent": parent.ref.to_dict()}, sort_keys=True),
+            encoding="utf-8",
+        )
+        provenance = ArtifactRef(provenance_path.relative_to(output_lineage.root).as_posix(), sha256_file(provenance_path))
+        node = CheckpointNode(
+            checkpoint=checkpoint,
+            genesis=False,
+            parent=parent.ref,
+            fresh_replay=fresh_replay,
+            effective_config=config.ref,
+            provenance=provenance,
+        )
+        node_path = checkpoint_node_path(output_lineage.root, checkpoint)
+        node_path.parent.mkdir(parents=True, exist_ok=True)
+        node_path.write_text(json.dumps(node.to_dict(), sort_keys=True), encoding="utf-8")
+        marker_path.write_text(json.dumps({"generation": generation, "lineage_id": output_lineage.lineage_id}), encoding="utf-8")
+        manifest_path = output_lineage.root / "manifest.json"
+        stored_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        hashes = dict(stored_manifest["checkpoint_hashes"])
+        hashes[checkpoint.path] = checkpoint.sha256
+        stored_manifest["checkpoint_hashes"] = hashes
+        manifest_path.write_text(json.dumps(stored_manifest), encoding="utf-8")
+        return self.resolver.checkpoint(checkpoint)
 
 
 def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monkeypatch):
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")
-    arm_path = FakeArmExecutionPath(tmp_path, resolver)
+    arm_path = SyntheticTrainOne(tmp_path, resolver)
     arena_calls: list[dict[str, object]] = []
 
     def fake_arena(**kwargs: object) -> dict[str, object]:
@@ -255,7 +264,8 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     runner = ExperimentRunnerV2(
         experiment_config,
         resolver=resolver,
-        arm_execution_path=arm_path,
+        lineage_factory=arm_path,
+        train_one=arm_path,
         arena_runner=ArenaRunner(engine=fake_arena),
         experiment_root=tmp_path / "experiment-state",
     )
@@ -263,7 +273,7 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     first = runner.run()
     assert first.state == "STOPPED"
     assert len(arm_path.calls) == 2
-    assert [call.arm.generations for call in arm_path.calls] == [2, 2]
+    assert [call.arm.arm_id for call in arm_path.calls] == ["A", "B"]
     assert all(call.common_parent.ref == parent.ref for call in arm_path.calls)
     assert len(arena_calls) == 1
 
@@ -296,7 +306,7 @@ def test_experiment_runner_v2_synthetic_two_stage_winner_rooted_flow(
 ):
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")
-    arm_path = FakeArmExecutionPath(tmp_path, resolver)
+    arm_path = SyntheticTrainOne(tmp_path, resolver)
     arena_calls: list[dict[str, object]] = []
 
     def fake_arena(**kwargs: object) -> dict[str, object]:
@@ -371,7 +381,8 @@ def test_experiment_runner_v2_synthetic_two_stage_winner_rooted_flow(
     runner = ExperimentRunnerV2(
         experiment_config,
         resolver=resolver,
-        arm_execution_path=arm_path,
+        lineage_factory=arm_path,
+        train_one=arm_path,
         arena_runner=ArenaRunner(engine=fake_arena),
         experiment_root=tmp_path / "experiment-state",
     )
@@ -434,15 +445,18 @@ def test_experiment_runner_v2_synthetic_two_stage_winner_rooted_flow(
 def test_experiment_runner_v2_resume_after_stage1_decision_reuses_all_stage1_work(tmp_path, monkeypatch):
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")
-    base_path = FakeArmExecutionPath(tmp_path, resolver)
+    base_path = SyntheticTrainOne(tmp_path, resolver)
     failing = {"enabled": True}
 
     class FailCOnce:
-        def run_arm(self, request: ArmExecutionRequest) -> ArmExecutionResult:
-            if request.arm.arm_id == "C" and failing["enabled"]:
+        def prepare(self, **kwargs):
+            return base_path.prepare(**kwargs)
+
+        def __call__(self, *, parent, config, output_lineage):
+            if base_path.active_arm is not None and base_path.active_arm.arm_id == "C" and failing["enabled"]:
                 failing["enabled"] = False
                 raise RuntimeError("synthetic interruption after Stage 1")
-            return base_path.run_arm(request)
+            return base_path(parent=parent, config=config, output_lineage=output_lineage)
 
     arena_calls: list[str] = []
 
@@ -502,7 +516,8 @@ def test_experiment_runner_v2_resume_after_stage1_decision_reuses_all_stage1_wor
     runner = ExperimentRunnerV2(
         config,
         resolver=resolver,
-        arm_execution_path=FailCOnce(),
+        lineage_factory=FailCOnce(),
+        train_one=FailCOnce(),
         arena_runner=ArenaRunner(engine=fake_arena),
         experiment_root=tmp_path / "experiment-state",
     )
@@ -531,7 +546,7 @@ def test_experiment_runner_v2_resume_after_stage1_decision_reuses_all_stage1_wor
 def test_experiment_runner_v2_invalid_stage1_arena_never_creates_stage2_decision(tmp_path, monkeypatch):
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")
-    arm_path = FakeArmExecutionPath(tmp_path, resolver)
+    arm_path = SyntheticTrainOne(tmp_path, resolver)
     arena_calls = 0
 
     def invalid_arena(**kwargs: object) -> dict[str, object]:
@@ -589,7 +604,8 @@ def test_experiment_runner_v2_invalid_stage1_arena_never_creates_stage2_decision
     runner = ExperimentRunnerV2(
         config,
         resolver=resolver,
-        arm_execution_path=arm_path,
+        lineage_factory=arm_path,
+        train_one=arm_path,
         arena_runner=ArenaRunner(engine=invalid_arena),
         experiment_root=tmp_path / "experiment-state",
     )
@@ -611,7 +627,7 @@ def test_experiment_runner_v2_invalid_stage1_arena_never_creates_stage2_decision
 def test_experiment_runner_v2_migrates_legacy_v2_stopped_state_without_reexecution(tmp_path, monkeypatch):
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")
-    arm_path = FakeArmExecutionPath(tmp_path, resolver)
+    arm_path = SyntheticTrainOne(tmp_path, resolver)
     arena_calls: list[dict[str, object]] = []
 
     def fake_arena(**kwargs: object) -> dict[str, object]:
@@ -664,7 +680,8 @@ def test_experiment_runner_v2_migrates_legacy_v2_stopped_state_without_reexecuti
     runner = ExperimentRunnerV2(
         config,
         resolver=resolver,
-        arm_execution_path=arm_path,
+        lineage_factory=arm_path,
+        train_one=arm_path,
         arena_runner=ArenaRunner(engine=fake_arena),
         experiment_root=tmp_path / "experiment-state",
     )

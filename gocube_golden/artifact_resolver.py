@@ -227,6 +227,47 @@ class ArtifactResolver:
             owner_status=owner.status or physical.owner_status,
         )
 
+    def effective_config(
+        self,
+        ref: EffectiveConfigRef | Mapping[str, object],
+        *,
+        owner_root: str | Path,
+        topology: str,
+        lineage_id: str,
+        owner_status: str | None = None,
+    ) -> ResolvedEffectiveConfig:
+        """Resolve an effective config by its immutable ref and lineage owner.
+
+        Generation workers receive only immutable references over IPC.  The
+        lineage identity supplies the owner context needed to reopen the
+        referenced config; the config payload itself is never serialized into
+        the worker request.
+        """
+        if isinstance(ref, EffectiveConfigRef):
+            effective_ref = ref
+        elif isinstance(ref, Mapping):
+            try:
+                effective_ref = EffectiveConfigRef.from_dict(ref)
+            except (TypeError, ValueError) as exc:
+                raise ArtifactResolutionError(f"Invalid effective config reference: {exc}") from exc
+        else:
+            raise TypeError("effective config reference must be EffectiveConfigRef or a mapping")
+        owner = _ArtifactOwner(
+            Path(owner_root).resolve(),
+            str(topology),
+            str(lineage_id),
+            owner_status,
+        )
+        context = CheckpointRef(
+            topology=owner.topology,
+            lineage_id=owner.lineage_id,
+            checkpoint_id="effective-config",
+            generation=0,
+            path=effective_ref.artifact.path,
+            sha256=effective_ref.artifact.sha256,
+        )
+        return self._resolve_effective_config(effective_ref, owner, context)
+
     def parent(self, checkpoint: ResolvedCheckpointNode) -> ResolvedCheckpointNode | None:
         """Resolve exactly the persisted immediate parent, if any."""
         self._require_resolved_node(checkpoint)

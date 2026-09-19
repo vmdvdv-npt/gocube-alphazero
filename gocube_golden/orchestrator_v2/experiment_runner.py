@@ -4,9 +4,10 @@ The runner owns sequencing and durable decisions only:
 
     common parent -> A/B -> Arena -> optional winner-rooted control/C -> Arena -> STOP
 
-The injected arm execution path still owns the proven generation path.  This
-module does not train, build replay, publish checkpoints, create commit
-markers, run Arena games, or resolve ancestry manually.
+The runner owns the arm generation loop.  One-generation execution, process
+supervision, commit/recovery, and graph resolution live below this boundary.
+This module does not train, build replay, publish checkpoints, create commit
+markers, or run Arena games.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from typing import Any, Protocol
 from ..process_supervision import atomic_write_text
 from ..provenance import canonical_json
 from .arena_runner import ArenaRunRequest, ArenaRunResult, ArenaRunnerV2, torus9_startset_ref
-from .artifact_resolver import ArtifactResolver, ResolvedCheckpointNode
+from .artifact_resolver import ArtifactResolver, ResolvedCheckpointNode, ResolvedEffectiveConfig
 from .contracts import CheckpointRef, EvaluationIdentity, StartsetRef
 from .experiment_plan import (
     EXPERIMENT_WINNER_RULE,
@@ -32,6 +33,9 @@ from .experiment_plan import (
     WinnerRule,
     WinnerRuleName,
 )
+from .generation_runner import OutputLineage
+from .production_generation import ProductionTrainOne
+from .torus9_production import Torus9ProductionLineage
 
 from tools.arena_engine import ArenaExecutionConfig
 
@@ -44,28 +48,31 @@ class ExperimentRunnerError(RuntimeError):
     """A persisted experiment cannot be resumed safely."""
 
 
-@dataclass(frozen=True)
-class ArmExecutionRequest:
-    """One request handed to an already-proven arm execution path."""
+class LineageFactory(Protocol):
+    """Prepare or resume one independent output lineage."""
 
-    experiment_id: str
-    topology: str
-    arm: ExperimentArmConfig
-    common_parent: ResolvedCheckpointNode
-
-
-@dataclass(frozen=True)
-class ArmExecutionResult:
-    """The only artifact returned by an arm execution path to the coordinator."""
-
-    final_checkpoint: ResolvedCheckpointNode
+    def prepare(
+        self,
+        *,
+        topology: str,
+        lineage_id: str,
+        parent: ResolvedCheckpointNode,
+        effective_config: object,
+        experiment_id: str,
+        arm_id: str,
+    ) -> tuple[Path, ResolvedEffectiveConfig]: ...
 
 
-class ArmExecutionPath(Protocol):
-    """Production seam for the existing V2 generation execution path."""
+class TrainOne(Protocol):
+    """Strictly one-generation boundary used by the coordinator loop."""
 
-    def run_arm(self, request: ArmExecutionRequest) -> ArmExecutionResult:
-        """Execute the configured generations and return the resolved final."""
+    def __call__(
+        self,
+        *,
+        parent: ResolvedCheckpointNode,
+        config: ResolvedEffectiveConfig,
+        output_lineage: OutputLineage,
+    ) -> ResolvedCheckpointNode: ...
 
 
 @dataclass(frozen=True)
@@ -107,15 +114,17 @@ class ExperimentRunnerV2:
         self,
         config: ExperimentConfig,
         *,
-        arm_execution_path: ArmExecutionPath,
         arena_runner: ArenaRunnerV2,
         resolver: ArtifactResolver | None = None,
         experiment_root: str | Path | None = None,
+        lineage_factory: LineageFactory | None = None,
+        train_one: TrainOne | None = None,
     ) -> None:
         self.config = config
-        self.arm_execution_path = arm_execution_path
         self.arena_runner = arena_runner
         self.resolver = resolver or ArtifactResolver()
+        self.lineage_factory = lineage_factory or Torus9ProductionLineage(self.resolver.runs_root)
+        self.train_one = train_one or ProductionTrainOne(resolver=self.resolver)
         self.experiment_root = (
             Path(experiment_root).resolve()
             if experiment_root is not None
@@ -281,17 +290,40 @@ class ExperimentRunnerV2:
             if isinstance(raw_final, Mapping):
                 checkpoint = self.resolver.checkpoint(raw_final)
             else:
-                result = self.arm_execution_path.run_arm(
-                    ArmExecutionRequest(
-                        experiment_id=self.config.experiment_id,
-                        topology=self.config.topology,
-                        arm=arm,
-                        common_parent=parent,
-                    )
+                lineage_id = arm.lineage_id or f"{self.config.experiment_id}-{arm.arm_id}"
+                root, effective_config = self.lineage_factory.prepare(
+                    topology=self.config.topology,
+                    lineage_id=lineage_id,
+                    parent=parent,
+                    effective_config=arm.effective_config,
+                    experiment_id=self.config.experiment_id,
+                    arm_id=arm.arm_id,
                 )
-                if not isinstance(result, ArmExecutionResult):
-                    raise ExperimentRunnerError("arm execution path returned an invalid result")
-                checkpoint = result.final_checkpoint
+                if effective_config.fingerprint != arm.effective_config.fingerprint:
+                    raise ExperimentRunnerError(
+                        f"arm {arm.arm_id} lineage resolved a different effective config"
+                    )
+                output_lineage = OutputLineage(self.config.topology, lineage_id, root)
+                checkpoint = parent
+                for _ in range(arm.generations):
+                    previous = checkpoint
+                    checkpoint = self.train_one(
+                        parent=checkpoint,
+                        config=effective_config,
+                        output_lineage=output_lineage,
+                    )
+                    if not isinstance(checkpoint, ResolvedCheckpointNode):
+                        raise ExperimentRunnerError(
+                            f"train_one returned an unresolved checkpoint for arm {arm.arm_id}"
+                        )
+                    if checkpoint.generation != previous.generation + 1:
+                        raise ExperimentRunnerError(
+                            f"arm {arm.arm_id} train_one did not return the immediate child"
+                        )
+                    if checkpoint.node.parent != previous.ref:
+                        raise ExperimentRunnerError(
+                            f"arm {arm.arm_id} train_one returned a child with the wrong parent"
+                        )
                 self._validate_final(arm, parent, checkpoint)
                 raw_record["final_checkpoint"] = checkpoint.ref.to_dict()
                 state["updated_at"] = self._now()
@@ -936,9 +968,6 @@ __all__ = [
     "EXPERIMENT_RUNNER_SCHEMA",
     "EXPERIMENT_STATE_SCHEMA",
     "EXPERIMENT_WINNER_RULE",
-    "ArmExecutionPath",
-    "ArmExecutionRequest",
-    "ArmExecutionResult",
     "ExperimentArmConfig",
     "ExperimentConfig",
     "ExperimentRunResult",
@@ -946,7 +975,9 @@ __all__ = [
     "ExperimentRunnerError",
     "ExperimentRunnerV2",
     "ExperimentStage2Config",
+    "LineageFactory",
     "Stage2Config",
+    "TrainOne",
     "WinnerDecision",
     "WinnerRule",
     "WinnerRuleName",
