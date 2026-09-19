@@ -76,6 +76,10 @@ class ArenaRunRequest:
     candidate_label: str | None = None
     reference_label: str | None = None
     comparison: str | None = None
+    # Cross-lineage evaluations stay in the canonical evaluations namespace.
+    # A coordinator may opt a same-lineage evaluation into its owning lineage
+    # without changing the Arena identity or execution semantics.
+    output_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidate, ResolvedCheckpointNode):
@@ -86,6 +90,27 @@ class ArenaRunRequest:
             raise ValueError("Arena checkpoints must share topology")
         if int(self.config.games) <= 0 or int(self.config.games) % 2:
             raise ValueError("Arena games must be a positive even number")
+        if self.output_dir is not None:
+            if self.candidate.lineage_id != self.reference.lineage_id:
+                raise ValueError(
+                    "custom Arena output_dir is allowed only for same-lineage evaluations"
+                )
+            candidate_root = Path(self.candidate.owner_root).resolve()
+            reference_root = Path(self.reference.owner_root).resolve()
+            if candidate_root != reference_root:
+                raise ValueError(
+                    "custom Arena output_dir requires one shared lineage owner root"
+                )
+            arena_root = (candidate_root / "arena").resolve()
+            output_root = Path(self.output_dir).resolve()
+            if output_root == arena_root:
+                raise ValueError("custom Arena output_dir must be inside the lineage arena directory")
+            try:
+                output_root.relative_to(arena_root)
+            except ValueError as exc:
+                raise ValueError(
+                    "custom Arena output_dir must be inside the lineage arena directory"
+                ) from exc
 
 
 @dataclass(frozen=True)
@@ -182,7 +207,18 @@ class ArenaRunner:
             reference_generation=request.reference.generation,
             fingerprint=fingerprint,
         )
-        output = evaluation_dir(request.candidate.topology, run_id).resolve()
+        if request.output_dir is not None:
+            requested_output = request.output_dir.resolve()
+            # A coordinator may provide either a concrete run directory or a
+            # lineage-owned generation directory.  The latter gets the same
+            # identity-derived leaf name used by canonical evaluations.
+            output = (
+                requested_output
+                if requested_output.name == run_id
+                else requested_output / run_id
+            )
+        else:
+            output = evaluation_dir(request.candidate.topology, run_id).resolve()
 
         if output.exists():
             existing = load_reusable_evaluation(
