@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
+import gocube_golden.orchestrator_v2.torus9_production as production
 from gocube_golden.artifact_graph import CheckpointRef, EffectiveConfig
 from gocube_golden.orchestrator_v2.torus9_production import Torus9ProductionLineage
 from gocube_golden.provenance import CodeIdentity
-import gocube_golden.orchestrator_v2.torus9_production as production
 
 
 def _config() -> EffectiveConfig:
@@ -23,9 +23,13 @@ def _config() -> EffectiveConfig:
     )
 
 
-def test_resume_allows_clean_code_rollover_without_changing_lineage_origin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _prepare_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    allow_code_rollover: bool,
+    second_worktree_clean: bool,
+) -> dict[str, object]:
     config = _config()
     parent = SimpleNamespace(
         ref=CheckpointRef(
@@ -40,7 +44,7 @@ def test_resume_allows_clean_code_rollover_without_changing_lineage_origin(
     identities = iter(
         [
             CodeIdentity("1" * 40, "2" * 40, True),
-            CodeIdentity("3" * 40, "4" * 40, True),
+            CodeIdentity("3" * 40, "4" * 40, second_worktree_clean),
         ]
     )
     monkeypatch.setattr(production, "capture_code_identity", lambda _root: next(identities))
@@ -61,12 +65,48 @@ def test_resume_allows_clean_code_rollover_without_changing_lineage_origin(
         effective_config=config,
         experiment_id="experiment",
         arm_id="continuous",
+        allow_code_rollover=allow_code_rollover,
     )
 
-    manifest = json.loads(
+    return json.loads(
         (tmp_path / "runs" / "torus9" / "active" / "lineage" / "manifest.json").read_text()
     )
+
+
+def test_clean_code_change_without_allow_code_rollover_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(ValueError, match="allow_code_rollover=True"):
+        _prepare_lineage(
+            tmp_path,
+            monkeypatch,
+            allow_code_rollover=False,
+            second_worktree_clean=True,
+        )
+
+
+def test_clean_code_change_with_allow_code_rollover_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _prepare_lineage(
+        tmp_path,
+        monkeypatch,
+        allow_code_rollover=True,
+        second_worktree_clean=True,
+    )
+
     assert manifest["lineage_initial_git_commit"] == "1" * 40
     assert manifest["git_commit"] == "3" * 40
     assert manifest["current_git_tree"] == "4" * 40
 
+
+def test_dirty_worktree_rejects_code_rollover_even_when_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(ValueError, match="clean working tree"):
+        _prepare_lineage(
+            tmp_path,
+            monkeypatch,
+            allow_code_rollover=True,
+            second_worktree_clean=False,
+        )

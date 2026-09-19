@@ -9,7 +9,7 @@ checkpoint, or Arena decision logic belongs here.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 import json
 import logging
@@ -136,6 +136,7 @@ class ContinuousTrainingConfig:
     arena_execution_contract: Mapping[str, object] | None = None
     arena_workload: Mapping[str, object] = field(default_factory=dict)
     arena_reference_gap: int | None = None
+    allow_code_rollover: bool = False
 
     def __post_init__(self) -> None:
         parent = (
@@ -178,6 +179,8 @@ class ContinuousTrainingConfig:
             raise ValueError("arena_execution_contract must be an object")
         if not isinstance(self.arena_workload, Mapping):
             raise ValueError("arena_workload must be an object")
+        if type(self.allow_code_rollover) is not bool:
+            raise ValueError("allow_code_rollover must be a boolean")
         startset = self.arena_startset
         if startset is None:
             startset = torus9_startset_ref(
@@ -241,6 +244,7 @@ class ContinuousTrainingRunnerV2:
         arena_execution_contract: Mapping[str, object] | None = None,
         arena_workload: Mapping[str, object] | None = None,
         arena_reference_gap: int | None = None,
+        allow_code_rollover: bool | None = None,
         resolver: ArtifactResolver | None = None,
         arena_runner: ArenaRunnerV2 | None = None,
         lineage_factory: LineageFactory | None = None,
@@ -272,10 +276,10 @@ class ContinuousTrainingRunnerV2:
                 arena_execution_contract=arena_execution_contract,
                 arena_workload={} if arena_workload is None else arena_workload,
                 arena_reference_gap=arena_reference_gap,
+                allow_code_rollover=False if allow_code_rollover is None else allow_code_rollover,
             )
-        elif any(
-            value is not None
-            for value in (
+        else:
+            direct_override = (
                 parent_checkpoint,
                 parent,
                 lineage_id,
@@ -283,8 +287,12 @@ class ContinuousTrainingRunnerV2:
                 arena_cadence,
                 arena_config,
             )
-        ):
-            raise TypeError("pass either config or direct ContinuousTrainingRunnerV2 inputs, not both")
+            if any(value is not None for value in direct_override):
+                raise TypeError("pass either config or direct ContinuousTrainingRunnerV2 inputs, not both")
+            if allow_code_rollover is not None:
+                if type(allow_code_rollover) is not bool:
+                    raise TypeError("allow_code_rollover must be a boolean")
+                config = replace(config, allow_code_rollover=allow_code_rollover)
 
         self.config = config
         self.resolver = resolver or ArtifactResolver()
@@ -346,14 +354,17 @@ class ContinuousTrainingRunnerV2:
     def run(self) -> ContinuousTrainingResult:
         self._launch_id = uuid.uuid4().hex
         original_parent = self.resolver.checkpoint(self.config.parent_checkpoint)
-        root, resolved_config = self.lineage_factory.prepare(
-            topology=self.config.topology,
-            lineage_id=self.config.lineage_id,
-            parent=original_parent,
-            effective_config=self.config.effective_config,
-            experiment_id=f"continuous-{self.config.lineage_id}",
-            arm_id="continuous",
-        )
+        prepare_args: dict[str, object] = {
+            "topology": self.config.topology,
+            "lineage_id": self.config.lineage_id,
+            "parent": original_parent,
+            "effective_config": self.config.effective_config,
+            "experiment_id": f"continuous-{self.config.lineage_id}",
+            "arm_id": "continuous",
+        }
+        if self.config.allow_code_rollover:
+            prepare_args["allow_code_rollover"] = True
+        root, resolved_config = self.lineage_factory.prepare(**prepare_args)
         self._lineage_root = Path(root).resolve()
         expected_root = (
             self.resolver.runs_root

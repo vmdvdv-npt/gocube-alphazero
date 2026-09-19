@@ -74,12 +74,18 @@ def _advance_lineage_code_pin(
     git_commit: str,
     git_tree: str,
     working_tree_clean: bool,
+    allow_code_rollover: bool,
 ) -> dict[str, object]:
     """Record a clean application-code rollover while preserving lineage origin."""
     updated = dict(manifest)
     previous = str(updated.get("git_commit", ""))
     if previous == git_commit:
         return updated
+    if not allow_code_rollover:
+        raise ValueError(
+            "Production arm lineage code pin changed during resume; "
+            "set allow_code_rollover=True"
+        )
     if not working_tree_clean:
         raise ValueError("Production arm lineage resume requires a clean working tree")
     updated["lineage_initial_git_commit"] = str(
@@ -110,7 +116,10 @@ class Torus9ProductionLineage:
         effective_config: object,
         experiment_id: str,
         arm_id: str,
+        allow_code_rollover: bool = False,
     ) -> tuple[Path, ResolvedEffectiveConfig]:
+        if type(allow_code_rollover) is not bool:
+            raise ValueError("allow_code_rollover must be a boolean")
         config = getattr(effective_config, "config", effective_config)
         if not hasattr(config, "to_dict") or not hasattr(config, "fingerprint"):
             raise TypeError("production lineage requires an EffectiveConfig")
@@ -138,6 +147,7 @@ class Torus9ProductionLineage:
                 git_commit=code.git_commit_sha,
                 git_tree=code.git_tree_sha,
                 working_tree_clean=code.working_tree_clean,
+                allow_code_rollover=allow_code_rollover,
             )
             if manifest != existing:
                 _write_json(root / "manifest.json", manifest)
