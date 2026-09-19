@@ -80,6 +80,10 @@ class GenerationExecutionResult:
     committed: bool
     checkpoint: CheckpointRef | None = None
     commit_artifact: ArtifactRef | None = None
+    # The production path may expose the generation-owned fresh replay so its
+    # canonical CheckpointNode publisher can bind the exact artifact without
+    # rediscovering files by name.
+    fresh_replay: ArtifactRef | None = None
 
 
 @dataclass(frozen=True)
