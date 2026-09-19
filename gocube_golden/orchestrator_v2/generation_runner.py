@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Protocol, Sequence
+from typing import Protocol
 
 from ..artifact_catalog import sha256_file
-from .artifact_resolver import ResolvedArtifact, ResolvedCheckpointNode, ResolvedEffectiveConfig
+from .artifact_resolver import ResolvedCheckpointNode, ResolvedEffectiveConfig
 from .contracts import ArtifactRef, CheckpointRef
 
 
@@ -46,20 +46,15 @@ class OutputLineage:
 class ResolvedGenerationInput:
     """All inputs required for exactly one generation.
 
-    The values are deliberately resolved objects, not lookup keys.  The
-    runner does not normalize or replace them so the production path sees the
-    exact parent, replay artifacts, and effective config selected by the
-    caller/resolver, including cross-lineage references.
+    The values describe the generation intent.  Replay reconstruction is an
+    internal concern of the production training path; it is deliberately not
+    represented here as files, JSONL sources, or rolling-composition evidence.
     """
 
     parent_checkpoint: ResolvedCheckpointNode
-    replay_artifacts: Sequence[ResolvedArtifact]
     generation: int
     effective_config: ResolvedEffectiveConfig
     output_lineage: OutputLineage
-    # Optional durable rolling-composition evidence from the resolved parent.
-    # Per-source evidence lives on each ``ResolvedArtifact``.
-    replay_identity: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if type(self.generation) is not int or self.generation < 0:

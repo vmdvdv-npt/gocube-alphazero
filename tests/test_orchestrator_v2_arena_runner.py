@@ -149,6 +149,65 @@ def test_runner_reuses_only_matching_complete_result(tmp_path: Path, monkeypatch
     assert second.validity == "VALID"
 
 
+def test_runner_reuses_completed_non_valid_arena_and_preserves_boundary_status(
+    tmp_path: Path, monkeypatch
+) -> None:
+    calls: list[str] = []
+
+    def engine(**kwargs: object) -> dict[str, object]:
+        calls.append(str(kwargs["run_id"]))
+        output = kwargs["output_dir"]
+        assert isinstance(output, Path)
+        identity = kwargs["evaluation_identity"]
+        assert isinstance(identity, dict)
+        status = str(kwargs["comparison"])
+        summary = {
+            "games": 16,
+            "W/L/D": [7, 8, 1],
+            "validity": status,
+            "telemetry": {"technical_games": 1 if status == "TECHNICAL" else 0},
+        }
+        (output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        (output / "manifest.json").write_text(
+            json.dumps({"run_id": str(kwargs["run_id"])}), encoding="utf-8"
+        )
+        (output / "provenance.json").write_text(
+            json.dumps(
+                {
+                    "candidate": identity["candidate"],
+                    "reference": identity["reference"],
+                    "profile": "torus9",
+                    "master_seed": identity["master_seed"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return summary
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    request = _request(tmp_path)
+    runner = ArenaRunner(engine=engine)
+
+    for offset, status in enumerate(("TECHNICAL", "CRITICAL", "INVALID"), start=1):
+        variant = replace(
+            request,
+            master_seed=request.master_seed + offset,
+            startset=torus9_startset_ref(
+                master_seed=request.master_seed + offset,
+                games=request.config.games,
+            ),
+            comparison=status,
+        )
+        first = runner.run(variant)
+        second = runner.run(variant)
+        assert first.validity == second.validity == status
+
+    assert len(calls) == 3
+
+
 def test_identity_changes_for_seed_startset_and_full_arena_contract(tmp_path: Path) -> None:
     request = _request(tmp_path)
     base = ArenaRunner._identity(request).fingerprint
