@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import gocube_golden.orchestrator_v2.production_entrypoint as entrypoint
 
@@ -126,3 +127,33 @@ def test_production_entrypoint_explicitly_allows_code_rollover(
     )
     assert len(captured) == 1
     assert captured[0].allow_code_rollover is True
+
+
+def test_production_experiment_entrypoint_wires_arena_runner(
+    monkeypatch, tmp_path: Path
+) -> None:
+    arena_runner = object()
+    config = SimpleNamespace(topology="torus9", experiment_id="experiment")
+    captured: list[object] = []
+
+    class FakeRunner:
+        def __init__(self, _config, *, arena_runner, resolver, notifier, **_kwargs) -> None:
+            captured.extend((arena_runner, resolver, notifier))
+
+        def run(self):
+            return "done"
+
+    monkeypatch.setattr(entrypoint, "_experiment_config", lambda _payload: config)
+    monkeypatch.setattr(entrypoint, "ArenaRunnerV2", lambda: arena_runner)
+    monkeypatch.setattr(entrypoint, "TelegramNotifier", lambda _paths: object())
+    monkeypatch.setattr(entrypoint, "ExperimentRunnerV2", FakeRunner)
+    monkeypatch.setattr(entrypoint, "flush_all", lambda: None)
+
+    assert (
+        entrypoint.run_experiment_from_config(
+            {},
+            runs_root=tmp_path / "runs",
+        )
+        == "done"
+    )
+    assert captured[0] is arena_runner
