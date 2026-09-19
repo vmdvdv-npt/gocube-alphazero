@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from gocube_golden.orchestrator_v2 import (
     ArenaRunRequest,
     ArenaRunner,
@@ -176,6 +178,27 @@ def test_runner_can_store_same_lineage_result_under_generation_directory(
     assert first.output_dir.parent == request.output_dir
     assert first.output_dir.name == first.evaluation_id
     assert second.output_dir == first.output_dir
+
+
+def test_runner_rejects_custom_output_for_cross_lineage_evaluation(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="same-lineage"):
+        ArenaRunner(engine=_fake_engine).run(
+            replace(
+                _request(tmp_path),
+                output_dir=tmp_path / "candidate" / "arena" / "generation-0095",
+            )
+        )
+
+
+def test_runner_rejects_same_lineage_output_outside_lineage_arena(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="inside the lineage arena directory"):
+        ArenaRunner(engine=_fake_engine).run(
+            replace(
+                _request(tmp_path),
+                reference=_resolved(tmp_path, "candidate", 94, SHA_B),
+                output_dir=tmp_path / "outside-arena",
+            )
+        )
 
 
 def test_runner_reuses_completed_non_valid_arena_and_preserves_boundary_status(

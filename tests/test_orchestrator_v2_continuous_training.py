@@ -167,7 +167,13 @@ class FakeTrainOne:
         generation = parent.generation + 1
         self.parents.append(parent.ref)
         self.calls.append(generation)
-        child = _node(self.root, self.config, output_lineage.lineage_id, generation, parent.ref)
+        child = _node(
+            self.root / "torus9" / "active",
+            self.config,
+            output_lineage.lineage_id,
+            generation,
+            parent.ref,
+        )
         self.resolver.add(child)
         if self.stop_runner is not None and self.stop_at == generation and self.stop_once:
             self.stop_runner.request_soft_stop(reason="test")

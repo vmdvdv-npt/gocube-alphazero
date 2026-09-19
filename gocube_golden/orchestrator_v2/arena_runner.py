@@ -90,6 +90,27 @@ class ArenaRunRequest:
             raise ValueError("Arena checkpoints must share topology")
         if int(self.config.games) <= 0 or int(self.config.games) % 2:
             raise ValueError("Arena games must be a positive even number")
+        if self.output_dir is not None:
+            if self.candidate.lineage_id != self.reference.lineage_id:
+                raise ValueError(
+                    "custom Arena output_dir is allowed only for same-lineage evaluations"
+                )
+            candidate_root = Path(self.candidate.owner_root).resolve()
+            reference_root = Path(self.reference.owner_root).resolve()
+            if candidate_root != reference_root:
+                raise ValueError(
+                    "custom Arena output_dir requires one shared lineage owner root"
+                )
+            arena_root = (candidate_root / "arena").resolve()
+            output_root = Path(self.output_dir).resolve()
+            if output_root == arena_root:
+                raise ValueError("custom Arena output_dir must be inside the lineage arena directory")
+            try:
+                output_root.relative_to(arena_root)
+            except ValueError as exc:
+                raise ValueError(
+                    "custom Arena output_dir must be inside the lineage arena directory"
+                ) from exc
 
 
 @dataclass(frozen=True)
