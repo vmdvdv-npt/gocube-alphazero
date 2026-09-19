@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 
+import pytest
+
 from gocube_golden import run_storage
 from gocube_golden.artifact_catalog import sha256_file
 from gocube_golden.orchestrator_v2 import (
@@ -19,6 +21,8 @@ from gocube_golden.orchestrator_v2 import (
     ExperimentArmConfig,
     ExperimentConfig,
     ExperimentRunnerV2,
+    ExperimentRunnerError,
+    ExperimentStage2Config,
     checkpoint_node_path,
 )
 from tools.arena_engine import ArenaExecutionConfig
@@ -215,7 +219,9 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
         }
         output.mkdir(parents=True, exist_ok=True)
         (output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
-        (output / "manifest.json").write_text("{}", encoding="utf-8")
+        (output / "manifest.json").write_text(
+            json.dumps({"run_id": str(kwargs["run_id"])}), encoding="utf-8"
+        )
         return summary
 
     monkeypatch.setattr(
@@ -262,6 +268,8 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
 
     a = first.final_checkpoints["A"]
     b = first.final_checkpoints["B"]
+    assert first.final_winner is not None and first.final_winner.ref == a.ref
+    assert first.decisions[1].winner == a.ref  # tie remains with the reference
     assert a.generation == b.generation == 2
     assert a.lineage_id != b.lineage_id
     assert a.node.parent is not None and b.node.parent is not None
@@ -279,3 +287,321 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     assert len(arena_calls) == 1
     assert resumed.arena.identity.candidate == b.ref
     assert resumed.arena.identity.reference == a.ref
+
+
+@pytest.mark.parametrize("stage1_candidate_wins", [True, False])
+def test_experiment_runner_v2_synthetic_two_stage_winner_rooted_flow(
+    tmp_path, monkeypatch, stage1_candidate_wins
+):
+    parent = _make_parent(tmp_path)
+    resolver = ArtifactResolver(tmp_path / "runs")
+    arm_path = FakeArmExecutionPath(tmp_path, resolver)
+    arena_calls: list[dict[str, object]] = []
+
+    def fake_arena(**kwargs: object) -> dict[str, object]:
+        arena_calls.append(kwargs)
+        output = kwargs["output_dir"]
+        assert isinstance(output, Path)
+        comparison = str(kwargs["comparison"])
+        summary = {
+            "games": 4,
+            "W/L/D": (
+                [3, 1, 0]
+                if not comparison.startswith("B-") or stage1_candidate_wins
+                else [1, 3, 0]
+            ),
+            "telemetry": {
+                "technical_games": 0,
+                "performance_status": "HEALTHY",
+                "performance_failures": [],
+            },
+        }
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        (output / "manifest.json").write_text("{}", encoding="utf-8")
+        return summary
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, evaluation_id: tmp_path / "evaluations" / evaluation_id,
+    )
+    b_config = _config(learning_rate=0.0005, games=12, steps=6, sims=16)
+    c_config = _config(learning_rate=0.0002, games=20, steps=9, sims=24)
+    experiment_config = ExperimentConfig(
+        experiment_id="synthetic-two-stage",
+        topology="torus9",
+        parent=parent.ref,
+        arms=(
+            ExperimentArmConfig("A", 2, _config(learning_rate=0.001, games=8, steps=4, sims=8)),
+            ExperimentArmConfig("B", 1, b_config),
+        ),
+        arena_config=ArenaExecutionConfig(
+            games=4,
+            workers=1,
+            games_per_worker=2,
+            inference_batch_rows=2,
+            inference_batch_wait_ms=0.0,
+            device="cpu",
+            strict_production=False,
+            min_mean_inference_batch_rows=0.0,
+            min_effective_cpu_cores=0.0,
+            early_gate_enabled=False,
+        ),
+        arena_master_seed=17,
+        stage2=ExperimentStage2Config(
+            control_generations=1,
+            c=ExperimentArmConfig("C", 2, c_config),
+            arena_config=ArenaExecutionConfig(
+                games=4,
+                workers=1,
+                games_per_worker=2,
+                inference_batch_rows=2,
+                inference_batch_wait_ms=0.0,
+                device="cpu",
+                strict_production=False,
+                min_mean_inference_batch_rows=0.0,
+                min_effective_cpu_cores=0.0,
+                early_gate_enabled=False,
+            ),
+            arena_master_seed=18,
+        ),
+    )
+    assert ExperimentConfig.from_dict(experiment_config.to_dict()).fingerprint == experiment_config.fingerprint
+    runner = ExperimentRunnerV2(
+        experiment_config,
+        resolver=resolver,
+        arm_execution_path=arm_path,
+        arena_runner=ArenaRunner(engine=fake_arena),
+        experiment_root=tmp_path / "experiment-state",
+    )
+
+    result = runner.run()
+
+    assert result.state == "STOPPED"
+    assert set(result.final_checkpoints) == {"A", "B", "control", "C"}
+    a = result.final_checkpoints["A"]
+    b = result.final_checkpoints["B"]
+    control = result.final_checkpoints["control"]
+    c = result.final_checkpoints["C"]
+    assert a.generation == 2
+    assert b.generation == 1
+    stage1_winner = b if stage1_candidate_wins else a
+    assert result.stage1_winner is not None and result.stage1_winner.ref == stage1_winner.ref
+    assert result.stage2_parent is not None and result.stage2_parent.ref == stage1_winner.ref
+    assert resolver.ancestor(control, 1).ref == stage1_winner.ref
+    assert resolver.ancestor(c, 2).ref == stage1_winner.ref
+    assert control.lineage_id != c.lineage_id
+    assert {control.lineage_id, c.lineage_id}.isdisjoint({a.lineage_id, b.lineage_id})
+    assert not (
+        tmp_path / "runs" / "torus9" / "active" / control.lineage_id / "checkpoints" / b.checkpoint_id
+    ).with_suffix(".pt").exists()
+    assert not (
+        tmp_path / "runs" / "torus9" / "active" / c.lineage_id / "checkpoints" / b.checkpoint_id
+    ).with_suffix(".pt").exists()
+    assert control.effective_config.fingerprint == stage1_winner.effective_config.fingerprint
+    assert control.effective_config.config.training["learning_rate"] == (
+        0.0005 if stage1_candidate_wins else 0.001
+    )
+    assert c.effective_config.fingerprint == c_config.fingerprint
+    assert result.final_winner is not None and result.final_winner.ref == c.ref
+    assert result.decisions[1].winner == stage1_winner.ref
+    assert result.decisions[2].winner == c.ref
+    assert result.decisions[1].to_dict()["W/L/D"] == ([3, 1, 0] if stage1_candidate_wins else [1, 3, 0])
+    assert result.decisions[2].to_dict()["W/L/D"] == [3, 1, 0]
+    assert [call.arm.arm_id for call in arm_path.calls] == ["A", "B", "control", "C"]
+    assert arm_path.calls[2].common_parent.ref == stage1_winner.ref
+    assert arm_path.calls[3].common_parent.ref == stage1_winner.ref
+    assert len(arena_calls) == 2
+    assert arena_calls[0]["candidate_path"] == b.path
+    assert arena_calls[0]["reference_path"] == a.path
+    assert arena_calls[1]["candidate_path"] == c.path
+    assert arena_calls[1]["reference_path"] == control.path
+
+    state = json.loads((tmp_path / "experiment-state" / "state.json").read_text())
+    assert state["original_parent"] == parent.ref.to_dict()
+    assert state["stage1"]["winner"]["winner_checkpoint"] == stage1_winner.ref.to_dict()
+    assert state["stage2"]["parent"] == stage1_winner.ref.to_dict()
+    assert state["stage2"]["winner"]["winner_checkpoint"] == c.ref.to_dict()
+    assert state["final_winner"] == c.ref.to_dict()
+
+    resumed = runner.run()
+    assert resumed.final_winner is not None and resumed.final_winner.ref == c.ref
+    assert len(arm_path.calls) == 4
+    assert len(arena_calls) == 2
+
+
+def test_experiment_runner_v2_resume_after_stage1_decision_reuses_all_stage1_work(tmp_path, monkeypatch):
+    parent = _make_parent(tmp_path)
+    resolver = ArtifactResolver(tmp_path / "runs")
+    base_path = FakeArmExecutionPath(tmp_path, resolver)
+    failing = {"enabled": True}
+
+    class FailCOnce:
+        def run_arm(self, request: ArmExecutionRequest) -> ArmExecutionResult:
+            if request.arm.arm_id == "C" and failing["enabled"]:
+                failing["enabled"] = False
+                raise RuntimeError("synthetic interruption after Stage 1")
+            return base_path.run_arm(request)
+
+    arena_calls: list[str] = []
+
+    def fake_arena(**kwargs: object) -> dict[str, object]:
+        arena_calls.append(str(kwargs["comparison"]))
+        output = kwargs["output_dir"]
+        assert isinstance(output, Path)
+        summary = {
+            "games": 4,
+            "W/L/D": [3, 1, 0],
+            "telemetry": {
+                "technical_games": 0,
+                "performance_status": "HEALTHY",
+                "performance_failures": [],
+            },
+        }
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        (output / "manifest.json").write_text(
+            json.dumps({"run_id": str(kwargs["run_id"])}), encoding="utf-8"
+        )
+        return summary
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, evaluation_id: tmp_path / "evaluations" / evaluation_id,
+    )
+    arena_config = ArenaExecutionConfig(
+        games=4,
+        workers=1,
+        games_per_worker=2,
+        inference_batch_rows=2,
+        inference_batch_wait_ms=0.0,
+        device="cpu",
+        strict_production=False,
+        min_mean_inference_batch_rows=0.0,
+        min_effective_cpu_cores=0.0,
+        early_gate_enabled=False,
+    )
+    config = ExperimentConfig(
+        experiment_id="synthetic-resume-stage1",
+        topology="torus9",
+        parent=parent.ref,
+        arms=(
+            ExperimentArmConfig("A", 1, _config(learning_rate=0.001, games=8, steps=4, sims=8)),
+            ExperimentArmConfig("B", 1, _config(learning_rate=0.0005, games=12, steps=6, sims=16)),
+        ),
+        arena_config=arena_config,
+        arena_master_seed=31,
+        stage2=ExperimentStage2Config(
+            control_generations=1,
+            c=ExperimentArmConfig("C", 1, _config(learning_rate=0.0002, games=20, steps=9, sims=24)),
+            arena_config=arena_config,
+            arena_master_seed=32,
+        ),
+    )
+    runner = ExperimentRunnerV2(
+        config,
+        resolver=resolver,
+        arm_execution_path=FailCOnce(),
+        arena_runner=ArenaRunner(engine=fake_arena),
+        experiment_root=tmp_path / "experiment-state",
+    )
+
+    try:
+        runner.run()
+    except RuntimeError as exc:
+        assert str(exc) == "synthetic interruption after Stage 1"
+    else:
+        raise AssertionError("expected synthetic interruption")
+
+    state = json.loads((tmp_path / "experiment-state" / "state.json").read_text())
+    assert state["state"] == "STAGE2_RUNNING"
+    assert state["stage1"]["winner"] is not None
+    assert state["stage2"]["arms"]["control"]["final_checkpoint"] is not None
+    assert state["stage2"]["arms"].get("C") is None
+    assert arena_calls == ["B-final-vs-A-final"]
+
+    resumed = runner.run()
+    assert resumed.state == "STOPPED"
+    assert len(base_path.calls) == 4
+    assert [call.arm.arm_id for call in base_path.calls] == ["A", "B", "control", "C"]
+    assert arena_calls == ["B-final-vs-A-final", "C-final-vs-control-final"]
+
+
+def test_experiment_runner_v2_invalid_stage1_arena_never_creates_stage2_decision(tmp_path, monkeypatch):
+    parent = _make_parent(tmp_path)
+    resolver = ArtifactResolver(tmp_path / "runs")
+    arm_path = FakeArmExecutionPath(tmp_path, resolver)
+    arena_calls = 0
+
+    def invalid_arena(**kwargs: object) -> dict[str, object]:
+        nonlocal arena_calls
+        arena_calls += 1
+        output = kwargs["output_dir"]
+        assert isinstance(output, Path)
+        summary = {
+            "games": 4,
+            "W/L/D": [4, 0, 0],
+            "telemetry": {
+                "technical_games": 1,
+                "performance_status": "HEALTHY",
+                "performance_failures": [],
+            },
+        }
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        (output / "manifest.json").write_text("{}", encoding="utf-8")
+        return summary
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, evaluation_id: tmp_path / "evaluations" / evaluation_id,
+    )
+    arena_config = ArenaExecutionConfig(
+        games=4,
+        workers=1,
+        games_per_worker=2,
+        inference_batch_rows=2,
+        inference_batch_wait_ms=0.0,
+        device="cpu",
+        strict_production=False,
+        min_mean_inference_batch_rows=0.0,
+        min_effective_cpu_cores=0.0,
+        early_gate_enabled=False,
+    )
+    config = ExperimentConfig(
+        experiment_id="synthetic-invalid-stage1",
+        topology="torus9",
+        parent=parent.ref,
+        arms=(
+            ExperimentArmConfig("A", 1, _config(learning_rate=0.001, games=8, steps=4, sims=8)),
+            ExperimentArmConfig("B", 1, _config(learning_rate=0.0005, games=12, steps=6, sims=16)),
+        ),
+        arena_config=arena_config,
+        arena_master_seed=41,
+        stage2=ExperimentStage2Config(
+            control_generations=1,
+            c=ExperimentArmConfig("C", 1, _config(learning_rate=0.0002, games=20, steps=9, sims=24)),
+            arena_config=arena_config,
+            arena_master_seed=42,
+        ),
+    )
+    runner = ExperimentRunnerV2(
+        config,
+        resolver=resolver,
+        arm_execution_path=arm_path,
+        arena_runner=ArenaRunner(engine=invalid_arena),
+        experiment_root=tmp_path / "experiment-state",
+    )
+
+    with pytest.raises(ExperimentRunnerError, match="no scientific winner"):
+        runner.run()
+    state = json.loads((tmp_path / "experiment-state" / "state.json").read_text())
+    assert state["state"] == "ARENA_INVALID"
+    assert state["stage1"]["winner"] is None
+    assert state["stage2"]["arms"] == {}
+    assert arena_calls == 1
+
+    with pytest.raises(ExperimentRunnerError, match="no winner or Stage 2"):
+        runner.run()
+    assert len(arm_path.calls) == 2
+    assert arena_calls == 1
