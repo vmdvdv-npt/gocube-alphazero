@@ -356,7 +356,7 @@ class Torus9ArenaProfile:
         if TORUS9_KOMI != 0.5:
             raise RuntimeError("Active Torus9 komi drifted from 0.5")
         if config.strict_production:
-            if config.games < PRODUCTION_MIN_GAMES:
+            if config.games < PRODUCTION_MIN_GAMES and not config.monitoring_acceptance:
                 raise ValueError("Production Torus9 Arena requires at least 64 games")
             if config.workers != PRODUCTION_WORKERS:
                 raise ValueError("Production Torus9 Arena requires exactly 16 OS workers")

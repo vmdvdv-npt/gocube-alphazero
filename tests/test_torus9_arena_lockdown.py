@@ -104,6 +104,21 @@ def test_debug_config_is_explicit_and_small_cpu():
     get_profile("torus9").validate_execution_config(config)
 
 
+def test_monitoring_acceptance_allows_small_workload_without_disabling_strict_checks():
+    config = arena_engine.ArenaExecutionConfig(
+        games=16,
+        workers=16,
+        games_per_worker=4,
+        inference_batch_rows=64,
+        inference_batch_wait_ms=1.0,
+        device="cuda",
+        strict_production=True,
+        monitoring_acceptance=True,
+    )
+    config.validate_base()
+    get_profile("torus9").validate_execution_config(config)
+
+
 def test_only_one_normal_arena_cli_is_advertised():
     parser = arena_cli.build_parser()
     action = next(item for item in parser._actions if item.dest == "profile")
