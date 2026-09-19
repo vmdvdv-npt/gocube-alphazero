@@ -197,7 +197,10 @@ class ProductionArmExecutionPath:
             else Path(__file__).resolve().parents[2]
         )
         self.python_executable = str(python_executable or sys.executable)
-        self.supervisor_policy = supervisor_policy
+        self.supervisor_policy = supervisor_policy or SupervisorPolicy(
+            heartbeat_grace_seconds=900.0,
+            committed_drain_seconds=300.0,
+        )
         self.lineage_factory = Torus9ProductionLineage(
             self.resolver.runs_root,
             repo_root=self.repo_root,
@@ -232,10 +235,7 @@ class ProductionArmExecutionPath:
                 continue
 
             marker = root / f"generation-{generation:02d}.complete.json"
-            if marker.is_file():
-                raise RuntimeError(
-                    f"generation {generation} has a production commit without its canonical V2 node"
-                )
+            recovering_committed_generation = marker.is_file()
 
             replay = self.resolver.replay_window(current, replay_count)
             resolved = ResolvedGenerationInput(
@@ -245,7 +245,11 @@ class ProductionArmExecutionPath:
                 effective_config=effective,
                 output_lineage=output,
             )
-            current = self._run_supervised_generation(resolved, root)
+            current = self._run_supervised_generation(
+                resolved,
+                root,
+                recovering_committed_generation=recovering_committed_generation,
+            )
 
         return ArmExecutionResult(final_checkpoint=current)
 
@@ -253,6 +257,8 @@ class ProductionArmExecutionPath:
         self,
         resolved: ResolvedGenerationInput,
         root: Path,
+        *,
+        recovering_committed_generation: bool = False,
     ) -> ResolvedCheckpointNode:
         generation = resolved.generation
         input_path = root / "runtime" / "v2-inputs" / f"generation-{generation:04d}.json"
@@ -288,6 +294,7 @@ class ProductionArmExecutionPath:
             root,
             lineage_id=resolved.output_lineage.lineage_id,
             initial_committed_generation=resolved.parent_checkpoint.generation,
+            target_generation=(resolved.generation if recovering_committed_generation else None),
             command=child_command,
             cwd=self.repo_root,
             env=env,

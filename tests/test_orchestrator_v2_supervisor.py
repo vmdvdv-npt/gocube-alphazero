@@ -75,6 +75,27 @@ def test_external_parent_generation_is_the_first_child_baseline(tmp_path: Path) 
     assert not (tmp_path / "generation-96.complete.json").exists()
 
 
+def test_target_generation_recovers_existing_commit_publication(tmp_path: Path) -> None:
+    lineage_id = "lineage"
+    _commit(tmp_path, 1, lineage_id)
+    supervisor = SupervisorV2(
+        tmp_path,
+        lineage_id=lineage_id,
+        initial_committed_generation=0,
+        target_generation=1,
+        command=[sys.executable, "-c", "pass"],
+        policy=SupervisorPolicy(poll_interval_seconds=0.01),
+    )
+
+    plan = supervisor.plan()
+    result = supervisor.run_once()
+
+    assert plan.action is SupervisorAction.START
+    assert plan.generation == 1
+    assert result.status is SupervisorStatus.COMMITTED
+    assert result.generation == 1
+
+
 def test_uncommitted_generation_without_child_is_rerun_same_generation(tmp_path: Path) -> None:
     supervisor = _supervisor(tmp_path)
     atomic_write_json(

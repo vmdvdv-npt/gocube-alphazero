@@ -74,15 +74,17 @@ class SupervisorPolicy:
     """Bounded technical-failure policy.
 
     The production defaults are deliberately fixed to five minutes of
-    heartbeat grace and exactly one retry of the same generation.  A shorter
-    grace is useful for unit tests; more than one retry is rejected so a
-    caller cannot accidentally turn this into an unbounded loop.
+    heartbeat grace, a bounded post-commit drain, and exactly one retry of
+    the same generation.  A shorter grace is useful for unit tests; more than
+    one retry is rejected so a caller cannot accidentally turn this into an
+    unbounded loop.
     """
 
     heartbeat_grace_seconds: float = 5 * 60.0
     max_retries: int = 1
     poll_interval_seconds: float = 1.0
     termination_grace_seconds: float = 5.0
+    committed_drain_seconds: float = 300.0
 
     def __post_init__(self) -> None:
         if self.heartbeat_grace_seconds < 0:
@@ -93,6 +95,8 @@ class SupervisorPolicy:
             raise ValueError("poll_interval_seconds must be non-negative")
         if self.termination_grace_seconds < 0:
             raise ValueError("termination_grace_seconds must be non-negative")
+        if self.committed_drain_seconds < 0:
+            raise ValueError("committed_drain_seconds must be non-negative")
 
     @property
     def max_attempts(self) -> int:
@@ -274,6 +278,7 @@ class SupervisorV2:
         *,
         lineage_id: str,
         initial_committed_generation: int | None = None,
+        target_generation: int | None = None,
         launcher: Callable[[LaunchRequest], subprocess.Popen[bytes] | subprocess.Popen[str]] | None = None,
         command: Sequence[str] | None = None,
         cwd: str | Path | None = None,
@@ -289,7 +294,16 @@ class SupervisorV2:
         if initial_committed_generation is not None:
             if type(initial_committed_generation) is not int or initial_committed_generation < 0:
                 raise ValueError("initial_committed_generation must be a non-negative integer")
+        if target_generation is not None:
+            if type(target_generation) is not int or target_generation < 0:
+                raise ValueError("target_generation must be a non-negative integer")
+            if (
+                initial_committed_generation is not None
+                and target_generation <= initial_committed_generation
+            ):
+                raise ValueError("target_generation must be after the initial committed generation")
         self.initial_committed_generation = initial_committed_generation
+        self.target_generation = target_generation
         if launcher is not None and command is not None:
             raise ValueError("SupervisorV2 accepts launcher or command, not both")
         self.launcher = launcher
@@ -354,6 +368,17 @@ class SupervisorV2:
         elif baseline is None:
             last_generation = committed_generation
         else:
+            if (
+                self.target_generation is not None
+                and committed_generation > self.target_generation
+            ):
+                return RecoveryPlan(
+                    action=SupervisorAction.STOP,
+                    generation=self.target_generation,
+                    last_committed_generation=committed_generation,
+                    attempt=1,
+                    reason="committed marker is newer than the requested recovery generation",
+                )
             if committed_generation < baseline:
                 return RecoveryPlan(
                     action=SupervisorAction.STOP,
@@ -363,7 +388,11 @@ class SupervisorV2:
                     reason="lineage commit marker is older than its declared initial generation",
                 )
             last_generation = committed_generation
-        default_generation = (last_generation or 0) + 1
+        default_generation = (
+            self.target_generation
+            if self.target_generation is not None
+            else (last_generation or 0) + 1
+        )
         try:
             intent = self._read_intent()
             active = self._read_active_child()
@@ -687,7 +716,7 @@ class SupervisorV2:
         the bounded termination grace, then clean up any surviving descendants
         with the same scoped ownership checks.
         """
-        timeout = max(0.0, float(self.policy.termination_grace_seconds))
+        timeout = max(0.0, float(self.policy.committed_drain_seconds))
         if process is not None:
             try:
                 process.wait(timeout=timeout)
