@@ -1,14 +1,9 @@
-"""Small, topology-neutral Supervisor V2.
+"""Generic durable supervision for one external process execution.
 
-This module owns only the durable mechanics around one generation execution:
-commit-marker discovery, child identity, process-group cleanup, heartbeat
-health, and one bounded retry.  It deliberately does not inherit from the V1
-orchestrator and does not contain a business-state machine, Arena handling, or
-continuous scheduling loop.
-
-The supervisor's restart decision is intentionally separate from execution.
-``plan()`` is read-only; callers can use it to prove recovery semantics without
-starting the next generation.
+The supervisor owns process mechanics only: durable child identity, process
+group ownership, liveness and progress freshness, bounded same-command retry,
+reattachment, exit status, and TERM/KILL cleanup. Domain success criteria
+belong to the caller.
 """
 
 from __future__ import annotations
@@ -18,10 +13,9 @@ from dataclasses import dataclass
 from enum import Enum
 import os
 from pathlib import Path
-import re
 import subprocess
 import time
-import uuid
+from typing import Any
 
 from ..process_supervision import (
     ProcessOwnershipError,
@@ -38,28 +32,23 @@ from ..process_supervision import (
     timestamp_seconds,
     write_active_child,
 )
-from ..artifact_graph import validate_generation_commit
 
 
 SUPERVISOR_SCHEMA = "gocube-orchestrator-supervisor-v2"
-ACTIVE_CHILD_SCHEMA = "gocube-orchestrator-v2-active-child-v1"
-LEGACY_ACTIVE_CHILD_SCHEMA = "gocube-training-active-child-v1"
-GENERATION_INTENT_SCHEMA = "gocube-orchestrator-v2-generation-intent-v1"
-STOP_SCHEMA = "gocube-orchestrator-v2-stop-v1"
-_COMMIT_RE = re.compile(r"^generation-(\d+)\.complete\.json$")
+ACTIVE_CHILD_SCHEMA = "gocube-orchestrator-v2-active-child-v2"
+EXECUTION_INTENT_SCHEMA = "gocube-orchestrator-v2-execution-intent-v1"
+STOP_SCHEMA = "gocube-orchestrator-v2-stop-v2"
 
 
 class SupervisorAction(str, Enum):
-    """The only decisions needed to recover one generation."""
-
     START = "START"
     REATTACH = "REATTACH"
     STOP = "STOP"
 
 
 class SupervisorStatus(str, Enum):
-    COMMITTED = "COMMITTED"
-    STOPPED = "STOPPED"
+    SUCCESS = "SUCCESS"
+    FAILURE = "FAILURE"
 
 
 class SupervisorIntegrityError(RuntimeError):
@@ -67,20 +56,20 @@ class SupervisorIntegrityError(RuntimeError):
 
 
 class TechnicalFailure(RuntimeError):
-    """One child attempt failed before producing its commit marker."""
+    """A child attempt failed before the process supervisor could succeed."""
+
+    def __init__(self, message: str, *, returncode: int | None = None) -> None:
+        super().__init__(message)
+        self.returncode = returncode
 
 
 @dataclass(frozen=True)
 class SupervisorPolicy:
-    """Bounded technical-failure policy.
-
-    The production defaults are deliberately fixed to five minutes of
-    heartbeat grace and exactly one retry of the same generation.  A shorter
-    grace is useful for unit tests; more than one retry is rejected so a
-    caller cannot accidentally turn this into an unbounded loop.
-    """
+    """Bounded process-health and restart policy."""
 
     heartbeat_grace_seconds: float = 5 * 60.0
+    liveness_timeout_seconds: float | None = None
+    progress_timeout_seconds: float | None = None
     max_retries: int = 1
     poll_interval_seconds: float = 1.0
     termination_grace_seconds: float = 5.0
@@ -88,8 +77,14 @@ class SupervisorPolicy:
     def __post_init__(self) -> None:
         if self.heartbeat_grace_seconds < 0:
             raise ValueError("heartbeat_grace_seconds must be non-negative")
-        if type(self.max_retries) is not int or not 0 <= self.max_retries <= 1:
-            raise ValueError("max_retries must be 0 or 1")
+        for name, value in (
+            ("liveness_timeout_seconds", self.liveness_timeout_seconds),
+            ("progress_timeout_seconds", self.progress_timeout_seconds),
+        ):
+            if value is not None and value < 0:
+                raise ValueError(f"{name} must be non-negative")
+        if type(self.max_retries) is not int or self.max_retries < 0:
+            raise ValueError("max_retries must be a non-negative integer")
         if self.poll_interval_seconds < 0:
             raise ValueError("poll_interval_seconds must be non-negative")
         if self.termination_grace_seconds < 0:
@@ -99,22 +94,25 @@ class SupervisorPolicy:
     def max_attempts(self) -> int:
         return 1 + self.max_retries
 
+    @property
+    def liveness_grace_seconds(self) -> float:
+        return (
+            self.heartbeat_grace_seconds
+            if self.liveness_timeout_seconds is None
+            else self.liveness_timeout_seconds
+        )
 
-@dataclass(frozen=True)
-class CommitMarker:
-    generation: int
-    path: Path
-    payload: Mapping[str, object]
+    @property
+    def progress_grace_seconds(self) -> float | None:
+        return self.progress_timeout_seconds
 
 
 @dataclass(frozen=True)
 class ActiveChild:
     """The minimum durable identity needed to reattach safely."""
 
-    lineage_id: str
-    generation: int
+    execution_id: str
     attempt: int
-    execution_unit_id: str
     pid: int
     process_group: int
     started_at: float
@@ -124,7 +122,7 @@ class ActiveChild:
 
     @property
     def heartbeat_path(self) -> Path:
-        """Compatibility alias for the common single-file heartbeat layout."""
+        """Compatibility alias for a single-file heartbeat layout."""
         return self.liveness_path
 
     def to_dict(self, root: Path) -> dict[str, object]:
@@ -134,10 +132,8 @@ class ActiveChild:
         return {
             "schema": self.schema,
             "supervisor_schema": SUPERVISOR_SCHEMA,
-            "lineage_id": self.lineage_id,
-            "generation": self.generation,
+            "execution_id": self.execution_id,
             "attempt": self.attempt,
-            "execution_unit_id": self.execution_unit_id,
             "pid": self.pid,
             "process_group": self.process_group,
             "started_at": self.started_at,
@@ -151,55 +147,46 @@ class ActiveChild:
         payload: Mapping[str, object],
         *,
         root: Path,
-        owner_lineage_id: str,
+        owner_execution_id: str,
     ) -> "ActiveChild":
-        schema = str(payload.get("schema", ""))
-        if schema not in {ACTIVE_CHILD_SCHEMA, LEGACY_ACTIVE_CHILD_SCHEMA}:
+        if str(payload.get("schema", "")) != ACTIVE_CHILD_SCHEMA:
             raise SupervisorIntegrityError("active-child schema mismatch")
-        raw_lineage = payload.get("lineage_id", owner_lineage_id)
-        lineage_id = str(raw_lineage)
+        execution_id = str(payload.get("execution_id", ""))
+        if not execution_id or execution_id != owner_execution_id:
+            raise SupervisorIntegrityError("active-child execution ownership mismatch")
         try:
-            generation = int(payload["generation"])
             attempt = int(payload.get("attempt", 1))
             pid = int(payload["pid"])
             process_group = int(payload.get("process_group", pid))
             started_at = timestamp_seconds(payload.get("started_at"))
         except (KeyError, TypeError, ValueError) as exc:
             raise SupervisorIntegrityError("active-child identity is malformed") from exc
-        if lineage_id != owner_lineage_id:
-            raise SupervisorIntegrityError("active-child lineage ownership mismatch")
-        if generation < 0 or attempt < 1 or pid <= 1 or process_group <= 1:
+        if attempt < 1 or pid <= 1 or process_group <= 1:
             raise SupervisorIntegrityError("active-child identity contains unsafe values")
 
-        default_heartbeat = root / "runtime" / "heartbeats" / f"generation-{generation:04d}.json"
-        raw_liveness = payload.get("liveness_path", payload.get("heartbeat_path", str(default_heartbeat)))
+        raw_liveness = payload.get("liveness_path")
         raw_progress = payload.get("progress_path", raw_liveness)
         liveness_path = _confined_path(root, raw_liveness, "active-child liveness path")
         progress_path = _confined_path(root, raw_progress, "active-child progress path")
-        execution_unit_id = str(
-            payload.get("execution_unit_id", f"legacy-generation-{generation:04d}-pid-{pid}")
-        )
-        if not execution_unit_id or execution_unit_id in {".", ".."}:
-            raise SupervisorIntegrityError("active-child execution unit is malformed")
         return cls(
-            lineage_id=lineage_id,
-            generation=generation,
+            execution_id=execution_id,
             attempt=attempt,
-            execution_unit_id=execution_unit_id,
             pid=pid,
             process_group=process_group,
             started_at=started_at,
             liveness_path=liveness_path,
             progress_path=progress_path,
-            schema=schema,
+            schema=ACTIVE_CHILD_SCHEMA,
         )
 
 
 @dataclass(frozen=True)
 class LaunchRequest:
-    generation: int
+    execution_id: str
     attempt: int
-    execution_unit_id: str
+    command: tuple[str, ...] | None
+    cwd: Path | None
+    env: Mapping[str, str] | None
     root: Path
     liveness_path: Path
     progress_path: Path
@@ -208,15 +195,9 @@ class LaunchRequest:
 @dataclass(frozen=True)
 class RecoveryPlan:
     action: SupervisorAction
-    generation: int
-    last_committed_generation: int | None
     attempt: int
     reason: str
     active_child: ActiveChild | None = None
-
-    @property
-    def next_generation(self) -> int:
-        return (self.last_committed_generation or 0) + 1
 
     @property
     def should_start(self) -> bool:
@@ -228,54 +209,60 @@ class RecoveryPlan:
 
 
 @dataclass(frozen=True)
-class SupervisionResult:
-    status: SupervisorStatus
-    generation: int
-    attempts: int
-    last_committed_generation: int | None
-    reattached: bool = False
-
-
-@dataclass(frozen=True)
 class HeartbeatStatus:
     liveness_age_seconds: float | None
     progress_age_seconds: float | None
     liveness_stale: bool
     progress_stale: bool
+    progress_token: object | None = None
 
     @property
     def stale(self) -> bool:
         return self.liveness_stale or self.progress_stale
 
 
+@dataclass(frozen=True)
+class ProcessResult:
+    status: SupervisorStatus
+    returncode: int | None
+    attempts: int
+    reattached: bool = False
+    reason: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.status is SupervisorStatus.SUCCESS
+
+    @property
+    def exit_code(self) -> int | None:
+        return self.returncode
+
+
+SupervisionResult = ProcessResult
+
+
 def _confined_path(root: Path, value: object, label: str) -> Path:
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, (str, Path)) or not str(value).strip():
         raise SupervisorIntegrityError(f"{label} is missing")
     candidate = Path(value)
     path = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
     try:
         path.relative_to(root.resolve())
     except ValueError as exc:
-        raise SupervisorIntegrityError(f"{label} escapes lineage root") from exc
+        raise SupervisorIntegrityError(f"{label} escapes execution root") from exc
     return path
 
 
 class SupervisorV2:
-    """Supervise exactly one generation at a time.
-
-    ``launcher`` receives a :class:`LaunchRequest` and must return a process
-    started in its own session/process group.  If it is omitted, ``command``
-    is launched with ``start_new_session=True``.  No topology-specific driver
-    or V1 orchestrator is imported here.
-    """
+    """Supervise one opaque process execution."""
 
     def __init__(
         self,
         root: str | Path,
         *,
-        lineage_id: str,
-        initial_committed_generation: int | None = None,
-        target_generation: int | None = None,
+        execution_id: str,
+        liveness_path: str | Path,
+        progress_path: str | Path,
         launcher: Callable[[LaunchRequest], subprocess.Popen[bytes] | subprocess.Popen[str]] | None = None,
         command: Sequence[str] | None = None,
         cwd: str | Path | None = None,
@@ -285,26 +272,15 @@ class SupervisorV2:
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         self.root = Path(root).resolve()
-        self.lineage_id = str(lineage_id)
-        if not self.lineage_id or "/" in self.lineage_id or "\\" in self.lineage_id:
-            raise ValueError("lineage_id must be one safe path component")
-        if initial_committed_generation is not None:
-            if type(initial_committed_generation) is not int or initial_committed_generation < 0:
-                raise ValueError("initial_committed_generation must be a non-negative integer")
-        if target_generation is not None:
-            if type(target_generation) is not int or target_generation < 0:
-                raise ValueError("target_generation must be a non-negative integer")
-            if (
-                initial_committed_generation is not None
-                and target_generation <= initial_committed_generation
-            ):
-                raise ValueError("target_generation must be after the initial committed generation")
-        self.initial_committed_generation = initial_committed_generation
-        self.target_generation = target_generation
-        if launcher is not None and command is not None:
-            raise ValueError("SupervisorV2 accepts launcher or command, not both")
+        self.execution_id = str(execution_id)
+        if not self.execution_id:
+            raise ValueError("execution_id must be non-empty")
+        self.liveness_path = Path(liveness_path).resolve()
+        self.progress_path = Path(progress_path).resolve()
         self.launcher = launcher
         self.command = tuple(str(value) for value in command) if command is not None else None
+        if self.command is not None and not self.command:
+            raise ValueError("command must not be empty")
         self.cwd = Path(cwd).resolve() if cwd is not None else None
         self.env = dict(env) if env is not None else None
         self.policy = policy or SupervisorPolicy()
@@ -316,305 +292,194 @@ class SupervisorV2:
         return self.root / "runtime" / "active-child.json"
 
     @property
-    def generation_intent_path(self) -> Path:
-        return self.root / "runtime" / "generation-intent.json"
+    def execution_intent_path(self) -> Path:
+        return self.root / "runtime" / "execution-intent.json"
 
     @property
     def stop_path(self) -> Path:
         return self.root / "runtime" / "supervisor-stop.json"
 
-    def last_committed(self) -> CommitMarker | None:
-        """Return the highest valid commit marker without changing the run."""
-        markers: list[CommitMarker] = []
-        for path in self.root.glob("generation-*.complete.json"):
-            match = _COMMIT_RE.fullmatch(path.name)
-            if match is None:
-                continue
-            generation = int(match.group(1))
-            try:
-                payload = read_json(path)
-            except (OSError, ValueError) as exc:
-                raise SupervisorIntegrityError(f"cannot read commit marker: {path}") from exc
-            try:
-                declared_generation = int(payload["generation"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise SupervisorIntegrityError(f"commit marker generation is malformed: {path}") from exc
-            if declared_generation != generation:
-                raise SupervisorIntegrityError(f"commit marker filename/payload mismatch: {path}")
-            for owner_key in ("lineage_id", "run_id"):
-                owner = payload.get(owner_key)
-                if owner is not None and str(owner) != self.lineage_id:
-                    raise SupervisorIntegrityError(f"commit marker ownership mismatch: {path}")
-            try:
-                validate_generation_commit(
-                    root=self.root,
-                    lineage_id=self.lineage_id,
-                    generation=generation,
-                )
-            except (OSError, TypeError, ValueError) as exc:
-                raise SupervisorIntegrityError(
-                    f"commit marker lacks valid graph/provenance evidence: {path}"
-                ) from exc
-            markers.append(CommitMarker(generation=generation, path=path, payload=payload))
-        if not markers:
-            return None
-        markers.sort(key=lambda marker: marker.generation)
-        return markers[-1]
-
     def plan(self) -> RecoveryPlan:
-        """Read restart evidence and decide START, REATTACH, or STOP.
-
-        This method is read-only.  In particular, a plan for generation M95
-        does not launch M95.
-        """
-        try:
-            committed = self.last_committed()
-        except SupervisorIntegrityError as exc:
-            generation = (
-                self.target_generation
-                if self.target_generation is not None
-                else (self.initial_committed_generation or 0) + 1
-            )
-            return RecoveryPlan(
-                action=SupervisorAction.STOP,
-                generation=generation,
-                last_committed_generation=self.initial_committed_generation,
-                attempt=1,
-                reason=str(exc),
-            )
-        committed_generation = committed.generation if committed is not None else None
-        baseline = self.initial_committed_generation
-        if committed_generation is None:
-            last_generation = baseline
-        elif baseline is None:
-            last_generation = committed_generation
-        else:
-            if (
-                self.target_generation is not None
-                and committed_generation > self.target_generation
-            ):
-                return RecoveryPlan(
-                    action=SupervisorAction.STOP,
-                    generation=self.target_generation,
-                    last_committed_generation=committed_generation,
-                    attempt=1,
-                    reason="committed marker is newer than the requested recovery generation",
-                )
-            if committed_generation < baseline:
-                return RecoveryPlan(
-                    action=SupervisorAction.STOP,
-                    generation=baseline + 1,
-                    last_committed_generation=baseline,
-                    attempt=1,
-                    reason="lineage commit marker is older than its declared initial generation",
-                )
-            last_generation = committed_generation
-        default_generation = (
-            self.target_generation
-            if self.target_generation is not None
-            else (last_generation or 0) + 1
-        )
+        """Decide whether to start, reattach, or stop without launching."""
         try:
             intent = self._read_intent()
             active = self._read_active_child()
         except SupervisorIntegrityError as exc:
             return RecoveryPlan(
                 action=SupervisorAction.STOP,
-                generation=default_generation,
-                last_committed_generation=last_generation,
                 attempt=1,
                 reason=str(exc),
             )
 
-        generation = default_generation
-        if intent is not None and int(intent["generation"]) > (last_generation or -1):
-            generation = int(intent["generation"])
-        if active is not None and active.generation > (last_generation or -1):
-            if generation != active.generation:
+        if self.stop_path.is_file():
+            return RecoveryPlan(
+                action=SupervisorAction.STOP,
+                attempt=int(intent["attempt"]) if intent is not None else 1,
+                reason="durable supervisor stop is present",
+                active_child=active,
+            )
+
+        if active is not None:
+            if process_group_exists(active.process_group):
+                if self._child_group_matches(active):
+                    return RecoveryPlan(
+                        action=SupervisorAction.REATTACH,
+                        attempt=active.attempt,
+                        reason="matching live child owns the durable execution identity",
+                        active_child=active,
+                    )
                 return RecoveryPlan(
                     action=SupervisorAction.STOP,
-                    generation=default_generation,
-                    last_committed_generation=last_generation,
-                    attempt=active.attempt,
-                    reason="active child and generation intent disagree",
-                    active_child=active,
-                )
-            group_alive = process_group_exists(active.process_group)
-            if group_alive and self._child_group_matches(active):
-                return RecoveryPlan(
-                    action=SupervisorAction.REATTACH,
-                    generation=generation,
-                    last_committed_generation=last_generation,
-                    attempt=active.attempt,
-                    reason="matching live child owns the uncommitted generation",
-                    active_child=active,
-                )
-            if group_alive:
-                return RecoveryPlan(
-                    action=SupervisorAction.STOP,
-                    generation=generation,
-                    last_committed_generation=last_generation,
                     attempt=active.attempt,
                     reason="active child process group ownership does not match its durable identity",
                     active_child=active,
                 )
-            attempt = max(active.attempt + 1, int(intent["attempt"]) if intent else 1)
+            attempt = active.attempt + 1
         else:
-            attempt = int(intent["attempt"]) if intent is not None and int(intent["generation"]) == generation else 1
+            attempt = 1
 
-        if self.stop_path.is_file():
-            return RecoveryPlan(
-                action=SupervisorAction.STOP,
-                generation=generation,
-                last_committed_generation=last_generation,
-                attempt=attempt,
-                reason="durable supervisor stop is present",
-                active_child=active,
-            )
+        if intent is not None:
+            attempt = max(attempt, int(intent["attempt"]))
         if attempt > self.policy.max_attempts:
             return RecoveryPlan(
                 action=SupervisorAction.STOP,
-                generation=generation,
-                last_committed_generation=last_generation,
                 attempt=attempt,
-                reason="generation exhausted its bounded technical retry budget",
+                reason="execution exhausted its bounded technical retry budget",
                 active_child=active,
             )
         return RecoveryPlan(
             action=SupervisorAction.START,
-            generation=generation,
-            last_committed_generation=last_generation,
             attempt=attempt,
             reason=(
-                "uncommitted generation has no live matching child; rerun the same generation"
-                if generation != default_generation or intent is not None or active is not None
-                else "next generation after the last committed marker"
+                "retry the same command after a technical failure"
+                if attempt > 1 or intent is not None or active is not None
+                else "no active child exists"
             ),
             active_child=active,
         )
 
-    def run_once(self) -> SupervisionResult:
-        """Supervise one generation, including at most one same-generation retry."""
+    def supervise(self) -> ProcessResult:
+        return self.run_once()
+
+    def run_once(self) -> ProcessResult:
+        """Supervise one command, including bounded same-command retries."""
         plan = self.plan()
         if plan.action is SupervisorAction.STOP:
-            return SupervisionResult(
-                status=SupervisorStatus.STOPPED,
-                generation=plan.generation,
-                attempts=plan.attempt,
-                last_committed_generation=plan.last_committed_generation,
-                reattached=False,
+            if plan.active_child is not None and process_group_exists(plan.active_child.process_group):
+                try:
+                    self._terminate_group(plan.active_child, reason=plan.reason)
+                except SupervisorIntegrityError as exc:
+                    return ProcessResult(
+                        status=SupervisorStatus.FAILURE,
+                        returncode=None,
+                        attempts=0,
+                        reason=str(exc),
+                    )
+            return ProcessResult(
+                status=SupervisorStatus.FAILURE,
+                returncode=None,
+                attempts=0,
+                reason=plan.reason,
             )
 
-        generation = plan.generation
         attempt = plan.attempt
         reattached = plan.action is SupervisorAction.REATTACH
+        ever_reattached = reattached
+        active = plan.active_child if reattached else None
+        process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None
         while attempt <= self.policy.max_attempts:
-            process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None
-            active = plan.active_child if reattached else None
             try:
-                if reattached:
-                    if active is None:
-                        raise TechnicalFailure("reattach plan has no active child")
-                else:
-                    self._discard_committed_stale_child(active, plan.last_committed_generation)
-                    process, active = self._start(generation, attempt)
-                self._monitor(active, process)
-                committed = self.last_committed()
-                if committed is None or committed.generation < generation:
-                    raise TechnicalFailure(
-                        f"generation {generation} exited without its commit marker"
-                    )
+                if not reattached:
+                    process, active = self._start(attempt)
+                if active is None:
+                    raise TechnicalFailure("supervision has no active child identity")
+                returncode = self._monitor(active, process)
                 self._clear_runtime_identity()
-                return SupervisionResult(
-                    status=SupervisorStatus.COMMITTED,
-                    generation=generation,
+                return ProcessResult(
+                    status=SupervisorStatus.SUCCESS,
+                    returncode=returncode,
                     attempts=attempt,
-                    last_committed_generation=committed.generation,
-                    reattached=reattached,
+                    reattached=ever_reattached,
                 )
             except TechnicalFailure as exc:
                 if active is not None:
-                    self._terminate_group(active, reason=str(exc), process=process)
+                    try:
+                        self._terminate_group(active, reason=str(exc), process=process)
+                    except SupervisorIntegrityError as cleanup_exc:
+                        self._write_stop(attempt, str(cleanup_exc), active=active)
+                        clear_active_child(self.active_child_path)
+                        return ProcessResult(
+                            status=SupervisorStatus.FAILURE,
+                            returncode=exc.returncode,
+                            attempts=attempt,
+                            reattached=ever_reattached,
+                            reason=str(cleanup_exc),
+                        )
                 clear_active_child(self.active_child_path)
                 if attempt >= self.policy.max_attempts:
-                    self._write_stop(generation, attempt, str(exc))
-                    return SupervisionResult(
-                        status=SupervisorStatus.STOPPED,
-                        generation=generation,
+                    reason = str(exc)
+                    self._write_stop(attempt, reason, active=active)
+                    return ProcessResult(
+                        status=SupervisorStatus.FAILURE,
+                        returncode=exc.returncode,
                         attempts=attempt,
-                        last_committed_generation=(
-                            self.last_committed().generation if self.last_committed() is not None else None
-                        ),
-                        reattached=reattached,
+                        reattached=ever_reattached,
+                        reason=reason,
                     )
                 attempt += 1
-                self._write_intent(generation, attempt)
-                plan = RecoveryPlan(
-                    action=SupervisorAction.START,
-                    generation=generation,
-                    last_committed_generation=plan.last_committed_generation,
-                    attempt=attempt,
-                    reason="retrying the same generation after one technical failure",
-                )
+                self._write_intent(attempt)
                 reattached = False
+                active = None
+                process = None
             except SupervisorIntegrityError as exc:
-                if active is not None:
-                    if self._can_terminate_group(active):
-                        self._terminate_group(active, reason=str(exc), process=process)
-                self._write_stop(generation, attempt, str(exc))
-                return SupervisionResult(
-                    status=SupervisorStatus.STOPPED,
-                    generation=generation,
+                if active is not None and self._can_terminate_group(active):
+                    self._terminate_group(active, reason=str(exc), process=process)
+                self._write_stop(attempt, str(exc), active=active)
+                clear_active_child(self.active_child_path)
+                return ProcessResult(
+                    status=SupervisorStatus.FAILURE,
+                    returncode=None,
                     attempts=attempt,
-                    last_committed_generation=plan.last_committed_generation,
-                    reattached=reattached,
+                    reattached=ever_reattached,
+                    reason=str(exc),
                 )
 
         raise AssertionError("bounded supervisor loop did not return")
 
     def heartbeat_status(self, child: ActiveChild, *, now: float | None = None) -> HeartbeatStatus:
-        """Return independent liveness/progress freshness for a child."""
+        """Return generic liveness/progress freshness for a child."""
         current = self.clock() if now is None else float(now)
-        liveness_at = self._heartbeat_timestamp(child.liveness_path, "liveness_at", current)
-        progress_at = self._heartbeat_timestamp(child.progress_path, "progress_at", current)
-        restore_phase = False
-        try:
-            heartbeat = read_json(child.progress_path)
-            restore_phase = heartbeat.get("phase") == "load-previous-state"
-        except (OSError, ValueError):
-            pass
-        grace = self.policy.heartbeat_grace_seconds
-        # A newly started child gets the full grace window to publish its
-        # first heartbeat.  Liveness and progress get that grace independently.
+        liveness_at, _ = self._heartbeat_value(child.liveness_path, "liveness_at")
+        progress_at, progress_token = self._heartbeat_value(child.progress_path, "progress_at")
         started_age = max(0.0, current - child.started_at)
         liveness_age = started_age if liveness_at is None else max(0.0, current - liveness_at)
         progress_age = started_age if progress_at is None else max(0.0, current - progress_at)
+        progress_grace = self.policy.progress_grace_seconds
         return HeartbeatStatus(
             liveness_age_seconds=liveness_age,
             progress_age_seconds=progress_age,
-            liveness_stale=liveness_age >= grace,
-            # Parent/replay restore is a bounded but potentially long I/O
-            # phase. Its dedicated liveness heartbeat remains authoritative
-            # until semantic progress resumes after restore completes.
-            progress_stale=progress_age >= grace and not restore_phase,
+            liveness_stale=liveness_age >= self.policy.liveness_grace_seconds,
+            progress_stale=(
+                progress_grace is not None and progress_age >= progress_grace
+            ),
+            progress_token=progress_token,
         )
 
     def _read_intent(self) -> dict[str, object] | None:
-        if not self.generation_intent_path.is_file():
+        if not self.execution_intent_path.is_file():
             return None
         try:
-            payload = read_json(self.generation_intent_path)
-            if payload.get("schema") != GENERATION_INTENT_SCHEMA:
+            payload = read_json(self.execution_intent_path)
+            if payload.get("schema") != EXECUTION_INTENT_SCHEMA:
                 raise ValueError("schema mismatch")
-            if str(payload.get("lineage_id")) != self.lineage_id:
-                raise ValueError("lineage mismatch")
-            generation = int(payload["generation"])
+            if str(payload.get("execution_id")) != self.execution_id:
+                raise ValueError("execution ownership mismatch")
             attempt = int(payload.get("attempt", 1))
-            if generation < 0 or attempt < 1:
-                raise ValueError("unsafe generation intent")
+            if attempt < 1:
+                raise ValueError("unsafe attempt")
             return payload
         except (OSError, KeyError, TypeError, ValueError) as exc:
-            raise SupervisorIntegrityError("generation intent is malformed") from exc
+            raise SupervisorIntegrityError("execution intent is malformed") from exc
 
     def _read_active_child(self) -> ActiveChild | None:
         if not self.active_child_path.is_file():
@@ -623,63 +488,54 @@ class SupervisorV2:
             return ActiveChild.from_dict(
                 read_active_child(self.active_child_path) or {},
                 root=self.root,
-                owner_lineage_id=self.lineage_id,
+                owner_execution_id=self.execution_id,
             )
         except (OSError, ValueError, SupervisorIntegrityError) as exc:
             if isinstance(exc, SupervisorIntegrityError):
                 raise
             raise SupervisorIntegrityError("active-child record is unreadable") from exc
 
-    def _write_intent(self, generation: int, attempt: int) -> None:
+    def _write_intent(self, attempt: int) -> None:
         atomic_write_json(
-            self.generation_intent_path,
+            self.execution_intent_path,
             {
-                "schema": GENERATION_INTENT_SCHEMA,
+                "schema": EXECUTION_INTENT_SCHEMA,
                 "supervisor_schema": SUPERVISOR_SCHEMA,
-                "lineage_id": self.lineage_id,
-                "generation": generation,
+                "execution_id": self.execution_id,
                 "attempt": attempt,
                 "updated_at": self.clock(),
             },
         )
 
-    def _start(self, generation: int, attempt: int) -> tuple[subprocess.Popen[bytes] | subprocess.Popen[str], ActiveChild]:
-        unit_id = f"generation-{generation:04d}-attempt-{attempt:02d}-{uuid.uuid4().hex[:12]}"
-        liveness_path = self.root / "runtime" / "heartbeats" / f"generation-{generation:04d}.json"
-        progress_path = liveness_path
+    def _start(
+        self,
+        attempt: int,
+    ) -> tuple[subprocess.Popen[bytes] | subprocess.Popen[str], ActiveChild]:
         request = LaunchRequest(
-            generation=generation,
+            execution_id=self.execution_id,
             attempt=attempt,
-            execution_unit_id=unit_id,
+            command=self.command,
+            cwd=self.cwd,
+            env=self.env,
             root=self.root,
-            liveness_path=liveness_path,
-            progress_path=progress_path,
+            liveness_path=self.liveness_path,
+            progress_path=self.progress_path,
         )
-        self._write_intent(generation, attempt)
-        liveness_path.unlink(missing_ok=True)
-        if progress_path != liveness_path:
-            progress_path.unlink(missing_ok=True)
+        self._write_intent(attempt)
+        self.liveness_path.parent.mkdir(parents=True, exist_ok=True)
+        self.progress_path.parent.mkdir(parents=True, exist_ok=True)
+        self.liveness_path.unlink(missing_ok=True)
+        if self.progress_path != self.liveness_path:
+            self.progress_path.unlink(missing_ok=True)
         if self.launcher is not None:
             process = self.launcher(request)
         else:
             if self.command is None:
                 raise SupervisorIntegrityError("run_once requires launcher or command")
-            child_env = dict(os.environ if self.env is None else self.env)
-            child_env.update(
-                {
-                    "AZ_V2_LINEAGE_ID": self.lineage_id,
-                    "AZ_V2_GENERATION": str(generation),
-                    "AZ_V2_EXECUTION_UNIT_ID": unit_id,
-                    "AZ_V2_LIVENESS_HEARTBEAT_PATH": str(liveness_path),
-                    "AZ_V2_PROGRESS_HEARTBEAT_PATH": str(progress_path),
-                    # The existing driver accepts this primitive directly.
-                    "AZ_DRIVER_HEARTBEAT_PATH": str(liveness_path),
-                }
-            )
             process = start_owned_child(
                 self.command,
                 cwd=self.cwd,
-                env=child_env,
+                env=self.env,
                 popen=subprocess.Popen,
             )
         try:
@@ -688,15 +544,13 @@ class SupervisorV2:
         except (AttributeError, OSError, ProcessOwnershipError, TypeError, ValueError) as exc:
             raise SupervisorIntegrityError("launcher did not return a usable child process") from exc
         active = ActiveChild(
-            lineage_id=self.lineage_id,
-            generation=generation,
+            execution_id=self.execution_id,
             attempt=attempt,
-            execution_unit_id=unit_id,
             pid=pid,
             process_group=process_group,
             started_at=self.clock(),
-            liveness_path=liveness_path,
-            progress_path=progress_path,
+            liveness_path=self.liveness_path,
+            progress_path=self.progress_path,
         )
         try:
             write_active_child(self.active_child_path, active.to_dict(self.root))
@@ -709,76 +563,105 @@ class SupervisorV2:
         self,
         active: ActiveChild,
         process: subprocess.Popen[bytes] | subprocess.Popen[str] | None,
-    ) -> None:
+    ) -> int:
+        previous = self._heartbeat_values(active)
+        now = self.clock()
+        liveness_changed_at = self._baseline_time(previous[0], active.started_at, now)
+        progress_changed_at = self._baseline_time(previous[1], active.started_at, now)
         while True:
-            if self._has_commit(active.generation):
-                self._drain_committed_child(active, process)
-                clear_active_child(self.active_child_path)
-                return
+            if process is not None:
+                returncode = process.poll()
+                if returncode is not None:
+                    if int(returncode) == 0:
+                        return 0
+                    raise TechnicalFailure(
+                        f"child exited with code {int(returncode)}",
+                        returncode=int(returncode),
+                    )
+            else:
+                returncode = self._reattached_returncode(active.pid)
+                if returncode is not None:
+                    if returncode == 0:
+                        if process_group_exists(active.process_group):
+                            self._terminate_group(active, reason="reattached child left descendants")
+                        return 0
+                    raise TechnicalFailure(
+                        "reattached child exited with a non-zero status",
+                        returncode=returncode,
+                    )
+            if process is None and not process_group_exists(active.process_group):
+                returncode = self._reattached_returncode(active.pid)
+                if returncode == 0:
+                    return 0
+                raise TechnicalFailure(
+                    "reattached child process group is gone without a successful exit status",
+                    returncode=returncode,
+                )
 
-            if process is not None and process.poll() is not None:
-                code = int(process.returncode)
-                raise TechnicalFailure(f"child exited with code {code}")
-            if not process_group_exists(active.process_group):
-                raise TechnicalFailure("active child process group is gone")
-
-            health = self.heartbeat_status(active)
-            if health.stale:
-                reasons: list[str] = []
-                if health.liveness_stale:
-                    reasons.append("liveness heartbeat missing or stale")
-                if health.progress_stale:
-                    reasons.append("progress heartbeat missing or stale")
-                raise TechnicalFailure("; ".join(reasons))
+            now = self.clock()
+            current = self._heartbeat_values(active)
+            if current[0] != previous[0] and current[0] is not None:
+                liveness_changed_at = now
+            if (current[1] != previous[1] or current[2] != previous[2]) and (
+                current[1] is not None or current[2] is not None
+            ):
+                progress_changed_at = now
+            liveness_age = max(0.0, now - liveness_changed_at)
+            progress_age = max(0.0, now - progress_changed_at)
+            if liveness_age >= self.policy.liveness_grace_seconds:
+                raise TechnicalFailure("liveness heartbeat is missing or stale")
+            progress_grace = self.policy.progress_grace_seconds
+            if progress_grace is not None and progress_age >= progress_grace:
+                raise TechnicalFailure("progress heartbeat is missing or stale")
+            previous = current
             self.sleeper(self.policy.poll_interval_seconds)
 
-    def _drain_committed_child(
-        self,
-        active: ActiveChild,
-        process: subprocess.Popen[bytes] | subprocess.Popen[str] | None,
-    ) -> None:
-        """Perform ordinary bounded process cleanup after the commit fence."""
-        timeout = max(0.0, float(self.policy.termination_grace_seconds))
-        if process is not None:
+    def _heartbeat_values(self, child: ActiveChild) -> tuple[float | None, float | None, object | None]:
+        liveness_at, _ = self._heartbeat_value(child.liveness_path, "liveness_at")
+        progress_at, progress_token = self._heartbeat_value(child.progress_path, "progress_at")
+        return liveness_at, progress_at, progress_token
+
+    @staticmethod
+    def _baseline_time(value: float | None, started_at: float, now: float) -> float:
+        if value is None:
+            return started_at
+        return min(now, max(started_at, value))
+
+    @staticmethod
+    def _heartbeat_value(path: Path, field: str) -> tuple[float | None, object | None]:
+        if not path.is_file():
+            return None, None
+        try:
+            payload: Mapping[str, Any] = read_json(path)
+        except (OSError, ValueError):
+            payload = {}
+        timestamp = heartbeat_timestamp(path, field)
+        if timestamp is None:
             try:
-                process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                pass
-        else:
-            deadline = time.monotonic() + timeout
-            while process_group_exists(active.process_group):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0.0:
-                    break
-                self.sleeper(min(self.policy.poll_interval_seconds, remaining))
-        if process_group_exists(active.process_group):
-            self._terminate_group(active, reason="committed child did not drain", process=process)
+                timestamp = path.stat().st_mtime
+            except OSError:
+                timestamp = None
+        token = payload.get("progress_token") if field == "progress_at" else None
+        return timestamp, token
 
-    def _heartbeat_timestamp(self, path: Path, field: str, now: float) -> float | None:
-        del now
-        return heartbeat_timestamp(path, field)
-
-    def _has_commit(self, generation: int) -> bool:
-        marker = self.last_committed()
-        return marker is not None and marker.generation >= generation
+    @staticmethod
+    def _reattached_returncode(pid: int) -> int | None:
+        try:
+            waited_pid, status = os.waitpid(int(pid), os.WNOHANG)
+        except (ChildProcessError, OSError):
+            return None
+        if waited_pid != int(pid):
+            return None
+        if os.WIFEXITED(status):
+            return os.WEXITSTATUS(status)
+        if os.WIFSIGNALED(status):
+            return -os.WTERMSIG(status)
+        return None
 
     def _child_group_matches(self, child: ActiveChild) -> bool:
         if not process_group_exists(child.process_group):
             return False
         return process_group_owned_by(child.pid, child.process_group)
-
-    def _discard_committed_stale_child(
-        self,
-        child: ActiveChild | None,
-        last_committed_generation: int | None,
-    ) -> None:
-        if child is None or last_committed_generation is None or child.generation > last_committed_generation:
-            return
-        if process_group_exists(child.process_group):
-            if not self._can_terminate_group(child):
-                raise SupervisorIntegrityError("committed stale child process group ownership mismatch")
-            self._terminate_group(child, reason="child belongs to an already committed generation")
-        clear_active_child(self.active_child_path)
 
     def _can_terminate_group(self, child: ActiveChild) -> bool:
         return process_group_owned_by(child.pid, child.process_group)
@@ -803,37 +686,65 @@ class SupervisorV2:
         except ProcessOwnershipError as exc:
             raise SupervisorIntegrityError(str(exc)) from exc
 
-    def _write_stop(self, generation: int, attempt: int, reason: str) -> None:
-        try:
-            committed = self.last_committed()
-        except SupervisorIntegrityError:
-            committed = None
+    def _write_stop(
+        self,
+        attempt: int,
+        reason: str,
+        *,
+        active: ActiveChild | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            "schema": STOP_SCHEMA,
+            "supervisor_schema": SUPERVISOR_SCHEMA,
+            "execution_id": self.execution_id,
+            "attempt": attempt,
+            "reason": reason,
+            "stopped_at": self.clock(),
+        }
+        if active is not None:
+            payload.update({"pid": active.pid, "process_group": active.process_group})
         atomic_write_json(
             self.stop_path,
-            {
-                "schema": STOP_SCHEMA,
-                "supervisor_schema": SUPERVISOR_SCHEMA,
-                "lineage_id": self.lineage_id,
-                "generation": generation,
-                "attempt": attempt,
-                "last_committed_generation": committed.generation if committed is not None else None,
-                "reason": reason,
-                "stopped_at": self.clock(),
-            },
+            payload,
         )
 
     def _clear_runtime_identity(self) -> None:
         clear_active_child(self.active_child_path)
-        self.generation_intent_path.unlink(missing_ok=True)
+        self.execution_intent_path.unlink(missing_ok=True)
+
+
+def supervise(
+    command: Sequence[str],
+    cwd: str | Path | None,
+    env: Mapping[str, str] | None,
+    execution_id: str,
+    liveness_path: str | Path,
+    progress_path: str | Path,
+    policy: SupervisorPolicy | None = None,
+    *,
+    root: str | Path | None = None,
+) -> ProcessResult:
+    """Convenience API for supervising one opaque command execution."""
+    state_root = Path(root).resolve() if root is not None else Path(liveness_path).resolve().parent
+    return SupervisorV2(
+        state_root,
+        execution_id=execution_id,
+        liveness_path=liveness_path,
+        progress_path=progress_path,
+        command=command,
+        cwd=cwd,
+        env=env,
+        policy=policy,
+    ).run_once()
 
 
 __all__ = [
     "ACTIVE_CHILD_SCHEMA",
     "ActiveChild",
-    "CommitMarker",
-    "GENERATION_INTENT_SCHEMA",
+    "EXECUTION_INTENT_SCHEMA",
     "HeartbeatStatus",
     "LaunchRequest",
+    "ProcessResult",
     "RecoveryPlan",
     "STOP_SCHEMA",
     "SupervisorAction",
@@ -843,4 +754,5 @@ __all__ = [
     "SupervisorV2",
     "SupervisionResult",
     "TechnicalFailure",
+    "supervise",
 ]

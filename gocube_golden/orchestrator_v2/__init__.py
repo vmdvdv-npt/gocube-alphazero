@@ -29,10 +29,10 @@ from .production_arm import ProductionArmExecutionPath  # noqa: F401
 from .supervisor import (  # noqa: F401
     ACTIVE_CHILD_SCHEMA,
     ActiveChild,
-    CommitMarker,
-    GENERATION_INTENT_SCHEMA,
+    EXECUTION_INTENT_SCHEMA,
     HeartbeatStatus,
     LaunchRequest,
+    ProcessResult,
     RecoveryPlan,
     STOP_SCHEMA,
     SupervisorAction,
@@ -42,6 +42,7 @@ from .supervisor import (  # noqa: F401
     SupervisorV2,
     SupervisionResult,
     TechnicalFailure,
+    supervise,
 )
 from .arena_runner import (  # noqa: F401
     ArenaRunRequest,
