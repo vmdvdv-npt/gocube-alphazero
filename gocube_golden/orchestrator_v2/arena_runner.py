@@ -243,25 +243,35 @@ class ArenaRunner:
             shutil.rmtree(output)
 
         write_evaluation_identity(output, run_id, identity.to_dict(), fingerprint)
+        engine_kwargs: dict[str, object] = {
+            "candidate_path": request.candidate.path,
+            "reference_path": request.reference.path,
+            "profile_name": request.profile,
+            "output_dir": output,
+            "candidate_label": request.candidate_label or request.candidate.checkpoint_id,
+            "reference_label": request.reference_label or request.reference.checkpoint_id,
+            "run_id": run_id,
+            "comparison": request.comparison
+            or f"{request.candidate.checkpoint_id}-vs-{request.reference.checkpoint_id}",
+            "master_seed": int(request.master_seed),
+            "config": config,
+            "expected_candidate_artifact_sha256": request.candidate.ref.sha256,
+            "expected_reference_artifact_sha256": request.reference.ref.sha256,
+            "evaluation_identity": identity.to_dict(),
+            "evaluation_fingerprint": fingerprint,
+        }
+        if request.output_dir is not None:
+            # The production engine enforces canonical evaluation storage. A
+            # same-lineage coordinator is the one explicit exception: it has
+            # already validated the path against this checkpoint owner's
+            # lineage arena, so pass that narrow allowance through the engine
+            # boundary without changing cross-lineage storage policy.
+            engine_kwargs["allowed_lineage_arena_root"] = (
+                Path(request.candidate.owner_root).resolve() / "arena"
+            )
         try:
             summary = dict(
-                self.engine(
-                    candidate_path=request.candidate.path,
-                    reference_path=request.reference.path,
-                    profile_name=request.profile,
-                    output_dir=output,
-                    candidate_label=request.candidate_label or request.candidate.checkpoint_id,
-                    reference_label=request.reference_label or request.reference.checkpoint_id,
-                    run_id=run_id,
-                    comparison=request.comparison
-                    or f"{request.candidate.checkpoint_id}-vs-{request.reference.checkpoint_id}",
-                    master_seed=int(request.master_seed),
-                    config=config,
-                    expected_candidate_artifact_sha256=request.candidate.ref.sha256,
-                    expected_reference_artifact_sha256=request.reference.ref.sha256,
-                    evaluation_identity=identity.to_dict(),
-                    evaluation_fingerprint=fingerprint,
-                )
+                self.engine(**engine_kwargs)
             )
         except Exception:
             # Keep the identity marker for fail-closed diagnosis/retry, just as
