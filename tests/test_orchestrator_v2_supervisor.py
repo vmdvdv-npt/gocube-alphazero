@@ -57,6 +57,24 @@ def test_committed_generation_is_not_rerun_and_next_is_only_planned(tmp_path: Pa
     assert not supervisor.active_child_path.exists()
 
 
+def test_external_parent_generation_is_the_first_child_baseline(tmp_path: Path) -> None:
+    lineage_id = "torus9-v2-ab-acceptance-m95-a-20260919-v1"
+    supervisor = SupervisorV2(
+        tmp_path,
+        lineage_id=lineage_id,
+        initial_committed_generation=95,
+        command=[sys.executable, "-c", "pass"],
+        policy=SupervisorPolicy(poll_interval_seconds=0.01),
+    )
+
+    plan = supervisor.plan()
+
+    assert plan.last_committed_generation == 95
+    assert plan.generation == 96
+    assert plan.action is SupervisorAction.START
+    assert not (tmp_path / "generation-96.complete.json").exists()
+
+
 def test_uncommitted_generation_without_child_is_rerun_same_generation(tmp_path: Path) -> None:
     supervisor = _supervisor(tmp_path)
     atomic_write_json(

@@ -273,6 +273,7 @@ class SupervisorV2:
         root: str | Path,
         *,
         lineage_id: str,
+        initial_committed_generation: int | None = None,
         launcher: Callable[[LaunchRequest], subprocess.Popen[bytes] | subprocess.Popen[str]] | None = None,
         command: Sequence[str] | None = None,
         cwd: str | Path | None = None,
@@ -285,6 +286,10 @@ class SupervisorV2:
         self.lineage_id = str(lineage_id)
         if not self.lineage_id or "/" in self.lineage_id or "\\" in self.lineage_id:
             raise ValueError("lineage_id must be one safe path component")
+        if initial_committed_generation is not None:
+            if type(initial_committed_generation) is not int or initial_committed_generation < 0:
+                raise ValueError("initial_committed_generation must be a non-negative integer")
+        self.initial_committed_generation = initial_committed_generation
         if launcher is not None and command is not None:
             raise ValueError("SupervisorV2 accepts launcher or command, not both")
         self.launcher = launcher
@@ -342,7 +347,22 @@ class SupervisorV2:
         does not launch M95.
         """
         committed = self.last_committed()
-        last_generation = committed.generation if committed is not None else None
+        committed_generation = committed.generation if committed is not None else None
+        baseline = self.initial_committed_generation
+        if committed_generation is None:
+            last_generation = baseline
+        elif baseline is None:
+            last_generation = committed_generation
+        else:
+            if committed_generation < baseline:
+                return RecoveryPlan(
+                    action=SupervisorAction.STOP,
+                    generation=baseline + 1,
+                    last_committed_generation=baseline,
+                    attempt=1,
+                    reason="lineage commit marker is older than its declared initial generation",
+                )
+            last_generation = committed_generation
         default_generation = (last_generation or 0) + 1
         try:
             intent = self._read_intent()

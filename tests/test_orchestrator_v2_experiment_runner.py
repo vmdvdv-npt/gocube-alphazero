@@ -270,12 +270,12 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     assert resolver.ancestor(a, 2).lineage_id == "parent"
     assert not (tmp_path / "runs" / "torus9" / "active" / "synthetic-ab-A" / "checkpoints" / "M0.pt").exists()
     assert not (tmp_path / "runs" / "torus9" / "active" / "synthetic-ab-B" / "checkpoints" / "M0.pt").exists()
-    assert arena_calls[0]["candidate_path"] == a.path
-    assert arena_calls[0]["reference_path"] == b.path
+    assert arena_calls[0]["candidate_path"] == b.path
+    assert arena_calls[0]["reference_path"] == a.path
 
     resumed = runner.run()
     assert resumed.state == "STOPPED"
     assert len(arm_path.calls) == 2
     assert len(arena_calls) == 1
-    assert resumed.arena.identity.candidate == a.ref
-    assert resumed.arena.identity.reference == b.ref
+    assert resumed.arena.identity.candidate == b.ref
+    assert resumed.arena.identity.reference == a.ref

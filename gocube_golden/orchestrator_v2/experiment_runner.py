@@ -418,8 +418,8 @@ class ExperimentRunnerV2:
                 games=self.config.arena_config.games,
             )
         request = ArenaRunRequest(
-            candidate=final["A"],
-            reference=final["B"],
+            candidate=final["B"],
+            reference=final["A"],
             master_seed=self.config.arena_master_seed,
             startset=startset,
             config=self.config.arena_config,
@@ -427,9 +427,9 @@ class ExperimentRunnerV2:
             scientific_contract=self.config.arena_scientific_contract,
             execution_contract=self.config.arena_execution_contract,
             workload=self.config.arena_workload,
-            candidate_label="A-final",
-            reference_label="B-final",
-            comparison="A-final-vs-B-final",
+            candidate_label="B-final",
+            reference_label="A-final",
+            comparison="B-final-vs-A-final",
         )
         return self.arena_runner.run(request)
 

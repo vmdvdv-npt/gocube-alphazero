@@ -1301,6 +1301,11 @@ def _publish_generation_result(
         "profile_fingerprint": profile_fingerprint,
         "checkpoint_reload_verified": True,
         "checkpoint": {"path": _relative(root, checkpoint)},
+        "fresh_replay": _artifact_with_known_identity(
+            root,
+            root / "replay" / f"iter-{generation:02d}-fresh.jsonl",
+            cached_identities.get(_relative(root, root / "replay" / f"iter-{generation:02d}-fresh.jsonl")),
+        ),
         "replay": {"path": _relative(root, replay)},
         "resume_state": {
             "path": _relative(root, resume),
