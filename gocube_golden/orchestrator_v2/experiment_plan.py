@@ -322,8 +322,6 @@ class ExperimentConfig:
             "arena": arena,
             "stage2": None if self.stage2 is None else self.stage2.to_dict(),
         }
-        if self.allow_code_rollover:
-            payload["allow_code_rollover"] = True
         return payload
 
     @property
