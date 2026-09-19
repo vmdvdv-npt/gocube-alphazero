@@ -13,6 +13,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import threading
@@ -25,7 +26,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from gocube_golden.provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
+from gocube_golden.provenance import (
+    CodeIdentity,
+    capture_code_identity,
+    derive_seed,
+    file_sha256,
+    sha256_fingerprint,
+)
 from gocube_golden.run_spec import StrictRunSpec, run_spec_fingerprint
 from gocube_golden.run_storage import (
     ensure_evaluation_layout,
@@ -33,6 +40,13 @@ from gocube_golden.run_storage import (
     resolve_checkpoint,
 )
 from gocube_golden.artifact_catalog import ArtifactCatalog, ARTIFACT_VALIDATION_SCHEMA
+from gocube_golden.orchestrator_v2.artifact_resolver import (
+    ArtifactIntegrityError,
+    ArtifactResolver,
+    ResolvedArtifact,
+    ResolvedCheckpointNode,
+)
+from gocube_golden.orchestrator_v2.contracts import ArtifactRef
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
     Torus9SelfPlaySearchContract,
@@ -50,7 +64,11 @@ from gocube_golden.torus9_contract import (
     load_torus9_current_profile,
     profile_fingerprint,
 )
-from gocube_golden.torus9_training import TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA
+from gocube_golden.torus9_training import (
+    TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA,
+    TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+    TORUS9_REPLAY_SELECTION_CONTRACT,
+)
 from tools.arena_engine import (
     ArenaExecutionConfig,
     classify_arena_performance,
@@ -1426,50 +1444,324 @@ def _v2_parent_checkpoint_identity(value: object) -> tuple[Path, str]:
     return Path(getattr(parent, "path")).resolve(), str(getattr(parent.ref, "sha256"))
 
 
+def _v2_replay_scope(value: object) -> tuple[int, int]:
+    """Read the production replay policy from the effective config."""
+    effective = _v2_effective_config(value)
+    replay = _mapping(effective.get("replay"), "effective_config.replay")
+    raw_generations = replay.get("generations", replay.get("window"))
+    if isinstance(raw_generations, str):
+        match = re.search(r"\b(\d+)\b", raw_generations)
+        if match is None:
+            raise ValueError("effective_config.replay.generations is malformed")
+        raw_generations = match.group(1)
+    generations = _positive_int(raw_generations, "effective_config.replay.generations")
+    cap = _positive_int(replay.get("cap"), "effective_config.replay.cap")
+    return generations, cap
+
+
+def _v2_generation_identities_from_metadata(
+    parent: ResolvedCheckpointNode,
+) -> dict[int, dict[str, object]]:
+    """Read compact replay evidence from the parent checkpoint only."""
+    metadata_path = parent.path.with_suffix(".metadata.json")
+    if not metadata_path.is_file():
+        return {}
+    metadata = _read_json(metadata_path)
+    raw = metadata.get("replay_generation_identities")
+    if not isinstance(raw, list):
+        return {}
+    result: dict[int, dict[str, object]] = {}
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            generation = int(item["generation"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        result[generation] = dict(item)
+    return result
+
+
 def _v2_replay_artifact_identities(
-    value: object,
-    replay_paths: Sequence[Path],
+    parent: ResolvedCheckpointNode,
+    artifacts: Sequence[ResolvedArtifact],
 ) -> tuple[dict[str, object], ...]:
-    """Forward resolver-owned replay evidence without rehashing its files."""
-    artifacts = tuple(getattr(value, "replay_artifacts"))
-    if len(artifacts) != len(replay_paths):
-        raise ValueError("V2 replay artifact identity count does not match replay list")
+    """Prepare immutable replay evidence for the existing training adapter."""
+    metadata_components = _v2_generation_identities_from_metadata(parent)
     identities: list[dict[str, object]] = []
-    for item, path in zip(artifacts, replay_paths):
-        raw = getattr(item, "identity", None)
-        identity = dict(raw) if isinstance(raw, Mapping) else {}
-        identity.setdefault("path", str(path))
-        identity.setdefault("sha256", str(getattr(item, "sha256")))
-        # Bare path/ref inputs remain fail-closed. Only resolver-attached
-        # evidence can authorize skipping the physical hash.
-        identity["immutable_verified"] = isinstance(raw, Mapping) and bool(
-            identity.get("immutable_verified")
-        )
+    for artifact in artifacts:
+        identity = dict(artifact.identity or {})
+        identity.setdefault("path", artifact.ref.path)
+        identity.setdefault("sha256", artifact.sha256)
+        identity["immutable_verified"] = True
+        component = identity.get("generation_identity")
+        if not isinstance(component, Mapping):
+            match = re.search(r"(?:iter-|fresh-M)(\d+)", artifact.path.name)
+            if match is not None:
+                component = metadata_components.get(int(match.group(1)))
+            if isinstance(component, Mapping):
+                identity["generation_identity"] = dict(component)
         identities.append(identity)
     return tuple(identities)
 
 
-def _v2_replay_identity(value: object, parent_checkpoint: Path) -> dict[str, object] | None:
-    """Return durable rolling composition evidence from the resolved parent."""
-    explicit = getattr(value, "replay_identity", None)
-    if isinstance(explicit, Mapping):
-        return dict(explicit)
-    metadata_path = parent_checkpoint.with_suffix(".metadata.json")
-    if not metadata_path.is_file():
+def _v2_expected_replay_identity(
+    artifacts: Sequence[ResolvedArtifact],
+    *,
+    generations: int,
+    cap: int,
+) -> dict[str, object] | None:
+    """Build the compact expected composition without reading JSONL rows."""
+    components: list[dict[str, object]] = []
+    for artifact in artifacts:
+        identity = artifact.identity or {}
+        component = identity.get("generation_identity") if isinstance(identity, Mapping) else None
+        if not isinstance(component, Mapping):
+            return None
+        if component.get("schema") != TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA:
+            return None
+        try:
+            generation = int(component["generation"])
+            row_count = int(component["row_count"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        sha256 = str(component.get("sha256", ""))
+        if generation <= 0 or row_count < 0 or not sha256.startswith("sha256:"):
+            return None
+        if sha256 != artifact.sha256:
+            raise ArtifactIntegrityError(
+                f"Replay generation identity disagrees with resolved artifact: M{generation}"
+            )
+        components.append(
+            {
+                "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+                "generation": generation,
+                "sha256": sha256,
+                "row_count": row_count,
+            }
+        )
+    if not components or [int(item["generation"]) for item in components] != sorted(
+        {int(item["generation"]) for item in components}
+    ):
         return None
-    metadata = _read_json(metadata_path)
-    result: dict[str, object] = {}
-    if metadata.get("replay_identity_schema") is not None:
-        result["replay_identity_schema"] = metadata["replay_identity_schema"]
-    if metadata.get("replay_identity_contract") is not None:
-        result["replay_identity_contract"] = metadata["replay_identity_contract"]
-    if metadata.get("replay_generation_identities") is not None:
-        result["generation_identities"] = metadata["replay_generation_identities"]
-    if metadata.get("replay_fingerprint") is not None:
-        result["canonical_replay_fingerprint"] = metadata["replay_fingerprint"]
-    if metadata.get("validation_schema") is not None:
-        result["validation_schema"] = metadata["validation_schema"]
-    return result or None
+    retained: dict[int, int] = {}
+    for component in components:
+        generation = int(component["generation"])
+        retained[generation] = int(component["row_count"])
+        total = sum(retained.values())
+        for oldest in sorted(tuple(retained)):
+            if total <= cap:
+                break
+            removed = min(retained[oldest], total - cap)
+            retained[oldest] -= removed
+            total -= removed
+            if retained[oldest] == 0:
+                del retained[oldest]
+    final_components = [
+        {
+            **component,
+            "retained_row_count": retained[int(component["generation"])],
+        }
+        for component in components
+        if int(component["generation"]) in retained
+    ]
+    contract = {
+        "selection": TORUS9_REPLAY_SELECTION_CONTRACT,
+        "generations": int(generations),
+        "maximum_positions": int(cap),
+    }
+    payload = {
+        "schema": TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA,
+        "contract": contract,
+        "components": final_components,
+    }
+    return {
+        "replay_identity_schema": TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA,
+        "replay_identity_contract": contract,
+        "generation_identities": final_components,
+        "canonical_replay_fingerprint": sha256_fingerprint(payload),
+    }
+
+
+def _v2_committed_rolling_replay(
+    parent: ResolvedCheckpointNode,
+    resolver: ArtifactResolver,
+) -> tuple[ResolvedArtifact, dict[str, object]] | None:
+    """Open the parent's committed rolling artifact, if durable evidence exists."""
+    relative = f"replay/rolling-after-{parent.generation:02d}.jsonl"
+    catalog_path = parent.owner_root / "runtime" / "artifact-catalog.json"
+    if catalog_path.is_file():
+        try:
+            catalog = ArtifactCatalog.load(catalog_path, root=parent.owner_root)
+        except ValueError as exc:
+            raise ArtifactIntegrityError(
+                f"Cannot load rolling replay artifact catalog: {catalog_path}"
+            ) from exc
+        if catalog.payload.get("lineage_id") != parent.lineage_id:
+            raise ArtifactIntegrityError("Rolling replay catalog lineage does not belong to parent")
+        entry = catalog.entries.get(relative)
+        if isinstance(entry, Mapping):
+            sha256 = str(entry.get("sha256", ""))
+            if not sha256.startswith("sha256:"):
+                raise ArtifactIntegrityError("Committed rolling replay catalog SHA is malformed")
+            artifact = resolver.open_artifact(ArtifactRef(relative, sha256), owner=parent)
+            identity = dict(artifact.identity or {})
+            identity.update(dict(entry))
+            identity["committed"] = True
+            identity["validation_schema"] = catalog.payload.get("validation_schema")
+            return artifact, identity
+
+    try:
+        provenance = json.loads(parent.provenance.path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        # A parent without V2 commit evidence simply has no rolling
+        # optimization to use.  The graph-derived fresh window remains the
+        # authoritative restore source.
+        return None
+    if not isinstance(provenance, Mapping) or not isinstance(provenance.get("generation_commit"), Mapping):
+        return None
+    try:
+        commit_ref = ArtifactRef.from_dict(provenance["generation_commit"])  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ArtifactIntegrityError("Parent V2 provenance has an invalid generation commit reference") from exc
+    commit_artifact = resolver.open_artifact(commit_ref, owner=parent)
+    try:
+        marker = json.loads(commit_artifact.path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ArtifactIntegrityError(
+            f"Cannot read committed generation marker: {commit_artifact.path}"
+        ) from exc
+    if not isinstance(marker, Mapping):
+        raise ArtifactIntegrityError("Parent generation marker is not an object")
+    try:
+        marker_generation = int(marker.get("generation", -1))
+    except (TypeError, ValueError) as exc:
+        raise ArtifactIntegrityError("Parent generation marker generation is malformed") from exc
+    if marker_generation != parent.generation:
+        raise ArtifactIntegrityError("Parent generation marker does not match checkpoint generation")
+    rolling_sha = str(marker.get("rolling_replay_sha256", ""))
+    if not rolling_sha.startswith("sha256:"):
+        raise ArtifactIntegrityError("Parent generation marker has no rolling replay SHA")
+    artifact = resolver.open_artifact(ArtifactRef(relative, rolling_sha), owner=parent)
+    identity = dict(artifact.identity or {})
+    identity.update(
+        {
+            "committed": True,
+            "commit_artifact": commit_ref.to_dict(),
+            "row_count": marker.get("replay_row_count"),
+            "source_generations": marker.get("replay_generations"),
+            "canonical_replay_fingerprint": marker.get("replay_fingerprint"),
+            "validation_schema": marker.get("validation_schema"),
+            "replay_identity_schema": marker.get("replay_identity_schema"),
+            "generation_identities": marker.get("replay_identity_components"),
+            "replay_identity_contract": marker.get("replay_identity_contract"),
+        }
+    )
+    return artifact, identity
+
+
+def _v2_replay_composition_matches(actual: object, expected: object) -> bool:
+    if not isinstance(actual, list) or not isinstance(expected, list):
+        return False
+    return [dict(item) for item in actual if isinstance(item, Mapping)] == [
+        dict(item) for item in expected if isinstance(item, Mapping)
+    ] and all(isinstance(item, Mapping) for item in actual) and all(
+        isinstance(item, Mapping) for item in expected
+    )
+
+
+def _resolve_v2_replay_sources(
+    parent: ResolvedCheckpointNode,
+    effective_config: object,
+) -> tuple[
+    tuple[Path, ...],
+    tuple[str, ...],
+    tuple[dict[str, object], ...],
+    dict[str, object] | None,
+]:
+    """Select Torus9 replay restore sources inside the production path."""
+    generations, cap = _v2_replay_scope(effective_config)
+    resolver = ArtifactResolver(parent.owner_root.parents[2])
+    fresh = resolver.replay_window(parent, generations)
+    fresh_identities = _v2_replay_artifact_identities(parent, fresh)
+    # The identity is intentionally optional: a graph with no compact evidence
+    # still has a correct fresh restore, just without the rolling optimization.
+    fresh_with_identity = tuple(
+        ResolvedArtifact(
+            ref=artifact.ref,
+            path=artifact.path,
+            owner_root=artifact.owner_root,
+            owner_topology=artifact.owner_topology,
+            owner_lineage_id=artifact.owner_lineage_id,
+            owner_status=artifact.owner_status,
+            identity=identity,
+        )
+        for artifact, identity in zip(fresh, fresh_identities)
+    )
+    expected = _v2_expected_replay_identity(
+        fresh_with_identity,
+        generations=generations,
+        cap=cap,
+    )
+    rolling = _v2_committed_rolling_replay(parent, resolver)
+    if rolling is None or expected is None:
+        return (
+            tuple(item.path for item in fresh_with_identity),
+            tuple(item.sha256 for item in fresh_with_identity),
+            fresh_identities,
+            expected,
+        )
+    rolling_artifact, rolling_identity = rolling
+    contract = rolling_identity.get("replay_identity_contract")
+    if not isinstance(contract, Mapping):
+        return (
+            tuple(item.path for item in fresh_with_identity),
+            tuple(item.sha256 for item in fresh_with_identity),
+            fresh_identities,
+            expected,
+        )
+    try:
+        contract_generations = int(contract.get("generations", -1))
+        contract_cap = int(contract.get("maximum_positions", -1))
+    except (TypeError, ValueError) as exc:
+        raise ArtifactIntegrityError("Committed rolling replay contract is malformed") from exc
+    if contract_generations != generations or contract_cap != cap:
+        return (
+            tuple(item.path for item in fresh_with_identity),
+            tuple(item.sha256 for item in fresh_with_identity),
+            fresh_identities,
+            expected,
+        )
+    if rolling_identity.get("replay_identity_schema") != TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA:
+        return (
+            tuple(item.path for item in fresh_with_identity),
+            tuple(item.sha256 for item in fresh_with_identity),
+            fresh_identities,
+            expected,
+        )
+    if dict(contract) != dict(expected["replay_identity_contract"]):
+        raise ArtifactIntegrityError(
+            "Committed rolling replay selection contract does not match the requested policy"
+        )
+    if not _v2_replay_composition_matches(
+        rolling_identity.get("generation_identities"),
+        expected.get("generation_identities"),
+    ):
+        raise ArtifactIntegrityError(
+            "Committed rolling replay composition does not match the checkpoint graph window"
+        )
+    if rolling_identity.get("canonical_replay_fingerprint") != expected.get(
+        "canonical_replay_fingerprint"
+    ):
+        raise ArtifactIntegrityError(
+            "Committed rolling replay composition fingerprint does not match the checkpoint graph window"
+        )
+    return (
+        (rolling_artifact.path,),
+        (rolling_artifact.sha256,),
+        (rolling_identity,),
+        rolling_identity,
+    )
 
 
 def _v2_adapter_bindings(optimizer_steps: int) -> DriverBindings:
@@ -1558,16 +1850,15 @@ def run_generation(
         explicit_parent, explicit_parent_sha256 = _v2_parent_checkpoint_identity(
             generation_input
         )
-        replay_items = tuple(getattr(generation_input, "replay_artifacts"))
-        explicit_replay = tuple(Path(getattr(item, "path")).resolve() for item in replay_items)
-        explicit_replay_sha256s = tuple(str(getattr(item, "sha256")) for item in replay_items)
-        explicit_replay_artifact_identities = _v2_replay_artifact_identities(
-            generation_input,
+        resolved_parent = getattr(generation_input, "parent_checkpoint")
+        (
             explicit_replay,
-        )
-        explicit_replay_identity = _v2_replay_identity(
-            generation_input,
-            explicit_parent,
+            explicit_replay_sha256s,
+            explicit_replay_artifact_identities,
+            explicit_replay_identity,
+        ) = _resolve_v2_replay_sources(
+            resolved_parent,
+            getattr(generation_input, "effective_config"),
         )
         heartbeat_path = Path(
             os.environ.get(

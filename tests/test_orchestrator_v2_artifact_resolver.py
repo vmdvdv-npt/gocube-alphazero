@@ -27,6 +27,7 @@ from gocube_golden.orchestrator_v2.contracts import (
 )
 from gocube_golden.provenance import canonical_json, sha256_fingerprint
 from gocube_golden.torus9_training import TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA
+from tools.torus9_run_driver import _resolve_v2_replay_sources
 
 
 def _write(path: Path, content: bytes) -> str:
@@ -423,7 +424,9 @@ def test_replay_window_attaches_catalog_and_checkpoint_evidence(tmp_path: Path) 
     assert artifact.identity is not None
     assert artifact.identity["immutable_verified"] is True
     assert artifact.identity["validation_schema"] == ARTIFACT_VALIDATION_SCHEMA
-    assert artifact.identity["generation_identity"] == component
+    # The generic resolver authenticates the referenced file and catalog
+    # evidence, but does not interpret Torus9 replay composition policy.
+    assert "generation_identity" not in artifact.identity
 
 
 def test_replay_window_missing_and_corrupt_artifacts_fail_closed(tmp_path: Path) -> None:
@@ -447,13 +450,11 @@ def test_compatible_parent_rolling_replay_is_selected_as_one_restore_artifact(tm
     graph = _make_graph(tmp_path)
     resolver, (parent, config, rolling_path, _entry) = _install_committed_rolling(graph)
 
-    selection = resolver.resolve_replay_window(parent, 3, effective_config=config)
+    paths, shas, identities, replay_identity = _resolve_v2_replay_sources(parent, config)
 
-    assert selection.source == "rolling-replay"
-    assert len(selection.artifacts) == 1
-    assert selection.artifacts[0].path == rolling_path.resolve()
-    assert selection.artifacts[0].owner_lineage_id == parent.lineage_id
-    assert selection.identity["replay_identity_contract"] == {
+    assert paths == (rolling_path.resolve(),)
+    assert len(shas) == len(identities) == 1
+    assert replay_identity["replay_identity_contract"] == {
         "selection": "rolling-recent-generations-then-last-cap-v1",
         "generations": 3,
         "maximum_positions": 8,
@@ -469,11 +470,10 @@ def test_changed_replay_scope_falls_back_to_graph_fresh_window(tmp_path: Path) -
         replay={"generations": 2, "cap": 8},
     )
 
-    selection = resolver.resolve_replay_window(parent, 2, effective_config=changed)
+    paths, _shas, _identities, _replay_identity = _resolve_v2_replay_sources(parent, changed)
 
-    assert selection.source == "fresh-window"
-    assert len(selection.artifacts) == 2
-    assert all("fresh-M" in artifact.path.name for artifact in selection.artifacts)
+    assert len(paths) == 2
+    assert all("fresh-M" in path.name for path in paths)
 
 
 def test_changed_replay_cap_falls_back_to_graph_fresh_window(tmp_path: Path) -> None:
@@ -485,11 +485,10 @@ def test_changed_replay_cap_falls_back_to_graph_fresh_window(tmp_path: Path) -> 
         replay={"generations": 3, "cap": 7},
     )
 
-    selection = resolver.resolve_replay_window(parent, 3, effective_config=changed)
+    paths, _shas, _identities, _replay_identity = _resolve_v2_replay_sources(parent, changed)
 
-    assert selection.source == "fresh-window"
-    assert len(selection.artifacts) == 3
-    assert all("fresh-M" in artifact.path.name for artifact in selection.artifacts)
+    assert len(paths) == 3
+    assert all("fresh-M" in path.name for path in paths)
 
 
 def test_rolling_replay_wrong_sha_fails_closed(tmp_path: Path) -> None:
@@ -499,7 +498,7 @@ def test_rolling_replay_wrong_sha_fails_closed(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ArtifactIntegrityError, match="expected SHA"):
-        resolver.resolve_replay_window(parent, 3, effective_config=config)
+        _resolve_v2_replay_sources(parent, config)
 
 
 def test_rolling_replay_wrong_composition_fails_closed(tmp_path: Path) -> None:
@@ -509,7 +508,7 @@ def test_rolling_replay_wrong_composition_fails_closed(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ArtifactIntegrityError, match="composition"):
-        resolver.resolve_replay_window(parent, 3, effective_config=config)
+        _resolve_v2_replay_sources(parent, config)
 
 
 def test_cross_lineage_parent_rolling_replay_is_referenced_without_copy(tmp_path: Path) -> None:
@@ -517,11 +516,10 @@ def test_cross_lineage_parent_rolling_replay_is_referenced_without_copy(tmp_path
     resolver, (parent, config, rolling_path, _entry) = _install_committed_rolling(graph)
     child_root = graph.roots["lineage-a"] / "child-output"
 
-    selection = resolver.resolve_replay_window(parent, 3, effective_config=config)
+    paths, _shas, _identities, _replay_identity = _resolve_v2_replay_sources(parent, config)
 
     assert parent.lineage_id == "lineage-b"
-    assert selection.artifacts[0].path == rolling_path.resolve()
-    assert selection.artifacts[0].owner_root == graph.roots["lineage-b"].resolve()
+    assert paths[0] == rolling_path.resolve()
     assert not (child_root / rolling_path.name).exists()
 
 

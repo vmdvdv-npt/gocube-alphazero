@@ -1,15 +1,15 @@
 """Production A/B arm execution for Orchestrator V2.
 
 This module is the production seam between the coordinator and one arm.  It
-owns only the durable arm loop and process boundary.  ArtifactResolver still
-selects the parent/replay inputs, SupervisorV2 owns child supervision, and the
-existing Torus9 driver owns self-play, training, checkpoint bytes, and the
-atomic generation commit.
+owns only the durable arm loop and process boundary.  ArtifactResolver
+resolves the parent graph, SupervisorV2 owns child supervision, and the
+existing Torus9 driver owns training-state restore, self-play, training,
+checkpoint bytes, and the atomic generation commit.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 import json
 import os
 from pathlib import Path
@@ -24,7 +24,7 @@ from .artifact_resolver import (
     ResolvedCheckpointNode,
     ResolvedEffectiveConfig,
 )
-from .contracts import ArtifactRef, CheckpointRef, EffectiveConfig, EffectiveConfigRef
+from .contracts import CheckpointRef, EffectiveConfig, EffectiveConfigRef
 from .experiment_runner import ArmExecutionRequest, ArmExecutionResult
 from .generation_runner import OutputLineage, ResolvedGenerationInput
 from .supervisor import SupervisorPolicy, SupervisorStatus, SupervisorV2
@@ -35,9 +35,9 @@ from .torus9_production import (
 )
 
 
-# A committed generation still has to reload its rolling replay and publish
-# the result record.  That production step is deliberately bounded, but can
-# be much longer than the ordinary process-cleanup grace period.
+# A committed generation still has to publish its result record.  That
+# production step is deliberately bounded, but can be much longer than the
+# ordinary process-cleanup grace period.
 PRODUCTION_COMMITTED_DRAIN_SECONDS = 15 * 60.0
 
 
@@ -74,18 +74,6 @@ def _serialize_resolved_input(
         "result_path": str(result_path),
         "generation": resolved.generation,
         "parent_checkpoint": resolved.parent_checkpoint.ref.to_dict(),
-        "replay_artifacts": [
-            {
-                "ref": item.ref.to_dict(),
-                "path": str(item.path),
-                "owner_root": str(item.owner_root),
-                "owner_topology": item.owner_topology,
-                "owner_lineage_id": item.owner_lineage_id,
-                "owner_status": item.owner_status,
-                "identity": dict(item.identity or {}),
-            }
-            for item in resolved.replay_artifacts
-        ],
         "effective_config": {
             "ref": effective.ref.to_dict(),
             "path": str(effective.path),
@@ -101,9 +89,6 @@ def _serialize_resolved_input(
             "lineage_id": resolved.output_lineage.lineage_id,
             "root": str(resolved.output_lineage.root),
         },
-        "replay_identity": (
-            None if resolved.replay_identity is None else dict(resolved.replay_identity)
-        ),
     }
 
 
@@ -113,34 +98,6 @@ def _deserialize_resolved_input(payload: Mapping[str, object]) -> ResolvedGenera
     runs_root = Path(str(payload["runs_root"])).resolve()
     resolver = ArtifactResolver(runs_root)
     parent = resolver.checkpoint(parent_ref)
-
-    raw_replays = payload.get("replay_artifacts")
-    if not isinstance(raw_replays, Sequence) or isinstance(raw_replays, (str, bytes)):
-        raise ValueError("generation input replay_artifacts must be a list")
-    replay: list[ResolvedArtifact] = []
-    for raw in raw_replays:
-        if not isinstance(raw, Mapping):
-            raise ValueError("generation input replay artifact must be an object")
-        ref = ArtifactRef.from_dict(raw["ref"])  # type: ignore[arg-type]
-        path = Path(str(raw["path"])).resolve()
-        owner_root = Path(str(raw["owner_root"])).resolve()
-        if _relative_to(owner_root, path, "replay artifact") != ref.path:
-            raise ValueError("serialized replay artifact path does not match its reference")
-        if not path.is_file():
-            raise ValueError(f"serialized replay artifact is missing: {path}")
-        raw_identity = raw.get("identity")
-        identity = dict(raw_identity) if isinstance(raw_identity, Mapping) else None
-        replay.append(
-            ResolvedArtifact(
-                ref=ref,
-                path=path,
-                owner_root=owner_root,
-                owner_topology=str(raw["owner_topology"]),
-                owner_lineage_id=str(raw["owner_lineage_id"]),
-                owner_status=None if raw.get("owner_status") is None else str(raw["owner_status"]),
-                identity=identity,
-            )
-        )
 
     raw_effective = payload.get("effective_config")
     if not isinstance(raw_effective, Mapping):
@@ -170,10 +127,8 @@ def _deserialize_resolved_input(payload: Mapping[str, object]) -> ResolvedGenera
     raw_output = payload.get("output_lineage")
     if not isinstance(raw_output, Mapping):
         raise ValueError("generation input output_lineage must be an object")
-    replay_identity = payload.get("replay_identity")
     return ResolvedGenerationInput(
         parent_checkpoint=parent,
-        replay_artifacts=tuple(replay),
         generation=int(payload["generation"]),
         effective_config=effective,
         output_lineage=OutputLineage(
@@ -181,7 +136,6 @@ def _deserialize_resolved_input(payload: Mapping[str, object]) -> ResolvedGenera
             str(raw_output["lineage_id"]),
             Path(str(raw_output["root"])),
         ),
-        replay_identity=dict(replay_identity) if isinstance(replay_identity, Mapping) else None,
     )
 
 
@@ -229,7 +183,6 @@ class ProductionArmExecutionPath:
         output = OutputLineage(request.topology, lineage_id, root)
         current = request.common_parent
         target = request.common_parent.generation + request.arm.generations
-        replay_count = int(request.arm.effective_config.replay.get("generations", 0))
 
         while current.generation < target:
             generation = current.generation + 1
@@ -245,18 +198,11 @@ class ProductionArmExecutionPath:
             marker = root / f"generation-{generation:02d}.complete.json"
             recovering_committed_generation = marker.is_file()
 
-            replay_selection = self.resolver.resolve_replay_window(
-                current,
-                replay_count,
-                effective_config=effective,
-            )
             resolved = ResolvedGenerationInput(
                 parent_checkpoint=current,
-                replay_artifacts=replay_selection.artifacts,
                 generation=generation,
                 effective_config=effective,
                 output_lineage=output,
-                replay_identity=replay_selection.identity,
             )
             current = self._run_supervised_generation(
                 resolved,

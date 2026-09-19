@@ -69,14 +69,13 @@ class FakeProductionGenerationPath:
 def _resolved_input(tmp_path: Path) -> ResolvedGenerationInput:
     return ResolvedGenerationInput(
         parent_checkpoint=object(),  # type: ignore[arg-type]
-        replay_artifacts=[object(), object(), object()],  # type: ignore[list-item]
         generation=94,
         effective_config=object(),  # type: ignore[arg-type]
         output_lineage=OutputLineage("torus9", "child-lineage", tmp_path),
     )
 
 
-def test_runner_forwards_resolved_parent_replay_and_config_and_returns_commit(tmp_path: Path):
+def test_runner_forwards_generation_intent_and_returns_commit(tmp_path: Path):
     resolved = _resolved_input(tmp_path)
     production_path = FakeProductionGenerationPath()
 
@@ -84,7 +83,6 @@ def test_runner_forwards_resolved_parent_replay_and_config_and_returns_commit(tm
 
     assert production_path.captured is resolved
     assert production_path.captured.parent_checkpoint is resolved.parent_checkpoint
-    assert production_path.captured.replay_artifacts is resolved.replay_artifacts
     assert production_path.captured.effective_config is resolved.effective_config
     assert result.generation == 94
     assert result.committed_checkpoint.lineage_id == "child-lineage"
