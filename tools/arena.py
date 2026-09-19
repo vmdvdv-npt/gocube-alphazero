@@ -64,12 +64,25 @@ def _default_output(profile_id: str, candidate: Path, reference: Path) -> Path:
     )
 
 
-def _canonical_evaluation_output(profile_id: str, output_dir: Path) -> Path:
+def _canonical_evaluation_output(
+    profile_id: str,
+    output_dir: Path,
+    *,
+    allowed_lineage_arena_root: Path | None = None,
+) -> Path:
     output_dir = Path(output_dir).resolve()
     root = evaluations_root(topology_for_profile(profile_id)).resolve()
     try:
         output_dir.relative_to(root)
     except ValueError as exc:
+        if allowed_lineage_arena_root is not None:
+            lineage_arena_root = Path(allowed_lineage_arena_root).resolve()
+            try:
+                output_dir.relative_to(lineage_arena_root)
+            except ValueError:
+                pass
+            else:
+                return output_dir
         raise ValueError(
             "Arena output must be inside the canonical runs/<topology>/evaluations tree: "
             f"{output_dir}"
@@ -231,6 +244,7 @@ def run_arena(
     expected_reference_artifact_sha256: str | None = None,
     evaluation_identity: Mapping[str, object] | None = None,
     evaluation_fingerprint: str | None = None,
+    allowed_lineage_arena_root: Path | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
     candidate_identity: ResolvedCheckpoint | None = None
@@ -265,6 +279,7 @@ def run_arena(
     output_dir = _canonical_evaluation_output(
         profile.profile_id,
         output_dir or _default_output(profile.profile_id, candidate_path, reference_path),
+        allowed_lineage_arena_root=allowed_lineage_arena_root,
     )
     result = run_engine(
         profile=profile,

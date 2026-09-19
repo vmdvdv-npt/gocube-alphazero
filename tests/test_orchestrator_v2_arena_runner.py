@@ -19,6 +19,7 @@ from gocube_golden.orchestrator_v2.contracts import (
     CheckpointRef,
     EffectiveConfigRef,
 )
+from tools.arena import _canonical_evaluation_output
 from tools.arena_engine import ArenaExecutionConfig
 
 
@@ -155,9 +156,11 @@ def test_runner_can_store_same_lineage_result_under_generation_directory(
     tmp_path: Path, monkeypatch
 ) -> None:
     calls: list[int] = []
+    captured: dict[str, object] = {}
 
     def engine(**kwargs: object) -> dict[str, object]:
         calls.append(1)
+        captured.update(kwargs)
         return _fake_engine(**kwargs)
 
     monkeypatch.setattr(
@@ -178,6 +181,9 @@ def test_runner_can_store_same_lineage_result_under_generation_directory(
     assert first.output_dir.parent == request.output_dir
     assert first.output_dir.name == first.evaluation_id
     assert second.output_dir == first.output_dir
+    assert captured["allowed_lineage_arena_root"] == (
+        request.candidate.owner_root / "arena"
+    ).resolve()
 
 
 def test_runner_rejects_custom_output_for_cross_lineage_evaluation(tmp_path: Path) -> None:
@@ -198,6 +204,26 @@ def test_runner_rejects_same_lineage_output_outside_lineage_arena(tmp_path: Path
                 reference=_resolved(tmp_path, "candidate", 94, SHA_B),
                 output_dir=tmp_path / "outside-arena",
             )
+        )
+
+
+def test_production_arena_boundary_allows_only_explicit_lineage_arena_root(
+    tmp_path: Path,
+) -> None:
+    lineage_arena = tmp_path / "active" / "lineage" / "arena"
+    same_lineage_output = lineage_arena / "generation-0095" / "evaluation-id"
+
+    assert _canonical_evaluation_output(
+        "torus9",
+        same_lineage_output,
+        allowed_lineage_arena_root=lineage_arena,
+    ) == same_lineage_output.resolve()
+
+    with pytest.raises(ValueError, match="canonical runs"):
+        _canonical_evaluation_output(
+            "torus9",
+            tmp_path / "active" / "other-lineage" / "arena" / "evaluation-id",
+            allowed_lineage_arena_root=lineage_arena,
         )
 
 
