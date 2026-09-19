@@ -54,6 +54,7 @@ from .arena_runner import (  # noqa: F401
 from .experiment_runner import (  # noqa: F401
     EXPERIMENT_RUNNER_SCHEMA,
     EXPERIMENT_STATE_SCHEMA,
+    EXPERIMENT_WINNER_RULE,
     ArmExecutionPath,
     ArmExecutionRequest,
     ArmExecutionResult,
@@ -63,4 +64,9 @@ from .experiment_runner import (  # noqa: F401
     ExperimentRunner,
     ExperimentRunnerError,
     ExperimentRunnerV2,
+    ExperimentStage2Config,
+    Stage2Config,
+    WinnerDecision,
+    WinnerRule,
+    WinnerRuleName,
 )
