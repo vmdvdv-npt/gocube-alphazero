@@ -161,6 +161,42 @@ def test_stale_progress_terminates_even_when_liveness_changes(tmp_path: Path) ->
     assert not supervisor.active_child_path.exists()
 
 
+def test_stagnant_progress_is_allowed_when_progress_timeout_is_disabled(tmp_path: Path) -> None:
+    heartbeat = tmp_path / "runtime" / "heartbeat.json"
+    loop = (
+        "def beat():\n"
+        "    while True:\n"
+        "        p.parent.mkdir(parents=True, exist_ok=True)\n"
+        "        p.write_text(json.dumps({'liveness_at': time.time(), 'progress_at': started, 'progress_token': 'fixed'}))\n"
+        "        time.sleep(0.005)\n"
+    )
+    script = (
+        "import json, threading, time; from pathlib import Path; "
+        f"p=Path({str(heartbeat)!r}); started=time.time(); "
+        f"exec({loop!r}); "
+        "threading.Thread(target=beat, daemon=True).start(); time.sleep(0.15)"
+    )
+    policy = SupervisorPolicy(
+        heartbeat_grace_seconds=300.0,
+        liveness_timeout_seconds=0.2,
+        progress_timeout_seconds=None,
+        max_retries=0,
+        poll_interval_seconds=0.005,
+        termination_grace_seconds=0.05,
+    )
+    supervisor = _supervisor(
+        tmp_path,
+        command=[sys.executable, "-c", script],
+        policy=policy,
+    )
+
+    result = supervisor.run_once()
+
+    assert policy.liveness_grace_seconds == 0.2
+    assert policy.progress_grace_seconds is None
+    assert result.success
+
+
 def test_retry_repeats_exact_same_command(tmp_path: Path) -> None:
     command = [sys.executable, "-c", "raise SystemExit(19)"]
     seen: list[tuple[str, ...]] = []

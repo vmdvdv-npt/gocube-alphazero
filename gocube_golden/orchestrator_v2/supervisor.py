@@ -103,12 +103,8 @@ class SupervisorPolicy:
         )
 
     @property
-    def progress_grace_seconds(self) -> float:
-        return (
-            self.heartbeat_grace_seconds
-            if self.progress_timeout_seconds is None
-            else self.progress_timeout_seconds
-        )
+    def progress_grace_seconds(self) -> float | None:
+        return self.progress_timeout_seconds
 
 
 @dataclass(frozen=True)
@@ -458,11 +454,14 @@ class SupervisorV2:
         started_age = max(0.0, current - child.started_at)
         liveness_age = started_age if liveness_at is None else max(0.0, current - liveness_at)
         progress_age = started_age if progress_at is None else max(0.0, current - progress_at)
+        progress_grace = self.policy.progress_grace_seconds
         return HeartbeatStatus(
             liveness_age_seconds=liveness_age,
             progress_age_seconds=progress_age,
             liveness_stale=liveness_age >= self.policy.liveness_grace_seconds,
-            progress_stale=progress_age >= self.policy.progress_grace_seconds,
+            progress_stale=(
+                progress_grace is not None and progress_age >= progress_grace
+            ),
             progress_token=progress_token,
         )
 
@@ -611,7 +610,8 @@ class SupervisorV2:
             progress_age = max(0.0, now - progress_changed_at)
             if liveness_age >= self.policy.liveness_grace_seconds:
                 raise TechnicalFailure("liveness heartbeat is missing or stale")
-            if progress_age >= self.policy.progress_grace_seconds:
+            progress_grace = self.policy.progress_grace_seconds
+            if progress_grace is not None and progress_age >= progress_grace:
                 raise TechnicalFailure("progress heartbeat is missing or stale")
             previous = current
             self.sleeper(self.policy.poll_interval_seconds)
