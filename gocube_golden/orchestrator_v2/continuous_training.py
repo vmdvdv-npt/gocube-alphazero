@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
+import uuid
 
 from ..artifact_graph import CheckpointRef, EffectiveConfig
 from ..process_supervision import atomic_write_text
@@ -343,6 +344,7 @@ class ContinuousTrainingRunnerV2:
         return self.run()
 
     def run(self) -> ContinuousTrainingResult:
+        self._launch_id = uuid.uuid4().hex
         original_parent = self.resolver.checkpoint(self.config.parent_checkpoint)
         root, resolved_config = self.lineage_factory.prepare(
             topology=self.config.topology,
@@ -851,7 +853,7 @@ class ContinuousTrainingRunnerV2:
         self._notify_operator(
             "START",
             message,
-            key_suffix=f"start:{config.fingerprint}",
+            key_suffix=f"start:{self._launch_id}",
         )
 
     def _report(self, event: str, message: str, **details: object) -> None:

@@ -18,6 +18,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Protocol
+import uuid
 
 from ..process_supervision import atomic_write_text
 from ..provenance import canonical_json
@@ -140,6 +141,7 @@ class ExperimentRunnerV2:
         return self.experiment_root / "state.json"
 
     def run(self) -> ExperimentRunResult:
+        self._launch_id = uuid.uuid4().hex
         original_parent = self.resolver.checkpoint(self.config.parent)
         state = self._load_or_create_state(original_parent)
         if state["state"] == "STOPPED":
@@ -159,7 +161,7 @@ class ExperimentRunnerV2:
             "EXPERIMENT_STARTED",
             f"Experiment {self.config.experiment_id} started from "
             f"{original_parent.topology}/{original_parent.lineage_id}/{original_parent.checkpoint_id}.",
-            key_suffix=f"started:{self.config.fingerprint}",
+            key_suffix=f"started:{self._launch_id}",
         )
 
         stage1_arms = {"A": self.config.arm_a, "B": self.config.arm_b}
@@ -331,11 +333,24 @@ class ExperimentRunnerV2:
                 checkpoint = parent
                 for _ in range(arm.generations):
                     previous = checkpoint
-                    checkpoint = self.train_one(
-                        parent=checkpoint,
-                        config=effective_config,
-                        output_lineage=output_lineage,
-                    )
+                    next_generation = previous.generation + 1
+                    try:
+                        checkpoint = self.train_one(
+                            parent=checkpoint,
+                            config=effective_config,
+                            output_lineage=output_lineage,
+                        )
+                    except BaseException as exc:
+                        self._notify_operator(
+                            "CRITICAL",
+                            f"Arm {arm.arm_id} generation M{next_generation} failed: "
+                            f"{exc.__class__.__name__}.",
+                            key_suffix=(
+                                f"critical:train:{stage_key}:{arm.arm_id}:"
+                                f"{next_generation}:{exc.__class__.__name__}"
+                            ),
+                        )
+                        raise
                     if not isinstance(checkpoint, ResolvedCheckpointNode):
                         raise ExperimentRunnerError(
                             f"train_one returned an unresolved checkpoint for arm {arm.arm_id}"

@@ -523,6 +523,63 @@ def test_experiment_runner_notifier_none_never_constructs_telegram(tmp_path, mon
     assert runner._notifier is None
 
 
+def test_experiment_runner_train_failure_notifies_critical_and_preserves_exception(tmp_path):
+    parent = _make_parent(tmp_path)
+    resolver = ArtifactResolver(tmp_path / "runs")
+    base_path = SyntheticTrainOne(tmp_path, resolver)
+    notifier = FakeNotifier()
+    failure = RuntimeError("synthetic arm failure")
+
+    class FailingTrain:
+        def prepare(self, **kwargs):
+            return base_path.prepare(**kwargs)
+
+        def __call__(self, **_kwargs):
+            raise failure
+
+    config = ExperimentConfig(
+        experiment_id="synthetic-train-failure",
+        topology="torus9",
+        parent=parent.ref,
+        arms=(
+            ExperimentArmConfig("A", 1, _config(learning_rate=0.001, games=8, steps=4, sims=8)),
+            ExperimentArmConfig("B", 1, _config(learning_rate=0.0005, games=12, steps=6, sims=16)),
+        ),
+        arena_config=ArenaExecutionConfig(
+            games=4,
+            workers=1,
+            games_per_worker=2,
+            inference_batch_rows=2,
+            inference_batch_wait_ms=0.0,
+            device="cpu",
+            strict_production=False,
+            min_mean_inference_batch_rows=0.0,
+            min_effective_cpu_cores=0.0,
+            early_gate_enabled=False,
+        ),
+        arena_master_seed=72,
+    )
+    runner = ExperimentRunnerV2(
+        config,
+        resolver=resolver,
+        lineage_factory=FailingTrain(),
+        train_one=FailingTrain(),
+        arena_runner=object(),  # type: ignore[arg-type]
+        experiment_root=tmp_path / "experiment-state",
+        notifier=notifier,
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        runner.run()
+
+    assert raised.value is failure
+    critical = [text for _key, text in notifier.events if text.startswith("CRITICAL —")]
+    assert len(critical) == 1
+    assert "Arm A" in critical[0]
+    assert "generation M1" in critical[0]
+    assert "RuntimeError" in critical[0]
+
+
 def test_experiment_runner_v2_resume_after_stage1_decision_reuses_all_stage1_work(tmp_path, monkeypatch):
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")

@@ -426,6 +426,26 @@ def test_soft_stop_operator_events_are_durable_and_resumable(tmp_path: Path) -> 
     assert events == ["START", "SOFT_STOP_REQUESTED", "SOFT_STOPPED"]
 
 
+def test_resume_launch_sends_a_new_start_event(tmp_path: Path) -> None:
+    notifier = FakeNotifier()
+    runner, train, _arena, _resolver, _parent = _runner(
+        tmp_path, generations=None, notifier=notifier
+    )
+    train.stop_at = 21
+
+    first = runner.run()
+    assert first.state == "SOFT_STOPPED"
+
+    train.stop_at = 22
+    train.stop_once = True
+    second = runner.run()
+
+    assert second.state == "SOFT_STOPPED"
+    starts = [(key, text) for key, text in notifier.events if text.startswith("START —")]
+    assert len(starts) == 2
+    assert starts[0][0] != starts[1][0]
+
+
 def test_non_golden_operator_values_are_reported_not_rejected(tmp_path: Path) -> None:
     config = _config(learning_rate=0.0002, sims=256, games=90)
     runner, _train, _arena, _resolver, _parent = _runner(
