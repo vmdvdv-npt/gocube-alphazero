@@ -68,6 +68,28 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     atomic_write_text(path, canonical_json(dict(payload)) + "\n")
 
 
+def _advance_lineage_code_pin(
+    manifest: Mapping[str, object],
+    *,
+    git_commit: str,
+    git_tree: str,
+    working_tree_clean: bool,
+) -> dict[str, object]:
+    """Record a clean application-code rollover while preserving lineage origin."""
+    updated = dict(manifest)
+    previous = str(updated.get("git_commit", ""))
+    if previous == git_commit:
+        return updated
+    if not working_tree_clean:
+        raise ValueError("Production arm lineage resume requires a clean working tree")
+    updated["lineage_initial_git_commit"] = str(
+        updated.get("lineage_initial_git_commit") or previous
+    )
+    updated["git_commit"] = git_commit
+    updated["current_git_tree"] = git_tree
+    return updated
+
+
 class Torus9ProductionLineage:
     """Prepare one active arm lineage without copying the external parent."""
 
@@ -111,9 +133,14 @@ class Torus9ProductionLineage:
             for key in ("lineage_id", "topology", "status", "parent_checkpoint", "config_fingerprint"):
                 if existing.get(key) != manifest[key]:
                     raise ValueError(f"Production arm lineage {key} changed: {root}")
-            if existing.get("git_commit") != code.git_commit_sha:
-                raise ValueError("Production arm lineage code pin changed during resume")
-            manifest = existing
+            manifest = _advance_lineage_code_pin(
+                existing,
+                git_commit=code.git_commit_sha,
+                git_tree=code.git_tree_sha,
+                working_tree_clean=code.working_tree_clean,
+            )
+            if manifest != existing:
+                _write_json(root / "manifest.json", manifest)
         else:
             run_storage.ensure_lineage_layout(
                 root,
