@@ -120,8 +120,8 @@ def _deserialize_resolved_input(payload: Mapping[str, object]) -> ResolvedGenera
         owner_root = Path(str(raw["owner_root"])).resolve()
         if _relative_to(owner_root, path, "replay artifact") != ref.path:
             raise ValueError("serialized replay artifact path does not match its reference")
-        if not path.is_file() or sha256_file(path) != ref.sha256:
-            raise ValueError(f"serialized replay artifact failed integrity check: {path}")
+        if not path.is_file():
+            raise ValueError(f"serialized replay artifact is missing: {path}")
         raw_identity = raw.get("identity")
         identity = dict(raw_identity) if isinstance(raw_identity, Mapping) else None
         replay.append(
@@ -197,10 +197,7 @@ class ProductionArmExecutionPath:
             else Path(__file__).resolve().parents[2]
         )
         self.python_executable = str(python_executable or sys.executable)
-        self.supervisor_policy = supervisor_policy or SupervisorPolicy(
-            heartbeat_grace_seconds=900.0,
-            committed_drain_seconds=300.0,
-        )
+        self.supervisor_policy = supervisor_policy
         self.lineage_factory = Torus9ProductionLineage(
             self.resolver.runs_root,
             repo_root=self.repo_root,

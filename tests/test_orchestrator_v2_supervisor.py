@@ -75,6 +75,14 @@ def test_external_parent_generation_is_the_first_child_baseline(tmp_path: Path) 
     assert not (tmp_path / "generation-96.complete.json").exists()
 
 
+def test_default_policy_preserves_standard_heartbeat_retry_and_drain() -> None:
+    policy = SupervisorPolicy()
+
+    assert policy.heartbeat_grace_seconds == 5 * 60.0
+    assert policy.max_retries == 1
+    assert policy.committed_drain_seconds is None
+
+
 def test_target_generation_recovers_existing_commit_publication(tmp_path: Path) -> None:
     lineage_id = "lineage"
     _commit(tmp_path, 1, lineage_id)

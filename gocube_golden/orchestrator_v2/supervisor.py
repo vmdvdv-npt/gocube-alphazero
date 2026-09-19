@@ -74,17 +74,18 @@ class SupervisorPolicy:
     """Bounded technical-failure policy.
 
     The production defaults are deliberately fixed to five minutes of
-    heartbeat grace, a bounded post-commit drain, and exactly one retry of
-    the same generation.  A shorter grace is useful for unit tests; more than
-    one retry is rejected so a caller cannot accidentally turn this into an
-    unbounded loop.
+    heartbeat grace and exactly one retry of the same generation.  A shorter
+    grace is useful for unit tests; more than one retry is rejected so a
+    caller cannot accidentally turn this into an unbounded loop.  The
+    committed drain defaults to the existing termination grace; a longer
+    drain is an explicit operator choice.
     """
 
     heartbeat_grace_seconds: float = 5 * 60.0
     max_retries: int = 1
     poll_interval_seconds: float = 1.0
     termination_grace_seconds: float = 5.0
-    committed_drain_seconds: float = 300.0
+    committed_drain_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if self.heartbeat_grace_seconds < 0:
@@ -95,7 +96,7 @@ class SupervisorPolicy:
             raise ValueError("poll_interval_seconds must be non-negative")
         if self.termination_grace_seconds < 0:
             raise ValueError("termination_grace_seconds must be non-negative")
-        if self.committed_drain_seconds < 0:
+        if self.committed_drain_seconds is not None and self.committed_drain_seconds < 0:
             raise ValueError("committed_drain_seconds must be non-negative")
 
     @property
@@ -716,7 +717,12 @@ class SupervisorV2:
         the bounded termination grace, then clean up any surviving descendants
         with the same scoped ownership checks.
         """
-        timeout = max(0.0, float(self.policy.committed_drain_seconds))
+        drain_seconds = (
+            self.policy.termination_grace_seconds
+            if self.policy.committed_drain_seconds is None
+            else self.policy.committed_drain_seconds
+        )
+        timeout = max(0.0, float(drain_seconds))
         if process is not None:
             try:
                 process.wait(timeout=timeout)
