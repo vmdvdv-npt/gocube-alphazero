@@ -9,7 +9,6 @@ engine.  It intentionally has no checkpoint lookup or copying logic.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-import json
 from pathlib import Path
 import shutil
 from typing import Callable, Mapping
@@ -18,7 +17,6 @@ from ..arena_identity import (
     evaluation_fingerprint,
     evaluation_id,
     load_reusable_evaluation,
-    stamp_evaluation_identity_metadata,
     write_evaluation_identity,
 )
 from ..provenance import sha256_fingerprint
@@ -30,12 +28,13 @@ from .contracts import (
     StartsetRef,
 )
 
-from tools.arena import run_arena as production_arena
+from tools.arena import (
+    ARENA_RESULT_PROVENANCE_SCHEMA,
+    normalize_arena_validity,
+    run_arena as production_arena,
+)
 from tools.arena_engine import ArenaExecutionConfig
 from tools.arena_profiles.torus9 import PROFILE as TORUS9_ARENA_PROFILE
-
-
-ARENA_RESULT_PROVENANCE_SCHEMA = "gocube-arena-evaluation-provenance-v2"
 
 
 def torus9_startset_ref(*, master_seed: int, games: int) -> StartsetRef:
@@ -150,41 +149,21 @@ class ArenaRunner:
         )
 
     @staticmethod
-    def _validity(summary: Mapping[str, object]) -> str:
-        telemetry = summary.get("telemetry")
-        if not isinstance(telemetry, Mapping):
-            return "INVALID"
-        if int(telemetry.get("technical_games", -1)) != 0:
-            return "TECHNICAL"
-        if (
-            str(telemetry.get("performance_status", "")).upper() == "CRITICAL"
-            or bool(telemetry.get("performance_failures"))
-        ):
-            return "CRITICAL"
-        return "VALID"
+    def _boundary_validity(summary: Mapping[str, object]) -> str:
+        """Read the status already normalized by the production Arena.
 
-    @staticmethod
-    def _provenance(
-        request: ArenaRunRequest,
-        identity: EvaluationIdentity,
-        run_id: str,
-    ) -> dict[str, object]:
-        payload = identity.to_dict()
-        return {
-            "schema": ARENA_RESULT_PROVENANCE_SCHEMA,
-            "evaluation_id": run_id,
-            "candidate": request.candidate.ref.to_dict(),
-            "reference": request.reference.ref.to_dict(),
-            "profile": str(identity.scientific_contract.get("profile", request.profile)),
-            "master_seed": int(request.master_seed),
-            "startset": payload["startset"],
-            "arena_contract": {
-                "scientific": payload["scientific_contract"],
-                "execution": payload["execution_contract"],
-                "workload": payload["workload"],
-            },
-            "training_mutated": False,
-        }
+        The default production boundary always supplies this field.  The
+        missing-field compatibility fallback is limited to injected legacy
+        synthetic engines used by older unit tests; it delegates to the same
+        production boundary classifier instead of maintaining local rules.
+        """
+        value = summary.get("validity")
+        if value is None:
+            return normalize_arena_validity(summary)
+        normalized = str(value).upper()
+        if normalized in {"VALID", "TECHNICAL", "CRITICAL", "INVALID"}:
+            return normalized
+        return "INVALID"
 
     def run(self, request: ArenaRunRequest) -> ArenaRunResult:
         """Run exactly one evaluation for the supplied explicit refs."""
@@ -206,7 +185,12 @@ class ArenaRunner:
         output = evaluation_dir(request.candidate.topology, run_id).resolve()
 
         if output.exists():
-            existing = load_reusable_evaluation(output, identity.to_dict(), fingerprint)
+            existing = load_reusable_evaluation(
+                output,
+                identity.to_dict(),
+                fingerprint,
+                allow_legacy_synthetic=self.engine is not production_arena,
+            )
             if existing is not None:
                 return ArenaRunResult(
                     evaluation_id=run_id,
@@ -214,7 +198,7 @@ class ArenaRunner:
                     output_dir=output,
                     identity=identity,
                     summary=existing,
-                    validity=self._validity(existing),
+                    validity=self._boundary_validity(existing),
                 )
             # The identity marker is already checked above; only incomplete
             # Arena output is removable. Checkpoints are in lineage storage and
@@ -238,6 +222,8 @@ class ArenaRunner:
                     config=config,
                     expected_candidate_artifact_sha256=request.candidate.ref.sha256,
                     expected_reference_artifact_sha256=request.reference.ref.sha256,
+                    evaluation_identity=identity.to_dict(),
+                    evaluation_fingerprint=fingerprint,
                 )
             )
         except Exception:
@@ -245,25 +231,13 @@ class ArenaRunner:
             # the staged V1 mechanism does for interrupted Arenas.
             raise
 
-        provenance_path = output / "provenance.json"
-        provenance_path.write_text(
-            json.dumps(self._provenance(request, identity, run_id), indent=2, sort_keys=True)
-            + "\n",
-            encoding="utf-8",
-        )
-        stamp_evaluation_identity_metadata(
-            output,
-            run_id,
-            fingerprint,
-            identity_schema=identity.schema,
-        )
         return ArenaRunResult(
             evaluation_id=run_id,
             evaluation_fingerprint=fingerprint,
             output_dir=output,
             identity=identity,
             summary=summary,
-            validity=self._validity(summary),
+            validity=self._boundary_validity(summary),
         )
 
 

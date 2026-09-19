@@ -157,6 +157,8 @@ def load_reusable_evaluation(
     output: Path,
     expected_identity: Mapping[str, object],
     expected_fingerprint: str,
+    *,
+    allow_legacy_synthetic: bool = False,
 ) -> dict[str, object] | None:
     """Validate a complete prior result, or return ``None`` for an interrupted one."""
     identity_path = output / EVALUATION_IDENTITY_FILENAME
@@ -204,12 +206,30 @@ def load_reusable_evaluation(
     summary_path = output / "summary.json"
     provenance_path = output / "provenance.json"
     manifest_path = output / "manifest.json"
-    if not all(path.is_file() for path in (summary_path, provenance_path, manifest_path)):
+    if not summary_path.is_file() or not manifest_path.is_file():
         return None
     try:
         summary = _read_json(summary_path)
-        provenance = _read_json(provenance_path)
         manifest = _read_json(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"evaluation identity/contract mismatch: malformed committed evaluation artifact: {output}"
+        ) from exc
+
+    if not provenance_path.is_file():
+        # Older injected synthetic Arena seams predate the production boundary
+        # publication contract.  They may still be reused when the durable
+        # identity and manifest prove the same run; real production results
+        # always include provenance and are checked below.
+        if (
+            allow_legacy_synthetic
+            and "validity" not in summary
+            and str(manifest.get("run_id")) == output.name
+        ):
+            return summary
+        return None
+    try:
+        provenance = _read_json(provenance_path)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(
             f"evaluation identity/contract mismatch: malformed committed evaluation artifact: {output}"
@@ -227,6 +247,13 @@ def load_reusable_evaluation(
     ):
         raise RuntimeError(
             f"evaluation identity/contract mismatch: Arena result metadata disagrees with persisted identity: {output}"
+        )
+
+    persisted_validity = summary.get("validity")
+    if persisted_validity is not None and str(persisted_validity).upper() != "VALID":
+        raise RuntimeError(
+            "Existing evaluation failed production validity/performance gates: "
+            f"validity={persisted_validity!r}: {output}"
         )
 
     telemetry = summary.get("telemetry")

@@ -37,6 +37,7 @@ from tools.arena_engine import (
     run_arena as run_engine,
 )
 from tools.arena_profiles import available_profiles, detect_profile, get_profile
+from gocube_golden.arena_identity import stamp_evaluation_identity_metadata
 from gocube_golden.run_storage import (
     ResolvedCheckpoint,
     evaluation_dir,
@@ -44,6 +45,9 @@ from gocube_golden.run_storage import (
     resolve_checkpoint,
     topology_for_profile,
 )
+
+
+ARENA_RESULT_PROVENANCE_SCHEMA = "gocube-arena-evaluation-provenance-v2"
 
 
 def _resolve_profile(profile_name: str, candidate: Path):
@@ -83,6 +87,132 @@ def _write_provenance(output_dir: Path, payload: Mapping[str, object]) -> None:
     _write_json(output_dir / "provenance.json", payload)
 
 
+def _normalized_validity(summary: Mapping[str, object]) -> str:
+    """Classify the completed engine result at the production boundary.
+
+    The engine owns all execution semantics and emits the telemetry used here.
+    This function only turns that already-owned result into the stable boundary
+    status consumed by orchestration.
+    """
+    telemetry = summary.get("telemetry")
+    if not isinstance(telemetry, Mapping):
+        return "INVALID"
+    technical_games = telemetry.get("technical_games")
+    if isinstance(technical_games, bool) or not isinstance(technical_games, int):
+        return "INVALID"
+    if technical_games != 0:
+        return "TECHNICAL"
+    performance_status = telemetry.get("performance_status")
+    performance_failures = telemetry.get("performance_failures")
+    if not isinstance(performance_status, str) or not performance_status.strip():
+        return "INVALID"
+    if not isinstance(performance_failures, list):
+        return "INVALID"
+    if performance_status.upper() == "CRITICAL" or performance_failures:
+        return "CRITICAL"
+    return "VALID"
+
+
+def normalize_arena_validity(summary: Mapping[str, object]) -> str:
+    """Expose the production boundary classifier to legacy test seams."""
+    return _normalized_validity(summary)
+
+
+def _reference_payload(
+    explicit: Mapping[str, object] | None,
+    resolved: ResolvedCheckpoint | None,
+    path: Path,
+    expected_sha256: str | None,
+) -> dict[str, object]:
+    if explicit is not None:
+        return dict(explicit)
+    if resolved is not None:
+        return resolved.as_reference()
+    return {
+        "path": str(path),
+        "sha256": expected_sha256,
+        "artifact_sha256": expected_sha256,
+    }
+
+
+def _publish_evaluation_metadata(
+    *,
+    output_dir: Path,
+    summary: dict[str, object],
+    profile_id: str,
+    master_seed: int,
+    run_id: str | None,
+    candidate_ref: Mapping[str, object],
+    reference_ref: Mapping[str, object],
+    evaluation_identity: Mapping[str, object] | None,
+    evaluation_fingerprint: str | None,
+) -> str | None:
+    """Commit the complete Arena result and its single provenance record."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    validity = _normalized_validity(summary)
+    summary["validity"] = validity
+    _write_json(output_dir / "summary.json", summary)
+
+    published_evaluation_id = run_id
+    if evaluation_identity is not None:
+        scientific = evaluation_identity.get("scientific_contract")
+        if not isinstance(scientific, Mapping):
+            scientific = {}
+        provenance: dict[str, object] = {
+            "schema": ARENA_RESULT_PROVENANCE_SCHEMA,
+            "evaluation_id": run_id,
+            "candidate": dict(evaluation_identity.get("candidate", candidate_ref)),
+            "reference": dict(evaluation_identity.get("reference", reference_ref)),
+            "profile": str(scientific.get("profile", profile_id)),
+            "master_seed": int(evaluation_identity.get("master_seed", master_seed)),
+            "startset": evaluation_identity.get("startset"),
+            "arena_contract": {
+                "scientific": dict(scientific),
+                "execution": dict(evaluation_identity.get("execution_contract", {})),
+                "workload": dict(evaluation_identity.get("workload", {})),
+            },
+            "training_mutated": False,
+        }
+    else:
+        provenance = {
+            "schema": "gocube-checkpoint-evaluation-provenance-v1",
+            "evaluation_id": run_id,
+            "candidate": dict(candidate_ref),
+            "reference": dict(reference_ref),
+            "profile": profile_id,
+            "master_seed": master_seed,
+            "training_mutated": False,
+        }
+
+    _write_provenance(output_dir, provenance)
+    manifest_path = output_dir / "manifest.json"
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, Mapping):
+            raise RuntimeError(f"Arena manifest is not an object: {manifest_path}")
+        updated_manifest = dict(manifest)
+        updated_manifest["evaluation_id"] = published_evaluation_id
+        updated_manifest["checkpoint_references"] = {
+            "candidate": dict(candidate_ref),
+            "reference": dict(reference_ref),
+        }
+        updated_manifest["provenance"] = str(output_dir / "provenance.json")
+        updated_manifest["validity"] = validity
+        _write_json(manifest_path, updated_manifest)
+
+    if evaluation_identity is not None and evaluation_fingerprint is not None and run_id is not None:
+        identity_schema = str(evaluation_identity.get("schema", ""))
+        if not identity_schema:
+            raise ValueError("evaluation identity schema is required for publication")
+        stamp_evaluation_identity_metadata(
+            output_dir,
+            run_id,
+            evaluation_fingerprint,
+            identity_schema=identity_schema,
+        )
+    return published_evaluation_id
+
+
 def run_arena(
     *,
     candidate_path: Path | Mapping[str, Any],
@@ -99,6 +229,8 @@ def run_arena(
     expected_candidate_artifact_sha256: str | None = None,
     expected_reference_model_hash: str | None = None,
     expected_reference_artifact_sha256: str | None = None,
+    evaluation_identity: Mapping[str, object] | None = None,
+    evaluation_fingerprint: str | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
     candidate_identity: ResolvedCheckpoint | None = None
@@ -162,63 +294,64 @@ def run_arena(
             or (reference_identity.sha256 if reference_identity else None)
         ),
     )
-    if candidate_identity is not None or reference_identity is not None:
-        candidate_ref = candidate_identity.as_reference() if candidate_identity else {
-            "path": str(candidate_path),
-            "sha256": expected_candidate_artifact_sha256,
-        }
-        reference_ref = reference_identity.as_reference() if reference_identity else {
-            "path": str(reference_path),
-            "sha256": expected_reference_artifact_sha256,
-        }
+    if candidate_identity is not None or reference_identity is not None or evaluation_identity is not None:
+        candidate_ref = _reference_payload(
+            (
+                evaluation_identity.get("candidate")
+                if isinstance(evaluation_identity, Mapping)
+                and isinstance(evaluation_identity.get("candidate"), Mapping)
+                else None
+            ),
+            candidate_identity,
+            candidate_path,
+            expected_candidate_artifact_sha256,
+        )
+        reference_ref = _reference_payload(
+            (
+                evaluation_identity.get("reference")
+                if isinstance(evaluation_identity, Mapping)
+                and isinstance(evaluation_identity.get("reference"), Mapping)
+                else None
+            ),
+            reference_identity,
+            reference_path,
+            expected_reference_artifact_sha256,
+        )
         cross_lineage = (
-            candidate_identity is not None
-            and reference_identity is not None
-            and candidate_identity.lineage_id != reference_identity.lineage_id
+            isinstance(candidate_ref.get("lineage_id"), str)
+            and isinstance(reference_ref.get("lineage_id"), str)
+            and candidate_ref.get("lineage_id") != reference_ref.get("lineage_id")
         )
-        evaluation_id = (
-            f"{candidate_identity.lineage_id}-M{candidate_identity.generation:04d}-vs-"
-            f"{reference_identity.lineage_id}-M{reference_identity.generation:04d}"
-            if cross_lineage
-            else None
-        )
-        _write_provenance(
-            output_dir,
-            {
-                "schema": "gocube-checkpoint-evaluation-provenance-v1",
-                "evaluation_id": evaluation_id,
-                "candidate": candidate_ref,
-                "reference": reference_ref,
-                "profile": profile.profile_id,
-                "master_seed": master_seed,
-                "training_mutated": False,
-            },
-        )
-        manifest_path = output_dir / "manifest.json"
-        if manifest_path.is_file():
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["evaluation_id"] = evaluation_id
-            manifest["checkpoint_references"] = {
-                "candidate": candidate_ref,
-                "reference": reference_ref,
-            }
-            manifest["provenance"] = str(output_dir / "provenance.json")
-            _write_json(manifest_path, manifest)
-            _write_provenance(
-                output_dir,
-                {
-                    "schema": "gocube-checkpoint-evaluation-provenance-v1",
-                    "evaluation_id": evaluation_id,
-                    "candidate": candidate_ref,
-                    "reference": reference_ref,
-                    "profile": profile.profile_id,
-                    "master_seed": master_seed,
-                    "training_mutated": False,
-                },
+        publication_run_id = (
+            run_id
+            if evaluation_identity is not None
+            else (
+                f"{candidate_ref['lineage_id']}-M{int(candidate_ref['generation']):04d}-vs-"
+                f"{reference_ref['lineage_id']}-M{int(reference_ref['generation']):04d}"
+                if cross_lineage
+                else None
             )
-        result["evaluation_id"] = evaluation_id
+        )
+        published_evaluation_id = _publish_evaluation_metadata(
+            output_dir=output_dir,
+            summary=result,
+            profile_id=profile.profile_id,
+            master_seed=master_seed,
+            run_id=publication_run_id,
+            candidate_ref=candidate_ref,
+            reference_ref=reference_ref,
+            evaluation_identity=evaluation_identity,
+            evaluation_fingerprint=evaluation_fingerprint,
+        )
+        result["evaluation_id"] = published_evaluation_id
         result["candidate_reference"] = candidate_ref
         result["reference_reference"] = reference_ref
+    else:
+        # A path-only CLI invocation has no canonical checkpoint references to
+        # publish, but it still returns the normalized production status.
+        output_dir.mkdir(parents=True, exist_ok=True)
+        result["validity"] = _normalized_validity(result)
+        _write_json(output_dir / "summary.json", result)
     return result
 
 
@@ -311,6 +444,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "arena_profile": summary["arena_profile"],
                 "run_id": summary["run_id"],
                 "comparison": summary["comparison"],
+                "validity": summary["validity"],
                 "games": summary["games"],
                 "W/L/D": summary["W/L/D"],
                 "performance_status": summary["telemetry"]["performance_status"],
