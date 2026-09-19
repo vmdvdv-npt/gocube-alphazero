@@ -28,7 +28,7 @@ from .artifact_resolver import (
 from .contracts import CheckpointRef, EffectiveConfig, EffectiveConfigRef
 from .experiment_runner import ArmExecutionRequest, ArmExecutionResult
 from .generation_runner import OutputLineage, ResolvedGenerationInput
-from .supervisor import SupervisorPolicy, SupervisorStatus, SupervisorV2
+from .supervisor import SupervisorPolicy, SupervisorV2
 from .torus9_production import (
     Torus9ProductionGenerationPath,
     Torus9ProductionLineage,
@@ -248,21 +248,36 @@ class ProductionArmExecutionPath:
         env["AZ_GENERATION_RESULT_PATH"] = str(
             root / "runtime" / "results" / f"generation-{generation:04d}.json"
         )
+        heartbeat_path = root / "runtime" / "heartbeats" / f"generation-{generation:04d}.json"
+        env["AZ_DRIVER_HEARTBEAT_PATH"] = str(heartbeat_path)
         supervisor = SupervisorV2(
             root,
-            lineage_id=resolved.output_lineage.lineage_id,
-            initial_committed_generation=resolved.parent_checkpoint.generation,
+            execution_id=(
+                f"{resolved.output_lineage.lineage_id}:child:{generation}"
+            ),
+            liveness_path=heartbeat_path,
+            progress_path=heartbeat_path,
             command=child_command,
             cwd=self.repo_root,
             env=env,
             policy=self._effective_supervisor_policy(),
         )
         result = supervisor.run_once()
-        if result.status is not SupervisorStatus.COMMITTED:
+        if not result.success:
             raise RuntimeError(
                 f"production generation M{generation} stopped: "
-                f"{root / 'runtime' / 'supervisor-stop.json'}"
+                f"{result.reason or root / 'runtime' / 'supervisor-stop.json'}"
             )
+        try:
+            validate_generation_commit(
+                root=root,
+                lineage_id=resolved.output_lineage.lineage_id,
+                generation=generation,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"production generation M{generation} exited successfully without a valid commit"
+            ) from exc
         if not result_path.is_file():
             raise RuntimeError(f"production generation child returned no result: {result_path}")
         child_result = _read_json(result_path)
