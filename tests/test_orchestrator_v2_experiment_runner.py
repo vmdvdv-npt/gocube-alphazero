@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from gocube_golden import run_storage
+import gocube_golden.orchestrator_v2.experiment_runner as experiment_runner_module
 from gocube_golden.artifact_catalog import sha256_file
 from gocube_golden.orchestrator_v2 import (
     ArenaRunner,
@@ -28,6 +29,17 @@ from gocube_golden.orchestrator_v2 import (
     checkpoint_node_path,
 )
 from tools.arena_engine import ArenaExecutionConfig
+
+
+class FakeNotifier:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.events: list[tuple[str, str]] = []
+        self.fail = fail
+
+    def send_now(self, key: str, text: str) -> None:
+        if self.fail:
+            raise RuntimeError("synthetic Telegram failure")
+        self.events.append((key, text))
 
 
 def _config(*, learning_rate: float, games: int, steps: int, sims: int) -> EffectiveConfig:
@@ -212,6 +224,7 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")
     arm_path = SyntheticTrainOne(tmp_path, resolver)
+    notifier = FakeNotifier()
     arena_calls: list[dict[str, object]] = []
 
     def fake_arena(**kwargs: object) -> dict[str, object]:
@@ -268,6 +281,7 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
         train_one=arm_path,
         arena_runner=ArenaRunner(engine=fake_arena),
         experiment_root=tmp_path / "experiment-state",
+        notifier=notifier,
     )
 
     first = runner.run()
@@ -276,6 +290,15 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     assert [call.arm.arm_id for call in arm_path.calls] == ["A", "B"]
     assert all(call.common_parent.ref == parent.ref for call in arm_path.calls)
     assert len(arena_calls) == 1
+    assert [text.split(" — ", 1)[0] for _key, text in notifier.events] == [
+        "EXPERIMENT_STARTED",
+        "A_COMPLETED",
+        "B_COMPLETED",
+        "STAGE1_ARENA_COMPLETED",
+        "EXPERIMENT_COMPLETED",
+    ]
+    assert "W/L/D=2/2/0" in notifier.events[3][1]
+    assert "winner=A-final" in notifier.events[3][1]
 
     a = first.final_checkpoints["A"]
     b = first.final_checkpoints["B"]
@@ -307,6 +330,7 @@ def test_experiment_runner_v2_synthetic_two_stage_winner_rooted_flow(
     parent = _make_parent(tmp_path)
     resolver = ArtifactResolver(tmp_path / "runs")
     arm_path = SyntheticTrainOne(tmp_path, resolver)
+    notifier = FakeNotifier()
     arena_calls: list[dict[str, object]] = []
 
     def fake_arena(**kwargs: object) -> dict[str, object]:
@@ -385,6 +409,7 @@ def test_experiment_runner_v2_synthetic_two_stage_winner_rooted_flow(
         train_one=arm_path,
         arena_runner=ArenaRunner(engine=fake_arena),
         experiment_root=tmp_path / "experiment-state",
+        notifier=notifier,
     )
 
     result = runner.run()
@@ -424,6 +449,20 @@ def test_experiment_runner_v2_synthetic_two_stage_winner_rooted_flow(
     assert arm_path.calls[2].common_parent.ref == stage1_winner.ref
     assert arm_path.calls[3].common_parent.ref == stage1_winner.ref
     assert len(arena_calls) == 2
+    event_names = [text.split(" — ", 1)[0] for _key, text in notifier.events]
+    assert event_names == [
+        "EXPERIMENT_STARTED",
+        "A_COMPLETED",
+        "B_COMPLETED",
+        "STAGE1_ARENA_COMPLETED",
+        "STAGE2_STARTED",
+        "STAGE2_CONTROL_COMPLETED",
+        "STAGE2_C_COMPLETED",
+        "STAGE2_ARENA_COMPLETED",
+        "EXPERIMENT_COMPLETED",
+    ]
+    assert ("W/L/D=3/1/0" if stage1_candidate_wins else "W/L/D=1/3/0") in notifier.events[3][1]
+    assert "W/L/D=3/1/0" in notifier.events[7][1]
     assert arena_calls[0]["candidate_path"] == b.path
     assert arena_calls[0]["reference_path"] == a.path
     assert arena_calls[1]["candidate_path"] == c.path
@@ -440,6 +479,48 @@ def test_experiment_runner_v2_synthetic_two_stage_winner_rooted_flow(
     assert resumed.final_winner is not None and resumed.final_winner.ref == c.ref
     assert len(arm_path.calls) == 4
     assert len(arena_calls) == 2
+
+
+def test_experiment_runner_notifier_none_never_constructs_telegram(tmp_path, monkeypatch):
+    class ForbiddenTelegram:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("runner must not construct TelegramNotifier")
+
+    monkeypatch.setattr(experiment_runner_module, "TelegramNotifier", ForbiddenTelegram, raising=False)
+    parent = _make_parent(tmp_path)
+    config = ExperimentConfig(
+        experiment_id="no-telegram-ab",
+        topology="torus9",
+        parent=parent.ref,
+        arms=(
+            ExperimentArmConfig("A", 0, _config(learning_rate=0.001, games=8, steps=4, sims=8)),
+            ExperimentArmConfig("B", 0, _config(learning_rate=0.0005, games=12, steps=6, sims=16)),
+        ),
+        arena_config=ArenaExecutionConfig(
+            games=4,
+            workers=1,
+            games_per_worker=2,
+            inference_batch_rows=2,
+            inference_batch_wait_ms=0.0,
+            device="cpu",
+            strict_production=False,
+            min_mean_inference_batch_rows=0.0,
+            min_effective_cpu_cores=0.0,
+            early_gate_enabled=False,
+        ),
+        arena_master_seed=71,
+    )
+    runner = ExperimentRunnerV2(
+        config,
+        resolver=ArtifactResolver(tmp_path / "runs"),
+        lineage_factory=type("NoopLineage", (), {})(),
+        train_one=lambda **_kwargs: None,
+        arena_runner=type("NoopArena", (), {})(),
+        experiment_root=tmp_path / "experiment-state",
+    )
+    # The constructor is the relevant boundary here: no notifier is created
+    # merely by selecting the V2 orchestration mode.
+    assert runner._notifier is None
 
 
 def test_experiment_runner_v2_resume_after_stage1_decision_reuses_all_stage1_work(tmp_path, monkeypatch):

@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import json
+import logging
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -119,12 +120,15 @@ class ExperimentRunnerV2:
         experiment_root: str | Path | None = None,
         lineage_factory: LineageFactory | None = None,
         train_one: TrainOne | None = None,
+        notifier: object | None = None,
     ) -> None:
         self.config = config
         self.arena_runner = arena_runner
         self.resolver = resolver or ArtifactResolver()
         self.lineage_factory = lineage_factory or Torus9ProductionLineage(self.resolver.runs_root)
         self.train_one = train_one or ProductionTrainOne(resolver=self.resolver)
+        self._notifier = notifier
+        self.logger = logging.getLogger(__name__)
         self.experiment_root = (
             Path(experiment_root).resolve()
             if experiment_root is not None
@@ -139,10 +143,24 @@ class ExperimentRunnerV2:
         original_parent = self.resolver.checkpoint(self.config.parent)
         state = self._load_or_create_state(original_parent)
         if state["state"] == "STOPPED":
-            return self._result_from_stopped_state(state)
+            result = self._result_from_stopped_state(state)
+            winner = result.final_winner
+            self._notify_operator(
+                "EXPERIMENT_COMPLETED",
+                "Experiment is already completed.",
+                key_suffix=f"completed:{winner.ref.sha256 if winner is not None else 'stopped'}",
+            )
+            return result
         if state["state"] == "ARENA_INVALID":
             stage = state.get("invalid_stage", "unknown")
             raise ExperimentRunnerError(f"stage {stage} Arena is invalid; no winner or Stage 2 is allowed")
+
+        self._notify_operator(
+            "EXPERIMENT_STARTED",
+            f"Experiment {self.config.experiment_id} started from "
+            f"{original_parent.topology}/{original_parent.lineage_id}/{original_parent.checkpoint_id}.",
+            key_suffix=f"started:{self.config.fingerprint}",
+        )
 
         stage1_arms = {"A": self.config.arm_a, "B": self.config.arm_b}
         stage1_final = self._run_arms(
@@ -193,6 +211,12 @@ class ExperimentRunnerV2:
         stage2 = self.config.stage2
         stage2_parent = stage1_winner
         stage2_arms = self._stage2_arms(stage2, stage2_parent, stage1_final)
+        self._notify_operator(
+            "STAGE2_STARTED",
+            f"Stage 2 started from winner {stage2_parent.ref.lineage_id}/"
+            f"{stage2_parent.ref.checkpoint_id}.",
+            key_suffix=f"stage2-started:{stage2_parent.ref.sha256}",
+        )
         stage2_state = state["stage2"]
         if not isinstance(stage2_state, dict):
             raise ExperimentRunnerError("experiment Stage 2 state is malformed")
@@ -330,6 +354,17 @@ class ExperimentRunnerV2:
                 _write_json(self.state_path, state)
             self._validate_final(arm, parent, checkpoint)
             final[arm_id] = checkpoint
+            event = (
+                f"{arm_id}_COMPLETED"
+                if stage_key == "stage1"
+                else f"STAGE2_{arm_id.upper()}_COMPLETED"
+            )
+            self._notify_operator(
+                event,
+                f"{event.replace('_', ' ').title()}: "
+                f"{checkpoint.ref.lineage_id}/{checkpoint.ref.checkpoint_id}.",
+                key_suffix=f"{event.lower()}:{checkpoint.ref.sha256}",
+            )
 
         return final
 
@@ -457,6 +492,11 @@ class ExperimentRunnerV2:
             state["stop_reason"] = f"stage {stage} Arena validity={arena_result.validity}"
             state["updated_at"] = self._now()
             _write_json(self.state_path, state)
+            self._notify_operator(
+                "CRITICAL",
+                f"Stage {stage} Arena is {arena_result.validity}; no winner was recorded.",
+                key_suffix=f"critical:arena:{stage}:{arena_result.evaluation_id}",
+            )
             raise ExperimentRunnerError(
                 f"stage {stage} Arena is {arena_result.validity}; no scientific winner was recorded"
             )
@@ -464,32 +504,38 @@ class ExperimentRunnerV2:
         if isinstance(raw_decision, Mapping):
             decision = WinnerDecision.from_dict(raw_decision)
             self._validate_decision(decision, arena_result, candidate, reference, winner_rule, stage)
-            return arena_result, decision
-
-        try:
-            wins, losses, draws = arena_result.wld
-        except (TypeError, ValueError) as exc:
-            raise ExperimentRunnerError(f"stage {stage} valid Arena has malformed W/L/D") from exc
-        decision = WinnerDecision(
-            stage=stage,
-            evaluation_id=arena_result.evaluation_id,
-            evaluation_fingerprint=arena_result.evaluation_fingerprint,
-            candidate=candidate.ref,
-            reference=reference.ref,
-            wins=wins,
-            losses=losses,
-            draws=draws,
-            winner_rule=winner_rule,
-            winner=winner_rule.choose(
+        else:
+            try:
+                wins, losses, draws = arena_result.wld
+            except (TypeError, ValueError) as exc:
+                raise ExperimentRunnerError(f"stage {stage} valid Arena has malformed W/L/D") from exc
+            decision = WinnerDecision(
+                stage=stage,
+                evaluation_id=arena_result.evaluation_id,
+                evaluation_fingerprint=arena_result.evaluation_fingerprint,
                 candidate=candidate.ref,
                 reference=reference.ref,
                 wins=wins,
                 losses=losses,
-            ),
+                draws=draws,
+                winner_rule=winner_rule,
+                winner=winner_rule.choose(
+                    candidate=candidate.ref,
+                    reference=reference.ref,
+                    wins=wins,
+                    losses=losses,
+                ),
+            )
+            stage_state["winner"] = decision.to_dict()
+            state["updated_at"] = self._now()
+            _write_json(self.state_path, state)
+        winner_label = candidate_label if decision.winner == candidate.ref else reference_label
+        self._notify_operator(
+            f"STAGE{stage}_ARENA_COMPLETED",
+            f"Stage {stage} Arena completed: W/L/D={decision.wins}/{decision.losses}/{decision.draws}; "
+            f"winner={winner_label} ({decision.winner.lineage_id}/{decision.winner.checkpoint_id}).",
+            key_suffix=f"stage{stage}-arena:{arena_result.evaluation_id}",
         )
-        stage_state["winner"] = decision.to_dict()
-        state["updated_at"] = self._now()
-        _write_json(self.state_path, state)
         return arena_result, decision
 
     def _run_arena(
@@ -527,7 +573,15 @@ class ExperimentRunnerV2:
             reference_label=reference_label,
             comparison=comparison,
         )
-        return self.arena_runner.run(request)
+        try:
+            return self.arena_runner.run(request)
+        except BaseException as exc:
+            self._notify_operator(
+                "CRITICAL",
+                f"Stage Arena execution failed: {exc.__class__.__name__}.",
+                key_suffix=f"critical:arena-execution:{candidate.ref.sha256}:{reference.ref.sha256}",
+            )
+            raise
 
     @staticmethod
     def _arena_state(result: ArenaRunResult) -> dict[str, object]:
@@ -607,6 +661,12 @@ class ExperimentRunnerV2:
         state["updated_at"] = self._now()
         state["stop_reason"] = reason
         _write_json(self.state_path, state)
+        self._notify_operator(
+            "EXPERIMENT_COMPLETED",
+            f"Experiment {self.config.experiment_id} completed; winner="
+            f"{final_winner.ref.lineage_id}/{final_winner.ref.checkpoint_id}.",
+            key_suffix=f"completed:{final_winner.ref.sha256}",
+        )
 
     def _load_or_create_state(self, parent: ResolvedCheckpointNode) -> dict[str, Any]:
         if self.state_path.is_file():
@@ -959,6 +1019,18 @@ class ExperimentRunnerV2:
         from datetime import datetime, timezone
 
         return datetime.now(timezone.utc).isoformat()
+
+    def _notify_operator(self, event: str, message: str, *, key_suffix: str) -> None:
+        """Report an injected operator event; observability stays fail-open."""
+        if self._notifier is None:
+            return
+        try:
+            self._notifier.send_now(
+                f"experiment:{self.config.experiment_id}:{key_suffix}",
+                f"{event} — {message}",
+            )
+        except BaseException:
+            self.logger.warning("operator notification failed", exc_info=True)
 
 
 ExperimentRunner = ExperimentRunnerV2

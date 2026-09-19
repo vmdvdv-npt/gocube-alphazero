@@ -24,3 +24,11 @@ Arena cadence is relative to the supplied parent generation. Same-lineage
 Arena output is owned by the lineage under `arena/generation-NNNN/`; a
 cross-lineage comparison uses the canonical `evaluations/` namespace. No
 checkpoint is copied between lineages.
+
+Telegram is an explicit production concern. Both runners accept an optional
+injected object implementing the existing `send_now(key, text)` boundary;
+`None` performs no Telegram work. `production_entrypoint` is the V2 wiring
+boundary that loads a JSON plan, creates the existing `TelegramNotifier`,
+injects it, runs the coordinator, and flushes it. Tests use a fake notifier;
+the separate `telegram-test` command remains the only explicit transport
+probe.

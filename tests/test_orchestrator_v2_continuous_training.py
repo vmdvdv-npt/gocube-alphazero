@@ -20,6 +20,7 @@ from gocube_golden.orchestrator_v2 import (
 )
 import gocube_golden.orchestrator_v2.continuous_training as continuous_training
 from gocube_golden.provenance import sha256_fingerprint
+from gocube_golden import telegram_notifier
 from tools.arena_engine import ArenaExecutionConfig
 
 
@@ -198,12 +199,24 @@ class FakeArena:
         )
 
 
+class FakeNotifier:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.events: list[tuple[str, str]] = []
+        self.fail = fail
+
+    def send_now(self, key: str, text: str) -> None:
+        if self.fail:
+            raise RuntimeError("synthetic Telegram failure")
+        self.events.append((key, text))
+
+
 def _runner(
     tmp_path: Path,
     *,
     generations: int | None,
     cadence: int = 5,
     effective_config: EffectiveConfig | None = None,
+    notifier: object | None = None,
 ):
     config = effective_config or _config()
     parent_root = tmp_path / "parent"
@@ -224,6 +237,7 @@ def _runner(
         train_one=train,  # type: ignore[arg-type]
         arena_runner=arena,  # type: ignore[arg-type]
         reporter=lambda *_args: None,
+        notifier=notifier,
     )
     train.stop_runner = runner
     return runner, train, arena, resolver, parent
@@ -341,6 +355,75 @@ def test_start_report_contains_resolved_operator_values(tmp_path: Path) -> None:
     assert "self-play MCTS=128 sims" in messages[0]
     assert "games/generation=128" in messages[0]
     assert "Arena cadence=every 5 generations" in messages[0]
+
+
+def test_injected_notifier_gets_operator_events_without_generation_log_spam(tmp_path: Path) -> None:
+    notifier = FakeNotifier()
+    runner, _train, _arena, _resolver, _parent = _runner(
+        tmp_path, generations=5, cadence=2, notifier=notifier
+    )
+
+    runner.run()
+
+    events = [text.split(" — ", 1)[0] for _key, text in notifier.events]
+    assert events == [
+        "START",
+        "ARENA_COMPLETED",
+        "ARENA_COMPLETED",
+        "COMPLETED",
+    ]
+    start = notifier.events[0][1]
+    assert "LR=0.0003" in start
+    assert "replay=6 generations / 40000 positions" in start
+    assert "self-play MCTS=128 sims" in start
+    assert "games/generation=128" in start
+    assert "Arena cadence=every 2 generations" in start
+
+
+def test_notifier_none_never_constructs_telegram_or_sends_network(tmp_path: Path, monkeypatch) -> None:
+    calls: list[object] = []
+
+    class ForbiddenTelegram:
+        def __init__(self, *_args, **_kwargs):
+            calls.append("constructed")
+            raise AssertionError("runner must not construct TelegramNotifier")
+
+    monkeypatch.setattr(continuous_training, "TelegramNotifier", ForbiddenTelegram, raising=False)
+    monkeypatch.setattr(
+        telegram_notifier,
+        "_send",
+        lambda *_args: calls.append("network send"),
+    )
+    runner, _train, _arena, _resolver, _parent = _runner(tmp_path, generations=1)
+    result = runner.run()
+
+    assert result.state == "COMPLETED"
+    assert calls == []
+
+
+def test_telegram_failure_is_fail_open_for_continuous_training(tmp_path: Path) -> None:
+    notifier = FakeNotifier(fail=True)
+    runner, _train, _arena, _resolver, _parent = _runner(
+        tmp_path, generations=1, notifier=notifier
+    )
+
+    result = runner.run()
+
+    assert result.state == "COMPLETED"
+
+
+def test_soft_stop_operator_events_are_durable_and_resumable(tmp_path: Path) -> None:
+    notifier = FakeNotifier()
+    runner, train, _arena, _resolver, _parent = _runner(
+        tmp_path, generations=None, cadence=1, notifier=notifier
+    )
+    train.stop_at = 21
+
+    result = runner.run()
+
+    events = [text.split(" — ", 1)[0] for _key, text in notifier.events]
+    assert result.state == "SOFT_STOPPED"
+    assert events == ["START", "SOFT_STOP_REQUESTED", "SOFT_STOPPED"]
 
 
 def test_non_golden_operator_values_are_reported_not_rejected(tmp_path: Path) -> None:

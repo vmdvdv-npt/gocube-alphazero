@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 
 from ..artifact_graph import CheckpointRef, EffectiveConfig
 from ..process_supervision import atomic_write_text
@@ -331,6 +330,11 @@ class ContinuousTrainingRunnerV2:
             state = _read_object(self.state_path, "continuous training state")
             state["soft_stop_requested"] = True
             self._persist_state(state)
+        self._notify_operator(
+            "SOFT_STOP_REQUESTED",
+            "A soft stop was requested; the active generation will finish before the safe boundary.",
+            key_suffix=f"soft-stop-requested:{payload['requested_at']}",
+        )
         return payload
 
     def resume(self) -> ContinuousTrainingResult:
@@ -378,6 +382,11 @@ class ContinuousTrainingRunnerV2:
         arenas = self._stored_arenas(state)
 
         if state.get("state") == "COMPLETED":
+            self._notify_operator(
+                "COMPLETED",
+                f"Continuous training already completed at M{current.generation}.",
+                key_suffix=f"completed:{current.generation}",
+            )
             return self._result(state, original_parent, current, committed, arenas)
 
         while True:
@@ -396,6 +405,11 @@ class ContinuousTrainingRunnerV2:
                     "soft_stop",
                     "Soft stop reached a safe generation boundary; lineage remains resumable",
                     generation=current.generation,
+                )
+                self._notify_operator(
+                    "SOFT_STOPPED",
+                    f"Soft stop completed at M{current.generation}; lineage remains resumable.",
+                    key_suffix=f"soft-stopped:{current.generation}",
                 )
                 return self._result(state, original_parent, current, committed, arenas)
 
@@ -420,6 +434,11 @@ class ContinuousTrainingRunnerV2:
                     }
                 )
                 self._persist_state(state)
+                self._notify_operator(
+                    "COMPLETED",
+                    f"Continuous training completed at M{current.generation}.",
+                    key_suffix=f"completed:{current.generation}",
+                )
                 return self._result(state, original_parent, current, committed, arenas)
 
             next_generation = current.generation + 1
@@ -433,11 +452,19 @@ class ContinuousTrainingRunnerV2:
             )
             self._persist_state(state)
             previous = current
-            current = self.train_one(
-                parent=current,
-                config=resolved_config,
-                output_lineage=output_lineage,
-            )
+            try:
+                current = self.train_one(
+                    parent=current,
+                    config=resolved_config,
+                    output_lineage=output_lineage,
+                )
+            except BaseException as exc:
+                self._notify_operator(
+                    "CRITICAL",
+                    f"Generation M{next_generation} failed: {exc.__class__.__name__}.",
+                    key_suffix=f"critical:generation:{next_generation}",
+                )
+                raise
             self._validate_child(previous, current, resolved_config, next_generation)
             committed.append(current)
             state.update(
@@ -637,7 +664,15 @@ class ContinuousTrainingRunnerV2:
             comparison=f"M{current.generation}-vs-M{reference.generation}",
             output_dir=output_dir,
         )
-        result = self.arena_runner.run(request)
+        try:
+            result = self.arena_runner.run(request)
+        except BaseException as exc:
+            self._notify_operator(
+                "CRITICAL",
+                f"Arena execution failed for M{current.generation}: {exc.__class__.__name__}.",
+                key_suffix=f"critical:arena:{current.generation}",
+            )
+            raise
         if not isinstance(result, ArenaRunResult):
             raise RuntimeError("ArenaRunnerV2 returned an invalid Arena result")
         if same_lineage:
@@ -650,6 +685,12 @@ class ContinuousTrainingRunnerV2:
             reference_generation=reference.generation,
             validity=result.validity,
             wld=list(result.wld),
+        )
+        self._notify_operator(
+            "ARENA_COMPLETED",
+            f"Arena completed for M{current.generation} vs M{reference.generation}: "
+            f"{result.validity} W/L/D={result.wld[0]}/{result.wld[1]}/{result.wld[2]}.",
+            key_suffix=f"arena:{current.generation}:{result.evaluation_id}",
         )
         return result
 
@@ -807,12 +848,14 @@ class ContinuousTrainingRunnerV2:
             "arena_cadence": self.config.arena_cadence,
         }
         self._report("started", message, **details)
-        self._telegram("training-start", message)
+        self._notify_operator(
+            "START",
+            message,
+            key_suffix=f"start:{config.fingerprint}",
+        )
 
     def _report(self, event: str, message: str, **details: object) -> None:
         self.logger.info(message)
-        if event in {"generation_committed", "arena_completed", "soft_stop"}:
-            self._telegram(event, message)
         if self.reporter is None:
             return
         try:
@@ -820,26 +863,23 @@ class ContinuousTrainingRunnerV2:
         except TypeError:
             self.reporter(message)
 
-    def _telegram(self, key_suffix: str, message: str) -> None:
-        try:
-            notifier = self._notifier
-            if notifier is None:
-                from ..telegram_notifier import TelegramNotifier
+    def _notify_operator(self, event: str, message: str, *, key_suffix: str) -> None:
+        """Send one injected operator event without making Telegram a dependency.
 
-                paths = SimpleNamespace(
-                    root=self.lineage_root,
-                    manifest=self.lineage_root / "manifest.json",
-                    runtime=self.lineage_root / "runtime",
-                    runtime_state=self.state_path,
-                    logs=self.lineage_root / "logs",
-                    metrics=self.lineage_root / "metrics",
-                )
-                notifier = TelegramNotifier(paths)
-                self._notifier = notifier
-            notifier.send_now(f"continuous:{self.config.lineage_id}:{key_suffix}", message)
+        The production entrypoint owns construction of the notifier.  Keeping
+        this boundary duck-typed also lets tests inject a recorder or a
+        fail-open transport without importing or contacting Telegram.
+        """
+        if self._notifier is None:
+            return
+        try:
+            self._notifier.send_now(
+                f"continuous:{self.config.lineage_id}:{key_suffix}",
+                f"{event} — {message}",
+            )
         except BaseException:
             # Telegram is fail-open observability; it cannot affect training.
-            return
+            self.logger.warning("operator notification failed", exc_info=True)
 
 
 __all__ = [
