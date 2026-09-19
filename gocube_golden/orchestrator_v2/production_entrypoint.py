@@ -9,6 +9,7 @@ the selected V2 coordinator, and flushes queued legacy notifications.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -76,6 +77,7 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
         arena_reference_gap=(
             None if raw.get("arena_reference_gap") is None else int(raw["arena_reference_gap"])
         ),
+        allow_code_rollover=raw.get("allow_code_rollover", False),  # type: ignore[arg-type]
     )
 
 
@@ -90,10 +92,15 @@ def run_continuous_from_config(
     payload: Mapping[str, object],
     *,
     runs_root: str | Path | None = None,
+    allow_code_rollover: bool | None = None,
     **runner_kwargs: Any,
 ) -> object:
     """Run a production continuous plan with explicitly injected Telegram."""
     config = _continuous_config(payload)
+    if allow_code_rollover is not None:
+        if type(allow_code_rollover) is not bool:
+            raise ValueError("allow_code_rollover must be a boolean")
+        config = replace(config, allow_code_rollover=allow_code_rollover)
     resolver = runner_kwargs.pop("resolver", None) or ArtifactResolver(runs_root)
     root = resolver.runs_root / config.topology / ACTIVE / config.lineage_id
     notifier = TelegramNotifier(_notification_paths(root))
@@ -113,10 +120,15 @@ def run_experiment_from_config(
     payload: Mapping[str, object],
     *,
     runs_root: str | Path | None = None,
+    allow_code_rollover: bool | None = None,
     **runner_kwargs: Any,
 ) -> object:
     """Run a production A/B or A/B→C plan with explicitly injected Telegram."""
     config = _experiment_config(payload)
+    if allow_code_rollover is not None:
+        if type(allow_code_rollover) is not bool:
+            raise ValueError("allow_code_rollover must be a boolean")
+        config = replace(config, allow_code_rollover=allow_code_rollover)
     resolver = runner_kwargs.pop("resolver", None) or ArtifactResolver(runs_root)
     experiment_root = runner_kwargs.get("experiment_root")
     root = (
@@ -146,6 +158,12 @@ def main(argv: list[str] | None = None) -> int:
         command = subparsers.add_parser(name, help=f"run a V2 {name} JSON plan")
         command.add_argument("config", type=Path)
         command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
+        command.add_argument(
+            "--allow-code-rollover",
+            action="store_true",
+            default=None,
+            help="explicitly allow a clean application-code rollover when resuming",
+        )
         command.set_defaults(kind=name)
     args = parser.parse_args(argv)
     if args.kind == "telegram":
@@ -158,9 +176,17 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = load_v2_config(args.config)
     if args.kind == "continuous":
-        run_continuous_from_config(payload, runs_root=args.runs_root)
+        run_continuous_from_config(
+            payload,
+            runs_root=args.runs_root,
+            allow_code_rollover=args.allow_code_rollover,
+        )
     else:
-        run_experiment_from_config(payload, runs_root=args.runs_root)
+        run_experiment_from_config(
+            payload,
+            runs_root=args.runs_root,
+            allow_code_rollover=args.allow_code_rollover,
+        )
     return 0
 
 

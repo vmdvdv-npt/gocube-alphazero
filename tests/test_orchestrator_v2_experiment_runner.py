@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 from pathlib import Path
 
@@ -118,6 +118,7 @@ class SyntheticTrainOne:
     experiment_root: Path
     resolver: ArtifactResolver
     calls: list[object] = field(default_factory=list)
+    allow_code_rollover_calls: list[bool] = field(default_factory=list)
     active_arm: ExperimentArmConfig | None = None
     active_parent: object | None = None
 
@@ -130,7 +131,9 @@ class SyntheticTrainOne:
         effective_config,
         experiment_id: str,
         arm_id: str,
+        allow_code_rollover: bool = False,
     ) -> tuple[Path, ResolvedEffectiveConfig]:
+        self.allow_code_rollover_calls.append(allow_code_rollover)
         arm = ExperimentArmConfig(arm_id, 1, effective_config, lineage_id=lineage_id)
         self.active_arm = arm
         self.active_parent = parent
@@ -321,6 +324,96 @@ def test_experiment_runner_v2_synthetic_ab_resume_and_final_arena(tmp_path, monk
     assert len(arena_calls) == 1
     assert resumed.arena.identity.candidate == b.ref
     assert resumed.arena.identity.reference == a.ref
+
+
+def test_experiment_resume_keeps_fingerprint_when_code_rollover_is_allowed(
+    tmp_path, monkeypatch
+):
+    parent = _make_parent(tmp_path)
+    resolver = ArtifactResolver(tmp_path / "runs")
+    lineage = SyntheticTrainOne(tmp_path, resolver)
+    arena_calls: list[dict[str, object]] = []
+
+    def fake_arena(**kwargs: object) -> dict[str, object]:
+        arena_calls.append(kwargs)
+        output = kwargs["output_dir"]
+        assert isinstance(output, Path)
+        summary = {
+            "games": 4,
+            "W/L/D": [2, 1, 1],
+            "telemetry": {
+                "technical_games": 0,
+                "performance_status": "HEALTHY",
+                "performance_failures": [],
+            },
+        }
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        (output / "manifest.json").write_text("{}", encoding="utf-8")
+        return summary
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, evaluation_id: tmp_path / "evaluations" / evaluation_id,
+    )
+    arena_config = ArenaExecutionConfig(
+        games=4,
+        workers=1,
+        games_per_worker=2,
+        inference_batch_rows=2,
+        inference_batch_wait_ms=0.0,
+        device="cpu",
+        strict_production=False,
+        min_mean_inference_batch_rows=0.0,
+        min_effective_cpu_cores=0.0,
+        early_gate_enabled=False,
+    )
+    config = ExperimentConfig(
+        experiment_id="resume-code-rollover",
+        topology="torus9",
+        parent=parent.ref,
+        arms=(
+            ExperimentArmConfig("A", 1, _config(learning_rate=0.001, games=8, steps=4, sims=8)),
+            ExperimentArmConfig("B", 1, _config(learning_rate=0.0005, games=12, steps=6, sims=16)),
+        ),
+        arena_config=arena_config,
+        arena_master_seed=19,
+    )
+    experiment_root = tmp_path / "experiment-state"
+
+    def fail_before_first_checkpoint(**_kwargs: object):
+        raise RuntimeError("simulated interruption before A completion")
+
+    first = ExperimentRunnerV2(
+        config,
+        resolver=resolver,
+        lineage_factory=lineage,
+        train_one=fail_before_first_checkpoint,
+        arena_runner=ArenaRunner(engine=fake_arena),
+        experiment_root=experiment_root,
+    )
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        first.run()
+
+    state = json.loads((experiment_root / "state.json").read_text())
+    resumed_config = replace(config, allow_code_rollover=True)
+    assert state["state"] == "RUNNING"
+    assert state["config_fingerprint"] == config.fingerprint
+    assert resumed_config.fingerprint == config.fingerprint
+    assert "allow_code_rollover" not in resumed_config.to_dict()
+
+    resumed = ExperimentRunnerV2(
+        resumed_config,
+        resolver=resolver,
+        lineage_factory=lineage,
+        train_one=lineage,
+        arena_runner=ArenaRunner(engine=fake_arena),
+        experiment_root=experiment_root,
+    ).run()
+
+    assert resumed.state == "STOPPED"
+    assert lineage.allow_code_rollover_calls[-2:] == [True, True]
+    assert len(arena_calls) == 1
 
 
 @pytest.mark.parametrize("stage1_candidate_wins", [True, False])

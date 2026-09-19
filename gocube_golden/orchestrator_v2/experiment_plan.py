@@ -259,6 +259,7 @@ class ExperimentConfig:
     arena_workload: Mapping[str, object] = field(default_factory=dict)
     winner_rule: WinnerRule | str | Mapping[str, object] = field(default_factory=WinnerRule)
     stage2: ExperimentStage2Config | None = None
+    allow_code_rollover: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "experiment_id", _component(self.experiment_id, "experiment_id"))
@@ -281,6 +282,8 @@ class ExperimentConfig:
         object.__setattr__(self, "winner_rule", WinnerRule.from_value(self.winner_rule))
         if not isinstance(self.arena_workload, Mapping):
             raise ValueError("arena_workload must be an object")
+        if type(self.allow_code_rollover) is not bool:
+            raise ValueError("allow_code_rollover must be a boolean")
         if self.stage2 is not None:
             if self.stage2.c.effective_config.topology != self.topology:
                 raise ValueError("Stage 2 C config topology does not match experiment")
@@ -310,7 +313,7 @@ class ExperimentConfig:
             workload=self.arena_workload,
             winner_rule=self.winner_rule,  # type: ignore[arg-type]
         )
-        return {
+        payload = {
             "schema": "gocube-experiment-runner-v2",
             "experiment_id": self.experiment_id,
             "topology": self.topology,
@@ -319,6 +322,7 @@ class ExperimentConfig:
             "arena": arena,
             "stage2": None if self.stage2 is None else self.stage2.to_dict(),
         }
+        return payload
 
     @property
     def fingerprint(self) -> str:
@@ -378,6 +382,7 @@ class ExperimentConfig:
             arena_workload=dict(raw_arena.get("workload", {})),  # type: ignore[arg-type]
             winner_rule=raw_arena.get("winner_rule", EXPERIMENT_WINNER_RULE),  # type: ignore[arg-type]
             stage2=(None if raw_stage2 is None else ExperimentStage2Config.from_dict(raw_stage2)),  # type: ignore[arg-type]
+            allow_code_rollover=value.get("allow_code_rollover", False),  # type: ignore[arg-type]
         )
 
 

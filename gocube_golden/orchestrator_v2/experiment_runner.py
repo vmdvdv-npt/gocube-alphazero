@@ -62,6 +62,7 @@ class LineageFactory(Protocol):
         effective_config: object,
         experiment_id: str,
         arm_id: str,
+        allow_code_rollover: bool = False,
     ) -> tuple[Path, ResolvedEffectiveConfig]: ...
 
 
@@ -318,12 +319,19 @@ class ExperimentRunnerV2:
             else:
                 lineage_id = arm.lineage_id or f"{self.config.experiment_id}-{arm.arm_id}"
                 root, effective_config = self.lineage_factory.prepare(
-                    topology=self.config.topology,
-                    lineage_id=lineage_id,
-                    parent=parent,
-                    effective_config=arm.effective_config,
-                    experiment_id=self.config.experiment_id,
-                    arm_id=arm.arm_id,
+                    **{
+                        "topology": self.config.topology,
+                        "lineage_id": lineage_id,
+                        "parent": parent,
+                        "effective_config": arm.effective_config,
+                        "experiment_id": self.config.experiment_id,
+                        "arm_id": arm.arm_id,
+                        **(
+                            {"allow_code_rollover": True}
+                            if self.config.allow_code_rollover
+                            else {}
+                        ),
+                    }
                 )
                 if effective_config.fingerprint != arm.effective_config.fingerprint:
                     raise ExperimentRunnerError(

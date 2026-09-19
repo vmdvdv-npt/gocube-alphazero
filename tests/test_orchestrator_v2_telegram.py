@@ -98,3 +98,31 @@ def test_production_entrypoint_flushes_when_runner_fails(monkeypatch, tmp_path: 
         raise AssertionError("expected runner failure")
 
     assert flushed == [True]
+
+
+def test_production_entrypoint_explicitly_allows_code_rollover(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured: list[object] = []
+
+    class FakeRunner:
+        def __init__(self, config, *, resolver, notifier, **_kwargs) -> None:
+            captured.append(config)
+
+        def run(self):
+            return "done"
+
+    monkeypatch.setattr(entrypoint, "TelegramNotifier", lambda _paths: object())
+    monkeypatch.setattr(entrypoint, "ContinuousTrainingRunnerV2", FakeRunner)
+    monkeypatch.setattr(entrypoint, "flush_all", lambda: None)
+
+    assert (
+        entrypoint.run_continuous_from_config(
+            _continuous_payload(),
+            runs_root=tmp_path / "runs",
+            allow_code_rollover=True,
+        )
+        == "done"
+    )
+    assert len(captured) == 1
+    assert captured[0].allow_code_rollover is True
