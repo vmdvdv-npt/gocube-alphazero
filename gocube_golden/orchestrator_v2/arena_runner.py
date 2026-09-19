@@ -76,6 +76,10 @@ class ArenaRunRequest:
     candidate_label: str | None = None
     reference_label: str | None = None
     comparison: str | None = None
+    # Cross-lineage evaluations stay in the canonical evaluations namespace.
+    # A coordinator may opt a same-lineage evaluation into its owning lineage
+    # without changing the Arena identity or execution semantics.
+    output_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidate, ResolvedCheckpointNode):
@@ -182,7 +186,18 @@ class ArenaRunner:
             reference_generation=request.reference.generation,
             fingerprint=fingerprint,
         )
-        output = evaluation_dir(request.candidate.topology, run_id).resolve()
+        if request.output_dir is not None:
+            requested_output = request.output_dir.resolve()
+            # A coordinator may provide either a concrete run directory or a
+            # lineage-owned generation directory.  The latter gets the same
+            # identity-derived leaf name used by canonical evaluations.
+            output = (
+                requested_output
+                if requested_output.name == run_id
+                else requested_output / run_id
+            )
+        else:
+            output = evaluation_dir(request.candidate.topology, run_id).resolve()
 
         if output.exists():
             existing = load_reusable_evaluation(

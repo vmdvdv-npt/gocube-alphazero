@@ -74,3 +74,9 @@ from .experiment_runner import (  # noqa: F401
     WinnerRule,
     WinnerRuleName,
 )
+from .continuous_training import (  # noqa: F401
+    CONTINUOUS_TRAINING_SCHEMA,
+    ContinuousTrainingConfig,
+    ContinuousTrainingResult,
+    ContinuousTrainingRunnerV2,
+)

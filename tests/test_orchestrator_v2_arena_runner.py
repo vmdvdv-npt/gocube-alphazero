@@ -149,6 +149,35 @@ def test_runner_reuses_only_matching_complete_result(tmp_path: Path, monkeypatch
     assert second.validity == "VALID"
 
 
+def test_runner_can_store_same_lineage_result_under_generation_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    calls: list[int] = []
+
+    def engine(**kwargs: object) -> dict[str, object]:
+        calls.append(1)
+        return _fake_engine(**kwargs)
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("same-lineage Arena must not use evaluations/")),
+    )
+    request = replace(
+        _request(tmp_path),
+        reference=_resolved(tmp_path, "candidate", 94, SHA_B),
+        output_dir=tmp_path / "candidate" / "arena" / "generation-0095",
+    )
+    runner = ArenaRunner(engine=engine)
+
+    first = runner.run(request)
+    second = runner.run(request)
+
+    assert calls == [1]
+    assert first.output_dir.parent == request.output_dir
+    assert first.output_dir.name == first.evaluation_id
+    assert second.output_dir == first.output_dir
+
+
 def test_runner_reuses_completed_non_valid_arena_and_preserves_boundary_status(
     tmp_path: Path, monkeypatch
 ) -> None:
