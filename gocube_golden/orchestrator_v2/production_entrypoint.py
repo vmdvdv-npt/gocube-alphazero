@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from ..run_storage import ACTIVE, RUNS_ROOT
 from ..telegram_notifier import TelegramError, TelegramNotifier, flush_all, telegram_test
 from .artifact_resolver import ArtifactResolver
+from .arena_runner import ArenaRunnerV2
 from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
 from .experiment_plan import ExperimentConfig
 from .experiment_runner import ExperimentRunnerV2
@@ -137,9 +138,11 @@ def run_experiment_from_config(
         else resolver.runs_root / config.topology / "experiments" / config.experiment_id
     )
     notifier = TelegramNotifier(_notification_paths(root))
+    arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2()
     try:
         runner = ExperimentRunnerV2(
             config,
+            arena_runner=arena_runner,
             resolver=resolver,
             notifier=notifier,
             **runner_kwargs,
