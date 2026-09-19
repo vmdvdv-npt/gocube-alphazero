@@ -47,6 +47,7 @@ from gocube_golden.artifact_resolver import (
     ResolvedCheckpointNode,
 )
 from gocube_golden.artifact_graph import ArtifactRef
+from gocube_golden.artifact_graph import CheckpointRef, publish_checkpoint_graph, validate_generation_commit
 from gocube_golden.torus9 import (
     Torus9CurrentGraphNet,
     Torus9SelfPlaySearchContract,
@@ -69,6 +70,7 @@ from gocube_golden.torus9_training import (
     TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
     TORUS9_REPLAY_SELECTION_CONTRACT,
 )
+from training_engine import CommitPreparation
 from tools.arena_engine import (
     ArenaExecutionConfig,
     classify_arena_performance,
@@ -967,10 +969,34 @@ def _cleanup_uncommitted_generation(root: Path, generation: int) -> None:
         f"training/.iter-{generation:02d}.tmp*",
         f".iter-{generation:02d}-summary.tmp*",
         f".generation-{generation:02d}.complete.tmp*",
+        f"metadata/checkpoints/M{generation}.json",
+        f"metadata/provenance-v2/M{generation}.json",
+        f"runtime/results/v2-generation-{generation:04d}.json",
+        f"runtime/results/generation-{generation:04d}.json",
+        f"runtime/resume/generation-{generation:04d}.json",
     ):
         for path in root.glob(pattern):
             if path.is_file():
                 path.unlink()
+    manifest_path = root / "manifest.json"
+    if manifest_path.is_file():
+        manifest = _read_json(manifest_path)
+        checkpoint_hashes = manifest.get("checkpoint_hashes")
+        checkpoint_path = f"checkpoints/M{generation}.pt"
+        if isinstance(checkpoint_hashes, Mapping) and checkpoint_path in checkpoint_hashes:
+            updated = dict(manifest)
+            updated_hashes = dict(checkpoint_hashes)
+            updated_hashes.pop(checkpoint_path, None)
+            updated["checkpoint_hashes"] = updated_hashes
+            commits = updated.get("generation_commits")
+            if isinstance(commits, Mapping):
+                updated_commits = dict(commits)
+                updated_commits.pop(str(generation), None)
+                updated["generation_commits"] = updated_commits
+            _atomic_json(manifest_path, updated)
+    catalog_path = root / "runtime" / "artifact-catalog.json"
+    if catalog_path.is_file():
+        ArtifactCatalog.load(catalog_path, root=root).discard_generation(generation)
 
 
 def _relative(root: Path, path: Path) -> str:
@@ -1058,15 +1084,16 @@ def _artifact_with_known_identity(
     identity: Mapping[str, object] | None,
     *,
     extra: Mapping[str, object] | None = None,
+    allow_missing: bool = False,
 ) -> dict[str, object]:
     """Use a commit-record identity when the file was already hashed."""
     if identity is None:
         result = _artifact(root, path)
     else:
-        if not path.is_file():
+        if not path.is_file() and not allow_missing:
             raise FileNotFoundError(path)
         size = int(identity.get("size_bytes", -1))
-        if size != path.stat().st_size:
+        if path.is_file() and size != path.stat().st_size:
             raise ValueError(f"Cached artifact size mismatch: {path}")
         result = {
             "path": _relative(root, path),
@@ -1179,6 +1206,8 @@ def _publish_generation_result(
     bindings: DriverBindings = DEFAULT_DRIVER_BINDINGS,
     profile: Mapping[str, object] | None = None,
     result_path: Path | None = None,
+    marker_payload: Mapping[str, object] | None = None,
+    marker_identity: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     checkpoint = root / "checkpoints" / f"M{generation}.pt"
     replay = root / "replay" / f"rolling-after-{generation:02d}.jsonl"
@@ -1190,7 +1219,7 @@ def _publish_generation_result(
         if profile is None
         else None
     )
-    marker_payload = _read_json(marker)
+    marker_payload = dict(_read_json(marker) if marker_payload is None else marker_payload)
     cached_identities: dict[str, Mapping[str, object]] = {}
     marker_fields = {
         "checkpoint": "checkpoint_sha256",
@@ -1217,6 +1246,8 @@ def _publish_generation_result(
                 "sha256": marker_payload[field],
                 "size_bytes": path.stat().st_size,
             }
+    if marker_identity is not None:
+        cached_identities[_relative(root, marker)] = dict(marker_identity)
     replay_identity: dict[str, object] = {
         **cached_identities.get(_relative(root, replay), {}),
         "row_count": marker_payload.get("replay_row_count"),
@@ -1310,7 +1341,15 @@ def _publish_generation_result(
                 "sha256": selfplay_metrics.get("selfplay_artifact_sha256"),
                 "size_bytes": path.stat().st_size,
             }
-        artifacts.append(_artifact_with_known_identity(root, path, known, extra=extra))
+        artifacts.append(
+            _artifact_with_known_identity(
+                root,
+                path,
+                known,
+                extra=extra,
+                allow_missing=path == marker and marker_identity is not None,
+            )
+        )
     if generation == 1:
         initial_checkpoint = root / "checkpoints" / "M0.pt"
         initial_metadata = initial_checkpoint.with_suffix(".metadata.json")
@@ -1340,7 +1379,12 @@ def _publish_generation_result(
         ),
     }
     if profile is not None:
-        payload["commit_artifact"] = _artifact(root, marker)
+        payload["commit_artifact"] = _artifact_with_known_identity(
+            root,
+            marker,
+            marker_identity,
+            allow_missing=marker_identity is not None,
+        )
     publication_started = time.perf_counter()
     result_path = (
         Path(os.environ["AZ_GENERATION_RESULT_PATH"])
@@ -1358,6 +1402,69 @@ def _publish_generation_result(
             # publication timing without touching replay/checkpoint artifacts.
             _atomic_json(result_path, payload)
     return payload
+
+
+def _prepare_v2_commit(
+    *,
+    resolved_input: object,
+    config: Mapping[str, object],
+    bindings: DriverBindings,
+    profile: Mapping[str, object],
+    expected_fingerprint: str,
+    result_path: Path,
+) -> Callable[[CommitPreparation], None]:
+    """Bind reload, graph, provenance, and catalog publication to one fence."""
+
+    def prepare(preparation: CommitPreparation) -> None:
+        selfplay_metrics = preparation.summary.get("orchestrator_selfplay")
+        if not isinstance(selfplay_metrics, Mapping):
+            raise ValueError("V2 generation summary is missing orchestrator self-play metrics")
+        marker_identity = preparation.artifact_identities["completion_marker"]
+        payload = _publish_generation_result(
+            root=preparation.root,
+            lineage_id=preparation.run_id,
+            generation=preparation.generation,
+            profile_fingerprint=expected_fingerprint,
+            selfplay_metrics=selfplay_metrics,
+            config=config,
+            bindings=bindings,
+            profile=profile,
+            result_path=result_path,
+            marker_payload=preparation.marker_payload,
+            marker_identity=marker_identity,
+        )
+        checkpoint_identity = preparation.artifact_identities["checkpoint"]
+        fresh_identity = preparation.artifact_identities["fresh_replay"]
+        checkpoint = CheckpointRef(
+            topology=str(getattr(resolved_input.output_lineage, "topology")),
+            lineage_id=preparation.run_id,
+            checkpoint_id=f"M{preparation.generation}",
+            generation=preparation.generation,
+            path=str(checkpoint_identity["path"]),
+            sha256=str(checkpoint_identity["sha256"]),
+        )
+        fresh_replay = ArtifactRef(
+            path=str(fresh_identity["path"]),
+            sha256=str(fresh_identity["sha256"]),
+        )
+        generation_commit = ArtifactRef(
+            path=preparation.marker_path.relative_to(preparation.root).as_posix(),
+            sha256=preparation.marker_sha256,
+        )
+        parent_ref = getattr(resolved_input.parent_checkpoint, "ref")
+        effective_ref = getattr(resolved_input.effective_config, "ref")
+        publish_checkpoint_graph(
+            root=preparation.root,
+            parent=parent_ref,
+            checkpoint=checkpoint,
+            fresh_replay=fresh_replay,
+            effective_config=effective_ref,
+            generation_commit=generation_commit,
+            artifact_identities=preparation.artifact_identities,
+            checkpoint_reload_verified=bool(payload.get("checkpoint_reload_verified")),
+        )
+
+    return prepare
 
 
 def _v2_effective_config(value: object) -> Mapping[str, object]:
@@ -1883,6 +1990,15 @@ def run_generation(
             _read_json(root / "manifest.json")
         if marker.is_file():
             heartbeat.advance("recover-published-generation")
+            if _resolved_input is not None:
+                validate_generation_commit(
+                    root=root,
+                    lineage_id=lineage_id,
+                    generation=args.generation,
+                )
+                if not result_path.is_file():
+                    raise ValueError("Committed V2 generation lacks its pre-commit result")
+                return _read_json(result_path)
             summary = _read_json(root / f"iter-{args.generation:02d}-summary.json")
             persisted = summary.get("orchestrator_selfplay")
             if not isinstance(persisted, Mapping):
@@ -2042,6 +2158,18 @@ def run_generation(
             unit="optimizer_steps",
             subphase="optimizer",
         )
+        prepare_commit = (
+            _prepare_v2_commit(
+                resolved_input=_resolved_input,
+                config=config,
+                bindings=bindings,
+                profile=profile,
+                expected_fingerprint=expected_fingerprint,
+                result_path=result_path,
+            )
+            if _resolved_input is not None
+            else None
+        )
         run_torus9_training_iteration(
             state=state,
             generation=args.generation,
@@ -2060,6 +2188,7 @@ def run_generation(
             adapter=adapter,
             summary_extra={"orchestrator_selfplay": selfplay_metrics},
             progress_callback=heartbeat.advance,
+            prepare_commit=prepare_commit,
         )
         heartbeat.advance(
             "training",
@@ -2070,17 +2199,20 @@ def run_generation(
             subphase="optimizer",
         )
         heartbeat.advance("reload-verification")
-        payload = _publish_generation_result(
-            root=root,
-            lineage_id=lineage_id,
-            generation=args.generation,
-            profile_fingerprint=expected_fingerprint,
-            selfplay_metrics=selfplay_metrics,
-            config=config,
-            bindings=bindings,
-            profile=profile if _resolved_input is not None else None,
-            result_path=result_path,
-        )
+        if _resolved_input is not None:
+            payload = _read_json(result_path)
+        else:
+            payload = _publish_generation_result(
+                root=root,
+                lineage_id=lineage_id,
+                generation=args.generation,
+                profile_fingerprint=expected_fingerprint,
+                selfplay_metrics=selfplay_metrics,
+                config=config,
+                bindings=bindings,
+                profile=None,
+                result_path=result_path,
+            )
         heartbeat.advance("completed", token=f"generation-M{args.generation}-completed")
         return payload
 
@@ -2089,7 +2221,7 @@ def run_generation_v2(resolved_input: object) -> dict[str, object]:
     """Run one production generation from resolver-owned V2 inputs."""
     generation = int(getattr(resolved_input, "generation"))
     return run_generation(
-        argparse.Namespace(generation=generation, resume=False),
+        argparse.Namespace(generation=generation, resume=True),
         _resolved_input=resolved_input,
     )
 

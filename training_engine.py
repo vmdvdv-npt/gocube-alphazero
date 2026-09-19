@@ -106,6 +106,22 @@ class CheckpointContext:
 
 
 @dataclass(frozen=True)
+class CommitPreparation:
+    """All durable identities available immediately before the commit fence."""
+
+    root: Path
+    run_id: str
+    generation: int
+    context: CheckpointContext
+    summary: Mapping[str, object]
+    marker_payload: Mapping[str, object]
+    marker_path: Path
+    marker_sha256: str
+    artifact_paths: Mapping[str, Path]
+    artifact_identities: Mapping[str, Mapping[str, object]]
+
+
+@dataclass(frozen=True)
 class TrainingIterationResult:
     generation: int
     label: str
@@ -269,6 +285,7 @@ class TrainingEngine:
         summary_extra: Mapping[str, object] | None = None,
         summary_builder: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
         progress_callback: Callable[..., None] | None = None,
+        prepare_commit: Callable[[CommitPreparation], None] | None = None,
     ) -> TrainingIterationResult:
         selected_adapter = adapter or self.adapter
         if selected_adapter is None:
@@ -666,10 +683,55 @@ class TrainingEngine:
                 (checkpoint_metadata_tmp, checkpoint_metadata_final),
                 (training_tmp, training_final),
                 (summary_tmp, summary_final),
-                (marker_tmp, marker_final),
             ):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(source, target)
+
+            artifact_paths = {
+                "fresh_replay": fresh_final,
+                "rolling_replay": rolling_final,
+                "checkpoint": checkpoint_final,
+                "checkpoint_metadata": checkpoint_metadata_final,
+                "training_metrics": training_final,
+                "iteration_summary": summary_final,
+                "completion_marker": marker_final,
+            }
+            artifact_hashes = {
+                "fresh_replay": artifact_hash_cache["fresh_replay"],
+                "rolling_replay": artifact_hash_cache["rolling_replay"],
+                "checkpoint": checkpoint_artifact_hash,
+                "checkpoint_metadata": artifact_hash_cache["checkpoint_metadata"],
+                "training_metrics": artifact_hash_cache["training_metrics"],
+                "iteration_summary": selected_adapter.artifact_hash(summary_final),
+                "completion_marker": selected_adapter.artifact_hash(marker_tmp),
+            }
+            artifact_identities = {
+                name: {
+                    "path": str(path.relative_to(root)),
+                    "sha256": artifact_hashes[name],
+                    "size_bytes": path.stat().st_size if path != marker_final else marker_tmp.stat().st_size,
+                }
+                for name, path in artifact_paths.items()
+            }
+            if prepare_commit is not None:
+                prepare_commit(
+                    CommitPreparation(
+                        root=root.resolve(),
+                        run_id=str(run_id),
+                        generation=generation,
+                        context=context,
+                        summary=summary,
+                        marker_payload=marker,
+                        marker_path=marker_final,
+                        marker_sha256=artifact_hashes["completion_marker"],
+                        artifact_paths=artifact_paths,
+                        artifact_identities=artifact_identities,
+                    )
+                )
+
+            # The completion marker is the final fence.  Nothing that makes a
+            # generation resolvable may be published after this replacement.
+            os.replace(marker_tmp, marker_final)
             phase_timing["checkpoint_publication_wall_time_sec"] = time.perf_counter() - phase_started
             phase_timing["training_transaction_wall_time_sec"] = (
                 time.perf_counter() - train_started

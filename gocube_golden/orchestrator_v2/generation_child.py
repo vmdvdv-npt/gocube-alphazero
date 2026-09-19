@@ -9,7 +9,7 @@ from ..process_supervision import atomic_write_text
 from ..provenance import canonical_json
 from .generation_runner import GenerationRunner
 from .production_arm import _deserialize_resolved_input, _read_json
-from .torus9_production import Torus9ProductionGenerationPath, V2CheckpointPublisher
+from .torus9_production import Torus9ProductionGenerationPath
 
 
 def main() -> int:
@@ -21,9 +21,7 @@ def main() -> int:
     request_path = Path(args.request).resolve()
     result_path = Path(args.result).resolve()
     resolved = _deserialize_resolved_input(_read_json(request_path))
-    result = GenerationRunner(
-        Torus9ProductionGenerationPath(publisher=V2CheckpointPublisher())
-    ).run(resolved)
+    result = GenerationRunner(Torus9ProductionGenerationPath()).run(resolved)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(
         result_path,
@@ -42,4 +40,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

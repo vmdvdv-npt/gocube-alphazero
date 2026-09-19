@@ -24,7 +24,6 @@ from .generation_runner import (  # noqa: F401
 from .torus9_production import (  # noqa: F401
     Torus9ProductionGenerationPath,
     Torus9ProductionLineage,
-    V2CheckpointPublisher,
 )
 from .production_arm import ProductionArmExecutionPath  # noqa: F401
 from .supervisor import (  # noqa: F401
