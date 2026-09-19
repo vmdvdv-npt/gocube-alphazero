@@ -256,3 +256,45 @@ def test_v2_restore_forwards_resolver_replay_evidence_without_rehashing(
     )
 
     assert captured["replay_artifact_identities"] == (evidence,)
+
+
+def test_v2_restore_installs_progress_callback_before_loading_replay(tmp_path: Path) -> None:
+    parent = tmp_path / "parent" / "checkpoints" / "M93.pt"
+    replay = tmp_path / "parent" / "replay" / "iter-93-fresh.jsonl"
+    parent.parent.mkdir(parents=True)
+    replay.parent.mkdir(parents=True)
+    parent.write_bytes(b"parent")
+    replay.write_text("{}\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class Adapter:
+        def set_progress_callback(self, callback: object) -> None:
+            captured["progress_callback"] = callback
+
+        def load_state(self, _checkpoint_path: Path, **_kwargs: object) -> object:
+            return object()
+
+    callback = lambda *_args, **_kwargs: None
+    bindings = torus9_run_driver.DriverBindings(
+        training_adapter_factory=lambda **_kwargs: Adapter(),
+        optimizer_steps_per_iteration=1,
+        scientific_validator=lambda _profile, _config: None,
+    )
+
+    torus9_run_driver._prepare_state_v2(
+        root=tmp_path / "output",
+        lineage_id="child",
+        generation=94,
+        profile={},
+        config={},
+        device="cpu",
+        code_identity=object(),  # type: ignore[arg-type]
+        parent_checkpoint=parent,
+        replay_paths=(replay,),
+        parent_sha256=sha256_file(parent),
+        replay_sha256s=(sha256_file(replay),),
+        bindings=bindings,
+        progress_callback=callback,
+    )
+
+    assert captured["progress_callback"] is callback

@@ -9,6 +9,7 @@ import pytest
 import tools.hardware_telemetry as hardware_telemetry
 import tools.torus9_run_driver as run_driver
 import tools.training_orchestrator as training_orchestrator
+import gocube_golden.torus9_training as torus9_training
 from gocube_golden.artifact_catalog import ArtifactCatalog, sha256_file
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_PROFILE_FINGERPRINT,
@@ -183,6 +184,26 @@ def test_semantic_heartbeat_publishes_incremental_counts() -> None:
             assert payload["progress_token"] == "self-play:7/64 games"
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_replay_reader_reports_bounded_progress_during_restore(tmp_path: Path) -> None:
+    replay = tmp_path / "replay.jsonl"
+    replay.write_text(
+        json.dumps({"source_generation": 1, "replay_row_id": "row-1"}) + "\n"
+        + json.dumps({"source_generation": 1, "replay_row_id": "row-2"}) + "\n",
+        encoding="utf-8",
+    )
+    progress: list[tuple[int, int]] = []
+
+    rows, identity = torus9_training._read_jsonl_with_identity(
+        replay,
+        progress_callback=lambda completed, total: progress.append((completed, total)),
+    )
+
+    assert len(rows) == 2
+    assert identity["row_count"] == 2
+    assert progress
+    assert progress[-1] == (replay.stat().st_size, replay.stat().st_size)
 
 
 def test_nvidia_smi_env_override_and_metrics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
