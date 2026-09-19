@@ -18,6 +18,7 @@ from gocube_golden.orchestrator_v2 import (
     CheckpointRef,
     EffectiveConfig,
     EffectiveConfigRef,
+    EXPERIMENT_STATE_SCHEMA,
     ExperimentArmConfig,
     ExperimentConfig,
     ExperimentRunnerV2,
@@ -605,3 +606,102 @@ def test_experiment_runner_v2_invalid_stage1_arena_never_creates_stage2_decision
         runner.run()
     assert len(arm_path.calls) == 2
     assert arena_calls == 1
+
+
+def test_experiment_runner_v2_migrates_legacy_v2_stopped_state_without_reexecution(tmp_path, monkeypatch):
+    parent = _make_parent(tmp_path)
+    resolver = ArtifactResolver(tmp_path / "runs")
+    arm_path = FakeArmExecutionPath(tmp_path, resolver)
+    arena_calls: list[dict[str, object]] = []
+
+    def fake_arena(**kwargs: object) -> dict[str, object]:
+        arena_calls.append(kwargs)
+        output = kwargs["output_dir"]
+        assert isinstance(output, Path)
+        summary = {
+            "games": 4,
+            "W/L/D": [2, 2, 0],
+            "telemetry": {
+                "technical_games": 0,
+                "performance_status": "HEALTHY",
+                "performance_failures": [],
+            },
+        }
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        (output / "manifest.json").write_text(
+            json.dumps({"run_id": str(kwargs["run_id"])}), encoding="utf-8"
+        )
+        return summary
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, evaluation_id: tmp_path / "evaluations" / evaluation_id,
+    )
+    arena_config = ArenaExecutionConfig(
+        games=4,
+        workers=1,
+        games_per_worker=2,
+        inference_batch_rows=2,
+        inference_batch_wait_ms=0.0,
+        device="cpu",
+        strict_production=False,
+        min_mean_inference_batch_rows=0.0,
+        min_effective_cpu_cores=0.0,
+        early_gate_enabled=False,
+    )
+    config = ExperimentConfig(
+        experiment_id="synthetic-legacy-v2",
+        topology="torus9",
+        parent=parent.ref,
+        arms=(
+            ExperimentArmConfig("A", 1, _config(learning_rate=0.001, games=8, steps=4, sims=8)),
+            ExperimentArmConfig("B", 1, _config(learning_rate=0.0005, games=12, steps=6, sims=16)),
+        ),
+        arena_config=arena_config,
+        arena_master_seed=51,
+    )
+    runner = ExperimentRunnerV2(
+        config,
+        resolver=resolver,
+        arm_execution_path=arm_path,
+        arena_runner=ArenaRunner(engine=fake_arena),
+        experiment_root=tmp_path / "experiment-state",
+    )
+
+    initial = runner.run()
+    current_state = json.loads((tmp_path / "experiment-state" / "state.json").read_text())
+    legacy_state = {
+        "schema": EXPERIMENT_STATE_SCHEMA,
+        "version": 2,
+        "experiment_id": config.experiment_id,
+        "topology": config.topology,
+        "config_fingerprint": config.legacy_fingerprint,
+        "parent": parent.ref.to_dict(),
+        "state": "STOPPED",
+        "arms": current_state["stage1"]["arms"],
+        "arena_result": current_state["stage1"]["arena"],
+        "stop_reason": "final A-vs-B Arena completed",
+        "created_at": current_state["created_at"],
+        "updated_at": current_state["updated_at"],
+    }
+    (tmp_path / "experiment-state" / "state.json").write_text(
+        json.dumps(legacy_state), encoding="utf-8"
+    )
+    assert config.legacy_fingerprint != config.fingerprint
+    arm_path.calls.clear()
+    arena_calls.clear()
+
+    resumed = runner.run()
+
+    assert resumed.state == "STOPPED"
+    assert resumed.final_winner is not None
+    assert resumed.final_winner.ref == initial.final_checkpoints["A"].ref
+    assert resumed.decisions[1].winner == initial.final_checkpoints["A"].ref
+    assert arm_path.calls == []
+    assert arena_calls == []
+    migrated = json.loads((tmp_path / "experiment-state" / "state.json").read_text())
+    assert migrated["version"] == 3
+    assert migrated["config_fingerprint"] == config.fingerprint
+    assert migrated["legacy_migration"]["from_version"] == 2
+    assert migrated["stage1"]["winner"]["winner_checkpoint"] == initial.final_checkpoints["A"].ref.to_dict()

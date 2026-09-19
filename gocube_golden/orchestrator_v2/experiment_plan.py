@@ -328,6 +328,25 @@ class ExperimentConfig:
     def fingerprint(self) -> str:
         return sha256_fingerprint(self.to_dict())
 
+    @property
+    def legacy_fingerprint(self) -> str:
+        """Fingerprint emitted by the pre-Stage-2 ExperimentRunner V2.
+
+        PR #155 persisted the same experiment schema before the explicit
+        winner rule and optional Stage 2 fields existed.  Keeping this
+        compatibility calculation here makes the migration exact rather than
+        accepting an arbitrary stale fingerprint.
+        """
+        payload = self.to_dict()
+        arena = payload["arena"]
+        if not isinstance(arena, Mapping):
+            raise ValueError("experiment arena payload is malformed")
+        legacy_arena = dict(arena)
+        legacy_arena.pop("winner_rule", None)
+        payload["arena"] = legacy_arena
+        payload.pop("stage2", None)
+        return sha256_fingerprint(payload)
+
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "ExperimentConfig":
         if not isinstance(value, Mapping):

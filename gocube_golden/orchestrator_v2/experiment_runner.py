@@ -578,7 +578,10 @@ class ExperimentRunnerV2:
 
     def _load_or_create_state(self, parent: ResolvedCheckpointNode) -> dict[str, Any]:
         if self.state_path.is_file():
-            state = dict(_read_json(self.state_path))
+            raw_state = dict(_read_json(self.state_path))
+            if self._is_legacy_state(raw_state):
+                return self._migrate_legacy_state(raw_state, parent)
+            state = raw_state
             if state.get("schema") != EXPERIMENT_STATE_SCHEMA:
                 raise ExperimentRunnerError("unsupported experiment state schema")
             if state.get("experiment_id") != self.config.experiment_id:
@@ -638,6 +641,152 @@ class ExperimentRunnerV2:
         }
         _write_json(self.state_path, state)
         return state
+
+    @staticmethod
+    def _is_legacy_state(state: Mapping[str, object]) -> bool:
+        """Recognize the exact top-level shape persisted by PR #155."""
+        return (
+            state.get("schema") == EXPERIMENT_STATE_SCHEMA
+            and state.get("version") == 2
+            and "arms" in state
+            and "stage1" not in state
+        )
+
+    def _migrate_legacy_state(
+        self,
+        legacy: Mapping[str, object],
+        parent: ResolvedCheckpointNode,
+    ) -> dict[str, Any]:
+        """Atomically convert a PR #155 A/B state into the v3 shape.
+
+        Legacy state never had Stage 2, so it is accepted only for a current
+        config with Stage 2 disabled and only when its old config fingerprint
+        matches exactly.  A legacy STOPPED state must contain a valid Arena
+        and complete A/B checkpoint evidence; otherwise it is not upgraded to
+        a scientific decision.
+        """
+        if self.config.stage2 is not None:
+            raise ExperimentRunnerError("legacy A/B state cannot be resumed with Stage 2 enabled")
+        if legacy.get("config_fingerprint") != self.config.legacy_fingerprint:
+            raise ExperimentRunnerError("legacy experiment config changed during resume")
+        if legacy.get("parent") != parent.ref.to_dict():
+            raise ExperimentRunnerError("legacy experiment parent changed during resume")
+        if legacy.get("experiment_id") != self.config.experiment_id:
+            raise ExperimentRunnerError("legacy experiment state id mismatch")
+        if legacy.get("topology") != self.config.topology:
+            raise ExperimentRunnerError("legacy experiment state topology mismatch")
+
+        raw_arms = legacy.get("arms")
+        if not isinstance(raw_arms, Mapping) or set(raw_arms) != {"A", "B"}:
+            raise ExperimentRunnerError("legacy experiment state arms are malformed")
+        arms = {
+            arm_id: dict(record)
+            for arm_id, record in raw_arms.items()
+            if isinstance(record, Mapping)
+        }
+        if set(arms) != {"A", "B"}:
+            raise ExperimentRunnerError("legacy experiment state arm records are malformed")
+
+        legacy_state = legacy.get("state")
+        if legacy_state not in {"RUNNING", "ARENA", "STOPPED"}:
+            raise ExperimentRunnerError("legacy experiment state is malformed")
+        state_name = "STAGE1_ARENA" if legacy_state == "ARENA" else str(legacy_state)
+        stage1_arena = legacy.get("arena_result")
+        decision: WinnerDecision | None = None
+
+        complete_finals = all(
+            isinstance(arms[arm_id].get("final_checkpoint"), Mapping)
+            for arm_id in ("A", "B")
+        )
+        if legacy_state == "STOPPED" and not complete_finals:
+            raise ExperimentRunnerError("legacy STOPPED state lacks final A/B checkpoints")
+
+        final: dict[str, ResolvedCheckpointNode] = {}
+        if complete_finals:
+            for arm in (self.config.arm_a, self.config.arm_b):
+                checkpoint = self.resolver.checkpoint(arms[arm.arm_id]["final_checkpoint"])
+                self._validate_final(arm, parent, checkpoint)
+                final[arm.arm_id] = checkpoint
+            if final["A"].lineage_id == final["B"].lineage_id:
+                raise ExperimentRunnerError("legacy A/B final checkpoints share a lineage")
+
+        if stage1_arena is not None:
+            if not isinstance(stage1_arena, Mapping):
+                raise ExperimentRunnerError("legacy Arena evidence is malformed")
+            arena_result = self._arena_result_from_state(stage1_arena)
+            if arena_result.validity != "VALID":
+                state_name = "ARENA_INVALID"
+            elif complete_finals:
+                self._validate_arena_result(arena_result, final["B"], final["A"], 1)
+                try:
+                    wins, losses, draws = arena_result.wld
+                except (TypeError, ValueError) as exc:
+                    raise ExperimentRunnerError("legacy valid Arena has malformed W/L/D") from exc
+                decision = WinnerDecision(
+                    stage=1,
+                    evaluation_id=arena_result.evaluation_id,
+                    evaluation_fingerprint=arena_result.evaluation_fingerprint,
+                    candidate=final["B"].ref,
+                    reference=final["A"].ref,
+                    wins=wins,
+                    losses=losses,
+                    draws=draws,
+                    winner_rule=self.config.winner_rule,
+                    winner=self.config.winner_rule.choose(
+                        candidate=final["B"].ref,
+                        reference=final["A"].ref,
+                        wins=wins,
+                        losses=losses,
+                    ),
+                )
+
+        if legacy_state == "STOPPED":
+            if state_name == "ARENA_INVALID":
+                # Never preserve the old runner's STOPPED claim for an
+                # invalid Arena; it was not a scientific decision.
+                state_name = "ARENA_INVALID"
+            elif decision is None:
+                raise ExperimentRunnerError("legacy STOPPED state lacks valid Arena winner evidence")
+
+        now = self._now()
+        migrated: dict[str, Any] = {
+            "schema": EXPERIMENT_STATE_SCHEMA,
+            "version": 3,
+            "experiment_id": self.config.experiment_id,
+            "topology": self.config.topology,
+            "config_fingerprint": self.config.fingerprint,
+            "original_parent": parent.ref.to_dict(),
+            "parent": parent.ref.to_dict(),
+            "state": state_name,
+            "stage1": {
+                "arms": arms,
+                "arena": None if stage1_arena is None else dict(stage1_arena),
+                "winner": None if decision is None else decision.to_dict(),
+            },
+            "stage2": {
+                "enabled": False,
+                "parent": None,
+                "arms": {},
+                "arena": None,
+                "winner": None,
+            },
+            "created_at": legacy.get("created_at", now),
+            "updated_at": now,
+            "legacy_migration": {
+                "from_schema": EXPERIMENT_STATE_SCHEMA,
+                "from_version": 2,
+                "legacy_config_fingerprint": legacy["config_fingerprint"],
+            },
+        }
+        if state_name == "ARENA_INVALID":
+            migrated["invalid_stage"] = 1
+            migrated["stop_reason"] = "legacy Stage 1 Arena was invalid"
+        elif state_name == "STOPPED":
+            assert decision is not None
+            migrated["final_winner"] = decision.winner.to_dict()
+            migrated["stop_reason"] = legacy.get("stop_reason", "migrated legacy final A-vs-B Arena")
+        _write_json(self.state_path, migrated)
+        return migrated
 
     @staticmethod
     def _validate_state_shape(state: Mapping[str, object]) -> None:
