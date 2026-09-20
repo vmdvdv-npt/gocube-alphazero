@@ -12,6 +12,7 @@ must not call ``parent()``, ``ancestor()``, or ``replay_window()``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -55,10 +56,27 @@ class ResolvedGenerationInput:
     generation: int
     effective_config: ResolvedEffectiveConfig
     output_lineage: OutputLineage
+    execution_overrides: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if type(self.generation) is not int or self.generation < 0:
             raise ValueError("generation must be a non-negative integer")
+        if self.execution_overrides is not None:
+            if not isinstance(self.execution_overrides, Mapping):
+                raise ValueError("execution_overrides must be an object")
+            allowed = {"active_games_per_worker", "total_active_contexts"}
+            unknown = set(self.execution_overrides) - allowed
+            if unknown:
+                raise ValueError(
+                    "execution_overrides contains unsupported fields: "
+                    + ", ".join(sorted(unknown))
+                )
+            for key in allowed:
+                if key in self.execution_overrides:
+                    value = self.execution_overrides[key]
+                    if type(value) is not int or value <= 0:
+                        raise ValueError(f"execution_overrides.{key} must be positive")
+            object.__setattr__(self, "execution_overrides", dict(self.execution_overrides))
 
 
 @dataclass(frozen=True)

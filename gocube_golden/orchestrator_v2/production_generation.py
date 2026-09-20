@@ -50,9 +50,10 @@ def _request_payload(
     parent: ResolvedCheckpointNode,
     config: ResolvedEffectiveConfig,
     output_lineage: OutputLineage,
+    execution_overrides: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the small immutable-ref request used by the worker process."""
-    return {
+    payload: dict[str, object] = {
         "schema": TRAIN_ONE_REQUEST_SCHEMA,
         "runs_root": str(resolver.runs_root),
         "parent_checkpoint": parent.ref.to_dict(),
@@ -63,6 +64,9 @@ def _request_payload(
             "root": str(output_lineage.root),
         },
     }
+    if execution_overrides is not None:
+        payload["execution_overrides"] = dict(execution_overrides)
+    return payload
 
 
 def _validate_child(
@@ -137,6 +141,7 @@ class ProductionTrainOne:
         parent: ResolvedCheckpointNode,
         config: ResolvedEffectiveConfig,
         output_lineage: OutputLineage,
+        execution_overrides: Mapping[str, object] | None = None,
     ) -> ResolvedCheckpointNode:
         if output_lineage.topology != "torus9":
             raise ValueError("production train_one currently supports topology=torus9 only")
@@ -160,6 +165,7 @@ class ProductionTrainOne:
                 parent=parent,
                 config=config,
                 output_lineage=output_lineage,
+                execution_overrides=execution_overrides,
             ),
         )
         heartbeat_path = output_lineage.root / "runtime" / "heartbeats" / f"generation-{generation:04d}.json"
@@ -244,11 +250,15 @@ def run_generation_worker(request_path: str | Path, result_path: str | Path) -> 
         lineage_id=output.lineage_id,
         owner_status="ACTIVE",
     )
+    raw_overrides = payload.get("execution_overrides")
+    if raw_overrides is not None and not isinstance(raw_overrides, Mapping):
+        raise ValueError("train-one execution_overrides must be an object")
     resolved = ResolvedGenerationInput(
         parent_checkpoint=parent,
         generation=parent.generation + 1,
         effective_config=config,
         output_lineage=output,
+        execution_overrides=None if raw_overrides is None else dict(raw_overrides),
     )
     result = GenerationRunner(Torus9ProductionGenerationPath()).run(resolved)
     _write_json(

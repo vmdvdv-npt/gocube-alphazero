@@ -1495,6 +1495,31 @@ def _v2_generation_config(value: object) -> dict[str, object]:
     active_games = int(
         execution.get("active_games_per_worker", max(1, (active_contexts + workers - 1) // workers))
     )
+    raw_override = getattr(value, "execution_overrides", None)
+    if raw_override is not None:
+        if not isinstance(raw_override, Mapping):
+            raise ValueError("V2 execution_overrides must be an object")
+        allowed_override = {"active_games_per_worker", "total_active_contexts"}
+        unknown = set(raw_override) - allowed_override
+        if unknown:
+            raise ValueError(
+                "V2 execution_overrides contains unsupported fields: "
+                + ", ".join(sorted(unknown))
+            )
+        if "active_games_per_worker" in raw_override:
+            if type(raw_override["active_games_per_worker"]) is not int or raw_override[
+                "active_games_per_worker"
+            ] <= 0:
+                raise ValueError("V2 execution_overrides.active_games_per_worker must be positive")
+            active_games = int(raw_override["active_games_per_worker"])
+        if "total_active_contexts" in raw_override:
+            if type(raw_override["total_active_contexts"]) is not int or raw_override[
+                "total_active_contexts"
+            ] <= 0:
+                raise ValueError("V2 execution_overrides.total_active_contexts must be positive")
+            active_contexts = int(raw_override["total_active_contexts"])
+        if active_contexts > workers * active_games:
+            raise ValueError("V2 execution_overrides exceed configured worker lane capacity")
     return {
         "games": int(
             self_play["games_per_iteration"]
@@ -2107,7 +2132,11 @@ def run_generation(
             total_active_contexts=int(config["total_active_contexts"]),
             inference_telemetry=inference,
             execution_activity=inference,
-            execution_override_reason="immutable production run-spec",
+            execution_override_reason=(
+                "per-generation self-play concurrency sweep"
+                if getattr(generation_input, "execution_overrides", None) is not None
+                else "immutable production run-spec"
+            ),
             execution_reference_interactive=False,
             progress_callback=selfplay_progress,
         )

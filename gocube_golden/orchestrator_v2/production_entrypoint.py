@@ -79,6 +79,7 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
             None if raw.get("arena_reference_gap") is None else int(raw["arena_reference_gap"])
         ),
         allow_code_rollover=raw.get("allow_code_rollover", False),  # type: ignore[arg-type]
+        self_play_concurrency_sweep=raw.get("self_play_concurrency_sweep"),  # type: ignore[arg-type]
     )
 
 
