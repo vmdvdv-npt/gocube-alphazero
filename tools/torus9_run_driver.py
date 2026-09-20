@@ -1522,7 +1522,7 @@ def _v2_generation_config(value: object) -> dict[str, object]:
         "batch_size": int(training["batch_size"]),
         "mcts_simulations": int(self_play["mcts_simulations"]),
         "replay_generations": int(replay["generations"]),
-        "replay_cap": int(replay["cap"]),
+        "replay_cap": None if replay.get("cap") is None else int(replay["cap"]),
     }
 
 
@@ -1539,7 +1539,7 @@ def _v2_profile(value: object, config: Mapping[str, object]) -> dict[str, object
         f"rolling last {int(config['replay_generations'])} generations"
     )
     profile["replay"]["generations"] = int(config["replay_generations"])
-    profile["replay"]["cap"] = int(config["replay_cap"])
+    profile["replay"]["cap"] = config["replay_cap"]
     profile["content_fingerprint"] = current_torus9_content_fingerprint(profile)
     profile["profile_fingerprint"] = profile_fingerprint(profile)
     return profile
@@ -1551,7 +1551,7 @@ def _v2_parent_checkpoint_identity(value: object) -> tuple[Path, str]:
     return Path(getattr(parent, "path")).resolve(), str(getattr(parent.ref, "sha256"))
 
 
-def _v2_replay_scope(value: object) -> tuple[int, int]:
+def _v2_replay_scope(value: object) -> tuple[int, int | None]:
     """Read the production replay policy from the effective config."""
     effective = _v2_effective_config(value)
     replay = _mapping(effective.get("replay"), "effective_config.replay")
@@ -1562,7 +1562,8 @@ def _v2_replay_scope(value: object) -> tuple[int, int]:
             raise ValueError("effective_config.replay.generations is malformed")
         raw_generations = match.group(1)
     generations = _positive_int(raw_generations, "effective_config.replay.generations")
-    cap = _positive_int(replay.get("cap"), "effective_config.replay.cap")
+    raw_cap = replay.get("cap")
+    cap = None if raw_cap is None else _positive_int(raw_cap, "effective_config.replay.cap")
     return generations, cap
 
 
@@ -1616,7 +1617,7 @@ def _v2_expected_replay_identity(
     artifacts: Sequence[ResolvedArtifact],
     *,
     generations: int,
-    cap: int,
+    cap: int | None,
 ) -> dict[str, object] | None:
     """Build the compact expected composition without reading JSONL rows."""
     components: list[dict[str, object]] = []
@@ -1651,10 +1652,11 @@ def _v2_expected_replay_identity(
         {int(item["generation"]) for item in components}
     ):
         return None
-    retained: dict[int, int] = {}
-    for component in components:
-        generation = int(component["generation"])
-        retained[generation] = int(component["row_count"])
+    retained: dict[int, int] = {
+        int(component["generation"]): int(component["row_count"])
+        for component in components
+    }
+    if cap is not None:
         total = sum(retained.values())
         for oldest in sorted(tuple(retained)):
             if total <= cap:
@@ -1675,7 +1677,7 @@ def _v2_expected_replay_identity(
     contract = {
         "selection": TORUS9_REPLAY_SELECTION_CONTRACT,
         "generations": int(generations),
-        "maximum_positions": int(cap),
+        "maximum_positions": cap,
     }
     payload = {
         "schema": TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA,
@@ -1829,7 +1831,7 @@ def _resolve_v2_replay_sources(
         )
     try:
         contract_generations = int(contract.get("generations", -1))
-        contract_cap = int(contract.get("maximum_positions", -1))
+        contract_cap = contract.get("maximum_positions")
     except (TypeError, ValueError) as exc:
         raise ArtifactIntegrityError("Committed rolling replay contract is malformed") from exc
     if contract_generations != generations or contract_cap != cap:
@@ -1905,7 +1907,7 @@ def _validate_v2_bindings(
         raise ValueError("V2 Torus9 self-play binding drift")
     if int(replay["generations"]) != int(config["replay_generations"]):
         raise ValueError("V2 Torus9 replay-window binding drift")
-    if int(replay["cap"]) != int(config["replay_cap"]):
+    if replay.get("cap") != config["replay_cap"]:
         raise ValueError("V2 Torus9 replay-cap binding drift")
 
 

@@ -88,7 +88,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
             raise ValueError("Current Torus9 Adam weight decay drift")
         if int(state.rolling_replay.generations) != int(self.replay_profile["generations"]):  # type: ignore[index]
             raise ValueError("Torus9 replay generation window disagrees with the run-owned value")
-        if int(state.rolling_replay.maximum_positions) != int(self.replay_profile["cap"]):  # type: ignore[index]
+        if state.rolling_replay.maximum_positions != self.replay_profile["cap"]:
             raise ValueError("Torus9 replay cap disagrees with the run-owned value")
         if int(state.optimizer_updates) != int(trainer.update_count):
             raise ValueError("Current Torus9 optimizer update counter drift")
@@ -98,13 +98,13 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
             raise ValueError("Current Torus9 Adam step does not match training clock")
 
     @staticmethod
-    def _parent_replay_scope(metadata: Mapping[str, object]) -> tuple[int, int]:
+    def _parent_replay_scope(metadata: Mapping[str, object]) -> tuple[int, int | None]:
         scientific = metadata.get("scientific_contract")
         contract = scientific if isinstance(scientific, Mapping) else {}
         generations = metadata.get("rolling_generations", contract.get("replay_generations", 0))
         cap = metadata.get("maximum_replay_positions", contract.get("replay_cap", 0))
         try:
-            return int(generations or 0), int(cap or 0)
+            return int(generations or 0), None if cap is None else int(cap)
         except (TypeError, ValueError) as exc:
             raise ValueError("Referenced Torus9 parent replay scope is malformed") from exc
 
@@ -120,7 +120,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
 
         generation = int(label[1:])
         requested_generations = int(self.replay_profile["generations"])  # type: ignore[index]
-        requested_cap = int(self.replay_profile["cap"])  # type: ignore[index]
+        requested_cap = self.replay_profile["cap"]
         parent_generations, parent_cap = self._parent_replay_scope(metadata)
 
         # A parent rolling artifact is sufficient only if it was built with a
@@ -129,7 +129,12 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         # silently falling back to the smaller parent rolling replay would
         # change the declared experiment.
         needs_fresh_bootstrap = (
-            requested_generations > parent_generations or requested_cap > parent_cap
+            requested_generations > parent_generations
+            or (requested_cap is None and parent_cap is not None)
+            or (
+                requested_cap is not None
+                and (parent_cap is None or requested_cap > parent_cap)
+            )
         )
         if not needs_fresh_bootstrap:
             sources = tuple(fallback)
@@ -278,7 +283,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
             replay = _base.Torus9RollingReplay.from_persisted_rows(
                 rows,
                 generations=int(self.replay_profile["generations"]),  # type: ignore[index]
-                maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
+                maximum_positions=self.replay_profile["cap"],
                 total_evictions=int(total_evictions),
                 generation_identities=generation_identities,
             )
