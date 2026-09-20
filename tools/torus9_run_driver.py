@@ -1453,6 +1453,30 @@ def _prepare_v2_commit(
         )
         parent_ref = getattr(resolved_input.parent_checkpoint, "ref")
         effective_ref = getattr(resolved_input.effective_config, "ref")
+        graph_identities = {
+            name: dict(identity)
+            for name, identity in preparation.artifact_identities.items()
+        }
+        rolling_identity = graph_identities.get("rolling_replay")
+        if rolling_identity is not None:
+            # The marker is the commit-fence source of truth for the rolling
+            # composition.  Publish that compact evidence alongside the
+            # catalog entry so the next V2 restore can authorize the
+            # materialized replay path without resolving every fresh source.
+            marker_fields = {
+                "row_count": "replay_row_count",
+                "source_generations": "replay_generations",
+                "canonical_replay_fingerprint": "replay_fingerprint",
+                "validation_schema": "validation_schema",
+                "replay_identity_schema": "replay_identity_schema",
+                "generation_identities": "replay_identity_components",
+                "replay_identity_contract": "replay_identity_contract",
+            }
+            for identity_field, marker_field in marker_fields.items():
+                value = preparation.marker_payload.get(marker_field)
+                if value is not None:
+                    rolling_identity[identity_field] = value
+            rolling_identity["generation_commit"] = generation_commit.to_dict()
         publish_checkpoint_graph(
             root=preparation.root,
             parent=parent_ref,
@@ -1460,7 +1484,7 @@ def _prepare_v2_commit(
             fresh_replay=fresh_replay,
             effective_config=effective_ref,
             generation_commit=generation_commit,
-            artifact_identities=preparation.artifact_identities,
+            artifact_identities=graph_identities,
             checkpoint_reload_verified=bool(payload.get("checkpoint_reload_verified")),
         )
 
@@ -1609,6 +1633,12 @@ def _v2_replay_artifact_identities(
                 component = metadata_components.get(int(match.group(1)))
             if isinstance(component, Mapping):
                 identity["generation_identity"] = dict(component)
+        if isinstance(component, Mapping) and component.get("row_count") is not None:
+            # The generation identity is already durable evidence bound to the
+            # resolver-verified immutable artifact.  Expose its row count at
+            # the source-identity boundary so the shared training layer can
+            # authorize the trusted path without re-reading a second manifest.
+            identity.setdefault("row_count", int(component["row_count"]))
         identities.append(identity)
     return tuple(identities)
 
@@ -1648,13 +1678,43 @@ def _v2_expected_replay_identity(
                 "row_count": row_count,
             }
         )
-    if not components or [int(item["generation"]) for item in components] != sorted(
-        {int(item["generation"]) for item in components}
+    return _v2_compose_replay_identity(components, generations=generations, cap=cap)
+
+
+def _v2_compose_replay_identity(
+    components: Sequence[Mapping[str, object]],
+    *,
+    generations: int,
+    cap: int | None,
+) -> dict[str, object] | None:
+    """Compose the replay identity from compact generation evidence only."""
+    normalized: list[dict[str, object]] = []
+    for raw in components:
+        if raw.get("schema") != TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA:
+            return None
+        try:
+            generation = int(raw["generation"])
+            row_count = int(raw["row_count"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        sha256 = str(raw.get("sha256", ""))
+        if generation <= 0 or row_count < 0 or re.fullmatch(r"sha256:[0-9a-f]{64}", sha256) is None:
+            return None
+        normalized.append(
+            {
+                "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+                "generation": generation,
+                "sha256": sha256,
+                "row_count": row_count,
+            }
+        )
+    if not normalized or [int(item["generation"]) for item in normalized] != sorted(
+        {int(item["generation"]) for item in normalized}
     ):
         return None
     retained: dict[int, int] = {
         int(component["generation"]): int(component["row_count"])
-        for component in components
+        for component in normalized
     }
     if cap is not None:
         total = sum(retained.values())
@@ -1671,7 +1731,7 @@ def _v2_expected_replay_identity(
             **component,
             "retained_row_count": retained[int(component["generation"])],
         }
-        for component in components
+        for component in normalized
         if int(component["generation"]) in retained
     ]
     contract = {
@@ -1692,6 +1752,58 @@ def _v2_expected_replay_identity(
     }
 
 
+def _v2_replay_identity_matches_scope(
+    identity: Mapping[str, object],
+    *,
+    parent_generation: int,
+    generations: int,
+    cap: int | None,
+) -> bool:
+    """Check a committed composition against the requested replay policy."""
+    if identity.get("replay_identity_schema") != TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA:
+        return False
+    contract = identity.get("replay_identity_contract")
+    expected_contract = {
+        "selection": TORUS9_REPLAY_SELECTION_CONTRACT,
+        "generations": int(generations),
+        "maximum_positions": cap,
+    }
+    if not isinstance(contract, Mapping) or dict(contract) != expected_contract:
+        return False
+    raw_components = identity.get("generation_identities")
+    if (
+        isinstance(raw_components, (str, bytes))
+        or not isinstance(raw_components, Sequence)
+        or any(not isinstance(item, Mapping) for item in raw_components)
+    ):
+        return False
+    expected = _v2_compose_replay_identity(
+        tuple(raw_components),
+        generations=generations,
+        cap=cap,
+    )
+    expected_count = min(generations, parent_generation)
+    if expected is None or expected_count <= 0:
+        return False
+    if len(expected["generation_identities"]) != expected_count:
+        return False
+    expected_components = expected["generation_identities"]
+    if expected_components[0]["generation"] != parent_generation - len(expected_components) + 1:
+        return False
+    if expected_components[-1]["generation"] != parent_generation:
+        return False
+    try:
+        row_count = int(identity.get("row_count", -1))
+    except (TypeError, ValueError):
+        return False
+    return (
+        list(raw_components) == expected_components
+        and identity.get("canonical_replay_fingerprint")
+        == expected["canonical_replay_fingerprint"]
+        and row_count == sum(int(item["retained_row_count"]) for item in expected_components)
+    )
+
+
 def _v2_committed_rolling_replay(
     parent: ResolvedCheckpointNode,
     resolver: ArtifactResolver,
@@ -1699,6 +1811,9 @@ def _v2_committed_rolling_replay(
     """Open the parent's committed rolling artifact, if durable evidence exists."""
     relative = f"replay/rolling-after-{parent.generation:02d}.jsonl"
     catalog_path = parent.owner_root / "runtime" / "artifact-catalog.json"
+    catalog_artifact: ResolvedArtifact | None = None
+    catalog_identity: dict[str, object] | None = None
+    catalog_complete = False
     if catalog_path.is_file():
         try:
             catalog = ArtifactCatalog.load(catalog_path, root=parent.owner_root)
@@ -1718,7 +1833,19 @@ def _v2_committed_rolling_replay(
             identity.update(dict(entry))
             identity["committed"] = True
             identity["validation_schema"] = catalog.payload.get("validation_schema")
-            return artifact, identity
+            # New catalogs contain the complete composition evidence. Older
+            # V2 catalogs contain only path/SHA/size; keep the verified
+            # artifact and enrich it from the immutable generation marker
+            # below instead of falling back to a fresh-window restore.
+            catalog_complete = (
+                identity.get("replay_identity_schema") is not None
+                and identity.get("replay_identity_contract") is not None
+                and isinstance(identity.get("generation_identities"), Sequence)
+                and identity.get("canonical_replay_fingerprint") is not None
+                and identity.get("row_count") is not None
+            )
+            catalog_artifact = artifact
+            catalog_identity = identity
 
     try:
         provenance = json.loads(parent.provenance.path.read_text(encoding="utf-8"))
@@ -1726,8 +1853,12 @@ def _v2_committed_rolling_replay(
         # A parent without V2 commit evidence simply has no rolling
         # optimization to use.  The graph-derived fresh window remains the
         # authoritative restore source.
+        if catalog_complete and catalog_artifact is not None and catalog_identity is not None:
+            return catalog_artifact, catalog_identity
         return None
     if not isinstance(provenance, Mapping) or not isinstance(provenance.get("generation_commit"), Mapping):
+        if catalog_complete and catalog_artifact is not None and catalog_identity is not None:
+            return catalog_artifact, catalog_identity
         return None
     try:
         commit_ref = ArtifactRef.from_dict(provenance["generation_commit"])  # type: ignore[arg-type]
@@ -1748,11 +1879,22 @@ def _v2_committed_rolling_replay(
         raise ArtifactIntegrityError("Parent generation marker generation is malformed") from exc
     if marker_generation != parent.generation:
         raise ArtifactIntegrityError("Parent generation marker does not match checkpoint generation")
+    marker_checkpoint_sha = marker.get("checkpoint_sha256")
+    if marker_checkpoint_sha is not None and str(marker_checkpoint_sha) != parent.ref.sha256:
+        raise ArtifactIntegrityError(
+            "Parent generation marker checkpoint SHA disagrees with checkpoint reference"
+        )
     rolling_sha = str(marker.get("rolling_replay_sha256", ""))
     if not rolling_sha.startswith("sha256:"):
         raise ArtifactIntegrityError("Parent generation marker has no rolling replay SHA")
-    artifact = resolver.open_artifact(ArtifactRef(relative, rolling_sha), owner=parent)
-    identity = dict(artifact.identity or {})
+    if catalog_artifact is not None and rolling_sha != catalog_artifact.sha256:
+        raise ArtifactIntegrityError(
+            "Generation marker rolling replay SHA disagrees with artifact catalog"
+        )
+    artifact = catalog_artifact or resolver.open_artifact(
+        ArtifactRef(relative, rolling_sha), owner=parent
+    )
+    identity = dict(catalog_identity or artifact.identity or {})
     identity.update(
         {
             "committed": True,
@@ -1766,6 +1908,107 @@ def _v2_committed_rolling_replay(
             "replay_identity_contract": marker.get("replay_identity_contract"),
         }
     )
+    # Validate the marker's compact composition against itself before a child
+    # policy is considered. A child may legitimately request a different
+    # replay scope and fall back to fresh artifacts, but internally
+    # inconsistent committed evidence must never be silently trusted.
+    marker_contract = marker.get("replay_identity_contract")
+    marker_components = marker.get("replay_identity_components")
+    marker_fingerprint = marker.get("replay_fingerprint")
+    marker_row_count = marker.get("replay_row_count")
+    if (
+        marker_contract is not None
+        and marker_components is not None
+        and marker_fingerprint is not None
+        and marker_row_count is not None
+    ):
+        if not isinstance(marker_contract, Mapping):
+            raise ArtifactIntegrityError("Parent generation marker replay contract is malformed")
+        if (
+            isinstance(marker_components, (str, bytes))
+            or not isinstance(marker_components, Sequence)
+            or any(not isinstance(item, Mapping) for item in marker_components)
+        ):
+            raise ArtifactIntegrityError(
+                "Parent generation marker replay generation identities are malformed"
+            )
+        try:
+            marker_generations = int(marker_contract.get("generations", -1))
+            marker_cap_raw = marker_contract.get("maximum_positions")
+            marker_cap = None if marker_cap_raw is None else int(marker_cap_raw)
+            declared_row_count = int(marker_row_count)
+        except (TypeError, ValueError) as exc:
+            raise ArtifactIntegrityError(
+                "Parent generation marker replay composition counts are malformed"
+            ) from exc
+        if marker_generations <= 0 or declared_row_count < 0 or (
+            marker_cap is not None and marker_cap <= 0
+        ):
+            raise ArtifactIntegrityError(
+                "Parent generation marker replay composition counts are invalid"
+            )
+        expected_marker_contract = {
+            "selection": TORUS9_REPLAY_SELECTION_CONTRACT,
+            "generations": marker_generations,
+            "maximum_positions": marker_cap,
+        }
+        if dict(marker_contract) != expected_marker_contract:
+            raise ArtifactIntegrityError(
+                "Parent generation marker replay selection contract is malformed"
+            )
+        raw_source_generations = marker.get("replay_generations")
+        if raw_source_generations is not None:
+            if (
+                isinstance(raw_source_generations, (str, bytes))
+                or not isinstance(raw_source_generations, Sequence)
+            ):
+                raise ArtifactIntegrityError(
+                    "Parent generation marker replay generations are malformed"
+                )
+            try:
+                source_generations = [int(value) for value in raw_source_generations]
+                component_generations = [
+                    int(component["generation"]) for component in marker_components
+                ]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ArtifactIntegrityError(
+                    "Parent generation marker replay generations are malformed"
+                ) from exc
+            if source_generations != component_generations:
+                raise ArtifactIntegrityError(
+                    "Parent generation marker replay generations disagree with identities"
+                )
+        composed = _v2_compose_replay_identity(
+            tuple(marker_components),
+            generations=marker_generations,
+            cap=marker_cap,
+        )
+        if composed is None or len(composed["generation_identities"]) != len(marker_components):
+            raise ArtifactIntegrityError(
+                "Parent generation marker replay generation identities are malformed"
+            )
+        if composed["canonical_replay_fingerprint"] != marker_fingerprint:
+            raise ArtifactIntegrityError(
+                "Parent generation marker replay composition fingerprint is invalid"
+            )
+        if declared_row_count != sum(
+            int(item["retained_row_count"]) for item in composed["generation_identities"]
+        ):
+            raise ArtifactIntegrityError(
+                "Parent generation marker replay row count disagrees with identities"
+            )
+        catalog_row_count = (catalog_identity or {}).get("row_count")
+        if catalog_row_count is not None:
+            try:
+                catalog_row_count_int = int(catalog_row_count)
+            except (TypeError, ValueError) as exc:
+                raise ArtifactIntegrityError(
+                    "Rolling replay catalog row count is malformed"
+                ) from exc
+            if catalog_row_count_int != declared_row_count:
+                raise ArtifactIntegrityError(
+                    "Rolling replay catalog row count disagrees with generation marker"
+                )
     return artifact, identity
 
 
@@ -1791,6 +2034,24 @@ def _resolve_v2_replay_sources(
     """Select Torus9 replay restore sources inside the production path."""
     generations, cap = _v2_replay_scope(effective_config)
     resolver = ArtifactResolver(parent.owner_root.parents[2])
+    rolling = _v2_committed_rolling_replay(parent, resolver)
+    if rolling is not None:
+        rolling_artifact, rolling_identity = rolling
+        if _v2_replay_identity_matches_scope(
+            rolling_identity,
+            parent_generation=parent.generation,
+            generations=generations,
+            cap=cap,
+        ) and (
+            rolling_identity.get("commit_artifact") is not None
+            or rolling_identity.get("generation_commit") is not None
+        ):
+            return (
+                (rolling_artifact.path,),
+                (rolling_artifact.sha256,),
+                (rolling_identity,),
+                rolling_identity,
+            )
     fresh = resolver.replay_window(parent, generations)
     fresh_identities = _v2_replay_artifact_identities(parent, fresh)
     # The identity is intentionally optional: a graph with no compact evidence
@@ -1812,7 +2073,6 @@ def _resolve_v2_replay_sources(
         generations=generations,
         cap=cap,
     )
-    rolling = _v2_committed_rolling_replay(parent, resolver)
     if rolling is None or expected is None:
         return (
             tuple(item.path for item in fresh_with_identity),
