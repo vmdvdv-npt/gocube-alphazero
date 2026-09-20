@@ -1264,6 +1264,7 @@ def _publish_generation_result(
         profile=(load_torus9_current_profile(profile_path) if profile is None else profile)
     )
     reload_timing: dict[str, object] = {}
+    reload_started = time.perf_counter()
     loaded = adapter.load_state(
         checkpoint,
         replay_path=replay,
@@ -1271,6 +1272,20 @@ def _publish_generation_result(
         replay_artifact_identity=replay_identity,
         load_timing=reload_timing,
     )
+    reload_timing.setdefault(
+        "checkpoint_reload_verification_wall_time_sec",
+        time.perf_counter() - reload_started,
+    )
+    if "checkpoint_reload_replay_parse_wall_time_sec" in reload_timing:
+        reload_timing.setdefault(
+            "checkpoint_reload_replay_reload_parse_wall_time_sec",
+            reload_timing["checkpoint_reload_replay_parse_wall_time_sec"],
+        )
+    generation_timing_payload = selfplay_metrics.get("timing")
+    if isinstance(generation_timing_payload, dict):
+        generation_timing_payload.update(reload_timing)
+    else:
+        selfplay_metrics["timing"] = dict(reload_timing)
     if int(loaded.current_generation) != generation:
         raise ValueError("Reloaded Torus9 checkpoint generation mismatch")
     resume = _resume_state(
@@ -1416,6 +1431,7 @@ def _prepare_v2_commit(
     """Bind reload, graph, provenance, and catalog publication to one fence."""
 
     def prepare(preparation: CommitPreparation) -> None:
+        commit_preparation_started = time.perf_counter()
         selfplay_metrics = preparation.summary.get("orchestrator_selfplay")
         if not isinstance(selfplay_metrics, Mapping):
             raise ValueError("V2 generation summary is missing orchestrator self-play metrics")
@@ -1487,6 +1503,19 @@ def _prepare_v2_commit(
             artifact_identities=graph_identities,
             checkpoint_reload_verified=bool(payload.get("checkpoint_reload_verified")),
         )
+        metrics_payload = payload.get("metrics")
+        if isinstance(metrics_payload, dict):
+            timing_payload = metrics_payload.get("timing")
+            if not isinstance(timing_payload, dict):
+                timing_payload = {}
+                metrics_payload["timing"] = timing_payload
+            timing_payload["generation_commit_preparation_wall_time_sec"] = (
+                time.perf_counter() - commit_preparation_started
+            )
+            # This is a small runtime result, not commit evidence.  Persist
+            # the final preparation timing after the graph/catalog fence has
+            # been prepared without rewriting any generation artifact.
+            _atomic_json(result_path, payload)
 
     return prepare
 

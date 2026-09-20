@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import copy
 import hashlib
 import json
@@ -26,6 +26,7 @@ from tools.torus9_golden_learning import _profile_comparison
 @dataclass
 class _FakeAdapter:
     fail_at: str | None = None
+    hash_calls: list[Path] = field(default_factory=list)
 
     def validate_state(self, state):
         if state.optimizer_updates < 0:
@@ -89,6 +90,7 @@ class _FakeAdapter:
         assert path.is_file()
 
     def artifact_hash(self, path):
+        self.hash_calls.append(path)
         return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
     def snapshot_state(self, state):

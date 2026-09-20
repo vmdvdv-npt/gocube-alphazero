@@ -548,8 +548,15 @@ class TrainingEngine:
             serialization_started = time.perf_counter()
             if fresh_artifact_sha256 is None:
                 _write_jsonl(fresh_tmp, stamped)
-            _write_jsonl(rolling_tmp, replay_rows)
-            phase_timing["replay_serialization_wall_time_sec"] = time.perf_counter() - serialization_started
+            rolling_serialization_started = time.perf_counter()
+            rolling_artifact_sha256 = _write_jsonl_with_identity(rolling_tmp, replay_rows)
+            rolling_serialization_elapsed = time.perf_counter() - rolling_serialization_started
+            phase_timing["rolling_replay_serialization_and_hash_wall_time_sec"] = (
+                rolling_serialization_elapsed
+            )
+            phase_timing["replay_serialization_wall_time_sec"] = (
+                time.perf_counter() - serialization_started
+            )
             checkpoint_write_started = time.perf_counter()
             saved_metadata = dict(selected_adapter.save_checkpoint(checkpoint_tmp, state, metadata))
             phase_timing["checkpoint_write_wall_time_sec"] = time.perf_counter() - checkpoint_write_started
@@ -572,7 +579,10 @@ class TrainingEngine:
                     if fresh_artifact_sha256 is not None
                     else selected_adapter.artifact_hash(fresh_tmp)
                 ),
-                "rolling_replay": selected_adapter.artifact_hash(rolling_tmp),
+                # The rolling file is hashed over the exact bytes as they are
+                # written.  Do not re-open this potentially multi-GB file for
+                # the same identity immediately after serialization.
+                "rolling_replay": rolling_artifact_sha256,
                 "checkpoint": checkpoint_artifact_hash,
                 "checkpoint_metadata": selected_adapter.artifact_hash(checkpoint_metadata_tmp),
                 "training_metrics": selected_adapter.artifact_hash(training_tmp),
@@ -664,6 +674,7 @@ class TrainingEngine:
                 ),
                 "replay_row_count": len(replay_rows),
                 "replay_generations": list(context.replay_generations),
+                "rolling_replay_size_bytes": rolling_tmp.stat().st_size,
                 "validation_schema": "torus9-replay-validation-v1",
             }
             selfplay_metrics = summary.get("orchestrator_selfplay")
@@ -714,6 +725,7 @@ class TrainingEngine:
                 for name, path in artifact_paths.items()
             }
             if prepare_commit is not None:
+                commit_preparation_started = time.perf_counter()
                 prepare_commit(
                     CommitPreparation(
                         root=root.resolve(),
@@ -727,6 +739,9 @@ class TrainingEngine:
                         artifact_paths=artifact_paths,
                         artifact_identities=artifact_identities,
                     )
+                )
+                phase_timing["generation_commit_preparation_wall_time_sec"] = (
+                    time.perf_counter() - commit_preparation_started
                 )
 
             # The completion marker is the final fence.  Nothing that makes a

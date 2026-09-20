@@ -456,8 +456,17 @@ def validate_generation_commit(
     root: str | Path,
     lineage_id: str,
     generation: int,
+    reuse_committed_rolling_replay_identity: bool = False,
 ) -> CheckpointNode:
-    """Validate the evidence behind a completion marker, fail-closed."""
+    """Validate the evidence behind a completion marker, fail-closed.
+
+    The normal path physically hashes every committed artifact.  The one
+    narrow exception is the parent-side validation immediately after a child
+    generation has crossed its atomic marker fence: when requested by that
+    caller, the rolling replay identity may be reused from the same
+    transaction's graph/catalog evidence.  The evidence must bind the exact
+    path, size, and SHA; otherwise validation still fails closed.
+    """
     lineage_root = Path(root).resolve()
     marker_path = lineage_root / f"generation-{generation:02d}.complete.json"
     marker = _read_object(marker_path, "generation completion marker")
@@ -496,6 +505,8 @@ def validate_generation_commit(
         "summary_sha256": lineage_root / f"iter-{generation:02d}-summary.json",
     }
     for field, path in marker_artifacts.items():
+        if field == "rolling_replay_sha256" and reuse_committed_rolling_replay_identity:
+            continue
         if not path.is_file() or sha256_file(path) != str(marker[field]):
             raise ValueError(f"completion marker artifact identity is invalid: {field}")
 
@@ -516,6 +527,61 @@ def validate_generation_commit(
         raise ValueError("generation provenance commit marker mismatch")
     if provenance.get("checkpoint_reload_verified") is not True:
         raise ValueError("checkpoint reload was not verified before commit")
+
+    if reuse_committed_rolling_replay_identity:
+        rolling_path = marker_artifacts["rolling_replay_sha256"]
+        rolling_sha = str(marker["rolling_replay_sha256"])
+        rolling_size = marker.get("rolling_replay_size_bytes")
+        if type(rolling_size) is not int or rolling_size < 0:
+            raise ValueError("completion marker lacks rolling replay size evidence")
+        if not _SHA_RE.fullmatch(rolling_sha):
+            raise ValueError("completion marker rolling replay SHA is malformed")
+        if not rolling_path.is_file() or rolling_path.stat().st_size != rolling_size:
+            raise ValueError("completion marker rolling replay size evidence is invalid")
+
+        raw_provenance_artifacts = provenance.get("artifact_identities")
+        if not isinstance(raw_provenance_artifacts, Mapping):
+            raise ValueError("generation provenance lacks artifact identities")
+        provenance_identity = raw_provenance_artifacts.get("rolling_replay")
+        if not isinstance(provenance_identity, Mapping):
+            raise ValueError("generation provenance lacks rolling replay identity")
+        expected_rolling_path = rolling_path.relative_to(lineage_root).as_posix()
+        if (
+            provenance_identity.get("path") != expected_rolling_path
+            or provenance_identity.get("sha256") != rolling_sha
+            or type(provenance_identity.get("size_bytes")) is not int
+            or int(provenance_identity["size_bytes"]) != rolling_size
+        ):
+            raise ValueError("generation provenance rolling replay identity mismatch")
+
+        catalog_path = lineage_root / "runtime" / "artifact-catalog.json"
+        if not catalog_path.is_file():
+            raise ValueError("artifact catalog is required for rolling replay identity reuse")
+        catalog = ArtifactCatalog.load(catalog_path, root=lineage_root)
+        catalog_identity = catalog.entries.get(expected_rolling_path)
+        if not isinstance(catalog_identity, Mapping):
+            raise ValueError("artifact catalog lacks rolling replay identity")
+        if (
+            catalog_identity.get("sha256") != rolling_sha
+            or type(catalog_identity.get("size_bytes")) is not int
+            or int(catalog_identity["size_bytes"]) != rolling_size
+        ):
+            raise ValueError("artifact catalog rolling replay identity mismatch")
+        raw_generations = catalog.payload.get("generations")
+        generation_record = (
+            raw_generations.get(str(generation))
+            if isinstance(raw_generations, Mapping)
+            else None
+        )
+        generation_artifact_paths = (
+            generation_record.get("artifact_paths")
+            if isinstance(generation_record, Mapping)
+            else None
+        )
+        if not isinstance(generation_artifact_paths, list) or expected_rolling_path not in set(
+            str(path) for path in generation_artifact_paths
+        ):
+            raise ValueError("artifact catalog does not bind rolling replay to the generation")
 
     config_path = _owned_path(lineage_root, node.effective_config.artifact.path, "effective config")
     if not config_path.is_file() or sha256_file(config_path) != node.effective_config.artifact.sha256:

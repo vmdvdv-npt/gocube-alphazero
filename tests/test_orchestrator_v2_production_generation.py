@@ -108,9 +108,15 @@ def test_train_one_runs_one_generation_and_returns_immediate_child(tmp_path: Pat
         assert value == child_ref
         return child
 
+    validation_call: dict[str, object] = {}
+
     resolver.checkpoint = resolve
     monkeypatch.setattr(production_generation, "SupervisorV2", FakeSupervisor)
-    monkeypatch.setattr(production_generation, "validate_generation_commit", lambda **_kwargs: None)
+
+    def validate(**kwargs):
+        validation_call.update(kwargs)
+
+    monkeypatch.setattr(production_generation, "validate_generation_commit", validate)
 
     result = ProductionTrainOne(resolver=resolver, repo_root=tmp_path)(
         parent=parent,
@@ -126,6 +132,7 @@ def test_train_one_runs_one_generation_and_returns_immediate_child(tmp_path: Pat
     assert request["effective_config"] == config.ref.to_dict()
     assert request["output_lineage"]["lineage_id"] == "child"
     assert FakeSupervisor.captured["execution_id"] == "child:generation:8"
+    assert validation_call["reuse_committed_rolling_replay_identity"] is True
 
 
 def test_train_one_reuses_committed_child_without_supervisor(tmp_path: Path, monkeypatch):

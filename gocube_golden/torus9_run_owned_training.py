@@ -182,6 +182,8 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         replay_identity: Mapping[str, object] | None = None,
         load_timing: MutableMapping[str, object] | None = None,
     ) -> TrainingState:
+        reload_started = time.perf_counter()
+        checkpoint_reload_started = reload_started
         checkpoint_path = Path(checkpoint_path)
         metadata_path = checkpoint_path.with_suffix(".metadata.json")
         if not metadata_path.is_file():
@@ -237,6 +239,10 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
         trainer.samples_consumed = int(metadata["train_samples_consumed"])
         if _base._adam_step(trainer.optimizer) != trainer.update_count:
             raise ValueError("Current Torus9 resume optimizer step mismatch")
+        if load_timing is not None:
+            load_timing["checkpoint_reload_model_optimizer_wall_time_sec"] = (
+                time.perf_counter() - checkpoint_reload_started
+            )
 
         replay_path = Path(replay_path)
         fallback_sources = tuple(Path(value) for value in (replay_paths or (replay_path,)))
@@ -290,6 +296,9 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
 
         if load_timing is not None:
             load_timing["replay_file_load_wall_time_sec"] = time.perf_counter() - replay_started
+            load_timing["checkpoint_reload_replay_parse_wall_time_sec"] = (
+                time.perf_counter() - replay_started
+            )
             load_timing["replay_files_parsed"] = len(source_digests)
             load_timing["replay_bytes_parsed"] = sum(
                 int(item.get("size_bytes", 0)) for item in source_digests
@@ -326,7 +335,11 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
             replay_fingerprint = expected_identity_fingerprint
         if load_timing is not None:
             load_timing["replay_validation_wall_time_sec"] = time.perf_counter() - validation_started
+            load_timing["checkpoint_reload_structural_validation_wall_time_sec"] = (
+                time.perf_counter() - validation_started
+            )
 
+        other_reload_started = time.perf_counter()
         if not allow_reference and len(rows) != int(metadata["valid_replay_positions"]):
             raise ValueError("Current Torus9 resume replay position count mismatch")
         if not allow_reference:
@@ -346,7 +359,7 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
             "model_hash": metadata["model_hash"],
             "artifact_sha256": file_sha256(checkpoint_path),
         }
-        return self.create_state(
+        state = self.create_state(
             model,
             run_id=str(metadata["run_id"]),
             replay=replay,
@@ -355,6 +368,14 @@ class Torus9TrainingAdapter(_base.Torus9TrainingAdapter):
             completed_games=int(metadata.get("completed_games", 0)),
             current_generation=current_generation,
         )
+        if load_timing is not None:
+            load_timing["checkpoint_reload_other_verification_wall_time_sec"] = (
+                time.perf_counter() - other_reload_started
+            )
+            load_timing["checkpoint_reload_verification_wall_time_sec"] = (
+                time.perf_counter() - reload_started
+            )
+        return state
 
 
 __all__ = ["Torus9TrainingAdapter"]

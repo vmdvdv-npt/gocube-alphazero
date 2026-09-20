@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 from ..artifact_graph import validate_generation_commit
 from ..process_supervision import atomic_write_text
@@ -42,6 +43,32 @@ def _read_json(path: Path) -> Mapping[str, object]:
 def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(path, canonical_json(dict(payload)) + "\n")
+
+
+def _record_post_commit_validation_timing(
+    output_root: Path,
+    generation: int,
+    elapsed: float,
+) -> None:
+    """Add parent-side commit validation timing to the small result JSON.
+
+    The generation marker and graph are immutable commit evidence.  The
+    runtime result is deliberately separate and may receive this observation
+    after the parent has validated the worker's committed generation.
+    """
+    result_path = output_root / "runtime" / "results" / f"generation-{generation:04d}.json"
+    if not result_path.is_file():
+        return
+    payload = dict(_read_json(result_path))
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict):
+        return
+    timing = metrics.get("timing")
+    if not isinstance(timing, dict):
+        timing = {}
+        metrics["timing"] = timing
+    timing["post_commit_validation_wall_time_sec"] = float(elapsed)
+    _write_json(result_path, payload)
 
 
 def _request_payload(
@@ -201,10 +228,21 @@ class ProductionTrainOne:
 
         # The graph/commit boundary is authoritative.  The worker result is
         # intentionally only a transport hint, never a second recovery record.
+        # The rolling identity was computed while writing the bytes and is
+        # already bound into the marker, provenance, and catalog.  Reuse that
+        # same-transaction evidence here; later reuse/restore paths retain
+        # their normal physical hash verification.
+        post_commit_started = time.perf_counter()
         validate_generation_commit(
             root=output_lineage.root,
             lineage_id=output_lineage.lineage_id,
             generation=generation,
+            reuse_committed_rolling_replay_identity=True,
+        )
+        _record_post_commit_validation_timing(
+            output_lineage.root,
+            generation,
+            time.perf_counter() - post_commit_started,
         )
         child_payload = _read_json(result_path)
         if child_payload.get("schema") != TRAIN_ONE_RESULT_SCHEMA:
