@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import json
+import __main__
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
@@ -46,6 +47,30 @@ def _notification_paths(root: Path) -> object:
         logs=root / "logs",
         metrics=root / "metrics",
     )
+
+
+def _require_file_backed_entrypoint() -> None:
+    """Reject production runs whose ``spawn`` parent has no importable file.
+
+    Arena workers use ``multiprocessing``'s ``spawn`` context.  A coordinator
+    started with ``python -`` or ``python -c`` gives child processes a
+    synthetic ``<stdin>``/``-`` main path, so every worker dies while trying
+    to reconstruct the parent before the startup barrier.  Fail before any
+    generation or Arena artifact is started and require the normal module or
+    script entrypoint instead.
+    """
+    main_file = getattr(__main__, "__file__", None)
+    if not isinstance(main_file, str) or main_file in {"", "-", "<stdin>"}:
+        raise RuntimeError(
+            "Orchestrator V2 production runs require a file-backed entrypoint; "
+            "invoke production_entrypoint.py (or python -m "
+            "gocube_golden.orchestrator_v2.production_entrypoint), not stdin/c."
+        )
+    if not Path(main_file).is_file():
+        raise RuntimeError(
+            "Orchestrator V2 production entrypoint is not an importable file: "
+            f"{main_file!r}"
+        )
 
 
 def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfig:
@@ -98,6 +123,7 @@ def run_continuous_from_config(
     **runner_kwargs: Any,
 ) -> object:
     """Run a production continuous plan with explicitly injected Telegram."""
+    _require_file_backed_entrypoint()
     config = _continuous_config(payload)
     if allow_code_rollover is not None:
         if type(allow_code_rollover) is not bool:
@@ -126,6 +152,7 @@ def run_experiment_from_config(
     **runner_kwargs: Any,
 ) -> object:
     """Run a production A/B or A/B→C plan with explicitly injected Telegram."""
+    _require_file_backed_entrypoint()
     config = _experiment_config(payload)
     if allow_code_rollover is not None:
         if type(allow_code_rollover) is not bool:
