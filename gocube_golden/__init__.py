@@ -34,10 +34,21 @@ from .scoring import GoldenScore, Ownership, score_terminal
 from .search import (
     Evaluation,
     SearchResult,
+    SearchPosition,
     SequentialPUCT,
     SequentialPUCTSession,
 )
 from .search_adapter import GoldenSearchAdapter
+from .selfplay_engine import (
+    CooperativeSelfPlayAdapter,
+    CooperativeSelfPlayResult,
+    run_cooperative_selfplay,
+)
+from .selfplay_policy import (
+    RootDirichletNoiseTransform,
+    apply_root_dirichlet_noise,
+    sample_action_from_search_result,
+)
 from .state import (
     BASELINE_KOMI,
     BLACK,
@@ -99,6 +110,7 @@ from .torus9_run_owned import (
     install_run_spec_policy,
     install_telegram_start_notification,
 )
+
 
 # Existing run-owned tuning and Telegram presentation policies remain
 # process-local. Application-code rollover/provenance is deliberately not

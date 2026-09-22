@@ -25,7 +25,7 @@ from .cube_family import (
     cube_family_topology,
 )
 from .cube_game_contract_v2 import SUPPORTED_SIZES, validate_cube_size
-from .rules import prepare_legal_actions
+from .rules import LegalActionContext, prepare_legal_actions
 from .state import BLACK, EMPTY, WHITE, GoldenState, Stone, opponent
 
 SCHEMA_VERSION = 2
@@ -550,6 +550,7 @@ def write_cube_observation(
     state: GoldenState,
     history_context: CubeObservationContext,
     schema: Mapping[str, object] | None = None,
+    legal_context: LegalActionContext | None = None,
 ) -> torch.Tensor:
     topology = _assert_context_matches_state(state, history_context)
     if state.is_terminal:
@@ -580,7 +581,16 @@ def write_cube_observation(
         else:
             destination[CHANNEL_INDEX["previous_move_point"], previous_action] = 1.0
 
-    legality = prepare_legal_actions(state)
+    if legal_context is None:
+        legality = prepare_legal_actions(state)
+    else:
+        # Search already paid for the exact legality calculation at this leaf.
+        # Keep the assertion here so a prepared context can never silently be
+        # reused for another rules state.
+        legal_context.assert_compatible(state)
+        legality = legal_context
+    if len(legality.action_mask) != topology.action_count:
+        raise ValueError("Cube legal-action context has the wrong action-mask shape")
     destination[CHANNEL_INDEX["legal_point_mask"]].copy_(
         torch.as_tensor(legality.action_mask[: topology.point_count], dtype=torch.float32)
     )
@@ -612,10 +622,17 @@ def build_cube_observation(
     state: GoldenState,
     history_context: CubeObservationContext,
     schema: Mapping[str, object] | None = None,
+    legal_context: LegalActionContext | None = None,
 ) -> torch.Tensor:
     topology = _assert_context_matches_state(state, history_context)
     destination = torch.empty((CHANNEL_COUNT, topology.point_count), dtype=torch.float32)
-    return write_cube_observation(destination, state, history_context, schema)
+    return write_cube_observation(
+        destination,
+        state,
+        history_context,
+        schema,
+        legal_context=legal_context,
+    )
 
 
 __all__ = [
