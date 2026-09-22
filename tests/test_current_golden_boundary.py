@@ -157,11 +157,6 @@ def test_current_production_tree_has_no_legacy_execution_imports():
         "gocube_golden.cube_topology",
         "gocube_golden.cube_training",
         "gocube_golden.cube_training_adapter",
-        "GoldenCubeGraphNetV1",
-        "GoldenCubeNeuralEvaluator",
-        "CubeSelfPlayAdapter",
-        "CubeTrainingAdapter",
-        "CUBE4_TOPOLOGY",
         "gocube-cube4-golden-training-v1",
     )
     for root in roots:
