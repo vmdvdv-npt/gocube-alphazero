@@ -8,6 +8,7 @@ from alphazero.envs.gocube.integration.catalog import CheckpointDescriptor
 from alphazero.envs.gocube.integration.errors import (
     CheckpointIncompatible,
     InvalidMoveHistory,
+    InvalidRequest,
     TerminalPosition,
 )
 from alphazero.envs.gocube.integration.golden_generation import (
@@ -15,7 +16,10 @@ from alphazero.envs.gocube.integration.golden_generation import (
     GoldenGameGenerator,
     replay_protocol_moves,
 )
-from alphazero.envs.gocube.integration.golden_mapping import mapping_for
+from alphazero.envs.gocube.integration.golden_mapping import (
+    GoldenActionMappingError,
+    mapping_for,
+)
 from alphazero.envs.gocube.integration.golden_models import GoldenPlayableModel
 from alphazero.envs.gocube.integration.golden_move import (
     GOLDEN_INTERACTIVE_SEARCH_PROFILE_ID,
@@ -43,8 +47,9 @@ class PreferredEvaluator:
         return Evaluation(policy=policy, wdl=(0.5, 0.0, 0.5))
 
 
-def _descriptor(topology: str) -> CheckpointDescriptor:
-    size = 4 if topology == "cube" else 9
+def _descriptor() -> CheckpointDescriptor:
+    topology = "torus"
+    size = 9
     position = GoldenPositionContract(
         topology=topology,
         size=size,
@@ -53,20 +58,20 @@ def _descriptor(topology: str) -> CheckpointDescriptor:
     )
     state = initial_state_for_position(position)
     mapping = mapping_for(topology, size)
-    architecture_id = f"test-{topology}-architecture"
+    architecture_id = "test-torus-architecture"
     observation_fingerprint = "sha256:" + "3" * 64
     target_fingerprint = "sha256:" + "4" * 64
     return CheckpointDescriptor(
-        checkpoint_id=f"{topology}-test@1",
-        run_name=f"{topology}-test",
+        checkpoint_id="torus-test@1",
+        run_name="torus-test",
         iteration=1,
         topology=topology,
         size=size,
         rule_set=GOLDEN_PROTOCOL_RULESET,
         komi=0.5,
         terminal_adjudicator="golden-graph-area-v1",
-        path=f"/tmp/{topology}-test-M1.pt",
-        profile_id=f"test-{topology}-profile",
+        path="/tmp/torus-test-M1.pt",
+        profile_id="test-torus-profile",
         architecture_id=architecture_id,
         rules_fingerprint=state.rules_fingerprint,
         observation_fingerprint=observation_fingerprint,
@@ -89,7 +94,7 @@ def _descriptor(topology: str) -> CheckpointDescriptor:
 
 
 def _model(descriptor: CheckpointDescriptor, preferred_action=0) -> GoldenPlayableModel:
-    mapping = mapping_for(descriptor.topology, 4 if descriptor.topology == "cube" else 9)
+    mapping = mapping_for(descriptor.topology, descriptor.size)
     return GoldenPlayableModel(
         descriptor=descriptor,
         network=object(),
@@ -150,7 +155,7 @@ def _service(
     model: GoldenPlayableModel | None = None,
     selector=None,
 ):
-    canonical = _descriptor(descriptor.topology)
+    canonical = _descriptor()
     loader = FakeLoader(descriptor, model or _model(canonical))
     service = GoCubeAlphaZeroService(
         "/tmp",
@@ -162,30 +167,46 @@ def _service(
     return service, loader
 
 
-def _place_history(topology: str, point: int = 0):
-    size = 4 if topology == "cube" else 9
-    action = mapping_for(topology, size).golden_action_to_protocol(point)
+def _place_history(point: int = 0):
+    action = mapping_for("torus", 9).golden_action_to_protocol(point)
     return [{"moveNumber": 1, "color": "black", "action": action}]
 
 
-@pytest.mark.parametrize(("topology", "size"), [("torus", 9), ("cube", 4)])
-def test_empty_history_restores_initial_golden_state(topology, size):
+def test_empty_history_restores_initial_golden_state():
     state = replay_action_history(
-        topology=topology,
-        size=size,
+        topology="torus",
+        size=9,
         rule_set="chinese",
         komi=0.5,
         moves=[],
     )
     expected = initial_state_for_position(
-        GoldenPositionContract(topology=topology, size=size, rule_set="chinese", komi=0.5)
+        GoldenPositionContract(topology="torus", size=9, rule_set="chinese", komi=0.5)
     )
     assert state == expected
     assert state.side_to_move == BLACK
 
 
+def test_historical_cube_serving_path_is_not_registered_before_stage5():
+    position = GoldenPositionContract(
+        topology="cube", size=4, rule_set="chinese", komi=0.5
+    )
+    with pytest.raises(InvalidRequest, match="No Golden initial state"):
+        initial_state_for_position(position)
+    with pytest.raises(GoldenActionMappingError, match="No Golden/Protocol mapping"):
+        mapping_for("cube", 4)
+    with pytest.raises(InvalidRequest):
+        replay_action_history(
+            topology="cube",
+            size=4,
+            rule_set="chinese",
+            komi=0.5,
+            moves=[],
+        )
+
+
 def test_empty_history_selects_first_black_move():
-    descriptor = _descriptor("torus")
+    descriptor = _descriptor()
     service, _loader = _service(descriptor, model=_model(descriptor, preferred_action=0))
     result = service.select_move(
         checkpoint_id=descriptor.checkpoint_id,
@@ -206,7 +227,7 @@ def test_legal_history_restores_expected_state_and_next_color():
         size=9,
         rule_set="chinese",
         komi=0.5,
-        moves=_place_history("torus"),
+        moves=_place_history(),
     )
     assert int(state.stones[0]) == int(BLACK)
     assert state.side_to_move == WHITE
@@ -214,7 +235,7 @@ def test_legal_history_restores_expected_state_and_next_color():
 
 
 def test_selector_returns_place_action_through_real_golden_search():
-    descriptor = _descriptor("torus")
+    descriptor = _descriptor()
     model = _model(descriptor, preferred_action=0)
     state = initial_state_for_position(
         GoldenPositionContract(topology="torus", size=9, rule_set="chinese", komi=0.5)
@@ -232,7 +253,7 @@ def test_selector_returns_place_action_through_real_golden_search():
 
 
 def test_selector_can_return_pass_action():
-    descriptor = _descriptor("torus")
+    descriptor = _descriptor()
     model = _model(descriptor, preferred_action=PASS)
     state = initial_state_for_position(
         GoldenPositionContract(topology="torus", size=9, rule_set="chinese", komi=0.5)
@@ -254,7 +275,7 @@ def test_one_pass_position_remains_playable():
     )
     assert not state.is_terminal
     assert state.side_to_move == WHITE
-    descriptor = _descriptor("torus")
+    descriptor = _descriptor()
     selection = GoldenMoveSelector().select_move(
         state=state,
         descriptor=descriptor,
@@ -285,7 +306,7 @@ def test_double_pass_terminal_never_starts_mcts():
     )
     assert state.is_terminal
     BombSearch.calls = 0
-    descriptor = _descriptor("torus")
+    descriptor = _descriptor()
     with pytest.raises(TerminalPosition):
         GoldenMoveSelector(search_factory=BombSearch).select_move(
             state=state,
@@ -369,10 +390,10 @@ class RecordingNeverSelector:
 @pytest.mark.parametrize(
     "descriptor",
     [
-        _descriptor("cube"),
-        replace(_descriptor("torus"), size=8),
-        replace(_descriptor("torus"), rule_set="japanese"),
-        replace(_descriptor("torus"), komi=6.5),
+        replace(_descriptor(), topology="cube", size=4),
+        replace(_descriptor(), size=8),
+        replace(_descriptor(), rule_set="japanese"),
+        replace(_descriptor(), komi=6.5),
     ],
     ids=["topology", "size", "rules", "komi"],
 )
@@ -413,7 +434,7 @@ class RecordingSearch:
 
 
 def test_requested_mcts_sims_reaches_fixed_interactive_search_contract():
-    descriptor = _descriptor("torus")
+    descriptor = _descriptor()
     state = initial_state_for_position(
         GoldenPositionContract(topology="torus", size=9, rule_set="chinese", komi=0.5)
     )
@@ -437,11 +458,10 @@ def test_requested_mcts_sims_reaches_fixed_interactive_search_contract():
     assert selection.action in selection.legal_actions
 
 
-@pytest.mark.parametrize(("topology", "size"), [("torus", 9), ("cube", 4)])
-def test_supported_topologies_pass_real_golden_search_path(topology, size):
-    descriptor = _descriptor(topology)
+def test_current_supported_topology_passes_real_golden_search_path():
+    descriptor = _descriptor()
     state = initial_state_for_position(
-        GoldenPositionContract(topology=topology, size=size, rule_set="chinese", komi=0.5)
+        GoldenPositionContract(topology="torus", size=9, rule_set="chinese", komi=0.5)
     )
     selection = GoldenMoveSelector().select_move(
         state=state,
@@ -468,7 +488,7 @@ class PassSelector:
 
 
 def test_golden_game_generator_uses_shared_move_selector():
-    descriptor = _descriptor("torus")
+    descriptor = _descriptor()
     model = _model(descriptor)
     selector = PassSelector()
     game = GoldenGameGenerator(move_selector=selector).generate(
@@ -488,7 +508,7 @@ def test_golden_game_generator_uses_shared_move_selector():
 
 
 def test_service_calls_are_history_stateless_and_have_no_game_session_state():
-    descriptor = _descriptor("torus")
+    descriptor = _descriptor()
     service, _loader = _service(descriptor, model=_model(descriptor, preferred_action=0))
 
     first = service.select_move(

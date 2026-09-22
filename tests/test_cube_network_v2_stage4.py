@@ -7,7 +7,6 @@ import torch
 from torch import nn
 
 from gocube_golden.cube_family import CROSS_FACE_SEAM, FACE_INTERIOR, cube_family_topology
-from gocube_golden.cube_neural import GoldenCubeGraphNetV1
 from gocube_golden.cube_network_v2 import (
     ARCHITECTURE_FINGERPRINT,
     ARCHITECTURE_ID,
@@ -49,8 +48,7 @@ def test_architecture_contract_and_historical_identity_are_distinct():
     assert contract["hidden"] == HIDDEN == 112
     assert contract["blocks"] == BLOCKS == 10
     assert contract["global_context"]["after_blocks"] == [3, 6, 9]
-    assert GoldenCubeGraphNetV1.architecture_id == "GoldenCubeGraphNetV1"
-    assert GoldenCubeGraphNetV1.architecture_id != ARCHITECTURE_ID
+    assert ARCHITECTURE_ID != "GoldenCubeGraphNetV1"
 
 
 @pytest.mark.parametrize("n", range(2, 8))

@@ -1,7 +1,7 @@
 """Explicit Golden-to-Protocol point/action mappings.
 
 The Golden engines use dense integer point indices while Protocol V1 uses the
-stable GoCube ``PointId`` strings.  This module is deliberately a small bridge:
+stable GoCube ``PointId`` strings. This module is deliberately a small bridge:
 it may inspect the product topology to prove the boundary mapping, but Golden
 rules and search never use the product topology as their source of truth.
 
@@ -17,9 +17,8 @@ import hashlib
 import json
 from typing import Mapping, Sequence
 
-from alphazero.envs.gocube.core import Topology, cube_topology, torus_topology
+from alphazero.envs.gocube.core import Topology, torus_topology
 
-from gocube_golden.cube_topology import CUBE4_TOPOLOGY
 from gocube_golden.topology import TORUS_9X9
 from gocube_golden.state import PASS
 
@@ -35,8 +34,6 @@ def _fingerprint(value: object) -> str:
 
 @dataclass(frozen=True)
 class GoldenProtocolMapping:
-    """A proven bijection for one supported Golden topology."""
-
     topology_kind: str
     size: int
     golden_topology_id: str
@@ -61,7 +58,6 @@ class GoldenProtocolMapping:
         for golden, protocol in enumerate(self.golden_to_protocol):
             if self.protocol_to_golden[protocol] != golden:
                 raise GoldenActionMappingError("Golden/Protocol reverse mapping is not exact")
-
         if len(self.golden_neighbors) != count or len(self.protocol_neighbors) != count:
             raise GoldenActionMappingError("Golden/Protocol adjacency lengths differ")
         for golden_point, neighbors in enumerate(self.golden_neighbors):
@@ -175,10 +171,7 @@ class GoldenProtocolMapping:
             "point_count": self.point_count,
             "action_count": self.point_count + 1,
             "pass": {"golden": PASS, "protocol": self.protocol_pass_action},
-            "point_order": {
-                "golden": list(self.golden_point_ids),
-                "protocol": list(self.protocol_point_ids),
-            },
+            "point_order": {"golden": list(self.golden_point_ids), "protocol": list(self.protocol_point_ids)},
             "golden_to_protocol": list(self.golden_to_protocol),
             "protocol_to_golden": list(self.protocol_to_golden),
             "adjacency_exact": True,
@@ -194,25 +187,17 @@ class GoldenProtocolMapping:
 
 
 def _golden_point_ids(topology_kind: str) -> tuple[str, ...]:
-    if topology_kind == "cube":
-        return tuple(CUBE4_TOPOLOGY.point_ids)
     if topology_kind == "torus":
         return tuple(f"{x},{y}" for y in range(9) for x in range(9))
     raise GoldenActionMappingError(f"Unsupported Golden topology {topology_kind!r}")
 
 
 def _build_mapping(topology_kind: str, size: int) -> GoldenProtocolMapping:
-    if topology_kind == "cube" and size == 4:
-        golden = CUBE4_TOPOLOGY
-        protocol: Topology = cube_topology(4)
-    elif topology_kind == "torus" and size == 9:
+    if topology_kind == "torus" and size == 9:
         golden = TORUS_9X9
-        protocol = torus_topology(9)
+        protocol: Topology = torus_topology(9)
     else:
-        raise GoldenActionMappingError(
-            f"No Golden/Protocol mapping is registered for {topology_kind} size {size}"
-        )
-
+        raise GoldenActionMappingError(f"No Golden/Protocol mapping is registered for {topology_kind} size {size}")
     golden_ids = _golden_point_ids(topology_kind)
     protocol_ids = tuple(protocol.point_ids)
     if len(golden_ids) != golden.point_count:
@@ -223,13 +208,11 @@ def _build_mapping(topology_kind: str, size: int) -> GoldenProtocolMapping:
         raise GoldenActionMappingError(
             f"PointId sets differ: missing_from_protocol={missing!r}, extra_in_protocol={extra!r}"
         )
-
     protocol_index_by_id = {point_id: index for index, point_id in enumerate(protocol_ids)}
     golden_to_protocol = tuple(protocol_index_by_id[point_id] for point_id in golden_ids)
     protocol_to_golden_list = [0] * len(golden_to_protocol)
     for golden_index, protocol_index in enumerate(golden_to_protocol):
         protocol_to_golden_list[protocol_index] = golden_index
-
     return GoldenProtocolMapping(
         topology_kind=topology_kind,
         size=size,
@@ -246,29 +229,8 @@ def _build_mapping(topology_kind: str, size: int) -> GoldenProtocolMapping:
 
 def mapping_for(topology_kind: str, size: int) -> GoldenProtocolMapping:
     """Return the registered, independently audited mapping."""
-
     return _build_mapping(str(topology_kind), int(size))
-
-
-def cube4_mapping() -> GoldenProtocolMapping:
-    return mapping_for("cube", 4)
 
 
 def torus9_mapping() -> GoldenProtocolMapping:
     return mapping_for("torus", 9)
-
-
-# Descriptive aliases make the bridge easy to discover from integration tests.
-cube_point_mapping = cube4_mapping
-torus_point_mapping = torus9_mapping
-
-
-__all__ = [
-    "GoldenActionMappingError",
-    "GoldenProtocolMapping",
-    "mapping_for",
-    "cube4_mapping",
-    "torus9_mapping",
-    "cube_point_mapping",
-    "torus_point_mapping",
-]
