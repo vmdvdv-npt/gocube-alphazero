@@ -2,14 +2,24 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
+import pytest
+
 from gocube_golden.artifact_graph import ArtifactRef, CheckpointRef, EffectiveConfig, EffectiveConfigRef
+from gocube_golden.process_supervision import atomic_write_json, process_group_exists
 from gocube_golden.orchestrator_v2 import (
+    ActiveChild,
+    EXECUTION_INTENT_SCHEMA,
     OutputLineage,
     ProductionTrainOne,
     ResolvedArtifact,
     ResolvedEffectiveConfig,
+    SupervisorAction,
+    SupervisorIntegrityError,
+    STOP_SCHEMA,
+    SupervisorV2,
 )
 from gocube_golden.orchestrator_v2 import production_generation
 
@@ -170,16 +180,188 @@ def test_train_one_reuses_committed_child_without_supervisor(tmp_path: Path, mon
         lambda **_kwargs: SimpleNamespace(checkpoint=child_ref),
     )
 
-    class MustNotStart:
-        def __init__(self, *_args, **_kwargs):
-            raise AssertionError("committed child must be reused")
+    class ReconcileOnly:
+        reconciled: list[dict[str, object]] = []
 
-    monkeypatch.setattr(production_generation, "SupervisorV2", MustNotStart)
+        def __init__(self, *_args, **_kwargs):
+            type(self).reconciled.append(dict(_kwargs))
+
+        def reconcile_completed_execution(self):
+            return SimpleNamespace(success=True)
+
+        def run_once(self):
+            raise AssertionError("committed child must not start a generation")
+
+    monkeypatch.setattr(production_generation, "SupervisorV2", ReconcileOnly)
     assert ProductionTrainOne(resolver=resolver)(
         parent=parent,
         config=config,
         output_lineage=output,
     ) is child
+    assert ReconcileOnly.reconciled[0]["execution_id"] == "child:generation:8"
+
+
+def test_train_one_reconciles_committed_execution_for_next_generation(
+    tmp_path: Path, monkeypatch
+):
+    parent, child, config, _parent_ref, child_ref = _refs(tmp_path)
+    output = OutputLineage("torus9", "child", tmp_path / "lineage")
+    output.root.mkdir(parents=True, exist_ok=True)
+    (output.root / "generation-08.complete.json").write_text("{}", encoding="utf-8")
+    resolver = SimpleNamespace(runs_root=tmp_path / "runs")
+    resolver.checkpoint = lambda value: child if value == child_ref else None
+
+    monkeypatch.setattr(
+        production_generation,
+        "validate_generation_commit",
+        lambda **_kwargs: SimpleNamespace(checkpoint=child_ref),
+    )
+
+    execution_id = "child:generation:8"
+    runtime = output.root / "runtime"
+    atomic_write_json(
+        runtime / "execution-intent.json",
+        {
+            "schema": EXECUTION_INTENT_SCHEMA,
+            "execution_id": execution_id,
+            "attempt": 1,
+            "updated_at": 1.0,
+        },
+    )
+    atomic_write_json(
+        runtime / "supervisor-stop.json",
+        {
+            "schema": STOP_SCHEMA,
+            "execution_id": execution_id,
+            "attempt": 1,
+            "reason": "stale stop from the committed execution",
+            "stopped_at": 1.0,
+        },
+    )
+    stale_group = 10_000_000
+    while process_group_exists(stale_group):
+        stale_group += 1
+    heartbeat = runtime / "heartbeats" / "generation-0008.json"
+    stale_active = ActiveChild(
+        execution_id=execution_id,
+        attempt=1,
+        pid=stale_group,
+        process_group=stale_group,
+        started_at=1.0,
+        liveness_path=heartbeat,
+        progress_path=heartbeat,
+    )
+    atomic_write_json(runtime / "active-child.json", stale_active.to_dict(output.root))
+
+    result = ProductionTrainOne(resolver=resolver)(
+        parent=parent,
+        config=config,
+        output_lineage=output,
+    )
+
+    assert result is child
+    assert not (runtime / "execution-intent.json").exists()
+    assert not (runtime / "active-child.json").exists()
+    assert not (runtime / "supervisor-stop.json").exists()
+
+    next_supervisor = SupervisorV2(
+        output.root,
+        execution_id="child:generation:9",
+        liveness_path=runtime / "heartbeats" / "generation-0009.json",
+        progress_path=runtime / "heartbeats" / "generation-0009.json",
+        command=[sys.executable, "-c", "pass"],
+    )
+    assert next_supervisor.plan().action is SupervisorAction.START
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "schema": EXECUTION_INTENT_SCHEMA,
+            "execution_id": "other:generation:8",
+            "attempt": 1,
+        },
+        {
+            "schema": EXECUTION_INTENT_SCHEMA,
+            "execution_id": "child:generation:8",
+            "attempt": 0,
+        },
+    ],
+)
+def test_committed_reuse_does_not_delete_foreign_or_malformed_supervisor_intent(
+    tmp_path: Path, monkeypatch, payload: dict[str, object]
+):
+    parent, child, config, _parent_ref, child_ref = _refs(tmp_path)
+    output = OutputLineage("torus9", "child", tmp_path / "lineage")
+    output.root.mkdir(parents=True, exist_ok=True)
+    (output.root / "generation-08.complete.json").write_text("{}", encoding="utf-8")
+    resolver = SimpleNamespace(runs_root=tmp_path / "runs")
+    resolver.checkpoint = lambda value: child if value == child_ref else None
+    monkeypatch.setattr(
+        production_generation,
+        "validate_generation_commit",
+        lambda **_kwargs: SimpleNamespace(checkpoint=child_ref),
+    )
+    intent_path = output.root / "runtime" / "execution-intent.json"
+    atomic_write_json(intent_path, payload)
+
+    with pytest.raises(SupervisorIntegrityError, match="execution intent is malformed"):
+        ProductionTrainOne(resolver=resolver)(
+            parent=parent,
+            config=config,
+            output_lineage=output,
+        )
+
+    assert intent_path.is_file()
+
+
+@pytest.mark.parametrize(
+    "raw_stop",
+    [
+        json.dumps(
+            {
+                "schema": STOP_SCHEMA,
+                "execution_id": "other:generation:8",
+                "attempt": 1,
+            }
+        ),
+        json.dumps(
+            {
+                "schema": "wrong-supervisor-stop-schema",
+                "execution_id": "child:generation:8",
+                "attempt": 1,
+            }
+        ),
+        "not-json",
+    ],
+)
+def test_committed_reuse_does_not_delete_foreign_or_malformed_supervisor_stop(
+    tmp_path: Path, monkeypatch, raw_stop: str
+):
+    parent, child, config, _parent_ref, child_ref = _refs(tmp_path)
+    output = OutputLineage("torus9", "child", tmp_path / "lineage")
+    output.root.mkdir(parents=True, exist_ok=True)
+    (output.root / "generation-08.complete.json").write_text("{}", encoding="utf-8")
+    resolver = SimpleNamespace(runs_root=tmp_path / "runs")
+    resolver.checkpoint = lambda value: child if value == child_ref else None
+    monkeypatch.setattr(
+        production_generation,
+        "validate_generation_commit",
+        lambda **_kwargs: SimpleNamespace(checkpoint=child_ref),
+    )
+    stop_path = output.root / "runtime" / "supervisor-stop.json"
+    stop_path.parent.mkdir(parents=True, exist_ok=True)
+    stop_path.write_text(raw_stop, encoding="utf-8")
+
+    with pytest.raises(SupervisorIntegrityError, match="supervisor stop is malformed"):
+        ProductionTrainOne(resolver=resolver)(
+            parent=parent,
+            config=config,
+            output_lineage=output,
+        )
+
+    assert stop_path.read_text(encoding="utf-8") == raw_stop
 
 
 def test_removed_arm_execution_path_and_resolved_object_serializer():

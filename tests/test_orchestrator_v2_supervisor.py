@@ -8,10 +8,15 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 from gocube_golden.process_supervision import atomic_write_json, process_group_exists
 from gocube_golden.orchestrator_v2 import (
+    ACTIVE_CHILD_SCHEMA,
     ActiveChild,
+    EXECUTION_INTENT_SCHEMA,
     SupervisorAction,
+    SupervisorIntegrityError,
     SupervisorPolicy,
     SupervisorStatus,
     SupervisorV2,
@@ -259,6 +264,88 @@ def test_reattach_works_with_only_opaque_execution_identity(tmp_path: Path) -> N
             process.wait(timeout=5)
         except ChildProcessError:
             pass
+
+
+def test_reconcile_completed_execution_stops_owned_live_child(tmp_path: Path) -> None:
+    first = _supervisor(
+        tmp_path,
+        execution_id="completed-execution",
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        policy=SupervisorPolicy(
+            max_retries=0,
+            poll_interval_seconds=0.005,
+            termination_grace_seconds=0.05,
+        ),
+    )
+    process, active = first._start(1)
+    second = _supervisor(
+        tmp_path,
+        execution_id="completed-execution",
+        command=None,
+        policy=first.policy,
+    )
+
+    try:
+        result = second.reconcile_completed_execution()
+        assert result.success
+        assert not process_group_exists(active.process_group)
+        assert not second.active_child_path.exists()
+        assert not second.execution_intent_path.exists()
+    finally:
+        if process_group_exists(active.process_group):
+            os.killpg(active.process_group, signal.SIGKILL)
+        try:
+            process.wait(timeout=5)
+        except ChildProcessError:
+            pass
+
+
+def test_reconcile_completed_execution_preserves_foreign_intent(tmp_path: Path) -> None:
+    supervisor = _supervisor(tmp_path, execution_id="expected-execution")
+    atomic_write_json(
+        supervisor.execution_intent_path,
+        {
+            "schema": EXECUTION_INTENT_SCHEMA,
+            "execution_id": "foreign-execution",
+            "attempt": 1,
+        },
+    )
+
+    with pytest.raises(SupervisorIntegrityError, match="execution intent is malformed"):
+        supervisor.reconcile_completed_execution()
+
+    assert supervisor.execution_intent_path.is_file()
+
+
+def test_reconcile_completed_execution_preserves_foreign_active_child(tmp_path: Path) -> None:
+    supervisor = _supervisor(tmp_path, execution_id="expected-execution")
+    atomic_write_json(
+        supervisor.execution_intent_path,
+        {
+            "schema": EXECUTION_INTENT_SCHEMA,
+            "execution_id": "expected-execution",
+            "attempt": 1,
+        },
+    )
+    atomic_write_json(
+        supervisor.active_child_path,
+        {
+            "schema": ACTIVE_CHILD_SCHEMA,
+            "execution_id": "foreign-execution",
+            "attempt": 1,
+            "pid": 999999,
+            "process_group": 999999,
+            "started_at": 1.0,
+            "liveness_path": "runtime/heartbeat.json",
+            "progress_path": "runtime/heartbeat.json",
+        },
+    )
+
+    with pytest.raises(SupervisorIntegrityError, match="active-child execution ownership mismatch"):
+        supervisor.reconcile_completed_execution()
+
+    assert supervisor.execution_intent_path.is_file()
+    assert supervisor.active_child_path.is_file()
 
 
 def test_term_then_kill_cleans_process_group(tmp_path: Path) -> None:

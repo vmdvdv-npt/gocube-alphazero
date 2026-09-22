@@ -446,6 +446,47 @@ class SupervisorV2:
 
         raise AssertionError("bounded supervisor loop did not return")
 
+    def reconcile_completed_execution(self) -> ProcessResult:
+        """Safely finish an execution completed outside the supervisor.
+
+        Callers may have authoritative evidence that the opaque child work is
+        complete even though this supervisor instance did not reach its normal
+        cleanup path.  The durable identity is still treated as ownership
+        evidence: malformed or foreign records fail closed, a live matching
+        process group is terminated through the normal ownership checks, and
+        runtime files are removed only after their identity is revalidated.
+        """
+        intent = self._read_intent()
+        active = self._read_active_child()
+        stop = self._read_stop()
+        attempt = (
+            active.attempt
+            if active is not None
+            else int(intent["attempt"])
+            if intent is not None
+            else 0
+        )
+
+        if active is not None and process_group_exists(active.process_group):
+            if not process_group_owned_by(active.pid, active.process_group):
+                raise SupervisorIntegrityError(
+                    "active child process group ownership does not match its durable identity"
+                )
+            self._terminate_group(
+                active,
+                reason="execution was externally confirmed complete",
+            )
+
+        self._clear_active_child_if_unchanged(active)
+        self._clear_intent_if_unchanged(intent)
+        self._clear_stop_if_unchanged(stop)
+        return ProcessResult(
+            status=SupervisorStatus.SUCCESS,
+            returncode=0,
+            attempts=attempt,
+            reason="externally confirmed execution reconciled",
+        )
+
     def heartbeat_status(self, child: ActiveChild, *, now: float | None = None) -> HeartbeatStatus:
         """Return generic liveness/progress freshness for a child."""
         current = self.clock() if now is None else float(now)
@@ -494,6 +535,23 @@ class SupervisorV2:
             if isinstance(exc, SupervisorIntegrityError):
                 raise
             raise SupervisorIntegrityError("active-child record is unreadable") from exc
+
+    def _read_stop(self) -> dict[str, object] | None:
+        if not self.stop_path.is_file():
+            return None
+        try:
+            payload = read_json(self.stop_path)
+            if payload.get("schema") != STOP_SCHEMA:
+                raise ValueError("schema mismatch")
+            execution_id = payload.get("execution_id")
+            if not isinstance(execution_id, str) or execution_id != self.execution_id:
+                raise ValueError("execution ownership mismatch")
+            attempt = int(payload.get("attempt", 1))
+            if attempt < 1:
+                raise ValueError("unsafe attempt")
+            return payload
+        except (OSError, KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise SupervisorIntegrityError("supervisor stop is malformed") from exc
 
     def _write_intent(self, attempt: int) -> None:
         atomic_write_json(
@@ -684,6 +742,15 @@ class SupervisorV2:
                 sleeper=self.sleeper,
             )
         except ProcessOwnershipError as exc:
+            # A reattached supervisor has no Popen object to reap.  If the
+            # verified leader was already terminated, reap it when it is our
+            # child so a zombie cannot make an otherwise empty process group
+            # look live.  Descendants are still checked below and remain a
+            # hard failure if the group survives.
+            if process is None:
+                self._reattached_returncode(child.pid)
+                if not process_group_exists(child.process_group):
+                    return
             raise SupervisorIntegrityError(str(exc)) from exc
 
     def _write_stop(
@@ -711,6 +778,38 @@ class SupervisorV2:
     def _clear_runtime_identity(self) -> None:
         clear_active_child(self.active_child_path)
         self.execution_intent_path.unlink(missing_ok=True)
+
+    def _clear_active_child_if_unchanged(self, expected: ActiveChild | None) -> None:
+        current = self._read_active_child()
+        if current is None:
+            if expected is not None:
+                return
+            return
+        if expected is None or current != expected:
+            raise SupervisorIntegrityError(
+                "active-child identity changed during completed-execution reconciliation"
+            )
+        clear_active_child(self.active_child_path)
+
+    def _clear_intent_if_unchanged(self, expected: dict[str, object] | None) -> None:
+        current = self._read_intent()
+        if current is None:
+            return
+        if expected is None or current != expected:
+            raise SupervisorIntegrityError(
+                "execution intent changed during completed-execution reconciliation"
+            )
+        self.execution_intent_path.unlink(missing_ok=True)
+
+    def _clear_stop_if_unchanged(self, expected: dict[str, object] | None) -> None:
+        current = self._read_stop()
+        if current is None:
+            return
+        if expected is None or current != expected:
+            raise SupervisorIntegrityError(
+                "supervisor stop changed during completed-execution reconciliation"
+            )
+        self.stop_path.unlink(missing_ok=True)
 
 
 def supervise(

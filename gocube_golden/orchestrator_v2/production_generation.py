@@ -181,6 +181,24 @@ class ProductionTrainOne:
             generation=generation,
         )
         if reused is not None:
+            heartbeat_path = (
+                output_lineage.root
+                / "runtime"
+                / "heartbeats"
+                / f"generation-{generation:04d}.json"
+            )
+            reconciliation = SupervisorV2(
+                output_lineage.root,
+                execution_id=f"{output_lineage.lineage_id}:generation:{generation}",
+                liveness_path=heartbeat_path,
+                progress_path=heartbeat_path,
+                policy=self.supervisor_policy,
+            ).reconcile_completed_execution()
+            if not reconciliation.success:
+                raise RuntimeError(
+                    f"committed generation M{generation} supervisor reconciliation failed: "
+                    f"{reconciliation.reason or 'unknown reason'}"
+                )
             return reused
 
         result_path = output_lineage.root / "runtime" / "results" / f"train-one-{generation:04d}.json"
