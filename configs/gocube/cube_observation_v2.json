@@ -1,0 +1,79 @@
+{
+  "schema_version": 2,
+  "schema_id": "gocube-cube-observation-v2",
+  "fingerprint_algorithm": "sha256-canonical-json-v1",
+  "channel_order": [
+    "own_stones",
+    "opponent_stones",
+    "side_to_move_is_black",
+    "previous_action_was_pass",
+    "legal_point_mask",
+    "komi_stm_normalized",
+    "previous_move_point",
+    "own_liberties_1",
+    "own_liberties_2",
+    "own_liberties_3_plus",
+    "opponent_liberties_1",
+    "opponent_liberties_2",
+    "opponent_liberties_3_plus",
+    "history_1_own",
+    "history_1_opponent",
+    "history_2_own",
+    "history_2_opponent",
+    "history_3_own",
+    "history_3_opponent",
+    "history_4_own",
+    "history_4_opponent",
+    "is_face_interior",
+    "is_face_edge",
+    "is_face_corner",
+    "corner_distance_family_scaled",
+    "seam_distance_family_scaled",
+    "corner_distance_topology_relative",
+    "seam_distance_topology_relative",
+    "cross_face_neighbor_count_scaled",
+    "face_size_scaled"
+  ],
+  "channel_count": 30,
+  "history_depth": 4,
+  "layout": "[channels,points]",
+  "dtype": "float32",
+  "geometry_dependency": {
+    "source": "CubeFamilyTopology",
+    "schema_id": "cube-family-geometry-v2",
+    "supported_sizes": [2, 3, 4, 5, 6, 7]
+  },
+  "perspective": {
+    "stone_planes": "current-side-to-move-relative",
+    "liberty_planes": "current-side-to-move-relative",
+    "history_planes": "current-side-to-move-relative",
+    "side_to_move_is_black": {"BLACK": 1.0, "WHITE": 0.0},
+    "komi": "WHITE:+komi;BLACK:-komi"
+  },
+  "normalization": {
+    "komi_stm_normalized": "komi_stm/(P+abs(komi))",
+    "corner_distance_family_scale": 6.0,
+    "seam_distance_family_scale": 3.0,
+    "corner_distance_topology_relative": "corner_distance/max_corner_distance_of_this_topology;zero-if-max=0",
+    "seam_distance_topology_relative": "seam_distance/max_seam_distance_of_this_topology;zero-if-max=0",
+    "cross_face_neighbor_count_scaled": "num_cross_face_neighbors/2.0",
+    "face_size_scaled": "n/7.0"
+  },
+  "history": {
+    "depth": 4,
+    "real_move_history_separate_from_superko": true,
+    "pass_is_real_action": true,
+    "pass_appends_superko_history": false,
+    "missing_positions": "empty-board",
+    "previous_action_space": "point:0..P-1;PASS:P;none:null"
+  },
+  "compatibility": {
+    "historical_cube_observation_compatible": false,
+    "torus_observation_compatible": false,
+    "requires_matching_schema_fingerprint": true,
+    "requires_matching_game_graph_fingerprint": true,
+    "requires_matching_geometry_fingerprint": true,
+    "requires_matching_size": true
+  },
+  "schema_fingerprint": "sha256:c56c878e1acc9847647666426c370a4cda56473b3c4311f310bae225d9ae12e8"
+}
