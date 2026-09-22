@@ -85,6 +85,22 @@ def test_clean_code_change_without_allow_code_rollover_is_rejected(
         )
 
 
+def test_lineage_manifest_records_orchestrator_v2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _prepare_lineage(
+        tmp_path,
+        monkeypatch,
+        allow_code_rollover=True,
+        second_worktree_clean=True,
+    )
+
+    assert manifest["orchestrator_version"] == "V2"
+    assert manifest["orchestrator_entrypoint"] == (
+        "gocube_golden.orchestrator_v2.production_entrypoint"
+    )
+
+
 def test_clean_code_change_with_allow_code_rollover_is_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

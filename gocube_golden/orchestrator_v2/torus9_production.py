@@ -14,6 +14,7 @@ from ..provenance import canonical_json, capture_code_identity
 from .artifact_resolver import ResolvedArtifact, ResolvedCheckpointNode, ResolvedEffectiveConfig
 from .contracts import ArtifactRef, CheckpointRef, EffectiveConfigRef
 from .generation_runner import GenerationExecutionResult, ResolvedGenerationInput
+from .version import ORCHESTRATOR_ENTRYPOINT, ORCHESTRATOR_VERSION
 
 
 def _default_driver(resolved_input: ResolvedGenerationInput) -> Mapping[str, object]:
@@ -127,6 +128,8 @@ class Torus9ProductionLineage:
         code = capture_code_identity(self.repo_root)
         manifest = {
             "schema": "gocube-orchestrator-v2-production-lineage-v1",
+            "orchestrator_version": ORCHESTRATOR_VERSION,
+            "orchestrator_entrypoint": ORCHESTRATOR_ENTRYPOINT,
             "lineage_id": lineage_id,
             "topology": topology,
             "status": "ACTIVE",
@@ -142,6 +145,11 @@ class Torus9ProductionLineage:
             for key in ("lineage_id", "topology", "status", "parent_checkpoint", "config_fingerprint"):
                 if existing.get(key) != manifest[key]:
                     raise ValueError(f"Production arm lineage {key} changed: {root}")
+            existing_version = existing.get("orchestrator_version")
+            if existing_version not in (None, ORCHESTRATOR_VERSION):
+                raise ValueError(
+                    f"Production arm lineage uses unsupported orchestrator version: {existing_version!r}"
+                )
             manifest = _advance_lineage_code_pin(
                 existing,
                 git_commit=code.git_commit_sha,
@@ -149,6 +157,8 @@ class Torus9ProductionLineage:
                 working_tree_clean=code.working_tree_clean,
                 allow_code_rollover=allow_code_rollover,
             )
+            manifest.setdefault("orchestrator_version", ORCHESTRATOR_VERSION)
+            manifest.setdefault("orchestrator_entrypoint", ORCHESTRATOR_ENTRYPOINT)
             if manifest != existing:
                 _write_json(root / "manifest.json", manifest)
         else:

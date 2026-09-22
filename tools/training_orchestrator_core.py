@@ -444,4 +444,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from gocube_golden.orchestrator_v2.version import reject_legacy_v1_entrypoint
+
+    reject_legacy_v1_entrypoint("tools/training_orchestrator_core.py")

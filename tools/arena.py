@@ -50,6 +50,18 @@ from gocube_golden.run_storage import (
 ARENA_RESULT_PROVENANCE_SCHEMA = "gocube-arena-evaluation-provenance-v2"
 
 
+def _require_v2_process(entrypoint: str) -> None:
+    """Load the V2 guard only after this module has finished importing.
+
+    ``gocube_golden.orchestrator_v2`` exports ``ArenaRunner`` from its package
+    initializer, and ``ArenaRunner`` imports this module.  Importing the V2
+    package at module scope here would therefore create a circular import.
+    """
+    from gocube_golden.orchestrator_v2.version import require_v2_process
+
+    require_v2_process(entrypoint)
+
+
 def _resolve_profile(profile_name: str, candidate: Path):
     if profile_name == "auto":
         return detect_profile(candidate)
@@ -247,6 +259,7 @@ def run_arena(
     allowed_lineage_arena_root: Path | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
+    _require_v2_process("tools.arena.run_arena")
     candidate_identity: ResolvedCheckpoint | None = None
     if isinstance(candidate_path, Mapping) and not candidate_path.get("path"):
         candidate_identity = resolve_checkpoint(
@@ -418,6 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _require_v2_process("tools/arena.py")
     args = build_parser().parse_args(argv)
     reference = args.reference or args.candidate
     profile = _resolve_profile(args.profile, args.candidate)

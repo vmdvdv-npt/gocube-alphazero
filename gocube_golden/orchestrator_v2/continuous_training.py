@@ -28,6 +28,7 @@ from .experiment_runner import LineageFactory, TrainOne
 from .generation_runner import OutputLineage
 from .production_generation import ProductionTrainOne
 from .torus9_production import Torus9ProductionLineage
+from .version import ORCHESTRATOR_VERSION
 
 from tools.arena_engine import ArenaExecutionConfig, DEFAULT_MASTER_SEED
 
@@ -756,6 +757,9 @@ class ContinuousTrainingRunnerV2:
             if state.get("schema") != CONTINUOUS_TRAINING_SCHEMA:
                 raise RuntimeError("unsupported continuous training state schema")
             self._validate_state(state, parent)
+            if state.get("orchestrator_version") is None:
+                state["orchestrator_version"] = ORCHESTRATOR_VERSION
+                self._persist_state(state)
             raw_current = state.get("current_checkpoint")
             current = parent if not isinstance(raw_current, Mapping) else self.resolver.checkpoint(raw_current)
             if current.topology != self.config.topology or current.lineage_id not in {
@@ -770,6 +774,7 @@ class ContinuousTrainingRunnerV2:
 
         state: dict[str, object] = {
             "schema": CONTINUOUS_TRAINING_SCHEMA,
+            "orchestrator_version": ORCHESTRATOR_VERSION,
             "lineage_id": self.config.lineage_id,
             "topology": self.config.topology,
             "state": "RUNNING",
@@ -798,6 +803,9 @@ class ContinuousTrainingRunnerV2:
         return state, parent
 
     def _validate_state(self, state: Mapping[str, object], parent: ResolvedCheckpointNode) -> None:
+        state_version = state.get("orchestrator_version")
+        if state_version not in (None, ORCHESTRATOR_VERSION):
+            raise RuntimeError(f"continuous state uses unsupported orchestrator version: {state_version!r}")
         expected = {
             "lineage_id": self.config.lineage_id,
             "topology": self.config.topology,

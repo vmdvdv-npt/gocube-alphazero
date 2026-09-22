@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 from tools import training_orchestrator_core as _core
 from tools.training_orchestrator_core import *  # noqa: F401,F403
 from gocube_golden.operator_policy import install_operator_policy
+from gocube_golden.orchestrator_v2.version import reject_legacy_v1_entrypoint
 from gocube_golden.telegram_notifier import (
     TelegramError,
     flush_all,
@@ -71,4 +72,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if len(sys.argv) > 1 and sys.argv[1] == "telegram-test":
+        raise SystemExit(main())
+    reject_legacy_v1_entrypoint("tools/training_orchestrator.py")

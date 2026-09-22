@@ -23,6 +23,7 @@ from .arena_runner import ArenaRunnerV2
 from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
 from .experiment_plan import ExperimentConfig
 from .experiment_runner import ExperimentRunnerV2
+from .version import mark_v2_process
 from tools.arena_engine import DEFAULT_MASTER_SEED
 
 
@@ -124,6 +125,7 @@ def run_continuous_from_config(
 ) -> object:
     """Run a production continuous plan with explicitly injected Telegram."""
     _require_file_backed_entrypoint()
+    mark_v2_process()
     config = _continuous_config(payload)
     if allow_code_rollover is not None:
         if type(allow_code_rollover) is not bool:
@@ -153,6 +155,7 @@ def run_experiment_from_config(
 ) -> object:
     """Run a production A/B or A/B→C plan with explicitly injected Telegram."""
     _require_file_backed_entrypoint()
+    mark_v2_process()
     config = _experiment_config(payload)
     if allow_code_rollover is not None:
         if type(allow_code_rollover) is not bool:
