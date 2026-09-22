@@ -67,6 +67,25 @@ def _is_materialized_rolling_source(path: Path) -> bool:
     return path.name.startswith("rolling-after-") and path.name.endswith(".jsonl")
 
 
+def _has_complete_materialized_replay_identity(
+    identity: Mapping[str, object] | None,
+) -> bool:
+    """Return whether a rolling source has enough evidence for trusted restore."""
+    if not isinstance(identity, Mapping):
+        return False
+    return (
+        identity.get("immutable_verified") is True
+        and identity.get("sha256") is not None
+        and identity.get("size_bytes") is not None
+        and identity.get("row_count") is not None
+        and identity.get("validation_schema") == ARTIFACT_VALIDATION_SCHEMA
+        and identity.get("canonical_replay_fingerprint") is not None
+        and identity.get("replay_identity_contract") is not None
+        and isinstance(identity.get("generation_identities"), Sequence)
+        and not isinstance(identity.get("generation_identities"), (str, bytes))
+    )
+
+
 def _normalize_generation_identities(
     value: object,
     *,
@@ -346,9 +365,13 @@ class Torus9RollingReplay(_core.Torus9RollingReplay):
         maximum_positions: int | None = TORUS9_MAX_REPLAY_POSITIONS,
         total_evictions: int = 0,
         generation_identities: object = None,
+        copy_rows: bool = True,
     ) -> "Torus9RollingReplay":
         replay = cls(generations=generations, maximum_positions=maximum_positions)
-        copied = [dict(row) for row in rows]
+        # Immutable JSONL restore owns the parsed row mappings exclusively, so
+        # the shared fast path can retain them without a second full-window
+        # dict copy. Legacy callers keep the defensive copy by default.
+        copied = [dict(row) for row in rows] if copy_rows else list(rows)  # type: ignore[list-item]
         if maximum_positions is not None and len(copied) > int(maximum_positions):
             raise ValueError("Persisted Torus9 replay exceeds the configured cap")
         row_ids = [str(row.get("replay_row_id", "")) for row in copied]
@@ -1196,6 +1219,72 @@ class Torus9TrainingAdapter:
             )
         }
         source_evidence = tuple(replay_artifact_identities or ())
+
+        # A committed rolling artifact is already a materialized replay
+        # composition. Once resolver evidence authenticates its bytes,
+        # reconstruct it with structural checks only; routing it through
+        # append_generation would restamp and copy every historical row.
+        if len(sources) == 1 and source_evidence:
+            source = Path(sources[0])
+            identity = source_evidence[0]
+            if (
+                _has_complete_materialized_replay_identity(identity)
+                and identity.get("replay_identity_schema")
+                == TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA
+                and _is_materialized_rolling_source(source)
+            ):
+                immutable_sha = (
+                    str(identity.get("sha256") or identity.get("artifact_sha256"))
+                    if identity.get("immutable_verified") is True
+                    else None
+                )
+                if immutable_sha is not None:
+                    source_rows, source_digest = _read_jsonl_with_identity(
+                        source,
+                        compute_hash=False,
+                        known_sha256=immutable_sha,
+                    )
+                    _replay_fingerprint, trusted = self._verified_replay_evidence(
+                        identity,
+                        source_digest,
+                        row_count=len(source_rows),
+                    )
+                    raw_components = identity.get("generation_identities")
+                    if (
+                        trusted
+                        and not isinstance(raw_components, (str, bytes))
+                        and isinstance(raw_components, Sequence)
+                    ):
+                        replay = Torus9RollingReplay.from_persisted_rows(
+                            source_rows,
+                            generations=int(self.replay_profile["generations"]),  # type: ignore[index]
+                            maximum_positions=self.replay_profile["cap"],
+                            total_evictions=total_evictions,
+                            generation_identities=raw_components,
+                            copy_rows=False,
+                        )
+                        expected_identity = replay_identity or identity
+                        schema = _replay_identity_schema_from_payload(
+                            expected_identity,
+                            None,
+                        )
+                        expected = _replay_fingerprint_from_payload(
+                            expected_identity,
+                            None,
+                        )
+                        if schema == TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA:
+                            if expected is None:
+                                raise ValueError(
+                                    "Torus9 replay composition identity evidence is incomplete"
+                                )
+                            actual = replay.replay_identity_descriptor()
+                            if actual["fingerprint"] != expected:
+                                raise ValueError(
+                                    "Current Torus9 replay composition fingerprint mismatch"
+                                )
+                        self._trust_historical_rows(replay.rows)
+                        return replay, [source_digest]
+
         materialized_source_indexes: list[int] = []
 
         def append_generation(
@@ -1210,7 +1299,8 @@ class Torus9TrainingAdapter:
                 )
             source_identity = identity
             materialized = (
-                isinstance(source_identity, Mapping)
+                _has_complete_materialized_replay_identity(source_identity)
+                and isinstance(source_identity, Mapping)
                 and source_identity.get("replay_identity_schema")
                 == TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA
                 and _is_materialized_rolling_source(source)
@@ -1338,7 +1428,8 @@ class Torus9TrainingAdapter:
             if current_generation:
                 append_generation(current_generation, current_rows, digest, identity)
             if (
-                isinstance(identity, Mapping)
+                _has_complete_materialized_replay_identity(identity)
+                and isinstance(identity, Mapping)
                 and identity.get("replay_identity_schema")
                 == TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA
                 and _is_materialized_rolling_source(source)

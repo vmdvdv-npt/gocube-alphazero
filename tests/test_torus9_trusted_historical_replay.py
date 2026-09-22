@@ -266,6 +266,85 @@ def test_materialized_rolling_source_parses_once_and_skips_historical_semantics(
     assert digests[0]["size_bytes"] == path.stat().st_size
 
 
+def test_materialized_two_generation_source_without_cap_keeps_every_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = _profile()
+    profile["replay"]["generations"] = 2
+    profile["replay"]["cap"] = None
+    profile["profile_fingerprint"] = profile_fingerprint(profile)
+    adapter = run_owned_training.Torus9TrainingAdapter(profile=profile)
+    rows = tuple(
+        _row(f"M{generation}:game:0:{position}") | {"source_generation": generation}
+        for generation, position in ((91, 0), (91, 1), (92, 0), (92, 1))
+    )
+    components = [
+        {
+            "schema": TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
+            "generation": generation,
+            "sha256": "sha256:" + str(generation % 10) * 64,
+            "row_count": 2,
+            "retained_row_count": 2,
+        }
+        for generation in (91, 92)
+    ]
+    source_replay = run_owned_training._base.Torus9RollingReplay.from_persisted_rows(
+        rows,
+        generations=2,
+        maximum_positions=None,
+        generation_identities=components,
+    )
+    descriptor = source_replay.replay_identity_descriptor()
+    path = tmp_path / "rolling-after-92.jsonl"
+    path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    digest = sha256_file(path)
+    evidence = {
+        "path": str(path),
+        "sha256": digest,
+        "size_bytes": path.stat().st_size,
+        "row_count": len(rows),
+        "validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+        "immutable_verified": True,
+        "replay_identity_schema": descriptor["schema"],
+        "replay_identity_contract": descriptor["contract"],
+        "generation_identities": descriptor["components"],
+        "canonical_replay_fingerprint": descriptor["fingerprint"],
+    }
+    calls: list[str] = []
+    monkeypatch.setattr(
+        adapter,
+        "validate_sample",
+        lambda sample: calls.append(str(sample["replay_row_id"])),
+    )
+    monkeypatch.setattr(
+        run_owned_training._base.Torus9RollingReplay,
+        "append_generation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("materialized trusted replay must not restamp rows")
+        ),
+    )
+
+    restored, _digests = adapter._rolling_from_sources(
+        [path],
+        total_evictions=0,
+        replay_artifact_identities=[evidence],
+        replay_identity={
+            "replay_identity_schema": descriptor["schema"],
+            "replay_identity_contract": descriptor["contract"],
+            "generation_identities": descriptor["components"],
+            "canonical_replay_fingerprint": descriptor["fingerprint"],
+        },
+    )
+
+    assert list(restored.rows) == list(rows)
+    assert restored.maximum_positions is None
+    assert calls == []
+
+
 def test_incomplete_resolved_source_evidence_uses_full_validation_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -293,6 +372,41 @@ def test_incomplete_resolved_source_evidence_uses_full_validation_fallback(
                 "immutable_verified": True,
                 # Missing row_count and generation identity is intentionally
                 # incomplete and must not authorize the trusted path.
+            }
+        ],
+    )
+
+    assert calls == ["M88:game:0:0"]
+
+
+def test_incomplete_materialized_identity_uses_full_validation_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = run_owned_training.Torus9TrainingAdapter(profile=_profile())
+    row = _row("M88:game:0:0")
+    path = tmp_path / "rolling-after-88.jsonl"
+    path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+    digest = sha256_file(path)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        adapter,
+        "validate_sample",
+        lambda sample: calls.append(str(sample["replay_row_id"])),
+    )
+
+    adapter._rolling_from_sources(
+        [path],
+        total_evictions=0,
+        replay_artifact_identities=[
+            {
+                "sha256": digest,
+                "size_bytes": path.stat().st_size,
+                "validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+                "immutable_verified": True,
+                "replay_identity_schema": "torus9-replay-composition-v1",
+                # Missing row_count/composition evidence must not authorize
+                # the materialized trusted path.
             }
         ],
     )

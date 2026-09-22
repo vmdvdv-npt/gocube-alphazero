@@ -223,6 +223,58 @@ def _install_committed_rolling(
     return resolver, (parent, config, rolling_path, rolling_entry)
 
 
+def _install_marker_backed_rolling(
+    graph: SyntheticGraph,
+    *,
+    marker_row_count: int | None = None,
+) -> tuple[object, object]:
+    resolver, (parent, config, rolling_path, rolling_entry) = _install_committed_rolling(graph)
+    root = graph.roots[parent.lineage_id]
+    marker = {
+        "generation": parent.generation,
+        "checkpoint_sha256": parent.ref.sha256,
+        "rolling_replay_sha256": rolling_entry["sha256"],
+        "replay_row_count": (
+            rolling_entry["row_count"] if marker_row_count is None else marker_row_count
+        ),
+        "replay_generations": rolling_entry["source_generations"],
+        "replay_fingerprint": rolling_entry["canonical_replay_fingerprint"],
+        "validation_schema": ARTIFACT_VALIDATION_SCHEMA,
+        "replay_identity_schema": rolling_entry["replay_identity_schema"],
+        "replay_identity_components": rolling_entry["generation_identities"],
+        "replay_identity_contract": rolling_entry["replay_identity_contract"],
+    }
+    marker_path = root / f"generation-{parent.generation:02d}.complete.json"
+    marker_sha = _write(marker_path, canonical_json(marker).encode("utf-8"))
+    provenance_path = parent.provenance.path
+    provenance = {
+        "generation_commit": {
+            "path": marker_path.relative_to(root).as_posix(),
+            "sha256": marker_sha,
+        }
+    }
+    provenance_sha = _write(provenance_path, canonical_json(provenance).encode("utf-8"))
+    original = CheckpointNode.from_dict(
+        json.loads(checkpoint_node_path(root, parent.ref).read_text())
+    )
+    _rewrite_node(
+        graph,
+        parent.generation,
+        CheckpointNode(
+            checkpoint=original.checkpoint,
+            genesis=original.genesis,
+            parent=original.parent,
+            fresh_replay=original.fresh_replay,
+            effective_config=original.effective_config,
+            provenance=ArtifactRef(
+                provenance_path.relative_to(root).as_posix(), provenance_sha
+            ),
+        ),
+    )
+    refreshed = ArtifactResolver(graph.runs_root).checkpoint(parent.ref)
+    return refreshed, config
+
+
 def _rewrite_node(graph: SyntheticGraph, generation: int, node: CheckpointNode) -> None:
     target = graph.refs[generation]
     path = checkpoint_node_path(graph.roots[target.lineage_id], target)
@@ -459,6 +511,34 @@ def test_compatible_parent_rolling_replay_is_selected_as_one_restore_artifact(tm
         "generations": 3,
         "maximum_positions": 8,
     }
+
+
+def test_marker_backed_parent_rolling_replay_skips_fresh_window_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _make_graph(tmp_path)
+    parent, config = _install_marker_backed_rolling(graph)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("trusted V2 rolling replay must not resolve fresh sources")
+
+    monkeypatch.setattr(ArtifactResolver, "replay_window", forbidden)
+    paths, _shas, _identities, replay_identity = _resolve_v2_replay_sources(parent, config)
+
+    assert paths == (
+        (graph.roots[parent.lineage_id] / "replay/rolling-after-04.jsonl").resolve(),
+    )
+    assert replay_identity["row_count"] == 3
+    assert replay_identity["commit_artifact"]["path"].endswith("generation-04.complete.json")
+
+
+def test_marker_row_count_corruption_fails_closed(tmp_path: Path) -> None:
+    graph = _make_graph(tmp_path)
+    parent, config = _install_marker_backed_rolling(graph, marker_row_count=2)
+
+    with pytest.raises(ArtifactIntegrityError, match="row count"):
+        _resolve_v2_replay_sources(parent, config)
 
 
 def test_changed_replay_scope_falls_back_to_graph_fresh_window(tmp_path: Path) -> None:
