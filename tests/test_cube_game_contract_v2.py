@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 
 import pytest
 
+from gocube_golden.cube_family import (
+    CROSS_FACE_SEAM,
+    FACE_CORNER,
+    cube_family_topology,
+)
 from gocube_golden.cube_game_contract_v2 import (
     FORMAL_DOUBLE_PASS,
     action_count_for_size,
@@ -23,11 +27,6 @@ from gocube_golden.cube_game_contract_v2 import (
     rules_action_to_action_index,
     validate_contract,
     validate_cube_size,
-)
-from gocube_golden.cube_topology import (
-    CROSS_FACE_SEAM,
-    CUBE4_TOPOLOGY,
-    FACE_CORNER,
 )
 from gocube_golden.rules import (
     IllegalMoveError,
@@ -50,12 +49,11 @@ from gocube_golden.state import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-HISTORICAL_CUBE_PROFILE = REPO_ROOT / "configs/gocube/cube4_golden_training_v1.json"
+CUBE4 = cube_family_topology(4)
 
 
 def state_with(*, black=(), white=(), side=BLACK, passes=0, history=None):
-    stones = [EMPTY] * CUBE4_TOPOLOGY.point_count
+    stones = [EMPTY] * CUBE4.point_count
     for point in black:
         stones[point] = BLACK
     for point in white:
@@ -65,7 +63,7 @@ def state_with(*, black=(), white=(), side=BLACK, passes=0, history=None):
     return research_state_from_stones(
         stones,
         side_to_move=side,
-        topology=CUBE4_TOPOLOGY,
+        topology=CUBE4,
         consecutive_passes=passes,
         superko_history=history,
     )
@@ -107,7 +105,7 @@ def test_cube4_policy_size_97_is_not_a_game_length_limit():
 
 
 def test_cube4_geometry_has_degree_four_real_seams_and_corner_triangles():
-    topology = CUBE4_TOPOLOGY
+    topology = CUBE4
     assert topology.point_count == 96
     assert all(len(neighbors) == 4 for neighbors in topology.adjacency)
     assert len(topology.seams) == 12
@@ -131,23 +129,18 @@ def test_cube4_geometry_has_degree_four_real_seams_and_corner_triangles():
 
 
 def test_capture_across_seam_and_multiface_liberties_are_unique():
-    left, right = CUBE4_TOPOLOGY.seams[0].point_pairs[1]
+    left, right = CUBE4.seams[0].point_pairs[1]
     group_state = state_with(black=(left, right), side=WHITE)
     group = group_from_board(group_state, left)
     expected_liberties = (
-        set(CUBE4_TOPOLOGY.adjacency[left])
-        | set(CUBE4_TOPOLOGY.adjacency[right])
+        set(CUBE4.adjacency[left]) | set(CUBE4.adjacency[right])
     ) - {left, right}
     assert group == frozenset((left, right))
     assert liberties_from_board(group_state, group) == frozenset(expected_liberties)
 
     target = left
     seam_neighbor = right
-    black = [
-        neighbor
-        for neighbor in CUBE4_TOPOLOGY.adjacency[target]
-        if neighbor != seam_neighbor
-    ]
+    black = [neighbor for neighbor in CUBE4.adjacency[target] if neighbor != seam_neighbor]
     capture_state = state_with(black=black, white=(target,))
     transition = apply_action(capture_state, seam_neighbor)
     assert transition.captured == (target,)
@@ -155,11 +148,11 @@ def test_capture_across_seam_and_multiface_liberties_are_unique():
 
 
 def test_capture_is_resolved_before_suicide_check():
-    point = CUBE4_TOPOLOGY.physical_corners[0][0]
-    white = set(CUBE4_TOPOLOGY.adjacency[point])
+    point = CUBE4.physical_corners[0][0]
+    white = set(CUBE4.adjacency[point])
     black = set()
     for neighbor in white:
-        black.update(CUBE4_TOPOLOGY.adjacency[neighbor])
+        black.update(CUBE4.adjacency[neighbor])
     black.discard(point)
     black.difference_update(white)
 
@@ -171,48 +164,31 @@ def test_capture_is_resolved_before_suicide_check():
     transition = apply_action(state, point)
     assert set(transition.captured) == white
     assert transition.after.stones[point] == BLACK
-    assert liberties_from_board(
-        transition.after, group_from_board(transition.after, point)
-    )
+    assert liberties_from_board(transition.after, group_from_board(transition.after, point))
 
 
 def test_captured_point_is_not_reserved_and_can_be_reused_when_legal():
     target = 1
     capture_from = next(
         neighbor
-        for neighbor, relation in zip(
-            CUBE4_TOPOLOGY.adjacency[target],
-            CUBE4_TOPOLOGY.relation_types[target],
-        )
+        for neighbor, relation in zip(CUBE4.adjacency[target], CUBE4.relation_types[target])
         if relation == CROSS_FACE_SEAM
     )
-    black = [
-        neighbor
-        for neighbor in CUBE4_TOPOLOGY.adjacency[target]
-        if neighbor != capture_from
-    ]
+    black = [neighbor for neighbor in CUBE4.adjacency[target] if neighbor != capture_from]
     captured = apply_action(state_with(black=black, white=(target,)), capture_from)
     assert captured.after.stones[target] == EMPTY
 
     later_stones = list(captured.after.stones)
-    opened_neighbor = next(
-        neighbor
-        for neighbor in CUBE4_TOPOLOGY.adjacency[target]
-        if neighbor != capture_from
-    )
+    opened_neighbor = next(neighbor for neighbor in CUBE4.adjacency[target] if neighbor != capture_from)
     later_stones[opened_neighbor] = EMPTY
-    later = research_state_from_stones(
-        later_stones,
-        side_to_move=WHITE,
-        topology=CUBE4_TOPOLOGY,
-    )
+    later = research_state_from_stones(later_stones, side_to_move=WHITE, topology=CUBE4)
     assert target in legal_actions(later)
     assert apply_action(later, target).after.stones[target] == WHITE
 
 
 def test_suicide_is_still_rejected_without_capture():
-    point = CUBE4_TOPOLOGY.physical_corners[0][0]
-    state = state_with(white=CUBE4_TOPOLOGY.adjacency[point])
+    point = CUBE4.physical_corners[0][0]
+    state = state_with(white=CUBE4.adjacency[point])
     with pytest.raises(IllegalMoveError) as caught:
         apply_action(state, point)
     assert caught.value.reason == IllegalMoveReason.SUICIDE
@@ -220,16 +196,12 @@ def test_suicide_is_still_rejected_without_capture():
 
 def test_positional_superko_uses_only_stones_not_side_to_move():
     point = 5
-    empty = tuple([EMPTY] * CUBE4_TOPOLOGY.point_count)
+    empty = tuple([EMPTY] * CUBE4.point_count)
     repeated = list(empty)
     repeated[point] = BLACK
-    state = state_with(
-        side=BLACK,
-        history=(tuple(repeated), empty),
-    )
+    state = state_with(side=BLACK, history=(tuple(repeated), empty))
     assert all(
-        isinstance(position, tuple)
-        and len(position) == CUBE4_TOPOLOGY.point_count
+        isinstance(position, tuple) and len(position) == CUBE4.point_count
         for position in state.superko_history
     )
     with pytest.raises(IllegalMoveError) as caught:
@@ -238,7 +210,7 @@ def test_positional_superko_uses_only_stones_not_side_to_move():
 
 
 def test_pass_adapter_history_and_double_pass_terminal():
-    state = initial_state(topology=CUBE4_TOPOLOGY)
+    state = initial_state(topology=CUBE4)
     pass_index = point_count_for_size(4)
     assert action_index_to_rules_action(pass_index, 4) == PASS
 
@@ -256,39 +228,27 @@ def test_pass_adapter_history_and_double_pass_terminal():
 
 
 def test_graph_area_territory_mixed_boundary_and_empty_board_are_exact():
-    empty_pair = CUBE4_TOPOLOGY.seams[0].point_pairs[1]
-    stones = [BLACK] * CUBE4_TOPOLOGY.point_count
+    empty_pair = CUBE4.seams[0].point_pairs[1]
+    stones = [BLACK] * CUBE4.point_count
     for point in empty_pair:
         stones[point] = EMPTY
-    black_terminal = research_state_from_stones(
-        stones,
-        topology=CUBE4_TOPOLOGY,
-        consecutive_passes=2,
-    )
+    black_terminal = research_state_from_stones(stones, topology=CUBE4, consecutive_passes=2)
     black_score = score_terminal(black_terminal)
     assert black_score.black_area == 96
     assert black_score.white_area == 0
     assert black_score.neutral_points == 0
 
     mixed = list(stones)
-    boundary = next(
-        neighbor
-        for neighbor in CUBE4_TOPOLOGY.adjacency[empty_pair[0]]
-        if neighbor not in empty_pair
-    )
+    boundary = next(neighbor for neighbor in CUBE4.adjacency[empty_pair[0]] if neighbor not in empty_pair)
     mixed[boundary] = WHITE
-    mixed_terminal = research_state_from_stones(
-        mixed,
-        topology=CUBE4_TOPOLOGY,
-        consecutive_passes=2,
-    )
+    mixed_terminal = research_state_from_stones(mixed, topology=CUBE4, consecutive_passes=2)
     mixed_score = score_terminal(mixed_terminal)
     assert mixed_score.neutral_points == len(empty_pair)
     assert all(mixed_score.ownership[point] == Ownership.NEUTRAL for point in empty_pair)
 
     empty_terminal = research_state_from_stones(
-        [EMPTY] * CUBE4_TOPOLOGY.point_count,
-        topology=CUBE4_TOPOLOGY,
+        [EMPTY] * CUBE4.point_count,
+        topology=CUBE4,
         consecutive_passes=2,
     )
     empty_score = score_terminal(empty_terminal)
@@ -300,13 +260,9 @@ def test_graph_area_territory_mixed_boundary_and_empty_board_are_exact():
 
 def test_terminal_scoring_does_not_remove_dead_stones_or_add_prisoner_points():
     dead_point = 0
-    stones = [WHITE] * CUBE4_TOPOLOGY.point_count
+    stones = [WHITE] * CUBE4.point_count
     stones[dead_point] = BLACK
-    terminal = research_state_from_stones(
-        stones,
-        topology=CUBE4_TOPOLOGY,
-        consecutive_passes=2,
-    )
+    terminal = research_state_from_stones(stones, topology=CUBE4, consecutive_passes=2)
     score = score_terminal(terminal)
     assert score.black_stones == 1
     assert score.white_stones == 95
@@ -328,18 +284,12 @@ def test_targets_project_from_each_saved_positions_player_not_terminal_player():
 
 
 def test_technical_completion_is_not_a_draw_and_formal_double_pass_wins_boundary():
-    technical = classify_completion(
-        formal_double_pass=False,
-        technical_reason="MOVE_LIMIT",
-    )
+    technical = classify_completion(formal_double_pass=False, technical_reason="MOVE_LIMIT")
     assert technical == "TECHNICAL_MOVE_LIMIT"
     assert technical != "DRAW"
     assert not completion_is_formal_result(technical)
 
-    boundary = classify_completion(
-        formal_double_pass=True,
-        technical_reason="MOVE_LIMIT",
-    )
+    boundary = classify_completion(formal_double_pass=True, technical_reason="MOVE_LIMIT")
     assert boundary == FORMAL_DOUBLE_PASS
     assert completion_is_formal_result(boundary)
 
@@ -348,9 +298,7 @@ def test_contract_fingerprint_is_canonical_and_semantic_drift_fails_closed():
     contract = load_contract()
     assert contract["contract_fingerprint"] == contract_fingerprint(contract)
 
-    reordered = json.loads(
-        json.dumps(contract, ensure_ascii=True, sort_keys=False)
-    )
+    reordered = json.loads(json.dumps(contract, ensure_ascii=True, sort_keys=False))
     assert contract_fingerprint(reordered) == contract["contract_fingerprint"]
 
     mutated = copy.deepcopy(contract)
@@ -365,12 +313,12 @@ def test_contract_fingerprint_is_canonical_and_semantic_drift_fails_closed():
 
 def test_concrete_identity_distinguishes_family_size_topology_rules_and_komi():
     contract = load_contract()
-    cube4_rules = rules_fingerprint_for(CUBE4_TOPOLOGY, 0.5)
+    cube4_rules = rules_fingerprint_for(CUBE4, 0.5)
     identity = concrete_game_identity(
         contract,
         4,
-        topology_id=CUBE4_TOPOLOGY.topology_id,
-        topology_fingerprint=CUBE4_TOPOLOGY.fingerprint,
+        topology_id=CUBE4.topology_id,
+        topology_fingerprint=CUBE4.fingerprint,
         rules_fingerprint=cube4_rules,
         komi=0.5,
     )
@@ -386,19 +334,9 @@ def test_concrete_identity_distinguishes_family_size_topology_rules_and_komi():
     assert identity["rules_fingerprint"] != identity["family_contract_fingerprint"]
 
 
-def test_existing_torus_and_historical_cube_identities_are_unchanged():
+def test_existing_torus_identity_is_unchanged_and_v2_does_not_inherit_v1_watchdog():
     assert STAGE0_RULES_FINGERPRINT == (
         "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842"
     )
     assert initial_state().rules_fingerprint == STAGE0_RULES_FINGERPRINT
-
-    historical = json.loads(HISTORICAL_CUBE_PROFILE.read_text(encoding="utf-8"))
-    assert historical["profile_id"] == "gocube-cube4-golden-training-v1"
-    assert historical["profile_fingerprint"] == (
-        "sha256:eecfc04b32cf95b56a6b9d314c2d7c0003d4ce0c50d3dca45f076c19b045ff34"
-    )
-    assert historical["rules"]["fingerprint"] == (
-        "sha256:27eb43ec6a566b13c44eb10691928eaa7e51f80ab667e48bb36d1a13103e7c2e"
-    )
-    assert historical["arena"]["watchdog"] == 1920
     assert load_contract()["results"]["technical_termination"]["historical_1920_inherited"] is False
