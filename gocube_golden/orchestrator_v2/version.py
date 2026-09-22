@@ -26,6 +26,16 @@ def mark_v2_process() -> None:
     os.environ[ORCHESTRATOR_VERSION_ENV] = ORCHESTRATOR_VERSION
 
 
+def require_v2_process(entrypoint: str) -> None:
+    """Reject production work invoked outside the V2 process boundary."""
+
+    if os.environ.get(ORCHESTRATOR_VERSION_ENV) != ORCHESTRATOR_VERSION:
+        raise RuntimeError(
+            f"{entrypoint}: production Arena execution requires "
+            f"{ORCHESTRATOR_ENTRYPOINT} (Orchestrator {ORCHESTRATOR_VERSION})."
+        )
+
+
 def reject_legacy_v1_entrypoint(entrypoint: str) -> None:
     """Fail closed when an executable legacy V1 entrypoint is invoked."""
 
@@ -38,5 +48,6 @@ __all__ = [
     "ORCHESTRATOR_VERSION",
     "ORCHESTRATOR_VERSION_ENV",
     "mark_v2_process",
+    "require_v2_process",
     "reject_legacy_v1_entrypoint",
 ]

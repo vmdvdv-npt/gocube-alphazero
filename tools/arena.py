@@ -38,6 +38,7 @@ from tools.arena_engine import (
 )
 from tools.arena_profiles import available_profiles, detect_profile, get_profile
 from gocube_golden.arena_identity import stamp_evaluation_identity_metadata
+from gocube_golden.orchestrator_v2.version import require_v2_process
 from gocube_golden.run_storage import (
     ResolvedCheckpoint,
     evaluation_dir,
@@ -247,6 +248,7 @@ def run_arena(
     allowed_lineage_arena_root: Path | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
+    require_v2_process("tools.arena.run_arena")
     candidate_identity: ResolvedCheckpoint | None = None
     if isinstance(candidate_path, Mapping) and not candidate_path.get("path"):
         candidate_identity = resolve_checkpoint(
@@ -418,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    require_v2_process("tools/arena.py")
     args = build_parser().parse_args(argv)
     reference = args.reference or args.candidate
     profile = _resolve_profile(args.profile, args.candidate)

@@ -27,6 +27,7 @@ from .contracts import (
     EvaluationIdentity,
     StartsetRef,
 )
+from .version import require_v2_process
 
 from tools.arena import (
     ARENA_RESULT_PROVENANCE_SCHEMA,
@@ -192,6 +193,8 @@ class ArenaRunner:
 
     def run(self, request: ArenaRunRequest) -> ArenaRunResult:
         """Run exactly one evaluation for the supplied explicit refs."""
+        if self.engine is production_arena:
+            require_v2_process("gocube_golden.orchestrator_v2.ArenaRunnerV2")
         config = request.config
         config.validate_base()
         identity = self._identity(request)
