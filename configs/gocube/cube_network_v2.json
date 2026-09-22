@@ -1,0 +1,76 @@
+{
+  "architecture_schema_version": 2,
+  "architecture_id": "gocube-cube-graphnet-v2",
+  "fingerprint_algorithm": "sha256-canonical-json-v1",
+  "hidden": 112,
+  "blocks": 10,
+  "input": {
+    "observation_schema_id": "gocube-cube-observation-v2",
+    "channels": 30,
+    "layout": "[B,channels,points]",
+    "projection": "shared-linear:30->112"
+  },
+  "trunk": {
+    "normalization": "pre-norm-layernorm-hidden-per-point",
+    "activation": "relu",
+    "aggregation": "mean-over-four-game-neighbors",
+    "relation_types": [
+      "SAME_FACE",
+      "CROSS_FACE_SEAM"
+    ],
+    "relation_specific_transforms": true,
+    "residual_style": "graph-message-output-projection-add",
+    "operation_order": "block->global(if 3,6,9)->corner(if <10)"
+  },
+  "corner_context": {
+    "enabled": true,
+    "after_blocks": [1,2,3,4,5,6,7,8,9],
+    "physical_corner_count": 8,
+    "incident_points_per_corner": 3,
+    "pooling": "arithmetic-mean-unordered-three-points",
+    "transform": "layernorm-linear-relu-linear",
+    "injection": "shared-residual-add-identical-context-to-three-points"
+  },
+  "global_context": {
+    "enabled": true,
+    "after_blocks": [3,6,9],
+    "pooling": "arithmetic-mean-all-points",
+    "transform": "layernorm-linear-relu-linear",
+    "injection": "broadcast-residual-add"
+  },
+  "final": {
+    "normalization": "layernorm-hidden-per-point",
+    "activation": "relu"
+  },
+  "heads": {
+    "policy": {
+      "point": "shared-linear:112->1",
+      "pass": "mean-final-nodes->linear:112->1",
+      "output": "logits",
+      "shape": "[B,P+1]",
+      "pass_index": "P"
+    },
+    "wdl": {
+      "pooling": "arithmetic-mean-final-nodes",
+      "transform": "linear:112->112,relu,linear:112->3",
+      "classes": ["WIN","DRAW","LOSS"],
+      "perspective": "current-side-to-move",
+      "output": "logits",
+      "shape": "[B,3]"
+    },
+    "ownership": {
+      "point": "shared-linear:112->3",
+      "classes": ["OWN","OPPONENT","NEUTRAL"],
+      "perspective": "current-side-to-move",
+      "output": "logits",
+      "shape": "[B,P,3]"
+    },
+    "score": {
+      "pooling": "arithmetic-mean-final-nodes",
+      "transform": "linear:112->112,relu,linear:112->1",
+      "output": "raw-scalar",
+      "shape": "[B,1]"
+    }
+  },
+  "architecture_fingerprint": "sha256:17e5fada8c69bcf9da0c6c8852af13da7af16c7ce73df7ed0153d4ccc9df77e4"
+}
