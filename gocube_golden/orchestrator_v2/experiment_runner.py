@@ -38,6 +38,7 @@ from .experiment_plan import (
 from .generation_runner import OutputLineage
 from .production_generation import ProductionTrainOne
 from .torus9_production import Torus9ProductionLineage
+from .version import ORCHESTRATOR_VERSION
 
 from tools.arena_engine import ArenaExecutionConfig
 
@@ -699,6 +700,11 @@ class ExperimentRunnerV2:
             state = raw_state
             if state.get("schema") != EXPERIMENT_STATE_SCHEMA:
                 raise ExperimentRunnerError("unsupported experiment state schema")
+            state_version = state.get("orchestrator_version")
+            if state_version not in (None, ORCHESTRATOR_VERSION):
+                raise ExperimentRunnerError(
+                    f"experiment state uses unsupported orchestrator version: {state_version!r}"
+                )
             if state.get("experiment_id") != self.config.experiment_id:
                 raise ExperimentRunnerError("experiment state id mismatch")
             if state.get("topology") != self.config.topology:
@@ -720,12 +726,17 @@ class ExperimentRunnerV2:
             if not isinstance(raw_stage2, Mapping) or raw_stage2.get("enabled") != self.config.stage2_enabled:
                 raise ExperimentRunnerError("experiment Stage 2 enablement changed during resume")
             self._validate_state_shape(state)
+            if state_version is None:
+                state["orchestrator_version"] = ORCHESTRATOR_VERSION
+                state["updated_at"] = self._now()
+                _write_json(self.state_path, state)
             return state
 
         now = self._now()
         state: dict[str, Any] = {
             "schema": EXPERIMENT_STATE_SCHEMA,
             "version": 3,
+            "orchestrator_version": ORCHESTRATOR_VERSION,
             "experiment_id": self.config.experiment_id,
             "topology": self.config.topology,
             "config_fingerprint": self.config.fingerprint,
