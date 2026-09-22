@@ -26,6 +26,14 @@ def test_legacy_training_orchestrator_cli_is_disabled() -> None:
     assert "orchestrator_v2.production_entrypoint" in result.stderr
 
 
+def test_legacy_training_orchestrator_core_cli_is_disabled() -> None:
+    result = _run_legacy_entrypoint("tools/training_orchestrator_core.py", "run")
+
+    assert result.returncode != 0
+    assert "Legacy Orchestrator V1" in result.stderr
+    assert "orchestrator_v2.production_entrypoint" in result.stderr
+
+
 def test_legacy_torus9_driver_cli_is_disabled() -> None:
     result = _run_legacy_entrypoint(
         "tools/torus9_run_driver.py", "generation", "--generation", "1"
