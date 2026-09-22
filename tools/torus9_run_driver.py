@@ -1529,9 +1529,12 @@ def _v2_effective_config(value: object) -> Mapping[str, object]:
     return config
 
 
-def _v2_generation_config(value: object) -> dict[str, object]:
+def _v2_generation_config(
+    effective_config: object,
+    execution_overrides: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     """Translate the resolved V2 config to the mature driver vocabulary."""
-    effective = _v2_effective_config(value)
+    effective = _v2_effective_config(effective_config)
     self_play = _mapping(effective.get("self_play"), "effective_config.self_play")
     training = _mapping(effective.get("training"), "effective_config.training")
     replay = _mapping(effective.get("replay"), "effective_config.replay")
@@ -1548,7 +1551,7 @@ def _v2_generation_config(value: object) -> dict[str, object]:
     active_games = int(
         execution.get("active_games_per_worker", max(1, (active_contexts + workers - 1) // workers))
     )
-    raw_override = getattr(value, "execution_overrides", None)
+    raw_override = execution_overrides
     if raw_override is not None:
         if not isinstance(raw_override, Mapping):
             raise ValueError("V2 execution_overrides must be an object")
@@ -2259,7 +2262,10 @@ def run_generation(
         output = getattr(generation_input, "output_lineage")
         root = Path(getattr(output, "root")).resolve()
         lineage_id = str(getattr(output, "lineage_id"))
-        config = _v2_generation_config(getattr(generation_input, "effective_config"))
+        config = _v2_generation_config(
+            getattr(generation_input, "effective_config"),
+            getattr(generation_input, "execution_overrides", None),
+        )
         optimizer_steps = _positive_int(
             config["optimizer_steps_per_iteration"],
             "effective_config.training.optimizer_steps",
@@ -2449,6 +2455,14 @@ def run_generation(
             "games_per_hour": games * 3600.0 / selfplay_wall if selfplay_wall else 0.0,
             "moves_per_sec": moves / selfplay_wall if selfplay_wall else 0.0,
             "selfplay_time_sec": selfplay_wall,
+            # These are the values passed to the real self-play boundary.
+            # Keep them beside the sweep observation so reporting can verify
+            # the execution mode instead of trusting only the requested label.
+            "execution": {
+                "workers": int(config["workers"]),
+                "active_games_per_worker": int(config["active_games_per_worker"]),
+                "total_active_contexts": int(config["total_active_contexts"]),
+            },
             "inference": {
                 "mean_batch_rows": float(inference.get("mean_batch_rows", 0.0)),
                 "p95_batch_rows": float(inference.get("p95_batch_rows", 0.0)),

@@ -1077,6 +1077,33 @@ class ContinuousTrainingRunnerV2:
         )
         technical = int(metrics.get("technical_games", 0) or 0)
         invalid = int(metrics.get("invalid_games", 0) or 0)
+        reasons: list[str] = []
+        actual_execution: dict[str, object] | None = None
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is not None:
+            expected_execution = {
+                "workers": sweep.workers,
+                "active_games_per_worker": mode.active_games_per_worker,
+                "total_active_contexts": mode.total_active_contexts,
+            }
+            raw_execution = metrics.get("execution")
+            if isinstance(raw_execution, Mapping):
+                actual_execution = {
+                    key: raw_execution.get(key)
+                    for key in expected_execution
+                }
+                if any(
+                    type(actual_execution[key]) is not int or actual_execution[key] <= 0
+                    for key in expected_execution
+                ):
+                    reasons.append("self-play execution values are malformed")
+                elif actual_execution != expected_execution:
+                    reasons.append(
+                        "self-play execution values do not match the selected mode: "
+                        f"actual={actual_execution!r}, expected={expected_execution!r}"
+                    )
+            else:
+                reasons.append("self-play execution values are missing")
         stall_value = None
         for source in (metrics, timing, inference):
             for key in ("stall_count", "stalls", "execution_stalls"):
@@ -1085,7 +1112,6 @@ class ContinuousTrainingRunnerV2:
                     break
             if stall_value is not None:
                 break
-        reasons: list[str] = []
         if games != expected_games:
             reasons.append(f"games={games}, expected={expected_games}")
         if wall <= 0.0:
@@ -1102,6 +1128,7 @@ class ContinuousTrainingRunnerV2:
             "generation": generation,
             "role": role,
             "mode": mode.to_dict(),
+            "actual_execution": actual_execution,
             "workers": self.config.self_play_concurrency_sweep.workers  # type: ignore[union-attr]
             if self.config.self_play_concurrency_sweep is not None
             else None,

@@ -7,6 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from gocube_golden.artifact_graph import (
+    ArtifactRef,
+    CheckpointRef,
+    EffectiveConfig,
+    EffectiveConfigRef,
+)
+from gocube_golden.artifact_resolver import ResolvedArtifact, ResolvedEffectiveConfig
+from gocube_golden.orchestrator_v2 import OutputLineage, ResolvedGenerationInput
 from gocube_golden.torus9_contract import TORUS9_OPTIMIZER_STEPS_PER_ITERATION
 from tools import torus9_run_driver as base
 from tools import torus9_staged_sims_driver as staged
@@ -91,15 +99,13 @@ def test_v2_generation_config_applies_execution_only_concurrency_override() -> N
         },
         "extensions": {},
     }
-    resolved = SimpleNamespace(
-        config=effective,
-        execution_overrides={
+    config = base._v2_generation_config(
+        effective,
+        {
             "active_games_per_worker": 6,
             "total_active_contexts": 96,
         },
     )
-
-    config = base._v2_generation_config(resolved)
 
     assert config["workers"] == 16
     assert config["active_games_per_worker"] == 6
@@ -108,6 +114,151 @@ def test_v2_generation_config_applies_execution_only_concurrency_override() -> N
     assert config["mcts_simulations"] == 200
     assert config["replay_generations"] == 2
     assert config["replay_cap"] is None
+
+
+def _resolved_v2_generation_input(
+    tmp_path: Path,
+    execution_overrides: dict[str, object] | None,
+) -> ResolvedGenerationInput:
+    effective = EffectiveConfig(
+        topology="torus9",
+        compatibility={"profile_id": "test"},
+        self_play={"games_per_iteration": 384, "mcts_simulations": 200},
+        training={
+            "optimizer_steps_per_iteration": 160,
+            "learning_rate": 0.0001,
+            "optimizer": "Adam",
+            "batch_size": 64,
+        },
+        replay={"generations": 2, "cap": None},
+        execution={
+            "device": "cpu",
+            "workers": 16,
+            "active_games_per_worker": 4,
+            "active_contexts": 64,
+            "inference_batch_cap": 64,
+            "inference_batch_wait_ms": 1,
+            "coalescing": True,
+            "model_init_seed": 1,
+            "selfplay_master_seed": 2,
+            "training_master_seed": 3,
+        },
+        extensions={},
+    )
+    effective_path = tmp_path / "metadata" / "effective.json"
+    effective_artifact = ResolvedArtifact(
+        ArtifactRef("metadata/effective.json", "sha256:" + "a" * 64),
+        effective_path,
+        tmp_path,
+        "torus9",
+        "child",
+        "ACTIVE",
+        {"immutable_verified": True},
+    )
+    resolved_effective = ResolvedEffectiveConfig(
+        EffectiveConfigRef(effective_artifact.ref, effective.fingerprint),
+        effective_artifact,
+        effective,
+    )
+    parent_path = tmp_path / "parent.pt"
+    parent_path.write_bytes(b"parent")
+    parent_ref = CheckpointRef(
+        "torus9",
+        "parent",
+        "M0",
+        0,
+        "checkpoints/M0.pt",
+        "sha256:" + "b" * 64,
+    )
+    return ResolvedGenerationInput(
+        parent_checkpoint=SimpleNamespace(path=parent_path, ref=parent_ref, generation=0),  # type: ignore[arg-type]
+        generation=1,
+        effective_config=resolved_effective,
+        output_lineage=OutputLineage("torus9", "child", tmp_path / "lineage"),
+        execution_overrides=execution_overrides,
+    )
+
+
+@pytest.mark.parametrize(
+    ("execution_overrides", "expected_active_games", "expected_contexts"),
+    (
+        (None, 4, 64),
+        ({"active_games_per_worker": 6, "total_active_contexts": 96}, 6, 96),
+    ),
+)
+def test_v2_production_path_forwards_actual_selfplay_execution_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    execution_overrides: dict[str, object] | None,
+    expected_active_games: int,
+    expected_contexts: int,
+) -> None:
+    """Exercise run_generation_v2 through the real call into self-play."""
+    generation_input = _resolved_v2_generation_input(tmp_path, execution_overrides)
+    effective_fingerprint = generation_input.effective_config.fingerprint
+    captured: dict[str, object] = {}
+
+    class ReachedSelfPlayBoundary(RuntimeError):
+        pass
+
+    def fake_prepare_state_v2(**kwargs: object):
+        captured["config"] = dict(kwargs["config"])  # type: ignore[arg-type]
+        return (
+            SimpleNamespace(),
+            SimpleNamespace(model=object(), completed_games=0),
+            generation_input.parent_checkpoint.path,
+        )
+
+    def fake_selfplay(_model: object, **kwargs: object):
+        captured["selfplay"] = kwargs
+        raise ReachedSelfPlayBoundary
+
+    monkeypatch.setattr(base, "_prepare_state_v2", fake_prepare_state_v2)
+    monkeypatch.setattr(base, "_resolve_v2_replay_sources", lambda *_args: ((), (), (), None))
+    monkeypatch.setattr(base, "_validate_code_pin", lambda _root: object())
+    monkeypatch.setattr(base, "run_torus9_selfplay_games", fake_selfplay)
+
+    with pytest.raises(ReachedSelfPlayBoundary):
+        base.run_generation_v2(generation_input)
+
+    selfplay = captured["selfplay"]
+    assert isinstance(selfplay, dict)
+    assert selfplay["workers"] == 16
+    assert selfplay["active_games_per_worker"] == expected_active_games
+    assert selfplay["total_active_contexts"] == expected_contexts
+    assert selfplay["execution_override_reason"] == (
+        "per-generation self-play concurrency sweep"
+        if execution_overrides is not None
+        else "immutable production run-spec"
+    )
+    assert generation_input.effective_config.fingerprint == effective_fingerprint
+    assert generation_input.effective_config.config.execution["active_games_per_worker"] == 4
+    assert generation_input.effective_config.config.execution["active_contexts"] == 64
+
+    config = captured["config"]
+    assert isinstance(config, dict)
+    assert {
+        key: config[key]
+        for key in (
+            "games",
+            "mcts_simulations",
+            "learning_rate",
+            "optimizer",
+            "optimizer_steps_per_iteration",
+            "batch_size",
+            "replay_generations",
+            "replay_cap",
+        )
+    } == {
+        "games": 384,
+        "mcts_simulations": 200,
+        "learning_rate": 0.0001,
+        "optimizer": "Adam",
+        "optimizer_steps_per_iteration": 160,
+        "batch_size": 64,
+        "replay_generations": 2,
+        "replay_cap": None,
+    }
 
 
 def test_resume_state_uses_resolved_lineage_without_environment(
