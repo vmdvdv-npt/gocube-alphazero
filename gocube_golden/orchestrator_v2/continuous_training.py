@@ -649,6 +649,11 @@ class ContinuousTrainingRunnerV2:
                     config=resolved_config,
                     output_lineage=output_lineage,
                     execution_mode=execution_mode,
+                    acknowledge_stopped_execution=self._is_baseline_recovery(
+                        state,
+                        generation=next_generation,
+                        execution_mode=execution_mode,
+                    ),
                 )
             except BaseException as exc:
                 if self._handle_sweep_failure(
@@ -931,6 +936,7 @@ class ContinuousTrainingRunnerV2:
         config: ResolvedEffectiveConfig,
         output_lineage: OutputLineage,
         execution_mode: SelfPlayConcurrencyMode | None,
+        acknowledge_stopped_execution: bool = False,
     ) -> ResolvedCheckpointNode:
         if execution_mode is not None and isinstance(self.train_one, ProductionTrainOne):
             return self.train_one(
@@ -941,12 +947,29 @@ class ContinuousTrainingRunnerV2:
                     "active_games_per_worker": execution_mode.active_games_per_worker,
                     "total_active_contexts": execution_mode.total_active_contexts,
                 },
+                acknowledge_stopped_execution=acknowledge_stopped_execution,
             )
         return self.train_one(
             parent=parent,
             config=config,
             output_lineage=output_lineage,
         )
+
+    def _is_baseline_recovery(
+        self,
+        state: Mapping[str, object],
+        *,
+        generation: int,
+        execution_mode: SelfPlayConcurrencyMode | None,
+    ) -> bool:
+        """Return true only for the durable same-generation sweep fallback."""
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is None or execution_mode is None:
+            return False
+        if execution_mode.label != sweep.baseline.label:
+            return False
+        raw = self._sweep_state(state)
+        return raw is not None and raw.get("retry_baseline_generation") == generation
 
     def _handle_sweep_failure(
         self,

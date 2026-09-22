@@ -446,6 +446,102 @@ class SupervisorV2:
 
         raise AssertionError("bounded supervisor loop did not return")
 
+    def acknowledge_stopped_execution(self) -> ProcessResult:
+        """Explicitly retire one matching durable stop before a new attempt.
+
+        This is intentionally opt-in.  A missing stop is a successful no-op:
+        the caller may be recovering after a restart and an already-started
+        child must remain available for :meth:`run_once` to reattach.  When a
+        stop is present, every supervisor identity is revalidated before any
+        cleanup is performed, and a live recorded process group is terminated
+        through the normal ownership checks.
+        """
+        if not self.stop_path.exists() and not self.stop_path.is_symlink():
+            return ProcessResult(
+                status=SupervisorStatus.SUCCESS,
+                returncode=0,
+                attempts=0,
+                reason="no durable supervisor stop is present",
+            )
+
+        stop = self._read_stop()
+        if stop is None:
+            # The existence check above can race with an external cleanup.  A
+            # vanished stop has the same idempotent semantics as no stop.
+            return ProcessResult(
+                status=SupervisorStatus.SUCCESS,
+                returncode=0,
+                attempts=0,
+                reason="no durable supervisor stop is present",
+            )
+        stop_attempt = int(stop["attempt"])
+        stop_owner = self._stop_process_identity(stop)
+        intent = self._read_intent()
+        active = self._read_active_child()
+
+        if intent is not None and int(intent["attempt"]) != stop_attempt:
+            raise SupervisorIntegrityError(
+                "execution intent does not match the stopped execution"
+            )
+        if active is not None:
+            if active.attempt != stop_attempt:
+                raise SupervisorIntegrityError(
+                    "active-child identity does not match the stopped execution"
+                )
+            if stop_owner is not None and stop_owner != (active.pid, active.process_group):
+                raise SupervisorIntegrityError(
+                    "supervisor stop process ownership does not match active-child"
+                )
+
+        # Revalidate the stop before touching any identity record.  In
+        # particular, do not turn a concurrent acknowledgement/restart into a
+        # cleanup of the new execution intent.
+        if self._read_stop() != stop:
+            raise SupervisorIntegrityError("supervisor stop changed during acknowledgement")
+
+        if active is not None:
+            if process_group_exists(active.process_group):
+                if not process_group_owned_by(active.pid, active.process_group):
+                    raise SupervisorIntegrityError(
+                        "active child process group ownership does not match its durable identity"
+                    )
+                self._terminate_group(
+                    active,
+                    reason="explicitly acknowledging the stopped execution",
+                )
+        elif stop_owner is not None:
+            owner_pid, process_group = stop_owner
+            if process_group_exists(process_group):
+                if not process_group_owned_by(owner_pid, process_group):
+                    raise SupervisorIntegrityError(
+                        "stopped execution process group ownership does not match its durable identity"
+                    )
+                owner = ActiveChild(
+                    execution_id=self.execution_id,
+                    attempt=stop_attempt,
+                    pid=owner_pid,
+                    process_group=process_group,
+                    started_at=0.0,
+                    liveness_path=self.liveness_path,
+                    progress_path=self.progress_path,
+                )
+                self._terminate_group(
+                    owner,
+                    reason="explicitly acknowledging the stopped execution",
+                )
+
+        # These helpers re-read and compare the records, so cleanup cannot
+        # blindly unlink a foreign or concurrently replaced identity.
+        self._clear_active_child_if_unchanged(active)
+        self._clear_intent_if_unchanged(intent)
+        self._clear_stop_if_unchanged(stop)
+        return ProcessResult(
+            status=SupervisorStatus.SUCCESS,
+            returncode=0,
+            attempts=stop_attempt,
+            reason="matching durable supervisor stop acknowledged",
+        )
+
     def reconcile_completed_execution(self) -> ProcessResult:
         """Safely finish an execution completed outside the supervisor.
 
@@ -537,7 +633,9 @@ class SupervisorV2:
             raise SupervisorIntegrityError("active-child record is unreadable") from exc
 
     def _read_stop(self) -> dict[str, object] | None:
-        if not self.stop_path.is_file():
+        if not self.stop_path.exists():
+            if self.stop_path.is_symlink():
+                raise SupervisorIntegrityError("supervisor stop is malformed")
             return None
         try:
             payload = read_json(self.stop_path)
@@ -552,6 +650,21 @@ class SupervisorV2:
             return payload
         except (OSError, KeyError, TypeError, ValueError, OverflowError) as exc:
             raise SupervisorIntegrityError("supervisor stop is malformed") from exc
+
+    @staticmethod
+    def _stop_process_identity(stop: Mapping[str, object]) -> tuple[int, int] | None:
+        raw_pid = stop.get("pid")
+        raw_process_group = stop.get("process_group")
+        if raw_pid is None and raw_process_group is None:
+            return None
+        if (
+            type(raw_pid) is not int
+            or type(raw_process_group) is not int
+            or raw_pid <= 1
+            or raw_process_group <= 1
+        ):
+            raise SupervisorIntegrityError("supervisor stop process identity is unsafe")
+        return raw_pid, raw_process_group
 
     def _write_intent(self, attempt: int) -> None:
         atomic_write_json(
