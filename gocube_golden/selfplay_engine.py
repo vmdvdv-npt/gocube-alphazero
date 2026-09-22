@@ -12,6 +12,7 @@ the exported class strengthens that helper with bounded SIGKILL escalation.
 
 from __future__ import annotations
 
+import inspect
 from selfplay_engine import (
     GameFinished,
     InferenceNeed,
@@ -74,21 +75,24 @@ def run_cooperative_selfplay(
         raise TypeError("adapter does not implement the cooperative self-play contract")
     raw_telemetry: MutableMapping[str, object] = telemetry if telemetry is not None else {}
     engine = SelfPlayEngine(engine_config)
-    records = engine.run(
-        game_ids,
-        worker_play=None,
-        worker_context=adapter.worker_context,
-        infer_batch=None,
-        record_metrics=adapter.record_metrics,
-        telemetry=raw_telemetry,
-        progress_callback=progress_callback,
-        shared_memory=adapter.shared_memory,
-        infer_shared_batch=adapter.infer_shared_batch,
-        worker_game_factory=adapter.worker_game_factory,
-        worker_diagnostics_factory=worker_diagnostics_factory,
-        active_games_per_worker=active_games_per_worker,
-        total_active_contexts=total_active_contexts,
-    )
+    run_kwargs: dict[str, object] = {
+        "worker_play": None,
+        "worker_context": adapter.worker_context,
+        "infer_batch": None,
+        "record_metrics": adapter.record_metrics,
+        "telemetry": raw_telemetry,
+        "progress_callback": progress_callback,
+        "shared_memory": adapter.shared_memory,
+        "infer_shared_batch": adapter.infer_shared_batch,
+        "worker_game_factory": adapter.worker_game_factory,
+        "active_games_per_worker": active_games_per_worker,
+        "total_active_contexts": total_active_contexts,
+    }
+    if worker_diagnostics_factory is not None:
+        if "worker_diagnostics_factory" not in inspect.signature(engine.run).parameters:
+            raise TypeError("SelfPlayEngine.run does not support worker diagnostics")
+        run_kwargs["worker_diagnostics_factory"] = worker_diagnostics_factory
+    records = engine.run(game_ids, **run_kwargs)
     return CooperativeSelfPlayResult(tuple(records), dict(raw_telemetry))
 
 
