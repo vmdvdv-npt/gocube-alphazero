@@ -15,6 +15,7 @@ from gocube_golden.orchestrator_v2 import (
     ACTIVE_CHILD_SCHEMA,
     ActiveChild,
     EXECUTION_INTENT_SCHEMA,
+    STOP_SCHEMA,
     SupervisorAction,
     SupervisorIntegrityError,
     SupervisorPolicy,
@@ -229,6 +230,171 @@ def test_retry_repeats_exact_same_command(tmp_path: Path) -> None:
 
     assert result.success
     assert seen == [tuple(command), tuple(command)]
+
+
+def test_acknowledge_matching_stopped_execution_allows_new_attempt(tmp_path: Path) -> None:
+    failed = _supervisor(
+        tmp_path,
+        execution_id="retryable-execution",
+        command=[sys.executable, "-c", "raise SystemExit(19)"],
+        policy=SupervisorPolicy(max_retries=0, poll_interval_seconds=0.005),
+    )
+
+    result = failed.run_once()
+    assert not result.success
+    assert failed.stop_path.is_file()
+    assert failed.execution_intent_path.is_file()
+
+    acknowledged = failed.acknowledge_stopped_execution()
+
+    assert acknowledged.success
+    assert not failed.stop_path.exists()
+    assert not failed.execution_intent_path.exists()
+    retry = _supervisor(
+        tmp_path,
+        execution_id="retryable-execution",
+        command=[sys.executable, "-c", "pass"],
+        policy=failed.policy,
+    )
+    assert retry.plan().action is SupervisorAction.START
+    assert retry.run_once().success
+
+
+def test_acknowledge_terminates_owned_live_group_before_cleanup(tmp_path: Path) -> None:
+    supervisor = _supervisor(
+        tmp_path,
+        execution_id="live-stopped-execution",
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        policy=SupervisorPolicy(
+            max_retries=0,
+            poll_interval_seconds=0.005,
+            termination_grace_seconds=0.05,
+        ),
+    )
+    process, active = supervisor._start(1)
+    atomic_write_json(
+        supervisor.stop_path,
+        {
+            "schema": STOP_SCHEMA,
+            "execution_id": "live-stopped-execution",
+            "attempt": 1,
+            "pid": active.pid,
+            "process_group": active.process_group,
+        },
+    )
+
+    try:
+        acknowledged = supervisor.acknowledge_stopped_execution()
+        assert acknowledged.success
+        assert not process_group_exists(active.process_group)
+        assert not supervisor.active_child_path.exists()
+        assert not supervisor.execution_intent_path.exists()
+        assert not supervisor.stop_path.exists()
+    finally:
+        if process_group_exists(active.process_group):
+            os.killpg(active.process_group, signal.SIGKILL)
+        try:
+            process.wait(timeout=5)
+        except ChildProcessError:
+            pass
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "schema": STOP_SCHEMA,
+            "execution_id": "foreign-execution",
+            "attempt": 1,
+        },
+        {
+            "schema": "wrong-supervisor-stop-schema",
+            "execution_id": "retryable-execution",
+            "attempt": 1,
+        },
+    ],
+)
+def test_acknowledge_does_not_remove_foreign_or_malformed_stop(
+    tmp_path: Path, payload: dict[str, object]
+) -> None:
+    supervisor = _supervisor(tmp_path, execution_id="retryable-execution")
+    atomic_write_json(supervisor.stop_path, payload)
+
+    with pytest.raises(SupervisorIntegrityError, match="supervisor stop is malformed"):
+        supervisor.acknowledge_stopped_execution()
+
+    assert supervisor.stop_path.read_text(encoding="utf-8") == json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def test_acknowledge_without_stop_preserves_active_child_for_reattach(tmp_path: Path) -> None:
+    first = _supervisor(
+        tmp_path,
+        execution_id="restartable-execution",
+        command=[sys.executable, "-c", "import time; time.sleep(0.25)"],
+        policy=SupervisorPolicy(
+            max_retries=0,
+            poll_interval_seconds=0.005,
+            termination_grace_seconds=0.05,
+        ),
+    )
+    process, active = first._start(1)
+    second = _supervisor(
+        tmp_path,
+        execution_id="restartable-execution",
+        command=[sys.executable, "-c", "pass"],
+        policy=first.policy,
+    )
+
+    try:
+        acknowledged = second.acknowledge_stopped_execution()
+        assert acknowledged.success
+        assert second.active_child_path.is_file()
+        assert second.execution_intent_path.is_file()
+        result = second.run_once()
+        assert result.success
+        assert result.reattached
+    finally:
+        if process_group_exists(active.process_group):
+            os.killpg(active.process_group, signal.SIGKILL)
+        try:
+            process.wait(timeout=5)
+        except ChildProcessError:
+            pass
+
+
+def test_acknowledge_fails_closed_for_live_foreign_execution(tmp_path: Path) -> None:
+    foreign = _supervisor(
+        tmp_path,
+        execution_id="foreign-execution",
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        policy=SupervisorPolicy(max_retries=0, termination_grace_seconds=0.05),
+    )
+    process, active = foreign._start(1)
+    expected = _supervisor(tmp_path, execution_id="expected-execution")
+    atomic_write_json(
+        expected.stop_path,
+        {
+            "schema": STOP_SCHEMA,
+            "execution_id": "expected-execution",
+            "attempt": 1,
+            "pid": active.pid,
+            "process_group": active.process_group,
+        },
+    )
+
+    try:
+        with pytest.raises(SupervisorIntegrityError, match="execution intent is malformed"):
+            expected.acknowledge_stopped_execution()
+        assert expected.stop_path.is_file()
+        assert foreign.active_child_path.is_file()
+        assert process_group_exists(active.process_group)
+    finally:
+        if process_group_exists(active.process_group):
+            os.killpg(active.process_group, signal.SIGKILL)
+        try:
+            process.wait(timeout=5)
+        except ChildProcessError:
+            pass
 
 
 def test_reattach_works_with_only_opaque_execution_identity(tmp_path: Path) -> None:

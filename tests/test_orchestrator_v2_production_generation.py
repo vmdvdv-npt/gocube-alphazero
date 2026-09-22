@@ -166,6 +166,57 @@ def test_train_one_runs_one_generation_and_returns_immediate_child(tmp_path: Pat
     assert validation_call["reuse_committed_rolling_replay_identity"] is True
 
 
+def test_train_one_acknowledges_stopped_execution_before_baseline_start(
+    tmp_path: Path, monkeypatch
+):
+    parent, child, config, _parent_ref, child_ref = _refs(tmp_path)
+    output = OutputLineage("torus9", "child", tmp_path / "lineage")
+    resolver = SimpleNamespace(runs_root=tmp_path / "runs")
+    events: list[str] = []
+
+    class FakeSupervisor:
+        def __init__(self, _root, **kwargs):
+            self.command = kwargs["command"]
+
+        def acknowledge_stopped_execution(self):
+            events.append("acknowledge")
+            return SimpleNamespace(success=True)
+
+        def run_once(self):
+            events.append("run")
+            result_path = Path(self.command[-1])
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.write_text(
+                json.dumps(
+                    {
+                        "schema": production_generation.TRAIN_ONE_RESULT_SCHEMA,
+                        "generation": 8,
+                        "checkpoint": child_ref.to_dict(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return SimpleNamespace(success=True, reason=None)
+
+    resolver.checkpoint = lambda value: child if value == child_ref else None
+    monkeypatch.setattr(production_generation, "SupervisorV2", FakeSupervisor)
+    monkeypatch.setattr(
+        production_generation,
+        "validate_generation_commit",
+        lambda **_kwargs: None,
+    )
+
+    result = ProductionTrainOne(resolver=resolver, repo_root=tmp_path)(
+        parent=parent,
+        config=config,
+        output_lineage=output,
+        acknowledge_stopped_execution=True,
+    )
+
+    assert result is child
+    assert events == ["acknowledge", "run"]
+
+
 def test_train_one_reuses_committed_child_without_supervisor(tmp_path: Path, monkeypatch):
     parent, child, config, _parent_ref, child_ref = _refs(tmp_path)
     output = OutputLineage("torus9", "child", tmp_path / "lineage")
@@ -197,6 +248,7 @@ def test_train_one_reuses_committed_child_without_supervisor(tmp_path: Path, mon
         parent=parent,
         config=config,
         output_lineage=output,
+        acknowledge_stopped_execution=True,
     ) is child
     assert ReconcileOnly.reconciled[0]["execution_id"] == "child:generation:8"
 

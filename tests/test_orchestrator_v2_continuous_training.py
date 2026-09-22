@@ -4,6 +4,7 @@ import inspect
 import json
 import logging
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 from gocube_golden.artifact_graph import (
@@ -14,10 +15,17 @@ from gocube_golden.artifact_graph import (
     EffectiveConfigRef,
 )
 from gocube_golden.artifact_resolver import ResolvedArtifact, ResolvedCheckpointNode, ResolvedEffectiveConfig
+from gocube_golden.process_supervision import atomic_write_json
 from gocube_golden.orchestrator_v2 import (
     ArenaRunResult,
     ArenaRunner,
     ContinuousTrainingRunnerV2,
+    EXECUTION_INTENT_SCHEMA,
+    ProductionTrainOne,
+    STOP_SCHEMA,
+    SupervisorAction,
+    SupervisorPolicy,
+    SupervisorV2,
 )
 import gocube_golden.orchestrator_v2.continuous_training as continuous_training
 from gocube_golden.provenance import sha256_fingerprint
@@ -218,6 +226,7 @@ def _runner(
     cadence: int = 5,
     effective_config: EffectiveConfig | None = None,
     notifier: object | None = None,
+    self_play_concurrency_sweep=None,
 ):
     config = effective_config or _config()
     parent_root = tmp_path / "parent"
@@ -239,6 +248,7 @@ def _runner(
         arena_runner=arena,  # type: ignore[arg-type]
         reporter=lambda *_args: None,
         notifier=notifier,
+        self_play_concurrency_sweep=self_play_concurrency_sweep,
     )
     train.stop_runner = runner
     return runner, train, arena, resolver, parent
@@ -514,6 +524,127 @@ def test_sweep_reporting_verifies_actual_execution_values(tmp_path: Path) -> Non
     assert mismatched is not None
     assert mismatched["stable"] is False
     assert "do not match the selected mode" in str(mismatched["stability_reasons"])
+
+
+def test_failed_sweep_mode_retries_same_generation_at_baseline_after_durable_stop(
+    tmp_path: Path,
+):
+    base = _config()
+    config = EffectiveConfig(
+        topology=base.topology,
+        compatibility=base.compatibility,
+        self_play=base.self_play,
+        training=base.training,
+        replay=base.replay,
+        execution={"workers": 16, "active_contexts": 64, "active_games_per_worker": 4},
+        arena=base.arena,
+    )
+    sweep = continuous_training.SelfPlayConcurrencySweep(
+        start_after_generation=20,
+        workers=16,
+        baseline=continuous_training.SelfPlayConcurrencyMode("baseline", 4, 64),
+        modes=(continuous_training.SelfPlayConcurrencyMode("six-by-96", 6, 96),),
+    )
+    runner, _unused_train, _arena, resolver, parent = _runner(
+        tmp_path,
+        generations=1,
+        effective_config=config,
+        self_play_concurrency_sweep=sweep,
+    )
+
+    class RecordingProductionTrainOne(ProductionTrainOne):
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+            self.supervisor_actions: list[SupervisorAction] = []
+            self.failed = False
+
+        def __call__(
+            self,
+            *,
+            parent,
+            config,
+            output_lineage,
+            execution_overrides=None,
+            acknowledge_stopped_execution=False,
+        ):
+            generation = parent.generation + 1
+            self.calls.append(
+                {
+                    "generation": generation,
+                    "parent": parent.ref,
+                    "overrides": dict(execution_overrides or {}),
+                    "acknowledge": acknowledge_stopped_execution,
+                }
+            )
+            execution_id = f"{output_lineage.lineage_id}:generation:{generation}"
+            runtime = output_lineage.root / "runtime"
+            if not self.failed:
+                self.failed = True
+                atomic_write_json(
+                    runtime / "execution-intent.json",
+                    {
+                        "schema": EXECUTION_INTENT_SCHEMA,
+                        "execution_id": execution_id,
+                        "attempt": 1,
+                    },
+                )
+                atomic_write_json(
+                    runtime / "supervisor-stop.json",
+                    {
+                        "schema": STOP_SCHEMA,
+                        "execution_id": execution_id,
+                        "attempt": 1,
+                        "reason": "test mode technical failure",
+                    },
+                )
+                raise RuntimeError("production generation stopped after supervisor failure")
+
+            supervisor = SupervisorV2(
+                output_lineage.root,
+                execution_id=execution_id,
+                liveness_path=runtime / "heartbeats" / f"generation-{generation:04d}.json",
+                progress_path=runtime / "heartbeats" / f"generation-{generation:04d}.json",
+                command=[sys.executable, "-c", "pass"],
+                policy=SupervisorPolicy(max_retries=0, poll_interval_seconds=0.001),
+            )
+            assert acknowledge_stopped_execution is True
+            assert supervisor.acknowledge_stopped_execution().success
+            assert not supervisor.stop_path.exists()
+            plan = supervisor.plan()
+            self.supervisor_actions.append(plan.action)
+            assert plan.action is SupervisorAction.START
+            assert supervisor.run_once().success
+            child = _node(
+                resolver.runs_root / "torus9" / "active",
+                config.config if isinstance(config, ResolvedEffectiveConfig) else config,
+                output_lineage.lineage_id,
+                generation,
+                parent.ref,
+            )
+            resolver.add(child)
+            return child
+
+    train = RecordingProductionTrainOne()
+    runner.train_one = train
+
+    result = runner.run()
+
+    assert result.state == "COMPLETED"
+    assert [call["generation"] for call in train.calls] == [21, 21]
+    assert [call["parent"] for call in train.calls] == [parent.ref, parent.ref]
+    assert train.calls[0]["overrides"] == {
+        "active_games_per_worker": 6,
+        "total_active_contexts": 96,
+    }
+    assert train.calls[0]["acknowledge"] is False
+    assert train.calls[1]["overrides"] == {
+        "active_games_per_worker": 4,
+        "total_active_contexts": 64,
+    }
+    assert train.calls[1]["acknowledge"] is True
+    assert train.supervisor_actions == [SupervisorAction.START]
+    assert result.final_checkpoint.generation == 21
+    assert json.loads(runner.state_path.read_text())["performance_sweep"]["retry_baseline_generation"] is None
 
 
 def test_runner_is_a_coordinator_and_does_not_import_training_engine(tmp_path: Path) -> None:

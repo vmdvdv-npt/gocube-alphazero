@@ -169,9 +169,12 @@ class ProductionTrainOne:
         config: ResolvedEffectiveConfig,
         output_lineage: OutputLineage,
         execution_overrides: Mapping[str, object] | None = None,
+        acknowledge_stopped_execution: bool = False,
     ) -> ResolvedCheckpointNode:
         if output_lineage.topology != "torus9":
             raise ValueError("production train_one currently supports topology=torus9 only")
+        if type(acknowledge_stopped_execution) is not bool:
+            raise TypeError("acknowledge_stopped_execution must be a boolean")
         generation = parent.generation + 1
         reused = _reuse_committed_child(
             self.resolver,
@@ -243,6 +246,13 @@ class ProductionTrainOne:
             env=env,
             policy=self.supervisor_policy,
         )
+        if acknowledge_stopped_execution:
+            acknowledgement = supervisor.acknowledge_stopped_execution()
+            if not acknowledgement.success:
+                raise RuntimeError(
+                    f"could not acknowledge stopped execution: "
+                    f"{acknowledgement.reason or 'unknown reason'}"
+                )
         result = supervisor.run_once()
         if not result.success:
             raise RuntimeError(
