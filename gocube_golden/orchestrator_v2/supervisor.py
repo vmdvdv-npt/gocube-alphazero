@@ -458,6 +458,7 @@ class SupervisorV2:
         """
         intent = self._read_intent()
         active = self._read_active_child()
+        stop = self._read_stop()
         attempt = (
             active.attempt
             if active is not None
@@ -478,6 +479,7 @@ class SupervisorV2:
 
         self._clear_active_child_if_unchanged(active)
         self._clear_intent_if_unchanged(intent)
+        self._clear_stop_if_unchanged(stop)
         return ProcessResult(
             status=SupervisorStatus.SUCCESS,
             returncode=0,
@@ -533,6 +535,23 @@ class SupervisorV2:
             if isinstance(exc, SupervisorIntegrityError):
                 raise
             raise SupervisorIntegrityError("active-child record is unreadable") from exc
+
+    def _read_stop(self) -> dict[str, object] | None:
+        if not self.stop_path.is_file():
+            return None
+        try:
+            payload = read_json(self.stop_path)
+            if payload.get("schema") != STOP_SCHEMA:
+                raise ValueError("schema mismatch")
+            execution_id = payload.get("execution_id")
+            if not isinstance(execution_id, str) or execution_id != self.execution_id:
+                raise ValueError("execution ownership mismatch")
+            attempt = int(payload.get("attempt", 1))
+            if attempt < 1:
+                raise ValueError("unsafe attempt")
+            return payload
+        except (OSError, KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise SupervisorIntegrityError("supervisor stop is malformed") from exc
 
     def _write_intent(self, attempt: int) -> None:
         atomic_write_json(
@@ -781,6 +800,16 @@ class SupervisorV2:
                 "execution intent changed during completed-execution reconciliation"
             )
         self.execution_intent_path.unlink(missing_ok=True)
+
+    def _clear_stop_if_unchanged(self, expected: dict[str, object] | None) -> None:
+        current = self._read_stop()
+        if current is None:
+            return
+        if expected is None or current != expected:
+            raise SupervisorIntegrityError(
+                "supervisor stop changed during completed-execution reconciliation"
+            )
+        self.stop_path.unlink(missing_ok=True)
 
 
 def supervise(
