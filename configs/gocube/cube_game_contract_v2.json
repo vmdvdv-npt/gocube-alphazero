@@ -1,0 +1,246 @@
+{
+  "schema_version": 2,
+  "contract_id": "gocube-cube-game-contract-v2",
+  "game_family": "cube",
+  "scope": "game-semantics-only",
+  "fingerprint_algorithm": "sha256-canonical-json-v1",
+  "supported_sizes": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "initial_komi": 0.5,
+  "profiles": [
+    {
+      "profile": "cube2",
+      "size": 2,
+      "point_count": 24,
+      "action_count": 25,
+      "initial_komi": 0.5
+    },
+    {
+      "profile": "cube3",
+      "size": 3,
+      "point_count": 54,
+      "action_count": 55,
+      "initial_komi": 0.5
+    },
+    {
+      "profile": "cube4",
+      "size": 4,
+      "point_count": 96,
+      "action_count": 97,
+      "initial_komi": 0.5
+    },
+    {
+      "profile": "cube5",
+      "size": 5,
+      "point_count": 150,
+      "action_count": 151,
+      "initial_komi": 0.5
+    },
+    {
+      "profile": "cube6",
+      "size": 6,
+      "point_count": 216,
+      "action_count": 217,
+      "initial_komi": 0.5
+    },
+    {
+      "profile": "cube7",
+      "size": 7,
+      "point_count": 294,
+      "action_count": 295,
+      "initial_komi": 0.5
+    }
+  ],
+  "topology": {
+    "faces": 6,
+    "points_per_face_formula": "n*n",
+    "point_count_formula": "6*n*n",
+    "distinct_points_across_faces": true,
+    "physical_vertex_is_game_point": false,
+    "graph": {
+      "undirected": true,
+      "connected": true,
+      "self_loops": false,
+      "duplicate_neighbors": false,
+      "degree": 4,
+      "relation_types": [
+        "SAME_FACE",
+        "CROSS_FACE_SEAM"
+      ],
+      "relation_types_have_equal_rule_semantics": true
+    },
+    "seams": {
+      "physical_seam_count": 12,
+      "pairs_per_seam_formula": "n",
+      "undirected_cross_face_edges_formula": "12*n"
+    },
+    "physical_corners": {
+      "count": 8,
+      "points_per_corner": 3,
+      "game_edge_shape": "triangle",
+      "corner_context_adds_game_edges": false
+    },
+    "point_classes": {
+      "corner_points": "24",
+      "edge_non_corner_points": "24*(n-2)",
+      "face_interior_points": "6*(n-2)*(n-2)",
+      "cube2_all_points_are_corners": true
+    },
+    "stage1_executable_geometry": "cube4",
+    "all_sizes_generator_deferred_to_stage": 2,
+    "all_24_rotations_n2_to_n7_deferred_to_stage": 2
+  },
+  "actions": {
+    "point_indices": "0..P-1",
+    "pass_index": "P",
+    "action_count_formula": "P+1",
+    "resign_in_action_space": false,
+    "rules_core_internal_pass_sentinel": "PASS",
+    "canonical_to_rules_core_mapping": "P<->PASS",
+    "action_count_is_not_game_length_limit": true
+  },
+  "rules": {
+    "initial_board": "empty",
+    "first_player": "BLACK",
+    "turn_order": "alternate",
+    "occupied_move": "illegal",
+    "capture_order": "place-capture-opponent-then-check-own-suicide",
+    "suicide": "forbidden",
+    "liberties": "unique-empty-neighbors-of-whole-group",
+    "cross_face_seams_participate_in_groups_and_liberties": true,
+    "captured_points_may_be_reused_if_legal": true,
+    "ko": "positional-superko",
+    "superko_compares": "stone-arrangement-only",
+    "side_to_move_part_of_superko_comparison": false,
+    "initial_board_in_superko_history": true,
+    "pass": {
+      "legal_in_any_nonterminal_state": true,
+      "exempt_from_superko": true,
+      "appends_board_to_superko_history": false,
+      "toggles_player": true,
+      "increments_consecutive_passes": true,
+      "point_move_resets_consecutive_passes": true
+    },
+    "terminal": {
+      "reason": "two-consecutive-passes",
+      "moves_after_terminal": "illegal",
+      "terminal_state_sent_to_network_for_move_selection": false
+    },
+    "scoring": {
+      "method": "exact-graph-area",
+      "stones_count_for_owner": true,
+      "empty_component_single_color_boundary": "owner",
+      "empty_component_mixed_or_no_color_boundary": "neutral",
+      "prisoner_points": false,
+      "automatic_dead_stone_removal": false,
+      "cleanup": false,
+      "automatic_life_based_termination": false
+    },
+    "margin_black": "black_area-white_area-komi",
+    "winner_from_margin": {
+      "positive": "BLACK",
+      "negative": "WHITE",
+      "zero": "DRAW"
+    }
+  },
+  "state": {
+    "includes": [
+      "stone_arrangement",
+      "side_to_move",
+      "superko_history",
+      "consecutive_passes",
+      "topology_identity",
+      "rules_identity",
+      "komi"
+    ],
+    "real_move_history_separate_from_superko_history": true,
+    "superko_history_contains_pass": false
+  },
+  "results": {
+    "policy": {
+      "meaning": "root-MCTS-visit-distribution-before-selected-move",
+      "length": "P+1",
+      "illegal_action_target_probability": 0.0
+    },
+    "wdl": {
+      "order": [
+        "WIN",
+        "DRAW",
+        "LOSS"
+      ],
+      "perspective": "side_to_move_of_training_position",
+      "not_terminal_side_to_move": true
+    },
+    "ownership": {
+      "labels": [
+        "OWN",
+        "OPPONENT",
+        "NEUTRAL"
+      ],
+      "perspective": "side_to_move_of_training_position",
+      "meaning": "actual-final-graph-area-ownership",
+      "life_estimate": false
+    },
+    "score": {
+      "meaning": "final-komi-adjusted-margin",
+      "perspective": "side_to_move_of_training_position",
+      "store_exact_margin": true,
+      "loss_normalization_deferred": true
+    },
+    "projection": {
+      "absolute_black_white_result_computed_once": true,
+      "project_per_saved_training_position": true
+    },
+    "game_length": {
+      "limited_by_action_count": false,
+      "captures_can_make_game_longer_than_point_count": true
+    },
+    "technical_termination": {
+      "is_game_rule": false,
+      "watchdog_limit": null,
+      "historical_1920_inherited": false,
+      "reasons": [
+        "MOVE_LIMIT",
+        "TIMEOUT",
+        "WORKER_ERROR"
+      ],
+      "converted_to_wdl_score_or_ownership": false,
+      "included_in_training_replay": false,
+      "included_in_formal_win_statistics": false,
+      "formal_double_pass_on_last_allowed_move_has_priority": true,
+      "stage1_implementation": "pure-result-classification-only"
+    }
+  },
+  "identity": {
+    "family_contract_fingerprint_is_concrete_game_identity": false,
+    "concrete_game_identity_components": [
+      "game_family",
+      "size",
+      "point_count",
+      "action_count",
+      "topology_id",
+      "topology_fingerprint",
+      "rules_fingerprint",
+      "komi",
+      "family_contract_fingerprint"
+    ],
+    "size_topology_and_komi_required": true,
+    "full_point_mapping_and_adjacency_fingerprint_deferred_to_stage": 2,
+    "human_readable_names_are_compatibility_check": false,
+    "historical_cube_model_identity_is_future_architecture_identity": false
+  },
+  "verification_scope": {
+    "rules_executable_size": 4,
+    "sizes_2_to_7_semantics_contract_only": true,
+    "do_not_claim_all_sizes_geometry_verified_before_stage2": true,
+    "production_integration": false,
+    "training_launch_config": false
+  },
+  "contract_fingerprint": "sha256:e046b39f0afd7686ae58334933f0b889b8da4cf49ad0c9d0eb5a09c56e235f49"
+}
