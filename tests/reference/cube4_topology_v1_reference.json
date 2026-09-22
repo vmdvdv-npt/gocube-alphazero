@@ -1,0 +1,14 @@
+{
+  "component_fingerprints": {
+    "adjacency": "sha256:c757016812798d9eb0e3692df59ad0de5b4945c6da1038ffd3587c0b6ec59419",
+    "corner_distances": "sha256:cb3fd6eb64ab8d4eec9a21f288e093771dfc5172bb352b9b50d36a9c2114f704",
+    "physical_corners": "sha256:06116149a534cbebff2aa50b0bd8664e577a979524d11bf057c68bf6b42d0794",
+    "point_order": "sha256:d37c70fe98fdde29e595ec5dab45af4271d0a52cf6a692681fd0427656e7e89a",
+    "relation_types": "sha256:4ffc82a72350ba22c3cef1cb611daf2ed66ac9c3237ae43547f0bec3d1c5fd51",
+    "seams": "sha256:ed97d44511376c08da42700ca424ad01f00e5c32336d96cb947045fcf963ce7a"
+  },
+  "schema_id": "cube4-topology-v1-frozen-reference-v1",
+  "source_commit": "5e5e118b2544a1b01a28d9a3ae75aaea2b74cc1e",
+  "topology_fingerprint": "sha256:b98a44c8172b94f522968c9fdf972b88755f6fd601d46dd3902ee473b170a591",
+  "topology_id": "cube4x4x6-golden-topology-v1"
+}

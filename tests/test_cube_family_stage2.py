@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections import deque
 import copy
+import hashlib
+import json
+from pathlib import Path
 
 import pytest
 
@@ -33,7 +36,12 @@ from gocube_golden.rules import (
 )
 from gocube_golden.scoring import Ownership, score_terminal
 from gocube_golden.state import BLACK, EMPTY, PASS, WHITE
-from gocube_golden.cube_topology import CUBE4_TOPOLOGY
+
+CUBE4_V1_REFERENCE = json.loads(
+    (Path(__file__).parent / "reference" / "cube4_topology_v1_reference.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 ORACLE_SEAMS = (
     ("front", "top", "top", "bottom", False),
@@ -58,6 +66,11 @@ EXPECTED_FINGERPRINTS = {
     6: ("sha256:30f1ee043524e214d4a3a06354a9c03f54fdf0aa6d0d2fcacee0fa3d37263d1e", "sha256:0b9a44dffe144ca36d68b810f7c93771c0be7e9110d12ac410f3c35feb87bd78"),
     7: ("sha256:4658bef09a802f14ce9e83fbab455bf0840277fff4b75580a4dff99318a45c29", "sha256:9cb7f251edf44fbd793ff31a2db43071603ac85a0bbbc3f215b720aa402b4d9f"),
 }
+
+
+def _reference_fingerprint(value):
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _oracle_point(face, row, col, n):
@@ -150,15 +163,31 @@ def test_cube2_is_all_corner_and_rules_core_is_dynamic():
     assert apply_action(apply_action(moved, PASS).after, PASS).after.is_terminal
 
 
-def test_cube4_parameterized_geometry_matches_stage1_golden_exactly():
-    generated, golden = cube_family_topology(4), CUBE4_TOPOLOGY
-    assert generated.point_ids == golden.point_ids
-    assert generated.adjacency == golden.adjacency
-    assert generated.relation_types == golden.relation_types
-    assert generated.physical_corners == golden.physical_corners
-    assert [(s.face_a, s.edge_a, s.face_b, s.edge_b, s.reversed_index, s.point_pairs) for s in generated.seams] == [(s.face_a, s.edge_a, s.face_b, s.edge_b, s.reversed_index, s.point_pairs) for s in golden.seams]
-    assert tuple(p.corner_distance for p in generated.points) == tuple(p.corner_distance for p in golden.points)
-    assert generated.topology_id != golden.topology_id and generated.fingerprint != golden.fingerprint
+def test_cube4_parameterized_geometry_matches_frozen_v1_reference():
+    generated = cube_family_topology(4)
+    components = {
+        "point_order": list(generated.point_ids),
+        "adjacency": [list(row) for row in generated.adjacency],
+        "relation_types": [list(row) for row in generated.relation_types],
+        "physical_corners": [list(corner) for corner in generated.physical_corners],
+        "seams": [
+            {
+                "face_a": seam.face_a,
+                "edge_a": seam.edge_a,
+                "face_b": seam.face_b,
+                "edge_b": seam.edge_b,
+                "reversed_index": seam.reversed_index,
+                "point_pairs": [list(pair) for pair in seam.point_pairs],
+            }
+            for seam in generated.seams
+        ],
+        "corner_distances": [point.corner_distance for point in generated.points],
+    }
+    assert {
+        name: _reference_fingerprint(value) for name, value in components.items()
+    } == CUBE4_V1_REFERENCE["component_fingerprints"]
+    assert generated.topology_id != CUBE4_V1_REFERENCE["topology_id"]
+    assert generated.fingerprint != CUBE4_V1_REFERENCE["topology_fingerprint"]
 
 
 def test_family_fingerprints_are_stable_and_separate():

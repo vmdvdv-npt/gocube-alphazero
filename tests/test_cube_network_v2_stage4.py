@@ -7,7 +7,6 @@ import torch
 from torch import nn
 
 from gocube_golden.cube_family import CROSS_FACE_SEAM, FACE_INTERIOR, cube_family_topology
-from gocube_golden.cube_neural import GoldenCubeGraphNetV1
 from gocube_golden.cube_network_v2 import (
     ARCHITECTURE_FINGERPRINT,
     ARCHITECTURE_ID,
@@ -23,6 +22,7 @@ from gocube_golden.cube_network_v2 import (
     trainable_parameter_count,
 )
 
+EXPECTED_ARCHITECTURE_FINGERPRINT = "sha256:17e5fada8c69bcf9da0c6c8852af13da7af16c7ce73df7ed0153d4ccc9df77e4"
 EXPECTED_PARAMETER_COUNT = 844_937
 
 
@@ -42,15 +42,13 @@ def _module_grad_sum(module: nn.Module) -> float:
     return float(sum(parameter.grad.abs().sum().item() for parameter in module.parameters() if parameter.grad is not None))
 
 
-def test_architecture_contract_and_historical_identity_are_distinct():
+def test_architecture_contract_identity_is_frozen():
     contract = load_cube_network_architecture_contract()
     assert contract["architecture_id"] == ARCHITECTURE_ID == "gocube-cube-graphnet-v2"
-    assert contract["architecture_fingerprint"] == ARCHITECTURE_FINGERPRINT
+    assert contract["architecture_fingerprint"] == ARCHITECTURE_FINGERPRINT == EXPECTED_ARCHITECTURE_FINGERPRINT
     assert contract["hidden"] == HIDDEN == 112
     assert contract["blocks"] == BLOCKS == 10
     assert contract["global_context"]["after_blocks"] == [3, 6, 9]
-    assert GoldenCubeGraphNetV1.architecture_id == "GoldenCubeGraphNetV1"
-    assert GoldenCubeGraphNetV1.architecture_id != ARCHITECTURE_ID
 
 
 @pytest.mark.parametrize("n", range(2, 8))
