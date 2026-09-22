@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 
 import pytest
 
+from gocube_golden.cube_family import (
+    CROSS_FACE_SEAM,
+    FACE_CORNER,
+    cube_family_topology,
+)
 from gocube_golden.cube_game_contract_v2 import (
     FORMAL_DOUBLE_PASS,
     action_count_for_size,
@@ -23,11 +27,6 @@ from gocube_golden.cube_game_contract_v2 import (
     rules_action_to_action_index,
     validate_contract,
     validate_cube_size,
-)
-from gocube_golden.cube_topology import (
-    CROSS_FACE_SEAM,
-    CUBE4_TOPOLOGY,
-    FACE_CORNER,
 )
 from gocube_golden.rules import (
     IllegalMoveError,
@@ -50,8 +49,7 @@ from gocube_golden.state import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-HISTORICAL_CUBE_PROFILE = REPO_ROOT / "configs/gocube/cube4_golden_training_v1.json"
+CUBE4_TOPOLOGY = cube_family_topology(4)
 
 
 def state_with(*, black=(), white=(), side=BLACK, passes=0, history=None):
@@ -223,10 +221,7 @@ def test_positional_superko_uses_only_stones_not_side_to_move():
     empty = tuple([EMPTY] * CUBE4_TOPOLOGY.point_count)
     repeated = list(empty)
     repeated[point] = BLACK
-    state = state_with(
-        side=BLACK,
-        history=(tuple(repeated), empty),
-    )
+    state = state_with(side=BLACK, history=(tuple(repeated), empty))
     assert all(
         isinstance(position, tuple)
         and len(position) == CUBE4_TOPOLOGY.point_count
@@ -328,18 +323,12 @@ def test_targets_project_from_each_saved_positions_player_not_terminal_player():
 
 
 def test_technical_completion_is_not_a_draw_and_formal_double_pass_wins_boundary():
-    technical = classify_completion(
-        formal_double_pass=False,
-        technical_reason="MOVE_LIMIT",
-    )
+    technical = classify_completion(formal_double_pass=False, technical_reason="MOVE_LIMIT")
     assert technical == "TECHNICAL_MOVE_LIMIT"
     assert technical != "DRAW"
     assert not completion_is_formal_result(technical)
 
-    boundary = classify_completion(
-        formal_double_pass=True,
-        technical_reason="MOVE_LIMIT",
-    )
+    boundary = classify_completion(formal_double_pass=True, technical_reason="MOVE_LIMIT")
     assert boundary == FORMAL_DOUBLE_PASS
     assert completion_is_formal_result(boundary)
 
@@ -348,9 +337,7 @@ def test_contract_fingerprint_is_canonical_and_semantic_drift_fails_closed():
     contract = load_contract()
     assert contract["contract_fingerprint"] == contract_fingerprint(contract)
 
-    reordered = json.loads(
-        json.dumps(contract, ensure_ascii=True, sort_keys=False)
-    )
+    reordered = json.loads(json.dumps(contract, ensure_ascii=True, sort_keys=False))
     assert contract_fingerprint(reordered) == contract["contract_fingerprint"]
 
     mutated = copy.deepcopy(contract)
@@ -386,19 +373,9 @@ def test_concrete_identity_distinguishes_family_size_topology_rules_and_komi():
     assert identity["rules_fingerprint"] != identity["family_contract_fingerprint"]
 
 
-def test_existing_torus_and_historical_cube_identities_are_unchanged():
+def test_existing_torus_identity_is_unchanged_and_v2_does_not_inherit_watchdog():
     assert STAGE0_RULES_FINGERPRINT == (
         "sha256:8eac3337443a70893fa5ad359580f7ba92b18958e06f0d775c29f08791796842"
     )
     assert initial_state().rules_fingerprint == STAGE0_RULES_FINGERPRINT
-
-    historical = json.loads(HISTORICAL_CUBE_PROFILE.read_text(encoding="utf-8"))
-    assert historical["profile_id"] == "gocube-cube4-golden-training-v1"
-    assert historical["profile_fingerprint"] == (
-        "sha256:eecfc04b32cf95b56a6b9d314c2d7c0003d4ce0c50d3dca45f076c19b045ff34"
-    )
-    assert historical["rules"]["fingerprint"] == (
-        "sha256:27eb43ec6a566b13c44eb10691928eaa7e51f80ab667e48bb36d1a13103e7c2e"
-    )
-    assert historical["arena"]["watchdog"] == 1920
     assert load_contract()["results"]["technical_termination"]["historical_1920_inherited"] is False

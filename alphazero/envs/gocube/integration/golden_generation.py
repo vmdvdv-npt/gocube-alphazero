@@ -27,7 +27,6 @@ from .golden_move import (
 
 GOLDEN_SEARCH_IMPLEMENTATION_ID = SEARCH_IMPLEMENTATION_ID
 TORUS9_INTERACTIVE_MOVE_LIMIT = 500
-CUBE4_INTERACTIVE_MOVE_LIMIT = 1920
 
 
 def _winner_name(winner: Winner) -> str:
@@ -85,8 +84,6 @@ def replay_protocol_moves(
     size: int,
     moves: Sequence[Mapping[str, object]],
 ) -> tuple[GoldenState, tuple[int, int]]:
-    """Strict generated-game replay preserving the existing Protocol V1 contract."""
-
     try:
         return replay_protocol_moves_strict(
             topology=topology,
@@ -100,8 +97,6 @@ def replay_protocol_moves(
 
 
 def replay_protocol_game(game: Mapping[str, object]) -> GoldenState:
-    """Replay a generated Protocol game and verify its Golden result."""
-
     topology = game.get("topology")
     size = game.get("size")
     moves = game.get("moves")
@@ -161,8 +156,10 @@ class GoldenGameGenerator:
 
     @staticmethod
     def _move_limit(descriptor: CheckpointDescriptor) -> int:
-        if descriptor.topology == "cube":
-            return CUBE4_INTERACTIVE_MOVE_LIMIT
+        if descriptor.topology != "torus" or descriptor.size != 9:
+            raise CheckpointIncompatible(
+                f"No current Golden serving watchdog for {descriptor.topology} size {descriptor.size}"
+            )
         return TORUS9_INTERACTIVE_MOVE_LIMIT
 
     def generate(
@@ -190,18 +187,8 @@ class GoldenGameGenerator:
         )
         state = initial_state_for_position(position)
 
-        validate_checkpoint_position_compatibility(
-            position=position,
-            state=state,
-            descriptor=black,
-            mapping=mapping,
-        )
-        validate_checkpoint_position_compatibility(
-            position=position,
-            state=state,
-            descriptor=white,
-            mapping=mapping,
-        )
+        validate_checkpoint_position_compatibility(position=position, state=state, descriptor=black, mapping=mapping)
+        validate_checkpoint_position_compatibility(position=position, state=state, descriptor=white, mapping=mapping)
         validate_loaded_model(black_model, black, mapping)
         validate_loaded_model(white_model, white, mapping)
 

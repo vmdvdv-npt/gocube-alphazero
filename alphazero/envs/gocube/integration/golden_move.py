@@ -7,7 +7,6 @@ import math
 from typing import Callable, Mapping, Sequence
 
 from gocube_golden.arena_contract import SEARCH_IMPLEMENTATION_ID, SearchSettings
-from gocube_golden.cube_training import cube_initial_state
 from gocube_golden.rules import apply_action
 from gocube_golden.search import SearchResult, SequentialPUCT
 from gocube_golden.search_adapter import GoldenSearchAdapter
@@ -100,8 +99,6 @@ class MoveSelection:
 
 
 def initial_state_for_position(position: GoldenPositionContract) -> GoldenState:
-    if position.topology == "cube" and position.size == 4:
-        return cube_initial_state(komi=position.komi)
     if position.topology == "torus" and position.size == 9:
         return initial_state(topology=TORUS_9X9, komi=position.komi)
     raise InvalidRequest(
@@ -248,6 +245,7 @@ def validate_checkpoint_position_compatibility(
             raise CheckpointIncompatible(
                 f"Golden checkpoint {descriptor.checkpoint_id} is missing {field}"
             )
+
     contract = serving_contract(descriptor)
     expected_contract = {
         "topology": position.topology,

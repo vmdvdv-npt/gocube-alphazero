@@ -17,12 +17,9 @@ from alphazero.envs.gocube.integration.service import GoCubeAlphaZeroService, _c
 from gocube_golden.state import PASS
 
 
-@pytest.mark.parametrize(
-    ("topology", "size", "point_count"),
-    [("cube", 4, 96), ("torus", 9, 81)],
-)
-def test_golden_protocol_mapping_is_bijective_and_adjacency_exact(topology, size, point_count):
-    mapping = mapping_for(topology, size)
+def test_golden_protocol_mapping_is_bijective_and_adjacency_exact():
+    mapping = mapping_for("torus", 9)
+    point_count = 81
     assert mapping.point_count == point_count
     assert len(set(mapping.golden_to_protocol)) == point_count
     assert len(set(mapping.protocol_to_golden)) == point_count
@@ -36,14 +33,18 @@ def test_golden_protocol_mapping_is_bijective_and_adjacency_exact(topology, size
         assert mapping.protocol_point_id_to_golden_index(point_id) == index
 
 
-@pytest.mark.parametrize(("topology", "size"), [("cube", 4), ("torus", 9)])
-def test_golden_capture_mapping_round_trips_point_ids(topology, size):
-    mapping = mapping_for(topology, size)
+def test_golden_capture_mapping_round_trips_point_ids():
+    mapping = mapping_for("torus", 9)
     captured = (0, mapping.point_count - 1)
     point_ids = mapping.captured_point_ids(captured)
     assert [mapping.protocol_point_id_to_golden_index(item) for item in point_ids] == list(captured)
     with pytest.raises(GoldenActionMappingError):
         mapping.captured_point_ids((mapping.point_count,))
+
+
+def test_retired_cube_mapping_is_not_registered():
+    with pytest.raises(GoldenActionMappingError):
+        mapping_for("cube", 4)
 
 
 def test_golden_protocol_passes_round_trip_through_canonical_terminal_result():
@@ -86,7 +87,7 @@ def _descriptor(checkpoint_id: str, *, profile_id: str = "gocube-torus9-golden-v
 
 def test_golden_descriptors_require_matching_scientific_identity():
     golden = _descriptor("same-run@17")
-    different_profile = _descriptor("same-run@17", profile_id="gocube-cube4-golden-training-v1")
+    different_profile = _descriptor("same-run@17", profile_id="unsupported-golden-profile")
     assert _compatible(golden, golden)
     assert _compatible(golden, different_profile)
 
@@ -136,7 +137,14 @@ def test_lineage_identity_uses_manifest_status_and_legacy_defaults_active(tmp_pa
 
 def test_golden_integration_modules_have_no_legacy_execution_imports():
     root = Path(__file__).parents[1] / "alphazero/envs/gocube/integration"
-    forbidden = ("alphazero.NNetWrapper", "alphazero.GenericPlayers", "SelfPlayAgent", "Coach")
+    forbidden = (
+        "alphazero.NNetWrapper",
+        "alphazero.GenericPlayers",
+        "SelfPlayAgent",
+        "Coach",
+        "GoldenCubeGraphNetV1",
+        "gocube_golden.cube_",
+    )
     for path in root.glob("*.py"):
         source = path.read_text(encoding="utf-8")
         assert not any(token in source for token in forbidden), path.name
@@ -185,7 +193,7 @@ def test_real_m17_golden_loader_and_protocol_round_trip_are_read_only():
     _, first = loader.load(checkpoint_id)
     _, second = loader.load(checkpoint_id)
     assert first.network is not None
-    assert first is not second  # no cache is configured by default
+    assert first is not second
     assert first.metadata["model_hash"] == json.loads(metadata_before)["model_hash"]
     assert not first.network.training
 

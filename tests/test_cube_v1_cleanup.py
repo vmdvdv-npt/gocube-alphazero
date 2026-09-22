@@ -39,6 +39,22 @@ CURRENT_CUBE_MODULES = (
     "gocube_golden.cube_observation_v2",
     "gocube_golden.cube_network_v2",
 )
+FORBIDDEN_PRODUCTION_TOKENS = (
+    "GoldenCubeGraphNetV1",
+    "GoldenCubeNeuralEvaluator",
+    "CubeSelfPlayAdapter",
+    "CubeTrainingAdapter",
+    "CUBE4_TOPOLOGY",
+    "gocube_golden.cube_contract",
+    "gocube_golden.cube_evaluation",
+    "gocube_golden.cube_neural",
+    "gocube_golden.cube_selfplay",
+    "gocube_golden.cube_topology",
+    "gocube_golden.cube_training",
+    "gocube_golden.cube_training_adapter",
+    "gocube-cube4-golden-training-v1",
+    "cube4_golden_training_v1.json",
+)
 
 
 def test_historical_cube_v1_runtime_is_absent_from_production_api():
@@ -55,3 +71,18 @@ def test_current_cube_stage1_to_stage4_modules_remain_importable():
 
 def test_historical_cube_v1_training_profile_is_absent():
     assert not (ROOT / "configs" / "gocube" / "cube4_golden_training_v1.json").exists()
+
+
+def test_production_source_has_no_historical_cube_v1_runtime_references():
+    roots = (
+        ROOT / "gocube_golden",
+        ROOT / "alphazero" / "envs" / "gocube" / "integration",
+    )
+    failures = []
+    for scan_root in roots:
+        for path in sorted(scan_root.rglob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            matches = [token for token in FORBIDDEN_PRODUCTION_TOKENS if token in source]
+            if matches:
+                failures.append((str(path.relative_to(ROOT)), matches))
+    assert failures == []

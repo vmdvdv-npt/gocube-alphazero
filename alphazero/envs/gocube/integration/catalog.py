@@ -118,7 +118,7 @@ class CheckpointCatalog:
             return False, "checkpoint has no canonical lineage_id"
         if not self._publication_entries:
             return False, f"publication manifest is missing or invalid: {self.publication_manifest}"
-        publication_topology = {"torus": "torus9", "cube": "cube4"}.get(topology, topology)
+        publication_topology = {"torus": "torus9"}.get(topology, topology)
         same_lineage = [
             entry
             for entry in self._publication_entries
@@ -172,99 +172,61 @@ class CheckpointCatalog:
         ):
             return None
 
+        if profile_id != "gocube-torus9-golden-v3":
+            return None
         try:
-            if profile_id == "gocube-torus9-golden-v3":
-                from gocube_golden.torus9_contract import (
-                    TORUS9_ACTION_COUNT,
-                    TORUS9_CURRENT_ARCHITECTURE_ID,
-                    TORUS9_CURRENT_PROFILE_ID,
-                    TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
-                    TORUS9_CURRENT_TARGET_FINGERPRINT,
-                    TORUS9_KOMI,
-                    TORUS9_OBSERVATION_FINGERPRINT,
-                    TORUS9_OBSERVATION_SCHEMA_ID,
-                    TORUS9_OBSERVATION_SCHEMA_VERSION,
-                    TORUS9_POINT_COUNT,
-                    TORUS9_RULES_FINGERPRINT,
-                    TORUS9_TARGET_CONTRACT_ID,
-                    current_torus9_selfplay_contract_fingerprint,
-                )
-                from gocube_golden.torus9 import TORUS9_TOPOLOGY_ID, TORUS9_TOPOLOGY_FINGERPRINT
-                expected = {
-                    "checkpoint_schema_version": 1,
-                    "profile_id": TORUS9_CURRENT_PROFILE_ID,
-                    "architecture_id": TORUS9_CURRENT_ARCHITECTURE_ID,
-                    "topology_id": TORUS9_TOPOLOGY_ID,
-                    "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
-                    "board_size": [9, 9],
-                    "point_id_order_identity": "row-major-yx:point_id=y*width+x",
-                    "komi": TORUS9_KOMI,
-                    "observation_schema_id": TORUS9_OBSERVATION_SCHEMA_ID,
-                    "observation_schema_version": TORUS9_OBSERVATION_SCHEMA_VERSION,
-                    "observation_fingerprint": TORUS9_OBSERVATION_FINGERPRINT,
-                    "observation_shape": [6, TORUS9_POINT_COUNT],
-                    "target_contract_id": TORUS9_TARGET_CONTRACT_ID,
-                    "target_contract_version": 1,
-                    "target_fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT,
-                    "rules_profile_id": "graph-area-v1",
-                    "rules_fingerprint": TORUS9_RULES_FINGERPRINT,
-                    "network_heads_and_shapes": {
-                        "policy": [TORUS9_ACTION_COUNT],
-                        "value": [3],
-                        "ownership": [TORUS9_POINT_COUNT, 3],
-                        "score": [1],
-                    },
-                    "auxiliary_heads": True,
-                    "selfplay_contract_id": TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
-                    "selfplay_contract_fingerprint": current_torus9_selfplay_contract_fingerprint(),
-                }
-                topology, size = "torus", 9
-                architecture_id = TORUS9_CURRENT_ARCHITECTURE_ID
-                rules_fingerprint = TORUS9_RULES_FINGERPRINT
-                observation_fingerprint = TORUS9_OBSERVATION_FINGERPRINT
-                target_fingerprint = TORUS9_CURRENT_TARGET_FINGERPRINT
-            elif profile_id == "gocube-cube4-golden-training-v1":
-                from gocube_golden.cube_contract import CUBE_PROFILE_ID, load_profile
-                from gocube_golden.cube_neural import CUBE_OBSERVATION_FINGERPRINT, CUBE_OBSERVATION_SCHEMA_ID
-                from gocube_golden.cube_topology import (
-                    CUBE4_GEOMETRY_FINGERPRINT,
-                    CUBE4_TOPOLOGY_FINGERPRINT,
-                    CUBE4_TOPOLOGY_ID,
-                )
-                from gocube_golden.cube_training import CUBE_TARGET_CONTRACT_ID, CUBE_TARGET_FINGERPRINT
-                profile = load_profile()
-                expected = {
-                    "checkpoint_schema_version": 1,
-                    "training_profile_id": CUBE_PROFILE_ID,
-                    "architecture_id": "GoldenCubeGraphNetV1",
-                    "topology_id": CUBE4_TOPOLOGY_ID,
-                    "topology_fingerprint": CUBE4_TOPOLOGY_FINGERPRINT,
-                    "geometry_fingerprint": CUBE4_GEOMETRY_FINGERPRINT,
-                    "point_count": 96,
-                    "action_count": 97,
-                    "point_ordering_fingerprint": profile["topology"]["point_ordering_fingerprint"],
-                    "rules_id": "graph-area-v1",
-                    "rules_fingerprint": profile["rules"]["fingerprint"],
-                    "komi": 0.5,
-                    "observation_schema_id": CUBE_OBSERVATION_SCHEMA_ID,
-                    "observation_fingerprint": CUBE_OBSERVATION_FINGERPRINT,
-                    "target_contract_id": CUBE_TARGET_CONTRACT_ID,
-                    "target_fingerprint": CUBE_TARGET_FINGERPRINT,
-                    "network_heads_and_shapes": {"policy": [97], "value": [3]},
-                }
-                topology, size = "cube", 4
-                architecture_id = "GoldenCubeGraphNetV1"
-                rules_fingerprint = str(profile["rules"]["fingerprint"])
-                observation_fingerprint = CUBE_OBSERVATION_FINGERPRINT
-                target_fingerprint = CUBE_TARGET_FINGERPRINT
-            else:
-                return None
+            from gocube_golden.torus9_contract import (
+                TORUS9_ACTION_COUNT,
+                TORUS9_CURRENT_ARCHITECTURE_ID,
+                TORUS9_CURRENT_PROFILE_ID,
+                TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
+                TORUS9_CURRENT_TARGET_FINGERPRINT,
+                TORUS9_KOMI,
+                TORUS9_OBSERVATION_FINGERPRINT,
+                TORUS9_OBSERVATION_SCHEMA_ID,
+                TORUS9_OBSERVATION_SCHEMA_VERSION,
+                TORUS9_POINT_COUNT,
+                TORUS9_RULES_FINGERPRINT,
+                TORUS9_TARGET_CONTRACT_ID,
+                current_torus9_selfplay_contract_fingerprint,
+            )
+            from gocube_golden.torus9 import TORUS9_TOPOLOGY_ID, TORUS9_TOPOLOGY_FINGERPRINT
+            expected = {
+                "checkpoint_schema_version": 1,
+                "profile_id": TORUS9_CURRENT_PROFILE_ID,
+                "architecture_id": TORUS9_CURRENT_ARCHITECTURE_ID,
+                "topology_id": TORUS9_TOPOLOGY_ID,
+                "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
+                "board_size": [9, 9],
+                "point_id_order_identity": "row-major-yx:point_id=y*width+x",
+                "komi": TORUS9_KOMI,
+                "observation_schema_id": TORUS9_OBSERVATION_SCHEMA_ID,
+                "observation_schema_version": TORUS9_OBSERVATION_SCHEMA_VERSION,
+                "observation_fingerprint": TORUS9_OBSERVATION_FINGERPRINT,
+                "observation_shape": [6, TORUS9_POINT_COUNT],
+                "target_contract_id": TORUS9_TARGET_CONTRACT_ID,
+                "target_contract_version": 1,
+                "target_fingerprint": TORUS9_CURRENT_TARGET_FINGERPRINT,
+                "rules_profile_id": "graph-area-v1",
+                "rules_fingerprint": TORUS9_RULES_FINGERPRINT,
+                "network_heads_and_shapes": {
+                    "policy": [TORUS9_ACTION_COUNT],
+                    "value": [3],
+                    "ownership": [TORUS9_POINT_COUNT, 3],
+                    "score": [1],
+                },
+                "auxiliary_heads": True,
+                "selfplay_contract_id": TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
+                "selfplay_contract_fingerprint": current_torus9_selfplay_contract_fingerprint(),
+            }
             for key, value in expected.items():
                 if metadata.get(key) != value:
                     return None
-            if profile_id == "gocube-cube4-golden-training-v1":
-                if metadata.get("profile_id", profile_id) != profile_id:
-                    return None
+            topology, size = "torus", 9
+            architecture_id = TORUS9_CURRENT_ARCHITECTURE_ID
+            rules_fingerprint = TORUS9_RULES_FINGERPRINT
+            observation_fingerprint = TORUS9_OBSERVATION_FINGERPRINT
+            target_fingerprint = TORUS9_CURRENT_TARGET_FINGERPRINT
         except (KeyError, TypeError, ValueError, ImportError):
             return None
 
@@ -381,9 +343,6 @@ class CheckpointCatalog:
                     iteration=int(identity["iteration"]),
                     topology=str(identity["topology"]),
                     size=int(identity["size"]),
-                    # V1 has no graph-area tag. This is only the narrow
-                    # area/komi/double-pass UI projection; Golden fingerprints
-                    # remain authoritative in the internal descriptor.
                     rule_set="chinese",
                     komi=float(identity["komi"]),
                     terminal_adjudicator=GOLDEN_TERMINAL_ADJUDICATOR,
