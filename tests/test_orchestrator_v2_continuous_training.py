@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -459,6 +460,60 @@ def test_non_golden_operator_values_are_reported_not_rejected(tmp_path: Path) ->
     assert manifest["operator_tunables"]["learning_rate"] == 0.0002
     assert manifest["operator_tunables"]["self_play_mcts_simulations"] == 256
     assert manifest["operator_tunables"]["games_per_generation"] == 90
+
+
+def test_sweep_reporting_verifies_actual_execution_values(tmp_path: Path) -> None:
+    sweep = continuous_training.SelfPlayConcurrencySweep(
+        start_after_generation=0,
+        workers=16,
+        baseline=continuous_training.SelfPlayConcurrencyMode("baseline", 4, 64),
+        modes=(continuous_training.SelfPlayConcurrencyMode("six-by-96", 6, 96),),
+    )
+    mode = sweep.modes[0]
+    runner = object.__new__(ContinuousTrainingRunnerV2)
+    runner.config = SimpleNamespace(
+        effective_config=SimpleNamespace(self_play={"games_per_iteration": 384, "mcts_simulations": 200}),
+        self_play_concurrency_sweep=sweep,
+    )
+    runner._lineage_root = tmp_path
+    runner.logger = logging.getLogger(__name__)
+
+    summary_path = runner._summary_path(7)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "orchestrator_selfplay": {
+            "games": 384,
+            "moves": 100,
+            "games_per_hour": 1382400.0,
+            "selfplay_time_sec": 1.0,
+            "execution": {
+                "workers": 16,
+                "active_games_per_worker": 6,
+                "total_active_contexts": 96,
+            },
+            "inference": {},
+            "timing": {},
+        }
+    }
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    observation = runner._load_sweep_observation(7, mode, role="sweep")
+
+    assert observation is not None
+    assert observation["actual_execution"] == {
+        "workers": 16,
+        "active_games_per_worker": 6,
+        "total_active_contexts": 96,
+    }
+    assert observation["stable"] is True
+
+    summary["orchestrator_selfplay"]["execution"]["total_active_contexts"] = 64  # type: ignore[index]
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    mismatched = runner._load_sweep_observation(7, mode, role="sweep")
+
+    assert mismatched is not None
+    assert mismatched["stable"] is False
+    assert "do not match the selected mode" in str(mismatched["stability_reasons"])
 
 
 def test_runner_is_a_coordinator_and_does_not_import_training_engine(tmp_path: Path) -> None:
