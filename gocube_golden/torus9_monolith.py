@@ -855,12 +855,16 @@ class Torus9RollingReplay:
         self,
         *,
         generations: int = TORUS9_ROLLING_GENERATIONS,
-        maximum_positions: int = TORUS9_MAX_REPLAY_POSITIONS,
+        maximum_positions: int | None = TORUS9_MAX_REPLAY_POSITIONS,
     ) -> None:
-        if generations <= 0 or maximum_positions <= 0:
-            raise ValueError("Torus 9×9 replay window settings must be positive")
+        if generations <= 0 or (
+            maximum_positions is not None and maximum_positions <= 0
+        ):
+            raise ValueError("Torus 9×9 replay window settings are invalid")
         self.generations = int(generations)
-        self.maximum_positions = int(maximum_positions)
+        self.maximum_positions = (
+            None if maximum_positions is None else int(maximum_positions)
+        )
         self._rows: list[dict[str, object]] = []
         self._last_generation = 0
         self.total_evictions = 0
@@ -889,7 +893,7 @@ class Torus9RollingReplay:
         self._rows.extend(stamped)
         oldest_allowed = generation - self.generations + 1
         self._rows = [row for row in self._rows if int(row["source_generation"]) >= oldest_allowed]
-        if len(self._rows) > self.maximum_positions:
+        if self.maximum_positions is not None and len(self._rows) > self.maximum_positions:
             self._rows = self._rows[-self.maximum_positions:]
         evicted = before + len(stamped) - len(self._rows)
         self.total_evictions += evicted

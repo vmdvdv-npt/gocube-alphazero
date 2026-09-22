@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 import json
 import logging
+import math
 from pathlib import Path
 import uuid
 
@@ -100,6 +101,168 @@ def _positive_int(value: object, label: str) -> int:
     return value
 
 
+def _nonnegative_int(value: object, label: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{label} must be a non-negative integer")
+    return value
+
+
+CONCURRENCY_SWEEP_SCHEMA = "gocube-orchestrator-v2-self-play-concurrency-sweep-v1"
+
+
+@dataclass(frozen=True)
+class SelfPlayConcurrencyMode:
+    """One execution-only self-play concurrency setting."""
+
+    label: str
+    active_games_per_worker: int
+    total_active_contexts: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "label", _component(self.label, "concurrency mode label"))
+        _positive_int(self.active_games_per_worker, "active_games_per_worker")
+        _positive_int(self.total_active_contexts, "total_active_contexts")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "label": self.label,
+            "active_games_per_worker": self.active_games_per_worker,
+            "total_active_contexts": self.total_active_contexts,
+        }
+
+
+@dataclass(frozen=True)
+class SelfPlayConcurrencySweep:
+    """Durable operator schedule for an execution-only concurrency sweep."""
+
+    start_after_generation: int
+    workers: int
+    baseline: SelfPlayConcurrencyMode
+    modes: tuple[SelfPlayConcurrencyMode, ...]
+    continue_after_sweep: bool = True
+
+    def __post_init__(self) -> None:
+        _nonnegative_int(self.start_after_generation, "sweep start_after_generation")
+        _positive_int(self.workers, "sweep workers")
+        if not self.modes:
+            raise ValueError("self-play concurrency sweep requires at least one test mode")
+        labels = {self.baseline.label}
+        for mode in self.modes:
+            if mode.label in labels:
+                raise ValueError(f"duplicate self-play concurrency mode: {mode.label}")
+            labels.add(mode.label)
+        if type(self.continue_after_sweep) is not bool:
+            raise ValueError("sweep continue_after_sweep must be a boolean")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": CONCURRENCY_SWEEP_SCHEMA,
+            "start_after_generation": self.start_after_generation,
+            "workers": self.workers,
+            "baseline": self.baseline.to_dict(),
+            "modes": [mode.to_dict() for mode in self.modes],
+            "continue_after_sweep": self.continue_after_sweep,
+        }
+
+    def mode_for_index(self, index: int) -> SelfPlayConcurrencyMode:
+        return self.modes[index]
+
+
+def _concurrency_mode(value: object, label: str) -> SelfPlayConcurrencyMode:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    allowed = {"label", "active_games_per_worker", "total_active_contexts"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(f"{label} contains unsupported fields: {', '.join(sorted(unknown))}")
+    missing = sorted(allowed - set(value))
+    if missing:
+        raise ValueError(f"{label} is missing explicit fields: {', '.join(missing)}")
+    return SelfPlayConcurrencyMode(
+        label=str(value["label"]),
+        active_games_per_worker=value["active_games_per_worker"],  # type: ignore[arg-type]
+        total_active_contexts=value["total_active_contexts"],  # type: ignore[arg-type]
+    )
+
+
+def _concurrency_sweep(
+    value: SelfPlayConcurrencySweep | Mapping[str, object] | None,
+    config: EffectiveConfig,
+    parent_generation: int,
+) -> SelfPlayConcurrencySweep | None:
+    if value is None:
+        return None
+    if isinstance(value, SelfPlayConcurrencySweep):
+        sweep = value
+    else:
+        if not isinstance(value, Mapping):
+            raise ValueError("self_play_concurrency_sweep must be an object")
+        allowed = {
+            "schema",
+            "start_after_generation",
+            "workers",
+            "baseline",
+            "modes",
+            "continue_after_sweep",
+        }
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(
+                "self_play_concurrency_sweep contains unsupported fields: "
+                + ", ".join(sorted(unknown))
+            )
+        if value.get("schema") != CONCURRENCY_SWEEP_SCHEMA:
+            raise ValueError("self_play_concurrency_sweep has an unsupported schema")
+        raw_modes = value.get("modes")
+        if not isinstance(raw_modes, list):
+            raise ValueError("self_play_concurrency_sweep.modes must be a list")
+        sweep = SelfPlayConcurrencySweep(
+            start_after_generation=_nonnegative_int(
+                value.get("start_after_generation"),
+                "sweep start_after_generation",
+            ),
+            workers=_positive_int(value.get("workers"), "sweep workers"),
+            baseline=_concurrency_mode(value.get("baseline"), "sweep baseline"),
+            modes=tuple(
+                _concurrency_mode(item, f"sweep modes[{index}]")
+                for index, item in enumerate(raw_modes)
+            ),
+            continue_after_sweep=value.get("continue_after_sweep", True),  # type: ignore[arg-type]
+        )
+
+    if sweep.start_after_generation < parent_generation:
+        raise ValueError("self-play concurrency sweep cannot start before the lineage parent")
+    execution = config.execution
+    configured_workers = _positive_int(execution.get("workers"), "effective execution workers")
+    if sweep.workers != configured_workers:
+        raise ValueError(
+            "self-play concurrency sweep may not change worker count: "
+            f"configured={configured_workers}, sweep={sweep.workers}"
+        )
+    configured_contexts = int(
+        execution.get("active_contexts", execution.get("total_active_contexts"))
+    )
+    configured_active = int(
+        execution.get(
+            "active_games_per_worker",
+            max(1, (configured_contexts + configured_workers - 1) // configured_workers),
+        )
+    )
+    if (
+        sweep.baseline.active_games_per_worker != configured_active
+        or sweep.baseline.total_active_contexts != configured_contexts
+    ):
+        raise ValueError(
+            "self-play concurrency sweep baseline must match the effective production execution"
+        )
+    for mode in (sweep.baseline, *sweep.modes):
+        if mode.total_active_contexts > sweep.workers * mode.active_games_per_worker:
+            raise ValueError(
+                f"self-play concurrency mode {mode.label} exceeds worker lane capacity"
+            )
+    return sweep
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -137,6 +300,7 @@ class ContinuousTrainingConfig:
     arena_workload: Mapping[str, object] = field(default_factory=dict)
     arena_reference_gap: int | None = None
     allow_code_rollover: bool = False
+    self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         parent = (
@@ -154,6 +318,11 @@ class ContinuousTrainingConfig:
         object.__setattr__(self, "lineage_id", _component(self.lineage_id, "lineage_id"))
         object.__setattr__(self, "effective_config", config)
         object.__setattr__(self, "arena_config", arena_config)
+        object.__setattr__(
+            self,
+            "self_play_concurrency_sweep",
+            _concurrency_sweep(self.self_play_concurrency_sweep, config, parent.generation),
+        )
         if config.topology != parent.topology:
             raise ValueError("effective_config topology does not match parent checkpoint")
         if config.topology != "torus9":
@@ -245,6 +414,7 @@ class ContinuousTrainingRunnerV2:
         arena_workload: Mapping[str, object] | None = None,
         arena_reference_gap: int | None = None,
         allow_code_rollover: bool | None = None,
+        self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None,
         resolver: ArtifactResolver | None = None,
         arena_runner: ArenaRunnerV2 | None = None,
         lineage_factory: LineageFactory | None = None,
@@ -277,6 +447,7 @@ class ContinuousTrainingRunnerV2:
                 arena_workload={} if arena_workload is None else arena_workload,
                 arena_reference_gap=arena_reference_gap,
                 allow_code_rollover=False if allow_code_rollover is None else allow_code_rollover,
+                self_play_concurrency_sweep=self_play_concurrency_sweep,
             )
         else:
             direct_override = (
@@ -390,6 +561,8 @@ class ContinuousTrainingRunnerV2:
             state["state"] = "RUNNING"
             self._persist_state(state)
 
+        self._initialize_concurrency_sweep(state, current)
+
         self._report_start(original_parent, resolved_config)
         committed: list[ResolvedCheckpointNode] = []
         arenas = self._stored_arenas(state)
@@ -455,23 +628,43 @@ class ContinuousTrainingRunnerV2:
                 return self._result(state, original_parent, current, committed, arenas)
 
             next_generation = current.generation + 1
+            execution_mode = self._next_sweep_mode(state, next_generation)
             state.update(
                 {
                     "state": "RUNNING",
                     "active_generation": next_generation,
                     "active_phase": "generation",
                     "soft_stop_requested": False,
+                    "active_execution_mode": (
+                        execution_mode.to_dict() if execution_mode is not None else None
+                    ),
                 }
             )
             self._persist_state(state)
             previous = current
             try:
-                current = self.train_one(
+                current = self._call_train_one(
                     parent=current,
                     config=resolved_config,
                     output_lineage=output_lineage,
+                    execution_mode=execution_mode,
                 )
             except BaseException as exc:
+                if self._handle_sweep_failure(
+                    state,
+                    generation=next_generation,
+                    execution_mode=execution_mode,
+                    error=exc,
+                ):
+                    state.update(
+                        {
+                            "active_generation": None,
+                            "active_phase": None,
+                            "active_execution_mode": None,
+                        }
+                    )
+                    self._persist_state(state)
+                    continue
                 self._notify_operator(
                     "CRITICAL",
                     f"Generation M{next_generation} failed: {exc.__class__.__name__}.",
@@ -480,15 +673,21 @@ class ContinuousTrainingRunnerV2:
                 raise
             self._validate_child(previous, current, resolved_config, next_generation)
             committed.append(current)
+            self._record_sweep_observation(state, current, execution_mode)
             state.update(
                 {
                     "current_checkpoint": current.ref.to_dict(),
                     "last_committed_generation": current.generation,
                     "active_generation": None,
                     "active_phase": None,
+                    "last_execution_mode": (
+                        execution_mode.to_dict() if execution_mode is not None else None
+                    ),
+                    "active_execution_mode": None,
                 }
             )
             self._persist_state(state)
+            self._write_sweep_report(state)
             next_arena = self._next_arena_generation(original_parent, current.generation)
             self._report(
                 "generation_committed",
@@ -531,12 +730,20 @@ class ContinuousTrainingRunnerV2:
             "arena_reference_gap": self.config.arena_reference_gap,
             "target_generation": self.config.target_generation,
         }
+        if self.config.self_play_concurrency_sweep is not None:
+            continuous["self_play_concurrency_sweep"] = (
+                self.config.self_play_concurrency_sweep.to_dict()
+            )
         if manifest.get("continuous_training") not in (None, continuous):
             previous = manifest.get("continuous_training")
             if isinstance(previous, Mapping):
                 for key in ("parent_checkpoint", "arena_cadence", "arena_reference_gap"):
                     if previous.get(key) != continuous[key]:
                         raise RuntimeError(f"continuous lineage {key} changed during resume")
+                previous_sweep = previous.get("self_play_concurrency_sweep")
+                current_sweep = continuous.get("self_play_concurrency_sweep")
+                if previous_sweep is not None and previous_sweep != current_sweep:
+                    raise RuntimeError("continuous lineage self-play concurrency sweep changed during resume")
         manifest["operator_tunables"] = operator_tunables
         manifest["continuous_training"] = continuous
         _write_object(manifest_path, manifest)
@@ -556,6 +763,9 @@ class ContinuousTrainingRunnerV2:
                 self.config.lineage_id,
             }:
                 raise RuntimeError("continuous state current checkpoint has an unexpected owner")
+            if self.config.self_play_concurrency_sweep is not None and "performance_sweep" not in state:
+                state["performance_sweep"] = self._new_sweep_state()
+                self._persist_state(state)
             return state, current
 
         state: dict[str, object] = {
@@ -579,7 +789,11 @@ class ContinuousTrainingRunnerV2:
             "updated_at": _now(),
             "active_generation": None,
             "active_phase": None,
+            "active_execution_mode": None,
+            "last_execution_mode": None,
         }
+        if self.config.self_play_concurrency_sweep is not None:
+            state["performance_sweep"] = self._new_sweep_state()
         self._persist_state(state)
         return state, parent
 
@@ -597,10 +811,565 @@ class ContinuousTrainingRunnerV2:
         for key, value in expected.items():
             if state.get(key) != value:
                 raise RuntimeError(f"continuous state {key} changed during resume")
+        configured_sweep = self.config.self_play_concurrency_sweep
+        persisted_sweep = state.get("performance_sweep")
+        if configured_sweep is None:
+            if persisted_sweep is not None:
+                raise RuntimeError("continuous state contains an unexpected self-play sweep")
+        elif isinstance(persisted_sweep, Mapping):
+            if persisted_sweep.get("config") != configured_sweep.to_dict():
+                raise RuntimeError("continuous state self-play concurrency sweep changed during resume")
+        elif persisted_sweep is not None:
+            raise RuntimeError("continuous state self-play sweep is malformed")
 
     def _persist_state(self, state: dict[str, object]) -> None:
         state["updated_at"] = _now()
         _write_object(self.state_path, state)
+
+    def _new_sweep_state(self) -> dict[str, object]:
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is None:
+            raise RuntimeError("cannot create a concurrency sweep state without a sweep")
+        return {
+            "schema": f"{CONCURRENCY_SWEEP_SCHEMA}-state-v1",
+            "config": sweep.to_dict(),
+            "status": "RUNNING",
+            "observations": [],
+            "failed_modes": [],
+            "next_mode_index": 0,
+            "retry_baseline_generation": None,
+            "selected_mode": None,
+            "selection_generation": None,
+        }
+
+    def _sweep_state(self, state: Mapping[str, object]) -> dict[str, object] | None:
+        if self.config.self_play_concurrency_sweep is None:
+            return None
+        raw = state.get("performance_sweep")
+        if not isinstance(raw, dict):
+            raise RuntimeError("continuous state is missing its self-play sweep state")
+        if raw.get("config") != self.config.self_play_concurrency_sweep.to_dict():
+            raise RuntimeError("continuous state self-play sweep config drifted")
+        return raw
+
+    def _initialize_concurrency_sweep(
+        self,
+        state: dict[str, object],
+        current: ResolvedCheckpointNode,
+    ) -> None:
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is None:
+            return
+        raw = self._sweep_state(state)
+        if raw is None:
+            return
+        observations = raw.get("observations")
+        if not isinstance(observations, list):
+            raise RuntimeError("continuous state self-play sweep observations are malformed")
+        # Baseline evidence is deliberately bounded to the three most recent
+        # committed generations at the sweep boundary; it never scans replay.
+        anchor = min(current.generation, sweep.start_after_generation)
+        existing = {
+            int(item.get("generation"))
+            for item in observations
+            if isinstance(item, Mapping) and item.get("generation") is not None
+        }
+        for generation in range(anchor, max(-1, anchor - 3), -1):
+            if generation in existing:
+                continue
+            observation = self._load_sweep_observation(
+                generation,
+                sweep.baseline,
+                role="baseline",
+            )
+            if observation is not None:
+                observations.append(observation)
+                existing.add(generation)
+        observations.sort(key=lambda item: int(item.get("generation", -1)))
+        self._refresh_sweep_cycles(observations)
+        self._maybe_select_sweep_mode(raw, current.generation)
+        self._persist_state(state)
+        self._write_sweep_report(state)
+
+    def _next_sweep_mode(
+        self,
+        state: Mapping[str, object],
+        generation: int,
+    ) -> SelfPlayConcurrencyMode | None:
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is None:
+            return None
+        raw = self._sweep_state(state)
+        if raw is None:
+            return None
+        if raw.get("retry_baseline_generation") == generation:
+            return sweep.baseline
+        if generation <= sweep.start_after_generation:
+            return sweep.baseline
+        raw_selected = raw.get("selected_mode")
+        next_index = int(raw.get("next_mode_index", 0))
+        if next_index < len(sweep.modes):
+            return sweep.mode_for_index(next_index)
+        if isinstance(raw_selected, Mapping):
+            return _concurrency_mode(raw_selected, "persisted selected mode")
+        # This is only a short-lived fallback while the report is being
+        # reconstructed after an interrupted sweep.
+        return sweep.baseline
+
+    def _call_train_one(
+        self,
+        *,
+        parent: ResolvedCheckpointNode,
+        config: ResolvedEffectiveConfig,
+        output_lineage: OutputLineage,
+        execution_mode: SelfPlayConcurrencyMode | None,
+    ) -> ResolvedCheckpointNode:
+        if execution_mode is not None and isinstance(self.train_one, ProductionTrainOne):
+            return self.train_one(
+                parent=parent,
+                config=config,
+                output_lineage=output_lineage,
+                execution_overrides={
+                    "active_games_per_worker": execution_mode.active_games_per_worker,
+                    "total_active_contexts": execution_mode.total_active_contexts,
+                },
+            )
+        return self.train_one(
+            parent=parent,
+            config=config,
+            output_lineage=output_lineage,
+        )
+
+    def _handle_sweep_failure(
+        self,
+        state: dict[str, object],
+        *,
+        generation: int,
+        execution_mode: SelfPlayConcurrencyMode | None,
+        error: BaseException,
+    ) -> bool:
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is None or execution_mode is None:
+            return False
+        if execution_mode.label == sweep.baseline.label or not self._recoverable_sweep_failure(error):
+            return False
+        raw = self._sweep_state(state)
+        if raw is None:
+            return False
+        failed_modes = raw.setdefault("failed_modes", [])
+        if not isinstance(failed_modes, list):
+            raise RuntimeError("continuous state self-play sweep failures are malformed")
+        failed_modes[:] = [
+            item
+            for item in failed_modes
+            if not isinstance(item, Mapping) or item.get("label") != execution_mode.label
+        ]
+        failed_modes.append(
+            {
+                "label": execution_mode.label,
+                "generation": generation,
+                "exception": error.__class__.__name__,
+                "message": str(error)[:1000],
+                "recorded_at": _now(),
+            }
+        )
+        labels = [mode.label for mode in sweep.modes]
+        if execution_mode.label in labels:
+            raw["next_mode_index"] = max(
+                int(raw.get("next_mode_index", 0)), labels.index(execution_mode.label) + 1
+            )
+        raw["retry_baseline_generation"] = generation
+        self._maybe_select_sweep_mode(raw, generation)
+        state["performance_sweep"] = raw
+        self._write_sweep_report(state)
+        self._notify_operator(
+            "WARNING",
+            f"Self-play concurrency mode {execution_mode.label} failed at M{generation}; "
+            "retrying the same generation at the stable baseline and continuing the sweep.",
+            key_suffix=f"sweep-failure:{generation}:{execution_mode.label}",
+        )
+        return True
+
+    @staticmethod
+    def _recoverable_sweep_failure(error: BaseException) -> bool:
+        if isinstance(error, (MemoryError, OSError, TimeoutError, ChildProcessError)):
+            return True
+        if not isinstance(error, RuntimeError):
+            return False
+        text = str(error).lower()
+        return any(
+            token in text
+            for token in (
+                "production generation",
+                "supervisor",
+                "out of memory",
+                "oom",
+                "cuda",
+                "technical",
+                "timeout",
+                "timed out",
+                "stopped",
+            )
+        )
+
+    def _summary_path(self, generation: int) -> Path:
+        return self.lineage_root / f"iter-{generation:02d}-summary.json"
+
+    def _request_path(self, generation: int) -> Path:
+        return self.lineage_root / "runtime" / "requests" / f"train-one-{generation:04d}.json"
+
+    @staticmethod
+    def _numeric(value: object, default: float | None = None) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return default
+        return number if math.isfinite(number) else default
+
+    def _load_sweep_observation(
+        self,
+        generation: int,
+        mode: SelfPlayConcurrencyMode,
+        *,
+        role: str,
+    ) -> dict[str, object] | None:
+        summary_path = self._summary_path(generation)
+        if not summary_path.is_file():
+            return None
+        try:
+            summary = _read_object(summary_path, f"generation M{generation} summary")
+        except RuntimeError as exc:
+            self.logger.warning("Cannot read sweep summary for M%s: %s", generation, exc)
+            return None
+        metrics = summary.get("orchestrator_selfplay")
+        if not isinstance(metrics, Mapping):
+            return None
+        inference = metrics.get("inference")
+        inference = inference if isinstance(inference, Mapping) else {}
+        timing = metrics.get("timing")
+        timing = timing if isinstance(timing, Mapping) else {}
+        games = int(metrics.get("games", 0) or 0)
+        moves = int(metrics.get("moves", 0) or 0)
+        wall = self._numeric(metrics.get("selfplay_time_sec"), 0.0) or 0.0
+        games_per_hour = self._numeric(metrics.get("games_per_hour"), 0.0) or 0.0
+        mean_batch = self._numeric(inference.get("mean_batch_rows"), 0.0) or 0.0
+        mcts = int(
+            self.config.effective_config.self_play.get(
+                "mcts_simulations",
+                self.config.effective_config.self_play.get("simulations", 0),
+            )
+            or 0
+        )
+        expected_games = int(
+            self.config.effective_config.self_play.get(
+                "games_per_iteration",
+                self.config.effective_config.self_play.get("games", 0),
+            )
+            or 0
+        )
+        technical = int(metrics.get("technical_games", 0) or 0)
+        invalid = int(metrics.get("invalid_games", 0) or 0)
+        stall_value = None
+        for source in (metrics, timing, inference):
+            for key in ("stall_count", "stalls", "execution_stalls"):
+                if key in source:
+                    stall_value = int(source[key] or 0)
+                    break
+            if stall_value is not None:
+                break
+        reasons: list[str] = []
+        if games != expected_games:
+            reasons.append(f"games={games}, expected={expected_games}")
+        if wall <= 0.0:
+            reasons.append("missing self-play wall time")
+        if technical:
+            reasons.append(f"technical_games={technical}")
+        if invalid:
+            reasons.append(f"invalid_games={invalid}")
+        if stall_value not in (None, 0):
+            reasons.append(f"stalls={stall_value}")
+        request_path = self._request_path(generation)
+        start_epoch = request_path.stat().st_mtime if request_path.is_file() else None
+        observation: dict[str, object] = {
+            "generation": generation,
+            "role": role,
+            "mode": mode.to_dict(),
+            "workers": self.config.self_play_concurrency_sweep.workers  # type: ignore[union-attr]
+            if self.config.self_play_concurrency_sweep is not None
+            else None,
+            "selfplay_wall_time_sec": wall,
+            "cycle_wall_time_sec": None,
+            "games_per_hour": games_per_hour,
+            "mean_game_length": (moves / games if games else 0.0),
+            "mcts_simulations": mcts,
+            "mcts_simulations_per_sec_equivalent": (
+                moves * mcts / wall if wall > 0.0 else 0.0
+            ),
+            "moves_per_sec": self._numeric(metrics.get("moves_per_sec"), 0.0) or 0.0,
+            "mean_inference_batch": mean_batch,
+            "gpu_utilization_percent": self._first_numeric(
+                (metrics, inference, timing),
+                ("gpu_utilization_percent", "gpu_utilization"),
+            ),
+            "gpu_power_w": self._first_numeric(
+                (metrics, inference, timing),
+                ("gpu_power_w", "gpu_power", "power_w"),
+            ),
+            "cpu_utilization_percent": self._first_numeric(
+                (metrics, inference, timing),
+                ("cpu_utilization_percent", "cpu_utilization"),
+            ),
+            "technical_games": technical,
+            "invalid_games": invalid,
+            "stalls": stall_value,
+            "stable": not reasons,
+            "stability_reasons": reasons,
+            "request_path": str(request_path.relative_to(self.lineage_root))
+            if request_path.is_relative_to(self.lineage_root)
+            else str(request_path),
+            "request_start_at": (
+                datetime.fromtimestamp(start_epoch, timezone.utc).isoformat()
+                if start_epoch is not None
+                else None
+            ),
+            "timing": {
+                key: timing[key]
+                for key in (
+                    "restore_previous_state_wall_time_sec",
+                    "self_play_wall_time_sec",
+                    "replay_file_load_wall_time_sec",
+                    "optimizer_wall_time_sec",
+                )
+                if key in timing
+            },
+        }
+        return observation
+
+    @staticmethod
+    def _first_numeric(
+        sources: tuple[Mapping[str, object], ...], keys: tuple[str, ...]
+    ) -> float | None:
+        for source in sources:
+            for key in keys:
+                if key in source:
+                    try:
+                        value = float(source[key])
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(value):
+                        return value
+        return None
+
+    def _refresh_sweep_cycles(self, observations: list[object]) -> None:
+        for item in observations:
+            if not isinstance(item, dict):
+                continue
+            try:
+                generation = int(item["generation"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            start = self._request_path(generation)
+            following = self._request_path(generation + 1)
+            if not start.is_file() or not following.is_file():
+                continue
+            elapsed = following.stat().st_mtime - start.stat().st_mtime
+            if elapsed >= 0.0:
+                item["cycle_wall_time_sec"] = elapsed
+                item["cycle_end_at"] = datetime.fromtimestamp(
+                    following.stat().st_mtime, timezone.utc
+                ).isoformat()
+
+    def _record_sweep_observation(
+        self,
+        state: dict[str, object],
+        current: ResolvedCheckpointNode,
+        execution_mode: SelfPlayConcurrencyMode | None,
+    ) -> None:
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is None or execution_mode is None:
+            return
+        raw = self._sweep_state(state)
+        if raw is None:
+            return
+        role = "baseline" if execution_mode.label == sweep.baseline.label else "sweep"
+        if current.generation > sweep.start_after_generation and role == "baseline":
+            role = "fallback"
+        observation = self._load_sweep_observation(current.generation, execution_mode, role=role)
+        observations = raw.setdefault("observations", [])
+        if not isinstance(observations, list):
+            raise RuntimeError("continuous state self-play sweep observations are malformed")
+        observations[:] = [
+            item
+            for item in observations
+            if not isinstance(item, Mapping) or int(item.get("generation", -1)) != current.generation
+        ]
+        if observation is not None:
+            observations.append(observation)
+        observations.sort(key=lambda item: int(item.get("generation", -1)))
+        if (
+            current.generation > sweep.start_after_generation
+            and execution_mode.label in {mode.label for mode in sweep.modes}
+        ):
+            labels = [mode.label for mode in sweep.modes]
+            index = labels.index(execution_mode.label)
+            raw["next_mode_index"] = max(int(raw.get("next_mode_index", 0)), index + 1)
+        if raw.get("retry_baseline_generation") == current.generation:
+            raw["retry_baseline_generation"] = None
+        self._refresh_sweep_cycles(observations)
+        self._maybe_select_sweep_mode(raw, current.generation)
+        state["performance_sweep"] = raw
+
+    def _maybe_select_sweep_mode(self, raw: dict[str, object], generation: int) -> None:
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is None:
+            return
+        observations = raw.get("observations")
+        failures = raw.get("failed_modes")
+        if not isinstance(observations, list) or not isinstance(failures, list):
+            raise RuntimeError("continuous state self-play sweep records are malformed")
+        candidate_labels = {mode.label for mode in sweep.modes}
+        observed_labels = {
+            item.get("mode", {}).get("label")
+            for item in observations
+            if isinstance(item, Mapping)
+            and isinstance(item.get("mode"), Mapping)
+            and item.get("mode", {}).get("label") in candidate_labels
+        }
+        failed_labels = {
+            item.get("label")
+            for item in failures
+            if isinstance(item, Mapping) and item.get("label") in candidate_labels
+        }
+        if not candidate_labels.issubset(observed_labels | failed_labels):
+            return
+        modes = {sweep.baseline.label: sweep.baseline, **{mode.label: mode for mode in sweep.modes}}
+        stable: list[tuple[float, float, SelfPlayConcurrencyMode]] = []
+        for label, mode in modes.items():
+            if label in failed_labels:
+                continue
+            values = [
+                item
+                for item in observations
+                if isinstance(item, Mapping)
+                and isinstance(item.get("mode"), Mapping)
+                and item["mode"].get("label") == label
+                and item.get("stable") is True
+            ]
+            if not values:
+                continue
+            hours = [float(item.get("games_per_hour", 0.0) or 0.0) for item in values]
+            walls = [float(item.get("selfplay_wall_time_sec", 0.0) or 0.0) for item in values]
+            stable.append((sum(hours) / len(hours), sum(walls) / len(walls), mode))
+        if not stable:
+            selected = sweep.baseline
+        else:
+            selected = max(stable, key=lambda item: (item[0], -item[1]))[2]
+        previous = raw.get("selected_mode")
+        raw["selected_mode"] = selected.to_dict()
+        raw["status"] = "SELECTED"
+        raw["selection_generation"] = generation
+        if previous != raw["selected_mode"]:
+            self._report(
+                "concurrency_sweep_selected",
+                f"Self-play concurrency sweep selected {selected.label} after M{generation}",
+                generation=generation,
+                contexts=selected.total_active_contexts,
+                active_games_per_worker=selected.active_games_per_worker,
+            )
+
+    def _write_sweep_report(self, state: Mapping[str, object]) -> None:
+        sweep = self.config.self_play_concurrency_sweep
+        if sweep is None:
+            return
+        raw = state.get("performance_sweep")
+        if not isinstance(raw, Mapping):
+            return
+        observations = raw.get("observations")
+        observations = observations if isinstance(observations, list) else []
+        baseline_values = [
+            item
+            for item in observations
+            if isinstance(item, Mapping)
+            and isinstance(item.get("mode"), Mapping)
+            and item["mode"].get("label") == sweep.baseline.label
+            and item.get("stable") is True
+        ]
+        baseline_wall = (
+            sum(float(item.get("selfplay_wall_time_sec", 0.0) or 0.0) for item in baseline_values)
+            / len(baseline_values)
+            if baseline_values
+            else None
+        )
+        baseline_hours = (
+            sum(float(item.get("games_per_hour", 0.0) or 0.0) for item in baseline_values)
+            / len(baseline_values)
+            if baseline_values
+            else None
+        )
+        report_observations: list[dict[str, object]] = []
+        for item in observations:
+            if not isinstance(item, Mapping):
+                continue
+            copied = dict(item)
+            wall = self._numeric(copied.get("selfplay_wall_time_sec"))
+            hours = self._numeric(copied.get("games_per_hour"))
+            copied["change_to_baseline_percent"] = (
+                (baseline_wall - wall) / baseline_wall * 100.0
+                if baseline_wall and wall is not None
+                else None
+            )
+            copied["games_per_hour_change_to_baseline_percent"] = (
+                (hours - baseline_hours) / baseline_hours * 100.0
+                if baseline_hours and hours is not None
+                else None
+            )
+            report_observations.append(copied)
+        effective = self.config.effective_config
+        selfplay = effective.self_play
+        training = effective.training
+        execution = effective.execution
+        report = {
+            "schema": f"{CONCURRENCY_SWEEP_SCHEMA}-report-v1",
+            "lineage_id": self.config.lineage_id,
+            "sweep": sweep.to_dict(),
+            "contract": {
+                "games_per_generation": selfplay.get(
+                    "games_per_iteration", selfplay.get("games")
+                ),
+                "mcts_simulations": selfplay.get(
+                    "mcts_simulations", selfplay.get("simulations")
+                ),
+                "inference_batch_cap": execution.get("inference_batch_cap"),
+                "inference_batch_wait_ms": execution.get("inference_batch_wait_ms"),
+                "optimizer": training.get("optimizer"),
+                "learning_rate": training.get("learning_rate"),
+                "optimizer_steps": training.get(
+                    "optimizer_steps", training.get("optimizer_steps_per_iteration")
+                ),
+                "replay_generations": effective.replay.get(
+                    "generations", effective.replay.get("window")
+                ),
+                "replay_cap": effective.replay.get("cap"),
+                "arena_cadence": self.config.arena_cadence,
+                "arena_games": self.config.arena_config.games,
+                "arena_diagnostic_only": True,
+                "arena_gating": False,
+            },
+            "status": raw.get("status", "RUNNING"),
+            "selected_mode": raw.get("selected_mode"),
+            "selection_generation": raw.get("selection_generation"),
+            "baseline_reference": {
+                "observations": len(baseline_values),
+                "mean_selfplay_wall_time_sec": baseline_wall,
+                "mean_games_per_hour": baseline_hours,
+            },
+            "observations": report_observations,
+            "failed_modes": [dict(item) for item in raw.get("failed_modes", []) if isinstance(item, Mapping)],
+        }
+        try:
+            _write_object(self.lineage_root / "metrics" / "self-play-concurrency-sweep-v1.json", report)
+        except (OSError, TypeError, ValueError):
+            self.logger.warning("Could not persist self-play concurrency sweep report", exc_info=True)
 
     def _arena_config_fingerprint(self) -> str:
         return sha256_fingerprint(asdict(self.config.arena_config))
@@ -896,8 +1665,11 @@ class ContinuousTrainingRunnerV2:
 
 
 __all__ = [
+    "CONCURRENCY_SWEEP_SCHEMA",
     "CONTINUOUS_TRAINING_SCHEMA",
     "ContinuousTrainingConfig",
     "ContinuousTrainingResult",
     "ContinuousTrainingRunnerV2",
+    "SelfPlayConcurrencyMode",
+    "SelfPlayConcurrencySweep",
 ]

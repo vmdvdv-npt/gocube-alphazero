@@ -326,7 +326,7 @@ class Torus9RollingReplay(_core.Torus9RollingReplay):
         self,
         *,
         generations: int = TORUS9_ROLLING_GENERATIONS,
-        maximum_positions: int = TORUS9_MAX_REPLAY_POSITIONS,
+        maximum_positions: int | None = TORUS9_MAX_REPLAY_POSITIONS,
     ) -> None:
         super().__init__(generations=generations, maximum_positions=maximum_positions)
         self._generation_identities: dict[int, dict[str, object]] = {}
@@ -343,13 +343,13 @@ class Torus9RollingReplay(_core.Torus9RollingReplay):
         rows: Sequence[Mapping[str, object]],
         *,
         generations: int = TORUS9_ROLLING_GENERATIONS,
-        maximum_positions: int = TORUS9_MAX_REPLAY_POSITIONS,
+        maximum_positions: int | None = TORUS9_MAX_REPLAY_POSITIONS,
         total_evictions: int = 0,
         generation_identities: object = None,
     ) -> "Torus9RollingReplay":
         replay = cls(generations=generations, maximum_positions=maximum_positions)
         copied = [dict(row) for row in rows]
-        if len(copied) > int(maximum_positions):
+        if maximum_positions is not None and len(copied) > int(maximum_positions):
             raise ValueError("Persisted Torus9 replay exceeds the configured cap")
         row_ids = [str(row.get("replay_row_id", "")) for row in copied]
         if any(not row_id for row_id in row_ids) or len(row_ids) != len(set(row_ids)):
@@ -512,7 +512,7 @@ class Torus9RollingReplay(_core.Torus9RollingReplay):
         contract = {
             "selection": TORUS9_REPLAY_SELECTION_CONTRACT,
             "generations": int(self.generations),
-            "maximum_positions": int(self.maximum_positions),
+            "maximum_positions": self.maximum_positions,
         }
         payload = {
             "schema": TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA,
@@ -707,7 +707,7 @@ class Torus9TrainingAdapter:
         if replay is None:
             replay = Torus9RollingReplay(
                 generations=int(self.replay_profile["generations"]),  # type: ignore[index]
-                maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
+                maximum_positions=self.replay_profile["cap"],
             )
         state = TrainingState(
             model=model,
@@ -1072,7 +1072,8 @@ class Torus9TrainingAdapter:
                     semantic_fallback_elapsed += time.perf_counter() - semantic_started
             previous_generation = generation
             row_ids.add(row_id)
-        if len(rows) > int(self.replay_profile["cap"]):  # type: ignore[index]
+        replay_cap = self.replay_profile["cap"]
+        if replay_cap is not None and len(rows) > int(replay_cap):
             raise ValueError("Current Torus9 replay cap exceeded")
         if self._diagnostic_timing is not None:
             total = time.perf_counter() - validation_started
@@ -1182,7 +1183,7 @@ class Torus9TrainingAdapter:
         """
         replay = Torus9RollingReplay(
             generations=int(self.replay_profile["generations"]),  # type: ignore[index]
-            maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
+            maximum_positions=self.replay_profile["cap"],
         )
         replay.total_evictions = int(total_evictions)
         source_digests: list[dict[str, object]] = []
@@ -1467,6 +1468,8 @@ class Torus9TrainingAdapter:
             "input_model_hash": parent.get("model_hash") if isinstance(parent, Mapping) else None,
             "parent_checkpoint_identity": dict(parent) if isinstance(parent, Mapping) else None,
             "replay_generations": list(context.replay_generations),
+            "rolling_generations": int(self.replay_profile["generations"]),
+            "maximum_replay_positions": self.replay_profile["cap"],
             "replay_fingerprint": context.replay_fingerprint,
             "replay_identity_schema": (
                 context.replay_identity.get("schema")
@@ -1508,7 +1511,7 @@ class Torus9TrainingAdapter:
                 "scheduler": None,
                 "model_gating": False,
                 "replay_generations": int(self.replay_profile["generations"]),  # type: ignore[index]
-                "replay_cap": int(self.replay_profile["cap"]),  # type: ignore[index]
+                "replay_cap": self.replay_profile["cap"],
                 "komi": TORUS9_KOMI,
                 "ownership_loss": True,
                 "score_loss": True,
@@ -1761,7 +1764,7 @@ class Torus9TrainingAdapter:
         replay = Torus9RollingReplay.from_persisted_rows(
             rows,
             generations=int(self.replay_profile["generations"]),  # type: ignore[index]
-            maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
+                maximum_positions=self.replay_profile["cap"],
             total_evictions=int(total_evictions),
             generation_identities=generation_identities,
         )
@@ -1828,7 +1831,7 @@ class Torus9TrainingAdapter:
     ) -> Torus9RollingReplay:
         replay = Torus9RollingReplay(
             generations=int(self.replay_profile["generations"]),  # type: ignore[index]
-            maximum_positions=int(self.replay_profile["cap"]),  # type: ignore[index]
+                maximum_positions=self.replay_profile["cap"],
         )
         for generation, path_value in enumerate(fresh_paths, 1):
             is_in_rolling_window = generation > len(fresh_paths) - int(self.replay_profile["generations"])  # type: ignore[arg-type]

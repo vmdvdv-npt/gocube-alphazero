@@ -67,6 +67,49 @@ def test_v2_generation_config_accepts_backfilled_execution_seeds() -> None:
     assert config["training_master_seed"] == 202609131003
 
 
+def test_v2_generation_config_applies_execution_only_concurrency_override() -> None:
+    effective = {
+        "self_play": {"games_per_iteration": 384, "mcts_simulations": 200},
+        "training": {
+            "optimizer_steps_per_iteration": 160,
+            "learning_rate": 0.0001,
+            "optimizer": "Adam",
+            "batch_size": 64,
+        },
+        "replay": {"generations": 2, "cap": None},
+        "execution": {
+            "device": "cuda",
+            "workers": 16,
+            "active_games_per_worker": 4,
+            "active_contexts": 64,
+            "inference_batch_cap": 64,
+            "inference_batch_wait_ms": 1,
+            "coalescing": True,
+            "model_init_seed": 1,
+            "selfplay_master_seed": 2,
+            "training_master_seed": 3,
+        },
+        "extensions": {},
+    }
+    resolved = SimpleNamespace(
+        config=effective,
+        execution_overrides={
+            "active_games_per_worker": 6,
+            "total_active_contexts": 96,
+        },
+    )
+
+    config = base._v2_generation_config(resolved)
+
+    assert config["workers"] == 16
+    assert config["active_games_per_worker"] == 6
+    assert config["total_active_contexts"] == 96
+    assert config["games"] == 384
+    assert config["mcts_simulations"] == 200
+    assert config["replay_generations"] == 2
+    assert config["replay_cap"] is None
+
+
 def test_resume_state_uses_resolved_lineage_without_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

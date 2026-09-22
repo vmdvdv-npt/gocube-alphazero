@@ -56,6 +56,12 @@ def _positive_int(value: object, label: str) -> int:
     return result
 
 
+def _optional_positive_int(value: object, label: str) -> int | None:
+    if value is None:
+        return None
+    return _positive_int(value, label)
+
+
 def _positive_float(value: object, label: str) -> float:
     if isinstance(value, bool):
         raise ValueError(f"{label} must be positive and finite")
@@ -94,7 +100,7 @@ def validate_run_owned_profile(
     _positive_int(self_play.get("mcts_simulations"), "self_play.mcts_simulations")
     _positive_float(training.get("learning_rate"), "training.learning_rate")
     _positive_int(replay.get("generations"), "replay.generations")
-    _positive_int(replay.get("cap"), "replay.cap")
+    _optional_positive_int(replay.get("cap"), "replay.cap")
 
     base = dict(base_profile) if base_profile is not None else _ORIGINAL_PROFILE_LOADER()
     normalized = deepcopy(dict(profile))
@@ -244,7 +250,7 @@ def _run_owned_tunables_from_spec(spec: object) -> dict[str, object]:
     return {
         "learning_rate": float(training["learning_rate"]),
         "replay_generations": int(replay["generations"]),
-        "replay_cap": int(replay["cap"]),
+        "replay_cap": replay["cap"],
         "replay_window": str(replay.get("window", "")),
         "self_play_mcts_simulations": int(self_play["mcts_simulations"]),
         "arena_every_generations": int(arena["every_generations"]),
@@ -321,7 +327,7 @@ def install_telegram_start_notification() -> None:
                 lineage = str(manifest.get("lineage_id") or Path(getattr(paths, "root")).name)
                 lr = float(tunables["learning_rate"])
                 replay_generations = int(tunables["replay_generations"])
-                replay_cap = int(tunables["replay_cap"])
+                replay_cap = tunables["replay_cap"]
                 mcts = int(tunables["self_play_mcts_simulations"])
                 cadence = int(tunables["arena_every_generations"])
                 key = f"training-start:{lineage}:{manifest.get('config_fingerprint', '')}"

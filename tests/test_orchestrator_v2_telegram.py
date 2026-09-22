@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import gocube_golden.orchestrator_v2.production_entrypoint as entrypoint
 
 
@@ -34,6 +36,16 @@ def _continuous_payload() -> dict[str, object]:
         "arena_cadence": 5,
         "arena_config": {"games": 4, "workers": 1, "games_per_worker": 2, "inference_batch_rows": 2},
     }
+
+
+def test_production_entrypoint_rejects_stdin_main(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(entrypoint, "__main__", SimpleNamespace(__file__="<stdin>"))
+
+    with pytest.raises(RuntimeError, match="file-backed entrypoint"):
+        entrypoint.run_continuous_from_config(
+            _continuous_payload(),
+            runs_root=tmp_path / "runs",
+        )
 
 
 def test_production_entrypoint_injects_notifier_and_flushes(monkeypatch, tmp_path: Path) -> None:
