@@ -6,39 +6,29 @@ from pathlib import Path
 import pytest
 
 from alphazero.envs.gocube.integration.catalog import CheckpointCatalog, CheckpointDescriptor
-from alphazero.envs.gocube.integration.golden_generation import (
-    replay_protocol_game,
-    replay_protocol_moves,
-    serialize_golden_result,
-)
+from alphazero.envs.gocube.integration.golden_generation import replay_protocol_game, replay_protocol_moves, serialize_golden_result
 from alphazero.envs.gocube.integration.golden_mapping import GoldenActionMappingError, mapping_for
 from alphazero.envs.gocube.integration.golden_models import GoldenCheckpointLoader
 from alphazero.envs.gocube.integration.service import GoCubeAlphaZeroService, _compatible
 from gocube_golden.state import PASS
 
 
-@pytest.mark.parametrize(
-    ("topology", "size", "point_count"),
-    [("cube", 4, 96), ("torus", 9, 81)],
-)
-def test_golden_protocol_mapping_is_bijective_and_adjacency_exact(topology, size, point_count):
-    mapping = mapping_for(topology, size)
-    assert mapping.point_count == point_count
-    assert len(set(mapping.golden_to_protocol)) == point_count
-    assert len(set(mapping.protocol_to_golden)) == point_count
+def test_golden_protocol_mapping_is_bijective_and_adjacency_exact():
+    mapping = mapping_for("torus", 9)
+    assert mapping.point_count == 81
+    assert len(set(mapping.golden_to_protocol)) == 81
+    assert len(set(mapping.protocol_to_golden)) == 81
     assert mapping.proof()["adjacency_exact"] is True
     assert mapping.golden_action_to_protocol(PASS) == {"type": "pass"}
     assert mapping.protocol_action_to_golden({"type": "pass"}) == PASS
-
-    for index in range(point_count):
+    for index in range(81):
         protocol_index = mapping.golden_point_to_protocol_index(index)
         point_id = mapping.protocol_point_ids[protocol_index]
         assert mapping.protocol_point_id_to_golden_index(point_id) == index
 
 
-@pytest.mark.parametrize(("topology", "size"), [("cube", 4), ("torus", 9)])
-def test_golden_capture_mapping_round_trips_point_ids(topology, size):
-    mapping = mapping_for(topology, size)
+def test_golden_capture_mapping_round_trips_point_ids():
+    mapping = mapping_for("torus", 9)
     captured = (0, mapping.point_count - 1)
     point_ids = mapping.captured_point_ids(captured)
     assert [mapping.protocol_point_id_to_golden_index(item) for item in point_ids] == list(captured)
@@ -52,12 +42,7 @@ def test_golden_protocol_passes_round_trip_through_canonical_terminal_result():
         {"moveNumber": 2, "color": "white", "action": {"type": "pass"}, "captured": []},
     ]
     state, captures = replay_protocol_moves(topology="torus", size=9, moves=moves)
-    game = {
-        "topology": "torus",
-        "size": 9,
-        "moves": moves,
-        "result": serialize_golden_result(state, captures=captures),
-    }
+    game = {"topology": "torus", "size": 9, "moves": moves, "result": serialize_golden_result(state, captures=captures)}
     assert state.is_terminal
     assert captures == (0, 0)
     assert replay_protocol_game(game) == state
@@ -66,27 +51,18 @@ def test_golden_protocol_passes_round_trip_through_canonical_terminal_result():
 def _descriptor(checkpoint_id: str, *, profile_id: str = "gocube-torus9-golden-v3"):
     run_name, iteration = checkpoint_id.rsplit("@", 1)
     return CheckpointDescriptor(
-        checkpoint_id=checkpoint_id,
-        run_name=run_name,
-        iteration=int(iteration),
-        topology="torus",
-        size=9,
-        rule_set="chinese",
-        komi=0.5,
-        terminal_adjudicator="golden-graph-area-v1",
-        path=str(Path("/tmp") / f"{run_name}-{iteration}.pt"),
-        profile_id=profile_id,
-        profile_fingerprint="sha256:" + "1" * 64,
-        architecture_id="GoldenGraphNetV2-Torus9",
-        rules_fingerprint="sha256:" + "2" * 64,
-        observation_fingerprint="sha256:" + "3" * 64,
+        checkpoint_id=checkpoint_id, run_name=run_name, iteration=int(iteration), topology="torus", size=9,
+        rule_set="chinese", komi=0.5, terminal_adjudicator="golden-graph-area-v1",
+        path=str(Path("/tmp") / f"{run_name}-{iteration}.pt"), profile_id=profile_id,
+        profile_fingerprint="sha256:" + "1" * 64, architecture_id="GoldenGraphNetV2-Torus9",
+        rules_fingerprint="sha256:" + "2" * 64, observation_fingerprint="sha256:" + "3" * 64,
         target_fingerprint="sha256:" + "4" * 64,
     )
 
 
 def test_golden_descriptors_require_matching_scientific_identity():
     golden = _descriptor("same-run@17")
-    different_profile = _descriptor("same-run@17", profile_id="gocube-cube4-golden-training-v1")
+    different_profile = _descriptor("same-run@17", profile_id="other-golden-profile")
     assert _compatible(golden, golden)
     assert _compatible(golden, different_profile)
 
@@ -120,18 +96,9 @@ def test_lineage_identity_uses_manifest_status_and_legacy_defaults_active(tmp_pa
     checkpoint.parent.mkdir(parents=True)
     checkpoint.write_bytes(b"checkpoint")
     manifest = checkpoint.parent.parent / "manifest.json"
-    manifest.write_text(
-        json.dumps({"lineage_id": "old-run", "status": "DISCARDED"}),
-        encoding="utf-8",
-    )
-
-    assert CheckpointCatalog._lineage_identity_for_checkpoint(str(checkpoint)) == (
-        "old-run",
-        "DISCARDED",
-    )
-    assert CheckpointCatalog._lineage_identity_for_checkpoint(
-        str(tmp_path / "legacy" / "checkpoints" / "M1.pt")
-    ) == (None, "ACTIVE")
+    manifest.write_text(json.dumps({"lineage_id": "old-run", "status": "DISCARDED"}), encoding="utf-8")
+    assert CheckpointCatalog._lineage_identity_for_checkpoint(str(checkpoint)) == ("old-run", "DISCARDED")
+    assert CheckpointCatalog._lineage_identity_for_checkpoint(str(tmp_path / "legacy" / "checkpoints" / "M1.pt")) == (None, "ACTIVE")
 
 
 def test_golden_integration_modules_have_no_legacy_execution_imports():
@@ -149,10 +116,7 @@ def test_pickle_artifacts_are_unsupported_and_hidden_from_catalog(tmp_path: Path
     assert CheckpointCatalog(str(tmp_path)).get("legacy@0") is None
 
 
-M17_PATH = (
-    Path(__file__).parents[1]
-    / "runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03/checkpoints/M17.pt"
-)
+M17_PATH = Path(__file__).parents[1] / "runs/torus9-golden-v3-active/torus9-golden-v3-20260914-run03/checkpoints/M17.pt"
 
 
 @pytest.mark.skipif(not M17_PATH.is_file(), reason="immutable local M17 artifact is not checked out")
@@ -163,52 +127,32 @@ def test_real_m17_golden_loader_and_protocol_round_trip_are_read_only():
     metadata_before = metadata_path.read_bytes()
     artifact_stat_before = M17_PATH.stat()
     m18_before = tuple(sorted(M17_PATH.parent.glob("M18*")))
-
     catalog = CheckpointCatalog(str(run_root))
     descriptor = catalog.get(checkpoint_id)
     assert descriptor is not None
     assert descriptor.profile_id == "gocube-torus9-golden-v3"
     assert descriptor.komi == 0.5
     assert descriptor.to_api() == {
-        "id": checkpoint_id,
-        "runName": "torus9-golden-v3-20260914-run03",
-        "iteration": 17,
-        "topology": "torus",
-        "size": 9,
-        "ruleSet": "chinese",
-        "komi": 0.5,
-        "terminalAdjudicator": "golden-graph-area-v1",
-        "lineageStatus": "ACTIVE",
+        "id": checkpoint_id, "runName": "torus9-golden-v3-20260914-run03", "iteration": 17,
+        "topology": "torus", "size": 9, "ruleSet": "chinese", "komi": 0.5,
+        "terminalAdjudicator": "golden-graph-area-v1", "lineageStatus": "ACTIVE",
     }
-
     loader = GoldenCheckpointLoader(catalog, device="cpu")
     _, first = loader.load(checkpoint_id)
     _, second = loader.load(checkpoint_id)
     assert first.network is not None
-    assert first is not second  # no cache is configured by default
+    assert first is not second
     assert first.metadata["model_hash"] == json.loads(metadata_before)["model_hash"]
     assert not first.network.training
-
     service = GoCubeAlphaZeroService(str(run_root), catalog=catalog, loader=loader)
-    response = service.generate_game(
-        {
-            "protocolVersion": 1,
-            "blackCheckpointId": checkpoint_id,
-            "whiteCheckpointId": checkpoint_id,
-            "mctsSims": 1,
-        }
-    )
+    response = service.generate_game({"protocolVersion": 1, "blackCheckpointId": checkpoint_id, "whiteCheckpointId": checkpoint_id, "mctsSims": 1})
     game = response["game"]
     assert game["mctsSims"] == 1
     assert game["komi"] == 0.5
     assert len(game["moves"]) > 0
     assert sum(move["action"]["type"] == "pass" for move in game["moves"]) == 2
     assert replay_protocol_game(game).is_terminal
-
     assert metadata_path.read_bytes() == metadata_before
     artifact_stat_after = M17_PATH.stat()
-    assert (artifact_stat_after.st_size, artifact_stat_after.st_mtime_ns) == (
-        artifact_stat_before.st_size,
-        artifact_stat_before.st_mtime_ns,
-    )
+    assert (artifact_stat_after.st_size, artifact_stat_after.st_mtime_ns) == (artifact_stat_before.st_size, artifact_stat_before.st_mtime_ns)
     assert tuple(sorted(M17_PATH.parent.glob("M18*"))) == m18_before

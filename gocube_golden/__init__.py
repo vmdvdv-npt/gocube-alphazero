@@ -3,34 +3,12 @@
 Production execution is deliberately explicit: profile adapters feed the
 shared ``SelfPlayEngine``/``TrainingEngine`` and the standalone Arena engine.
 Retired generic runners are not re-exported from this package.
+
+Cube Stage 1-4 V2 modules stay explicit imports until the production pipeline
+is built; historical Cube4/V1 runtime is intentionally absent from package API.
 """
 
 from .arena_contract import SearchSettings
-from .cube_neural import (
-    CUBE_ACTION_COUNT,
-    GoldenCubeGraphNetV1,
-    GoldenCubeNeuralEvaluator,
-    build_cube_action_mask,
-    build_cube_observation,
-    cube_model_hash,
-)
-from .cube_selfplay import CubeSelfPlayAdapter, run_cube_selfplay_games_shared
-from .cube_topology import CUBE4_TOPOLOGY
-from .cube_training import (
-    CUBE_SELFPLAY_CONTRACT_ID,
-    CUBE_TARGET_CONTRACT_ID,
-    CUBE_TARGET_FINGERPRINT,
-    CubeSelfPlayGameRecord,
-    CubeSelfPlayPosition,
-    CubeSelfPlaySearchContract,
-    CubeTrainingSample,
-    DEFAULT_CUBE_SELFPLAY_CONTRACT,
-    cube_initial_state,
-    cube_state_from_identity,
-    cube_state_identity,
-    run_cube_selfplay_games,
-)
-from .cube_training_adapter import CubeTrainingAdapter, run_cube_training_iteration
 from .execution_reference import (
     LEGION_SELFPLAY_PERFORMANCE_DEGRADED_DELTA_PCT,
     LEGION_TORUS9_SELFPLAY_PERFORMANCE_REFERENCE,

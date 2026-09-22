@@ -50,7 +50,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          from gocube_golden.cube_contract import CUBE_PROFILE_ID, load_profile
           from gocube_golden.torus9_contract import (
               TORUS9_CURRENT_PROFILE_ID,
               TORUS9_KOMI,
@@ -58,8 +57,6 @@ jobs:
           )
           from tools.arena_profiles import available_profiles
 
-          assert CUBE_PROFILE_ID == 'gocube-cube4-golden-training-v1'
-          assert load_profile()['rules']['komi'] == 0.5
           assert TORUS9_CURRENT_PROFILE_ID == 'gocube-torus9-golden-v3'
           assert load_torus9_current_profile()['rules']['komi'] == 0.5
           assert TORUS9_KOMI == 0.5

@@ -33,7 +33,6 @@ from gocube_golden.rules import (
 )
 from gocube_golden.scoring import Ownership, score_terminal
 from gocube_golden.state import BLACK, EMPTY, PASS, WHITE
-from gocube_golden.cube_topology import CUBE4_TOPOLOGY
 
 ORACLE_SEAMS = (
     ("front", "top", "top", "bottom", False),
@@ -148,17 +147,6 @@ def test_cube2_is_all_corner_and_rules_core_is_dynamic():
     action = t.physical_corners[0][0]; moved = apply_action(state, action).after
     assert len(moved.stones) == 24 and moved.stones[action] == BLACK
     assert apply_action(apply_action(moved, PASS).after, PASS).after.is_terminal
-
-
-def test_cube4_parameterized_geometry_matches_stage1_golden_exactly():
-    generated, golden = cube_family_topology(4), CUBE4_TOPOLOGY
-    assert generated.point_ids == golden.point_ids
-    assert generated.adjacency == golden.adjacency
-    assert generated.relation_types == golden.relation_types
-    assert generated.physical_corners == golden.physical_corners
-    assert [(s.face_a, s.edge_a, s.face_b, s.edge_b, s.reversed_index, s.point_pairs) for s in generated.seams] == [(s.face_a, s.edge_a, s.face_b, s.edge_b, s.reversed_index, s.point_pairs) for s in golden.seams]
-    assert tuple(p.corner_distance for p in generated.points) == tuple(p.corner_distance for p in golden.points)
-    assert generated.topology_id != golden.topology_id and generated.fingerprint != golden.fingerprint
 
 
 def test_family_fingerprints_are_stable_and_separate():

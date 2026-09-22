@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -87,10 +88,44 @@ def test_retired_runtime_entrypoints_are_physically_absent():
         "gocube_golden/training.py",
         "gocube_golden/arena.py",
         "gocube_golden/arena_process.py",
+        "gocube_golden/cube_contract.py",
+        "gocube_golden/cube_evaluation.py",
+        "gocube_golden/cube_neural.py",
+        "gocube_golden/cube_selfplay.py",
+        "gocube_golden/cube_topology.py",
+        "gocube_golden/cube_training.py",
+        "gocube_golden/cube_training_adapter.py",
+        "configs/gocube/cube4_golden_training_v1.json",
+        "tools/cube_golden_performance.py",
+        "tools/cube_stage5_cuda_smoke.py",
         "tools/continue_torus9_golden_m1_m100.py",
         "tools/torus9_alpha_score_ab.py",
     ):
         assert not (ROOT / relative).exists(), relative
+
+
+def test_historical_cube_v1_runtime_is_not_package_api():
+    import gocube_golden
+
+    for module_name in (
+        "gocube_golden.cube_contract",
+        "gocube_golden.cube_evaluation",
+        "gocube_golden.cube_neural",
+        "gocube_golden.cube_selfplay",
+        "gocube_golden.cube_topology",
+        "gocube_golden.cube_training",
+        "gocube_golden.cube_training_adapter",
+    ):
+        assert importlib.util.find_spec(module_name) is None, module_name
+    for symbol in (
+        "GoldenCubeGraphNetV1",
+        "GoldenCubeNeuralEvaluator",
+        "CubeSelfPlayAdapter",
+        "CubeTrainingAdapter",
+        "CUBE4_TOPOLOGY",
+    ):
+        assert not hasattr(gocube_golden, symbol), symbol
+    assert not (ROOT / "configs/gocube/cube4_golden_training_v1.json").exists()
 
 
 def test_current_production_tree_has_no_legacy_execution_imports():
@@ -115,6 +150,19 @@ def test_current_production_tree_has_no_legacy_execution_imports():
         "use_old_mcts",
         "use_nnet_wrapper",
         "old_checkpoint_format",
+        "gocube_golden.cube_contract",
+        "gocube_golden.cube_evaluation",
+        "gocube_golden.cube_neural",
+        "gocube_golden.cube_selfplay",
+        "gocube_golden.cube_topology",
+        "gocube_golden.cube_training",
+        "gocube_golden.cube_training_adapter",
+        "GoldenCubeGraphNetV1",
+        "GoldenCubeNeuralEvaluator",
+        "CubeSelfPlayAdapter",
+        "CubeTrainingAdapter",
+        "CUBE4_TOPOLOGY",
+        "gocube-cube4-golden-training-v1",
     )
     for root in roots:
         files = root.rglob("*.py") if root.is_dir() else (root,)
@@ -125,7 +173,6 @@ def test_current_production_tree_has_no_legacy_execution_imports():
 
 def test_current_runtime_contains_no_forbidden_komi_literal():
     paths = (
-        "configs/gocube/cube4_golden_training_v1.json",
         "configs/gocube/torus9_golden_current_v3.json",
         "gocube_golden",
         "alphazero/envs/gocube/integration",
