@@ -77,6 +77,27 @@ def test_train_one_request_contains_only_immutable_refs(tmp_path: Path):
     assert "path" not in payload["effective_config"]
 
 
+def test_train_one_request_carries_only_execution_concurrency_override(tmp_path: Path):
+    parent, _child, config, _parent_ref, _child_ref = _refs(tmp_path)
+    output = OutputLineage("torus9", "child", tmp_path / "lineage")
+
+    payload = production_generation._request_payload(
+        resolver=SimpleNamespace(runs_root=tmp_path / "runs"),
+        parent=parent,
+        config=config,
+        output_lineage=output,
+        execution_overrides={
+            "active_games_per_worker": 6,
+            "total_active_contexts": 96,
+        },
+    )
+
+    assert payload["execution_overrides"] == {
+        "active_games_per_worker": 6,
+        "total_active_contexts": 96,
+    }
+
+
 def test_train_one_runs_one_generation_and_returns_immediate_child(tmp_path: Path, monkeypatch):
     parent, child, config, parent_ref, child_ref = _refs(tmp_path)
     output = OutputLineage("torus9", "child", tmp_path / "lineage")

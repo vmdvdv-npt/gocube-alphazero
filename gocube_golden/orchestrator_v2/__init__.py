@@ -75,8 +75,11 @@ from .experiment_runner import (  # noqa: F401
     WinnerRuleName,
 )
 from .continuous_training import (  # noqa: F401
+    CONCURRENCY_SWEEP_SCHEMA,
     CONTINUOUS_TRAINING_SCHEMA,
     ContinuousTrainingConfig,
     ContinuousTrainingResult,
     ContinuousTrainingRunnerV2,
+    SelfPlayConcurrencyMode,
+    SelfPlayConcurrencySweep,
 )

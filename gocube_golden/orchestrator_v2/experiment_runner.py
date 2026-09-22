@@ -76,6 +76,7 @@ class TrainOne(Protocol):
         parent: ResolvedCheckpointNode,
         config: ResolvedEffectiveConfig,
         output_lineage: OutputLineage,
+        execution_overrides: Mapping[str, object] | None = None,
     ) -> ResolvedCheckpointNode: ...
 
 
