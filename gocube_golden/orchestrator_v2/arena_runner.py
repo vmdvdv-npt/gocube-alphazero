@@ -6,7 +6,7 @@ the common Arena profile registry.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from . import _arena_runner_core as _core
 from .contracts import EvaluationIdentity
@@ -21,6 +21,27 @@ torus9_startset_ref = _core.torus9_startset_ref
 # callers that redirect cross-lineage evaluation storage.  Production keeps
 # the original function, so the core module is not mutated in normal runs.
 evaluation_dir = _core.evaluation_dir
+
+
+def _common_wld_result(result: ArenaRunResult) -> ArenaRunResult:
+    """Expose profile-neutral candidate/reference/draw counts through legacy W/L/D.
+
+    Torus summaries already publish ``W/L/D``.  The common Arena profile API
+    used by Cube publishes the equivalent canonical counters instead.  Keep the
+    scientific summary untouched on disk and add only an in-memory compatibility
+    view for existing Orchestrator reporting/state code.
+    """
+    if "W/L/D" in result.summary:
+        return result
+    summary = dict(result.summary)
+    candidate_wins = summary.get("candidate_wins")
+    reference_wins = summary.get("reference_wins")
+    draws = summary.get("draws")
+    values = (candidate_wins, reference_wins, draws)
+    if not all(type(value) is int and value >= 0 for value in values):
+        return result
+    summary["W/L/D"] = [int(candidate_wins), int(reference_wins), int(draws)]
+    return replace(result, summary=summary)
 
 
 class ArenaRunner(_core.ArenaRunner):
@@ -71,11 +92,11 @@ class ArenaRunner(_core.ArenaRunner):
         # evaluation_dir seam (normally used by tests); production takes the
         # fast path without touching module globals.
         if evaluation_dir is _core.evaluation_dir:
-            return super().run(request)
+            return _common_wld_result(super().run(request))
         original = _core.evaluation_dir
         _core.evaluation_dir = evaluation_dir
         try:
-            return super().run(request)
+            return _common_wld_result(super().run(request))
         finally:
             _core.evaluation_dir = original
 
