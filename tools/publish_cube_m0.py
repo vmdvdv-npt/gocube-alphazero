@@ -11,6 +11,7 @@ import subprocess
 
 import torch
 
+from gocube_golden.cube_game_contract_v2 import validate_cube_size
 from gocube_golden.cube_m0_publisher import publish_cube_m0
 from gocube_golden.provenance import capture_code_identity
 
@@ -26,7 +27,15 @@ def _git(repo_root: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def _preflight(repo_root: Path, runs_root: Path, lineage_id: str, expected_head: str | None) -> None:
+def _preflight(
+    repo_root: Path,
+    runs_root: Path,
+    lineage_id: str,
+    size: int,
+    expected_head: str | None,
+) -> int:
+    validated_size = validate_cube_size(size)
+    topology = f"cube{validated_size}"
     head = _git(repo_root, "rev-parse", "HEAD")
     origin_main = _git(repo_root, "rev-parse", "origin/main")
     expected = expected_head or origin_main
@@ -40,13 +49,16 @@ def _preflight(repo_root: Path, runs_root: Path, lineage_id: str, expected_head:
         raise RuntimeError("production M0 preflight requires CUDA")
     usage = shutil.disk_usage(runs_root.parent if runs_root.parent.exists() else runs_root)
     if usage.free < 10 * 1024**3:
-        raise RuntimeError(f"insufficient free disk space for Cube4 production: {usage.free} bytes")
+        raise RuntimeError(
+            f"insufficient free disk space for Cube{validated_size} production: {usage.free} bytes"
+        )
     for path in (
-        runs_root / "cube4" / "active" / lineage_id,
-        runs_root / "cube4" / "archive" / lineage_id,
+        runs_root / topology / "active" / lineage_id,
+        runs_root / topology / "archive" / lineage_id,
     ):
         if path.exists():
             raise RuntimeError(f"lineage id is already occupied: {path}")
+    return validated_size
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,10 +74,16 @@ def main(argv: list[str] | None = None) -> int:
 
     repo_root = args.repo_root.resolve()
     runs_root = args.runs_root.resolve()
-    _preflight(repo_root, runs_root, args.lineage_id, args.expected_head)
+    size = _preflight(
+        repo_root,
+        runs_root,
+        args.lineage_id,
+        args.size,
+        args.expected_head,
+    )
     config = json.loads(args.config.read_text(encoding="utf-8"))
     publication = publish_cube_m0(
-        size=args.size,
+        size=size,
         lineage_id=args.lineage_id,
         effective_config=config,
         seed=args.seed,

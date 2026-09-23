@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
+import shutil
 import tempfile
 from typing import Mapping
 
@@ -112,6 +114,48 @@ def _write_immutable_json(path: Path, payload: Mapping[str, object]) -> None:
     atomic_write_text(path, content)
 
 
+def _validate_staged_publication(
+    *,
+    staging_runs_root: Path,
+    staging_root: Path,
+    checkpoint_ref: CheckpointRef,
+    config_ref: EffectiveConfigRef,
+    catalog_fingerprint: str,
+) -> CheckpointNode:
+    """Resolve and verify the complete M0 publication before the commit fence."""
+    from .artifact_resolver import ArtifactResolver
+
+    resolved = ArtifactResolver(staging_runs_root).checkpoint(checkpoint_ref)
+    if (
+        not resolved.node.genesis
+        or resolved.node.parent is not None
+        or resolved.node.fresh_replay is not None
+    ):
+        raise RuntimeError("Staged Cube M0 is not a canonical genesis node")
+
+    catalog_path = staging_root / "runtime" / "artifact-catalog.json"
+    catalog = ArtifactCatalog.load(catalog_path, root=staging_root)
+    if catalog.fingerprint != catalog_fingerprint:
+        raise RuntimeError("Staged Cube M0 artifact catalog fingerprint changed")
+    catalog.verify(tuple(catalog.entries))
+
+    manifest_path = staging_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, Mapping):
+        raise RuntimeError("Staged Cube M0 manifest is not an object")
+    if manifest.get("artifact_catalog_fingerprint") != catalog.fingerprint:
+        raise RuntimeError("Staged Cube M0 manifest/catalog fingerprint mismatch")
+    if manifest.get("checkpoint_hashes") != {
+        checkpoint_ref.path: checkpoint_ref.sha256
+    }:
+        raise RuntimeError("Staged Cube M0 manifest/checkpoint identity mismatch")
+    if manifest.get("effective_config") != config_ref.to_dict():
+        raise RuntimeError("Staged Cube M0 manifest/effective-config mismatch")
+    if manifest.get("parent_checkpoint") is not None or manifest.get("genesis") is not True:
+        raise RuntimeError("Staged Cube M0 manifest is not canonical genesis")
+    return resolved.node
+
+
 @dataclass(frozen=True)
 class CubeM0Publication:
     """Published identities returned by :func:`publish_cube_m0`."""
@@ -150,8 +194,6 @@ class CubeM0Publication:
         }
 
     def _model_hash(self) -> str:
-        import json
-
         payload = json.loads(
             (self.root / self.checkpoint_metadata.path).read_text(encoding="utf-8")
         )
@@ -232,7 +274,9 @@ def publish_cube_m0(
     staging_parent = Path(
         tempfile.mkdtemp(prefix=f".{lineage}.m0-publishing-", dir=final_root.parent)
     )
-    staging_root = staging_parent / lineage
+    # Mirror the canonical runs/<topology>/active/<lineage> layout inside the
+    # temporary root so the normal resolver can validate it before commit.
+    staging_root = staging_parent / topology / ACTIVE / lineage
 
     manifest: dict[str, object] = {
         "schema": "gocube-orchestrator-v2-production-lineage-v1",
@@ -391,21 +435,24 @@ def publish_cube_m0(
         manifest["artifact_catalog_fingerprint"] = catalog.fingerprint
         atomic_write_text(staging_root / "manifest.json", canonical_json(manifest) + "\n")
 
+        validated_node = _validate_staged_publication(
+            staging_runs_root=staging_parent,
+            staging_root=staging_root,
+            checkpoint_ref=checkpoint_ref,
+            config_ref=config_ref,
+            catalog_fingerprint=catalog.fingerprint,
+        )
+
         if final_root.exists() or archive_root.exists():
             raise FileExistsError(
                 f"Refusing to publish Cube M0 over a concurrently-created lineage: {lineage}"
             )
+        # Commit fence: everything required to accept M0 has already passed.
         os.rename(staging_root, final_root)
-        staging_parent.rmdir()
         staging_root = final_root
-
-        # Reopen through the canonical resolver after publication.  The
-        # returned node is the identity production Orchestrator will consume.
-        from .artifact_resolver import ArtifactResolver
-
-        resolved = ArtifactResolver(root_base).checkpoint(checkpoint_ref)
-        if not resolved.node.genesis or resolved.node.parent is not None or resolved.node.fresh_replay is not None:
-            raise RuntimeError("Published Cube M0 is not a canonical genesis node")
+        # Cleanup after the fence is best-effort and cannot turn a committed M0
+        # into an API-level publication failure.
+        shutil.rmtree(staging_parent, ignore_errors=True)
         return CubeM0Publication(
             root=final_root,
             lineage_id=lineage,
@@ -416,14 +463,12 @@ def publish_cube_m0(
             checkpoint_metadata=checkpoint_metadata_ref,
             rolling_replay=rolling_ref,
             effective_config=config_ref,
-            node=resolved.node,
+            node=validated_node,
             code_identity=identity,
         )
     except Exception:
         if staging_root != final_root and staging_parent.exists():
-            import shutil
-
-            shutil.rmtree(staging_parent)
+            shutil.rmtree(staging_parent, ignore_errors=True)
         raise
 
 

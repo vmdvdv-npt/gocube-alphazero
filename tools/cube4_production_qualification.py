@@ -113,6 +113,48 @@ def _phase_metric(
     return value if isinstance(value, Mapping) else None
 
 
+def _selfplay_acceptance(result: Mapping[str, object]) -> dict[str, bool]:
+    return {
+        "self_play_games": int(result.get("games", -1)) == GAMES,
+        "self_play_formal_games": int(result.get("formal_games", -1)) == GAMES,
+        "self_play_technical_games": int(result.get("technical_games", -1)) == 0,
+        "self_play_invalid_records": int(result.get("invalid_records", -1)) == 0,
+        "self_play_worker_errors": not bool(result.get("worker_errors")),
+        "self_play_central_inference_fatal": not bool(
+            result.get("central_inference_fatal")
+        ),
+    }
+
+
+def _arena_acceptance(result: Mapping[str, object]) -> dict[str, bool]:
+    requested = int(result.get("games_requested", -1))
+    expected_colors = {
+        "candidate_black": ARENA_GAMES // 2,
+        "candidate_white": ARENA_GAMES // 2,
+    }
+    return {
+        "arena_games_requested": requested == ARENA_GAMES,
+        "arena_games_valid": int(result.get("games_valid", -1)) == requested == ARENA_GAMES,
+        "arena_technical_games": int(result.get("technical_games", -1)) == 0,
+        "arena_invalid_games": int(result.get("invalid_games", -1)) == 0,
+        "paired_colors": result.get("paired_colors") == expected_colors,
+    }
+
+
+def _qualification_acceptance(
+    selfplay: Mapping[str, object], arena: Mapping[str, object]
+) -> dict[str, bool]:
+    checks = {**_selfplay_acceptance(selfplay), **_arena_acceptance(arena)}
+    return {"passed": all(checks.values()), **checks}
+
+
+def _require_acceptance(checks: Mapping[str, bool], label: str) -> None:
+    if all(bool(value) for value in checks.values()):
+        return
+    failed = sorted(key for key, value in checks.items() if not bool(value))
+    raise RuntimeError(f"{label} failed acceptance checks: {', '.join(failed)}")
+
+
 def _run_selfplay(
     *,
     publication,
@@ -132,7 +174,7 @@ def _run_selfplay(
         expected_size=SIZE,
     )
     selected: dict[str, object] | None = None
-    for move_limit in move_limits:
+    for index, move_limit in enumerate(move_limits):
         telemetry: dict[str, object] = {}
         hardware_path = root / f"selfplay-{move_limit}-hardware.jsonl"
         hardware = HardwareTelemetry(hardware_path, interval_s=1.0)
@@ -147,7 +189,7 @@ def _run_selfplay(
 
             records = run_cube_selfplay_games(
                 state.model,
-                tuple(f"qualification-g{index:04d}" for index in range(GAMES)),
+                tuple(f"qualification-g{game_index:04d}" for game_index in range(GAMES)),
                 size=SIZE,
                 run_id="cube4-stage9-qualification",
                 model_checkpoint_label="M0",
@@ -231,20 +273,17 @@ def _run_selfplay(
             "worker_errors": telemetry.get("worker_failures", []),
             "central_inference_fatal": telemetry.get("central_inference_fatal"),
         }
-        if reasons and set(reasons) == {"MOVE_LIMIT"}:
+        retry_move_limit = (
+            reasons
+            and set(reasons) == {"MOVE_LIMIT"}
+            and index < len(move_limits) - 1
+        )
+        if retry_move_limit:
             continue
         break
     if selected is None:
         raise RuntimeError("Cube self-play qualification produced no result")
-    if int(selected["games"]) != GAMES:
-        raise RuntimeError("Cube self-play qualification did not complete 64 games")
-    if selected["worker_errors"] or selected["central_inference_fatal"]:
-        raise RuntimeError("Cube self-play qualification encountered worker/inference errors")
-    if selected["technical_reasons"] and set(selected["technical_reasons"]) != {"MOVE_LIMIT"}:
-        raise RuntimeError(
-            "Cube self-play qualification encountered non-MOVE_LIMIT technical failures: "
-            + repr(selected["technical_reasons"])
-        )
+    _require_acceptance(_selfplay_acceptance(selected), "Cube self-play qualification")
     return selected
 
 
@@ -346,10 +385,8 @@ def run_qualification(*, config_path: Path, output_path: Path | None, temporary_
             move_limits=(600, 1000, 1600),
         )
         arena = _run_arena(publication=publication, root=root, seed=seed + 1)
-        if arena["games_requested"] != ARENA_GAMES or arena["invalid_games"] != 0:
-            raise RuntimeError("Cube Arena qualification failed correctness checks")
-        if arena["paired_colors"] != {"candidate_black": ARENA_GAMES // 2, "candidate_white": ARENA_GAMES // 2}:
-            raise RuntimeError("Cube Arena qualification did not use paired colors")
+        technical_acceptance = _qualification_acceptance(selfplay, arena)
+        _require_acceptance(technical_acceptance, "Cube4 production qualification")
         report = {
             "schema": "gocube-cube4-production-qualification-v1",
             "status": "PASS",
@@ -389,16 +426,7 @@ def run_qualification(*, config_path: Path, output_path: Path | None, temporary_
             },
             "self_play": selfplay,
             "arena": arena,
-            "technical_acceptance": {
-                "self_play_games": selfplay["games"] == GAMES,
-                "self_play_worker_errors": not bool(selfplay["worker_errors"]),
-                "self_play_non_move_limit_errors": not bool(
-                    set(selfplay["technical_reasons"]) - {"MOVE_LIMIT"}
-                ),
-                "arena_invalid_games": arena["invalid_games"] == 0,
-                "arena_technical_games": arena["technical_games"] == 0,
-                "paired_colors": arena["paired_colors"],
-            },
+            "technical_acceptance": technical_acceptance,
         }
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
