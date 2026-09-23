@@ -101,7 +101,7 @@ def _arena_config() -> ArenaExecutionConfig:
         games=2,
         workers=1,
         games_per_worker=2,
-        inference_batch_rows=1,
+        inference_batch_rows=2,
         inference_batch_wait_ms=0.0,
         device="cpu",
         strict_production=False,
