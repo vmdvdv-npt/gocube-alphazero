@@ -253,20 +253,38 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         replay = effective.replay
         self_play = effective.self_play
         training = effective.training
+        execution = effective.execution
+        arena = effective.arena
+        compatibility = effective.compatibility
+        network = compatibility.get("network") or compatibility.get("architecture")
+        if network is None and self.config.topology.startswith("cube"):
+            network = "CubeGraphNetV2 112×10"
+        contexts = execution.get(
+            "total_active_contexts", execution.get("active_contexts", "-")
+        )
+        arena_games = arena.get("games", "-")
+        arena_sims = arena.get("simulations", arena.get("mcts_simulations", "-"))
+        komi = self_play.get("komi", "-")
         message = (
             "Training started — GoCube AlphaZero; "
             f"Topology={self.config.topology}; "
+            f"Network={network or '-'}; "
             f"parent={parent.topology}/{parent.lineage_id}/{parent.checkpoint_id}; "
+            f"parent_sha={parent.ref.sha256}; "
             f"lineage={self.config.lineage_id}; "
             f"LR={training.get('learning_rate', '-')}; "
             f"replay={replay.get('generations', replay.get('window', '-'))} generations / "
             f"{replay.get('cap', '-')} positions; "
             f"self-play MCTS={self_play.get('mcts_simulations', self_play.get('simulations', '-'))} sims; "
             f"games/generation={self_play.get('games_per_iteration', self_play.get('games', '-'))}; "
-            f"Arena cadence=every {self.config.arena_cadence} generations"
+            f"contexts={contexts}; "
+            f"Arena cadence=every {self.config.arena_cadence} generations / "
+            f"{arena_games} games / {arena_sims} sims; "
+            f"Komi={komi}"
         )
         details = {
             "topology": self.config.topology,
+            "network": network,
             "parent": parent.ref.to_dict(),
             "lineage_id": self.config.lineage_id,
             "learning_rate": training.get("learning_rate"),
@@ -278,7 +296,11 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             "games_per_generation": self_play.get(
                 "games_per_iteration", self_play.get("games")
             ),
+            "contexts": contexts,
             "arena_cadence": self.config.arena_cadence,
+            "arena_games": arena_games,
+            "arena_simulations": arena_sims,
+            "komi": komi,
         }
         self._report("started", message, **details)
         self._notify_operator(

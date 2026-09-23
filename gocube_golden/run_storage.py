@@ -411,6 +411,7 @@ def ensure_lineage_layout(
     *,
     manifest: Mapping[str, Any],
     extra_directories: Iterable[str] = (),
+    include_data: bool = True,
 ) -> Path:
     """Ensure a lineage layout, requiring a valid manifest at creation time.
 
@@ -421,7 +422,11 @@ def ensure_lineage_layout(
     """
     path = Path(path)
     validated = _validate_manifest(manifest)
-    directories = ["checkpoints", "data", "logs", "arena", "metrics"]
+    if type(include_data) is not bool:
+        raise ValueError("include_data must be a boolean")
+    directories = ["checkpoints", "logs", "arena", "metrics"]
+    if include_data:
+        directories.insert(1, "data")
     for name in extra_directories:
         safe_name = _safe_component(name, label="lineage directory")
         if safe_name == "manifest.json":
@@ -467,6 +472,7 @@ def create_lineage(
     *,
     manifest: Mapping[str, Any],
     extra_directories: Iterable[str] = (),
+    include_data: bool = True,
 ) -> Path:
     """Create a new active lineage in the canonical location."""
     validated = _validate_manifest(
@@ -479,6 +485,7 @@ def create_lineage(
         active_lineage_dir(topology, lineage_id),
         manifest=validated,
         extra_directories=extra_directories,
+        include_data=include_data,
     )
 
 

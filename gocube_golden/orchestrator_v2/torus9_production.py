@@ -166,6 +166,10 @@ class Torus9ProductionLineage:
                 root,
                 manifest=manifest,
                 extra_directories=("metadata", "runtime", "replay", "selfplay", "training"),
+                # The legacy Torus layout retains its historical ``data``
+                # directory. Cube lineages use only the canonical artifact
+                # directories and never create the deprecated placeholder.
+                include_data=topology == "torus9",
             )
         catalog_path = root / "runtime" / "artifact-catalog.json"
         if not catalog_path.is_file():

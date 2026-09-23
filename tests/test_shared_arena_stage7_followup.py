@@ -218,20 +218,46 @@ def test_one_topology_neutral_cooperative_worker_path() -> None:
     assert "run_cooperative_arena_worker" in torus
 
 
-def test_cube_strict_production_remains_forbidden() -> None:
+def test_cube_strict_production_requires_qualified_execution_preset() -> None:
     profile = CubeV2ArenaProfile(size=2, search_config=_cube_search())
-    with pytest.raises(ValueError, match="no production execution profile"):
+    with pytest.raises(ValueError, match="requires CUDA"):
         profile.validate_execution_config(
             ArenaExecutionConfig(
-                games=4,
+                games=192,
                 workers=1,
-                games_per_worker=4,
-                inference_batch_rows=4,
-                inference_batch_wait_ms=0.0,
+                games_per_worker=12,
+                inference_batch_rows=64,
+                inference_batch_wait_ms=4.0,
                 device="cpu",
                 strict_production=True,
             )
         )
+
+    with pytest.raises(ValueError, match="at least 192 games"):
+        profile.validate_execution_config(
+            ArenaExecutionConfig(
+                games=64,
+                workers=16,
+                games_per_worker=12,
+                inference_batch_rows=64,
+                inference_batch_wait_ms=4.0,
+                device="cuda",
+                strict_production=True,
+            )
+        )
+
+    profile.validate_execution_config(
+        ArenaExecutionConfig(
+            games=64,
+            workers=16,
+            games_per_worker=12,
+            inference_batch_rows=64,
+            inference_batch_wait_ms=4.0,
+            device="cuda",
+            strict_production=True,
+            monitoring_acceptance=True,
+        )
+    )
 
 
 def test_cube_four_games_use_four_real_lanes_and_central_batching(
