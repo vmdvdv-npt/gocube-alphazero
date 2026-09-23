@@ -1,12 +1,9 @@
 """Production one-generation boundary for Orchestrator V2.
 
-This module owns the production-specific process boundary around the already
-strictly one-generation ``GenerationRunner``.  The coordinator supplies a
-resolved parent, a prepared output lineage, and an effective-config artifact;
-the child process receives only immutable references and resolves the full
-objects locally.
+The coordinator supplies resolved immutable references; the worker reopens
+those references and chooses a topology-specific production bridge only at the
+composition boundary.
 """
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -23,7 +20,7 @@ from .artifact_resolver import ArtifactResolver, ResolvedCheckpointNode, Resolve
 from .contracts import CheckpointRef, EffectiveConfigRef
 from .generation_runner import GenerationRunner, OutputLineage, ResolvedGenerationInput
 from .supervisor import SupervisorPolicy, SupervisorV2
-from .torus9_production import Torus9ProductionGenerationPath
+from .topology_binding import get_topology_binding, production_path_for
 
 
 TRAIN_ONE_REQUEST_SCHEMA = "gocube-orchestrator-v2-train-one-request-v1"
@@ -46,16 +43,8 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
 
 
 def _record_post_commit_validation_timing(
-    output_root: Path,
-    generation: int,
-    elapsed: float,
+    output_root: Path, generation: int, elapsed: float
 ) -> None:
-    """Add parent-side commit validation timing to the small result JSON.
-
-    The generation marker and graph are immutable commit evidence.  The
-    runtime result is deliberately separate and may receive this observation
-    after the parent has validated the worker's committed generation.
-    """
     result_path = output_root / "runtime" / "results" / f"generation-{generation:04d}.json"
     if not result_path.is_file():
         return
@@ -79,7 +68,6 @@ def _request_payload(
     output_lineage: OutputLineage,
     execution_overrides: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Build the small immutable-ref request used by the worker process."""
     payload: dict[str, object] = {
         "schema": TRAIN_ONE_REQUEST_SCHEMA,
         "runs_root": str(resolver.runs_root),
@@ -107,8 +95,13 @@ def _validate_child(
     if child.node.parent != parent.ref:
         raise RuntimeError(f"generation M{generation} does not descend from the supplied parent")
     if child.generation != generation:
-        raise RuntimeError(f"generation child has generation {child.generation}, expected {generation}")
-    if child.topology != output_lineage.topology or child.lineage_id != output_lineage.lineage_id:
+        raise RuntimeError(
+            f"generation child has generation {child.generation}, expected {generation}"
+        )
+    if (
+        child.topology != output_lineage.topology
+        or child.lineage_id != output_lineage.lineage_id
+    ):
         raise RuntimeError("generation child is owned by the wrong output lineage")
     if child.effective_config.ref != config.ref:
         raise RuntimeError("generation child uses a different effective config")
@@ -123,7 +116,6 @@ def _reuse_committed_child(
     output_lineage: OutputLineage,
     generation: int,
 ) -> ResolvedCheckpointNode | None:
-    """Reuse only a fully committed generation; partial evidence is retried."""
     marker = output_lineage.root / f"generation-{generation:02d}.complete.json"
     if not marker.is_file():
         return None
@@ -171,8 +163,12 @@ class ProductionTrainOne:
         execution_overrides: Mapping[str, object] | None = None,
         acknowledge_stopped_execution: bool = False,
     ) -> ResolvedCheckpointNode:
-        if output_lineage.topology != "torus9":
-            raise ValueError("production train_one currently supports topology=torus9 only")
+        get_topology_binding(output_lineage.topology)
+        if (
+            parent.ref.topology != output_lineage.topology
+            or config.config.topology != output_lineage.topology
+        ):
+            raise ValueError("production train_one topology identities disagree")
         if type(acknowledge_stopped_execution) is not bool:
             raise TypeError("acknowledge_stopped_execution must be a boolean")
         generation = parent.generation + 1
@@ -204,8 +200,18 @@ class ProductionTrainOne:
                 )
             return reused
 
-        result_path = output_lineage.root / "runtime" / "results" / f"train-one-{generation:04d}.json"
-        request_path = output_lineage.root / "runtime" / "requests" / f"train-one-{generation:04d}.json"
+        result_path = (
+            output_lineage.root
+            / "runtime"
+            / "results"
+            / f"train-one-{generation:04d}.json"
+        )
+        request_path = (
+            output_lineage.root
+            / "runtime"
+            / "requests"
+            / f"train-one-{generation:04d}.json"
+        )
         _write_json(
             request_path,
             _request_payload(
@@ -216,7 +222,12 @@ class ProductionTrainOne:
                 execution_overrides=execution_overrides,
             ),
         )
-        heartbeat_path = output_lineage.root / "runtime" / "heartbeats" / f"generation-{generation:04d}.json"
+        heartbeat_path = (
+            output_lineage.root
+            / "runtime"
+            / "heartbeats"
+            / f"generation-{generation:04d}.json"
+        )
         env = dict(os.environ)
         existing_pythonpath = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = (
@@ -226,7 +237,10 @@ class ProductionTrainOne:
         )
         env["AZ_DRIVER_HEARTBEAT_PATH"] = str(heartbeat_path)
         env["AZ_GENERATION_RESULT_PATH"] = str(
-            output_lineage.root / "runtime" / "results" / f"generation-{generation:04d}.json"
+            output_lineage.root
+            / "runtime"
+            / "results"
+            / f"generation-{generation:04d}.json"
         )
         supervisor = SupervisorV2(
             output_lineage.root,
@@ -250,7 +264,7 @@ class ProductionTrainOne:
             acknowledgement = supervisor.acknowledge_stopped_execution()
             if not acknowledgement.success:
                 raise RuntimeError(
-                    f"could not acknowledge stopped execution: "
+                    "could not acknowledge stopped execution: "
                     f"{acknowledgement.reason or 'unknown reason'}"
                 )
         result = supervisor.run_once()
@@ -260,12 +274,6 @@ class ProductionTrainOne:
                 f"{result.reason or output_lineage.root / 'runtime' / 'supervisor-stop.json'}"
             )
 
-        # The graph/commit boundary is authoritative.  The worker result is
-        # intentionally only a transport hint, never a second recovery record.
-        # The rolling identity was computed while writing the bytes and is
-        # already bound into the marker, provenance, and catalog.  Reuse that
-        # same-transaction evidence here; later reuse/restore paths retain
-        # their normal physical hash verification.
         post_commit_started = time.perf_counter()
         validate_generation_commit(
             root=output_lineage.root,
@@ -295,7 +303,6 @@ class ProductionTrainOne:
 
 
 def run_generation_worker(request_path: str | Path, result_path: str | Path) -> None:
-    """Resolve a ref-only request and execute one production generation."""
     payload = _read_json(Path(request_path).resolve())
     if payload.get("schema") != TRAIN_ONE_REQUEST_SCHEMA:
         raise ValueError("unsupported train_one request schema")
@@ -307,8 +314,11 @@ def run_generation_worker(request_path: str | Path, result_path: str | Path) -> 
         str(raw_lineage["lineage_id"]),
         Path(str(raw_lineage["root"])),
     )
+    get_topology_binding(output.topology)
     resolver = ArtifactResolver(Path(str(payload["runs_root"])).resolve())
-    parent = resolver.checkpoint(CheckpointRef.from_dict(payload["parent_checkpoint"]))  # type: ignore[arg-type]
+    parent = resolver.checkpoint(
+        CheckpointRef.from_dict(payload["parent_checkpoint"])  # type: ignore[arg-type]
+    )
     config = resolver.effective_config(
         EffectiveConfigRef.from_dict(payload["effective_config"]),  # type: ignore[arg-type]
         owner_root=output.root,
@@ -324,9 +334,11 @@ def run_generation_worker(request_path: str | Path, result_path: str | Path) -> 
         generation=parent.generation + 1,
         effective_config=config,
         output_lineage=output,
-        execution_overrides=None if raw_overrides is None else dict(raw_overrides),
+        execution_overrides=(
+            None if raw_overrides is None else dict(raw_overrides)
+        ),
     )
-    result = GenerationRunner(Torus9ProductionGenerationPath()).run(resolved)
+    result = GenerationRunner(production_path_for(output.topology)).run(resolved)
     _write_json(
         Path(result_path).resolve(),
         {
