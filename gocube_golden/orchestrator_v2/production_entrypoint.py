@@ -1,11 +1,4 @@
-"""Explicit production wiring for Orchestrator V2.
-
-The coordinators deliberately accept an injected notifier and never construct
-one themselves.  This module is the production boundary that loads a JSON
-plan, creates the existing fail-open ``TelegramNotifier``, injects it, runs
-the selected V2 coordinator, and flushes queued legacy notifications.
-"""
-
+"""Explicit production wiring for Orchestrator V2."""
 from __future__ import annotations
 
 import argparse
@@ -28,7 +21,6 @@ from tools.arena_engine import DEFAULT_MASTER_SEED
 
 
 def load_v2_config(path: str | Path) -> dict[str, object]:
-    """Load one operator-owned V2 JSON plan without changing its values."""
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -39,7 +31,6 @@ def load_v2_config(path: str | Path) -> dict[str, object]:
 
 
 def _notification_paths(root: Path) -> object:
-    """Adapt an existing V2 root to the path interface of TelegramNotifier."""
     return SimpleNamespace(
         root=root,
         manifest=root / "manifest.json",
@@ -51,15 +42,6 @@ def _notification_paths(root: Path) -> object:
 
 
 def _require_file_backed_entrypoint() -> None:
-    """Reject production runs whose ``spawn`` parent has no importable file.
-
-    Arena workers use ``multiprocessing``'s ``spawn`` context.  A coordinator
-    started with ``python -`` or ``python -c`` gives child processes a
-    synthetic ``<stdin>``/``-`` main path, so every worker dies while trying
-    to reconstruct the parent before the startup barrier.  Fail before any
-    generation or Arena artifact is started and require the normal module or
-    script entrypoint instead.
-    """
     main_file = getattr(__main__, "__file__", None)
     if not isinstance(main_file, str) or main_file in {"", "-", "<stdin>"}:
         raise RuntimeError(
@@ -92,17 +74,23 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
         parent_checkpoint=raw["parent_checkpoint"],  # type: ignore[arg-type]
         lineage_id=str(raw["lineage_id"]),
         effective_config=raw["effective_config"],  # type: ignore[arg-type]
-        generations=None if raw.get("generations") is None else int(raw["generations"]),
+        generations=(
+            None if raw.get("generations") is None else int(raw["generations"])
+        ),
         arena_cadence=int(raw["arena_cadence"]),
         arena_config=raw["arena_config"],  # type: ignore[arg-type]
         arena_master_seed=int(raw.get("arena_master_seed", DEFAULT_MASTER_SEED)),
         arena_startset=raw.get("arena_startset"),  # type: ignore[arg-type]
-        arena_profile=str(raw.get("arena_profile", "torus9")),
+        arena_profile=(
+            None if raw.get("arena_profile") is None else str(raw["arena_profile"])
+        ),
         arena_scientific_contract=raw.get("arena_scientific_contract"),  # type: ignore[arg-type]
         arena_execution_contract=raw.get("arena_execution_contract"),  # type: ignore[arg-type]
         arena_workload=dict(raw.get("arena_workload", {})),  # type: ignore[arg-type]
         arena_reference_gap=(
-            None if raw.get("arena_reference_gap") is None else int(raw["arena_reference_gap"])
+            None
+            if raw.get("arena_reference_gap") is None
+            else int(raw["arena_reference_gap"])
         ),
         allow_code_rollover=raw.get("allow_code_rollover", False),  # type: ignore[arg-type]
         self_play_concurrency_sweep=raw.get("self_play_concurrency_sweep"),  # type: ignore[arg-type]
@@ -123,7 +111,6 @@ def run_continuous_from_config(
     allow_code_rollover: bool | None = None,
     **runner_kwargs: Any,
 ) -> object:
-    """Run a production continuous plan with explicitly injected Telegram."""
     _require_file_backed_entrypoint()
     mark_v2_process()
     config = _continuous_config(payload)
@@ -153,7 +140,6 @@ def run_experiment_from_config(
     allow_code_rollover: bool | None = None,
     **runner_kwargs: Any,
 ) -> object:
-    """Run a production A/B or A/B→C plan with explicitly injected Telegram."""
     _require_file_backed_entrypoint()
     mark_v2_process()
     config = _experiment_config(payload)
@@ -166,7 +152,10 @@ def run_experiment_from_config(
     root = (
         Path(experiment_root).resolve()
         if experiment_root is not None
-        else resolver.runs_root / config.topology / "experiments" / config.experiment_id
+        else resolver.runs_root
+        / config.topology
+        / "experiments"
+        / config.experiment_id
     )
     notifier = TelegramNotifier(_notification_paths(root))
     arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2()
@@ -186,7 +175,9 @@ def run_experiment_from_config(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    telegram = subparsers.add_parser("telegram-test", help="send one explicit transport test")
+    telegram = subparsers.add_parser(
+        "telegram-test", help="send one explicit transport test"
+    )
     telegram.set_defaults(kind="telegram")
     for name in ("continuous", "experiment"):
         command = subparsers.add_parser(name, help=f"run a V2 {name} JSON plan")
