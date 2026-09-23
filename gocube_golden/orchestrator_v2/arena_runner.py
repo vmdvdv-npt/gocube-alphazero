@@ -17,6 +17,11 @@ ArenaRunRequest = _core.ArenaRunRequest
 ArenaRunResult = _core.ArenaRunResult
 torus9_startset_ref = _core.torus9_startset_ref
 
+# Preserve the historical module-level patch seam used by synthetic tests and
+# callers that redirect cross-lineage evaluation storage.  Production keeps
+# the original function, so the core module is not mutated in normal runs.
+evaluation_dir = _core.evaluation_dir
+
 
 class ArenaRunner(_core.ArenaRunner):
     """Run one V2 Arena evaluation with profile-owned scientific semantics."""
@@ -60,6 +65,20 @@ class ArenaRunner(_core.ArenaRunner):
             workload=workload,
         )
 
+    def run(self, request: ArenaRunRequest) -> ArenaRunResult:
+        # `_arena_runner_core` is the unchanged Stage-7 execution/storage
+        # implementation. Only propagate a deliberately overridden public
+        # evaluation_dir seam (normally used by tests); production takes the
+        # fast path without touching module globals.
+        if evaluation_dir is _core.evaluation_dir:
+            return super().run(request)
+        original = _core.evaluation_dir
+        _core.evaluation_dir = evaluation_dir
+        try:
+            return super().run(request)
+        finally:
+            _core.evaluation_dir = original
+
 
 ArenaRunnerV2 = ArenaRunner
 
@@ -70,5 +89,6 @@ __all__ = [
     "ArenaRunResult",
     "ArenaRunner",
     "ArenaRunnerV2",
+    "evaluation_dir",
     "torus9_startset_ref",
 ]

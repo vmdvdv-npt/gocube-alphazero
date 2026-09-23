@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from training_engine import CheckpointContext, value_fingerprint
+from training_engine import CheckpointContext, sequence_fingerprint, value_fingerprint
 from tools.arena_engine import ArenaExecutionConfig
 
 from gocube_golden.artifact_catalog import sha256_file
@@ -145,7 +145,7 @@ def _publish_cube_m0(runs_root: Path, *, size: int = 4) -> CheckpointRef:
         fresh_positions=0,
         replay_positions=0,
         replay_generations=(),
-        replay_fingerprint=value_fingerprint(()),
+        replay_fingerprint=sequence_fingerprint(()),
         sampled_row_ids_fingerprint=value_fingerprint(()),
         completed_games=0,
         parent_checkpoint_identity=None,
@@ -277,31 +277,21 @@ def test_cube_continuous_defaults_are_profile_and_startset_aware():
         )
 
 
-def test_arena_identity_comes_from_selected_cube_profile():
+def test_arena_identity_comes_from_selected_cube_profile(tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    parent_ref = _publish_cube_m0(runs_root, size=4)
+    node = ArtifactResolver(runs_root).checkpoint(parent_ref)
     config = ContinuousTrainingConfig(
-        parent_checkpoint=CheckpointRef(
-            "cube4",
-            "parent",
-            "M0",
-            0,
-            "checkpoints/M0.pt",
-            "sha256:" + "2" * 64,
-        ),
+        parent_checkpoint=parent_ref,
         lineage_id="cube4-identity",
         effective_config=_effective_config(),
         generations=1,
         arena_cadence=1,
         arena_config=_arena_config(),
     )
-    candidate = type("Node", (), {"ref": CheckpointRef(
-        "cube4", "candidate", "M2", 2, "checkpoints/M2.pt", "sha256:" + "3" * 64
-    )})()
-    reference = type("Node", (), {"ref": CheckpointRef(
-        "cube4", "candidate", "M1", 1, "checkpoints/M1.pt", "sha256:" + "4" * 64
-    )})()
     request = ArenaRunRequest(
-        candidate=candidate,
-        reference=reference,
+        candidate=node,
+        reference=node,
         master_seed=123,
         startset=config.arena_startset,
         config=config.arena_config,

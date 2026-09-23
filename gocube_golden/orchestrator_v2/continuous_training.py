@@ -15,6 +15,7 @@ from . import _continuous_training_core as _core
 from .artifact_resolver import ArtifactResolver, ResolvedCheckpointNode, ResolvedEffectiveConfig
 from .contracts import StartsetRef
 from .experiment_runner import LineageFactory, TrainOne
+from .production_generation import ProductionTrainOne
 from .production_lineage import ProductionLineage
 from .topology_binding import get_topology_binding
 from tools.arena_engine import ArenaExecutionConfig, DEFAULT_MASTER_SEED
@@ -208,6 +209,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
                 config = replace(config, allow_code_rollover=allow_code_rollover)
 
         selected_resolver = resolver or ArtifactResolver()
+        selected_train_one = train_one or ProductionTrainOne(resolver=selected_resolver)
         super().__init__(
             config=config,  # type: ignore[arg-type]
             resolver=selected_resolver,
@@ -215,7 +217,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             lineage_factory=(
                 lineage_factory or ProductionLineage(selected_resolver.runs_root)
             ),
-            train_one=train_one,
+            train_one=selected_train_one,
             reporter=reporter,
             notifier=notifier,
             logger=logger,

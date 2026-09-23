@@ -66,7 +66,7 @@ class TopologyBinding:
             from .torus9_production import Torus9ProductionGenerationPath
 
             return Torus9ProductionGenerationPath()
-        from .cube_production import CubeProductionGenerationPath
+        from ..cube_production_orchestrator_v2 import CubeProductionGenerationPath
 
         return CubeProductionGenerationPath(size=int(self.cube_size))
 
