@@ -3,7 +3,7 @@
   "contract_id": "gocube-cube-selfplay-v2",
   "contract_version": 1,
   "fingerprint_algorithm": "sha256-canonical-json-v1",
-  "contract_fingerprint": "sha256:b199bc5b65743f77d5672795e32430e35af6f0ec661c53a37658f57ccce9113b",
+  "contract_fingerprint": "sha256:7b851dd6b5cc22c842c94974c348ab6fea3f3e5436e795ba5e0f2e89c9388220",
   "semantics": {
     "id": "gocube-common-selfplay-semantics-v1",
     "fingerprint": "sha256:8b6d2d127639d8229efdf615e61a7b479af09b98487c721de1d3beac950d9c08"
@@ -23,22 +23,24 @@
   "search": {
     "implementation_id": "golden-sequential-puct-v1",
     "root_noise": "root-only-legal-normalized-dirichlet-v1",
-    "temperature": "root-visits-power-sampling-v1;zero-max-canonical-tie",
+    "temperature": "root-visits-power-sampling-v1;zero=max-canonical-tie",
     "simulations_run_owned": true,
-    "default": {
-      "simulations": 64,
+    "stage5_smoke": {
+      "purpose": "bounded CPU acceptance smoke only; production profile is resolved in Stage 8",
+      "simulations": 1,
       "cpuct": 1.25,
       "fpu": 0.0,
-      "root_noise": true,
+      "root_noise": false,
       "epsilon": 0.25,
       "alpha": 0.11,
       "temperature_plies": [1, 8],
       "temperature_after": 0.0,
       "resign": false,
-      "technical_move_limit": 1920,
+      "technical_move_limit": 32,
       "komi": 0.5
     }
   },
+  "production_profile": "deferred-to-stage8",
   "action_representation": {
     "internal_pass": "PASS",
     "durable_point": "0..P-1",

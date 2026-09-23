@@ -289,8 +289,9 @@ def _validate_replayed_record(record: CubeSelfPlayGameRecord, topology: CubeFami
 
     state = deserialize_cube_state(record.initial_state)
     context = initial_cube_observation_context(state)
-    adapter = CubeSearchAdapter()
     for position, action in zip(record.positions, record.final_action_trace):
+        if state.is_terminal:
+            raise ValueError("Cube replay contains actions after terminal state")
         legal = prepare_legal_actions(state)
         expected_mask = tuple(bool(value) for value in legal.action_mask)
         if position.side_to_move != state.side_to_move.name or position.legal_action_mask != expected_mask:
@@ -302,8 +303,6 @@ def _validate_replayed_record(record: CubeSelfPlayGameRecord, topology: CubeFami
         rules_action = action_index_to_rules_action(action, record.size)
         state = apply_action(state, rules_action).after
         context = advance_cube_observation_context(context, action, state)
-        if state.is_terminal:
-            break
     if record.completion == FORMAL_DOUBLE_PASS:
         if not state.is_terminal or record.final_action_trace[-2:] != (topology.pass_action, topology.pass_action):
             raise ValueError("Cube formal record did not end with DOUBLE_PASS")
@@ -313,6 +312,8 @@ def _validate_replayed_record(record: CubeSelfPlayGameRecord, topology: CubeFami
             raise ValueError("Cube final ownership shape drift")
         if record.black_area is None or record.white_area is None or record.neutral_points is None or record.margin_black is None:
             raise ValueError("Cube formal score fields are incomplete")
+    elif state.is_terminal:
+        raise ValueError("Cube technical record reached formal terminal state")
     elif record.final_ownership or any(value is not None for value in (record.black_area, record.white_area, record.neutral_points, record.margin_black)):
         raise ValueError("Cube technical record must not contain formal score targets")
 

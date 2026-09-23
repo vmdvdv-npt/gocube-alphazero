@@ -30,7 +30,10 @@ CUBE_TARGET_CONTRACT_ID = "gocube-cube-training-targets-v2"
 CUBE_TARGET_CONTRACT_VERSION = 1
 CUBE_SEMANTICS_ID = "gocube-common-selfplay-semantics-v1"
 CUBE_TECHNICAL_RESULT_POLICY = "exclude-from-training-and-formal-statistics"
-CUBE_DEFAULT_TECHNICAL_MOVE_LIMIT = 1920
+# Stage 5 owns only a bounded CPU smoke/reference configuration.  The
+# production scientific profile and watchdog are deliberately Stage-8-owned.
+CUBE_STAGE5_SMOKE_TECHNICAL_MOVE_LIMIT = 32
+CUBE_STAGE5_SMOKE_SIMULATIONS = 1
 CUBE_SELFPLAY_CONTRACT_PATH = Path(__file__).resolve().parents[1] / "configs" / "gocube" / "cube_selfplay_targets_v2.json"
 
 
@@ -107,6 +110,15 @@ def validate_cube_selfplay_contract(payload: Mapping[str, object]) -> Mapping[st
         or required_network.get("wdl") != 3
     ):
         raise ValueError("Cube self-play network identity drift")
+    search = payload.get("search")
+    semantics_identity = cube_selfplay_semantics_identity()
+    if (
+        not isinstance(search, Mapping)
+        or search.get("implementation_id") != semantics_identity["puct_implementation"]
+        or search.get("root_noise") != semantics_identity["root_noise"]
+        or search.get("temperature") != semantics_identity["temperature"]
+    ):
+        raise ValueError("Cube self-play search semantics drift")
     return payload
 
 
@@ -118,19 +130,24 @@ def load_cube_selfplay_contract(path: str | Path = CUBE_SELFPLAY_CONTRACT_PATH) 
 
 @dataclass(frozen=True)
 class CubeSelfPlaySearchContract:
-    """Scientific settings only; process/execution settings are elsewhere."""
+    """Stage-5 smoke settings; production values are resolved by Stage 8.
+
+    These defaults are intentionally cheap and bounded for CPU acceptance
+    tests.  A future production generation driver must pass an explicit
+    resolved contract instead of treating them as a production profile.
+    """
 
     contract_id: str = CUBE_SELFPLAY_CONTRACT_ID
-    simulations: int = 64
+    simulations: int = CUBE_STAGE5_SMOKE_SIMULATIONS
     cpuct: float = 1.25
     fpu: float = 0.0
-    root_noise: bool = True
+    root_noise: bool = False
     dirichlet_epsilon: float = 0.25
     dirichlet_alpha: float = 0.11
     temperature_plies: tuple[int, int] = (1, 8)
     temperature_after: float = 0.0
     resign: bool = False
-    technical_move_limit: int = CUBE_DEFAULT_TECHNICAL_MOVE_LIMIT
+    technical_move_limit: int = CUBE_STAGE5_SMOKE_TECHNICAL_MOVE_LIMIT
     komi: float = 0.5
 
     @property
@@ -231,7 +248,10 @@ class CubeSelfPlaySearchContract:
             raise ValueError("Cube self-play requires komi 0.5")
 
 
-DEFAULT_CUBE_SELFPLAY_CONTRACT = CubeSelfPlaySearchContract()
+STAGE5_SMOKE_CUBE_SELFPLAY_CONTRACT = CubeSelfPlaySearchContract()
+# Keep the existing import surface while making its non-production purpose
+# explicit in the named constant above.
+DEFAULT_CUBE_SELFPLAY_CONTRACT = STAGE5_SMOKE_CUBE_SELFPLAY_CONTRACT
 
 
 def cube_action_index(action: int | str, *, point_count: int | None = None) -> int:
@@ -276,7 +296,6 @@ def project_cube_score(margin_black: object, perspective: object) -> float:
 
 
 __all__ = [
-    "CUBE_DEFAULT_TECHNICAL_MOVE_LIMIT",
     "CUBE_SEMANTICS_ID",
     "CUBE_SELFPLAY_CONTRACT_ID",
     "CUBE_SELFPLAY_SEMANTICS_FINGERPRINT",
@@ -284,6 +303,9 @@ __all__ = [
     "CUBE_TARGET_CONTRACT_ID",
     "CUBE_TARGET_FINGERPRINT",
     "DEFAULT_CUBE_SELFPLAY_CONTRACT",
+    "STAGE5_SMOKE_CUBE_SELFPLAY_CONTRACT",
+    "CUBE_STAGE5_SMOKE_SIMULATIONS",
+    "CUBE_STAGE5_SMOKE_TECHNICAL_MOVE_LIMIT",
     "CubeSelfPlaySearchContract",
     "cube_action_index",
     "cube_selfplay_semantics_identity",

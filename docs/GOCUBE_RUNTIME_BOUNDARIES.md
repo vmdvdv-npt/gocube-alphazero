@@ -31,4 +31,7 @@ cooperative runner, one root-noise helper, one temperature sampler, one
 policy/WDL inference owner, one PUCT implementation, and one process execution
 engine. Common modules do not import a concrete topology. Execution settings
 (`workers`, contexts, batch cap/wait, device, and process start method) are
-not scientific contract fields.
+not scientific contract fields. The machine-readable Cube contract's
+`stage5_smoke` settings are bounded CPU acceptance values only; they are not a
+production scientific profile or an approved watchdog. Stage 8 owns resolving
+the production simulations, search constants, and technical move limit.
