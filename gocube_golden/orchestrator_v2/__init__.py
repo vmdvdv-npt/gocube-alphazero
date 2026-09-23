@@ -26,7 +26,7 @@ from .torus9_production import (  # noqa: F401
     Torus9ProductionLineage,
 )
 from .production_lineage import ProductionLineage  # noqa: F401,E402
-from ..cube_production_orchestrator_v2 import CubeProductionGenerationPath  # noqa: F401,E402
+from .cube_production import CubeProductionGenerationPath  # noqa: F401,E402
 from .topology_binding import (  # noqa: F401,E402
     SUPPORTED_TOPOLOGIES,
     TopologyBinding,
