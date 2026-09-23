@@ -3,7 +3,6 @@
 Profiles define game/topology semantics. They do not own multiprocessing,
 inference brokering, lifecycle, or telemetry; those belong to arena_engine.
 """
-
 from __future__ import annotations
 
 import json
@@ -19,16 +18,24 @@ def _profiles() -> dict[str, ArenaProfile]:
 
 
 def get_profile(profile_id: str) -> ArenaProfile:
+    value = str(profile_id)
+    if value.startswith("cube-v2|"):
+        from tools.arena_profiles.cube_v2 import CubeV2ArenaProfile
+
+        return CubeV2ArenaProfile.from_profile_id(value)
     profiles = _profiles()
     try:
-        return profiles[str(profile_id)]
+        return profiles[value]
     except KeyError as exc:
         raise ValueError(
-            f"Unknown Arena profile {profile_id!r}; available={sorted(profiles)}"
+            f"Unknown Arena profile {profile_id!r}; available={sorted(profiles)}; "
+            "Cube V2 profiles are caller-configured"
         ) from exc
 
 
 def available_profiles() -> tuple[str, ...]:
+    # Dynamic Cube profiles deliberately do not advertise a default scientific
+    # configuration: size/search values are caller-owned.
     return tuple(sorted(_profiles()))
 
 
@@ -45,6 +52,11 @@ def detect_profile(checkpoint_path: Path) -> ArenaProfile:
         if getattr(profile, "matches_metadata")(metadata)
     ]
     if len(matches) != 1:
+        if metadata.get("checkpoint_schema") == "gocube-cube-checkpoint-v2":
+            raise ValueError(
+                "Cube V2 Arena requires explicit caller-owned size/search configuration; "
+                "use the Cube generation/Arena API instead of profile auto-detection"
+            )
         raise ValueError(
             "Could not uniquely auto-detect Arena profile from checkpoint metadata; "
             f"matches={[profile.profile_id for profile in matches]}. "
