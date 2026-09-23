@@ -141,6 +141,7 @@ def _run_selfplay(
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
         started = time.perf_counter()
+        records = ()
         try:
             from gocube_golden.cube_selfplay_v2 import run_cube_selfplay_games
 
@@ -353,6 +354,11 @@ def run_qualification(*, config_path: Path, output_path: Path | None, temporary_
             "schema": "gocube-cube4-production-qualification-v1",
             "status": "PASS",
             "commit": code.git_commit_sha,
+            "source": {
+                "git_commit_sha": code.git_commit_sha,
+                "git_tree_sha": code.git_tree_sha,
+                "working_tree_clean": code.working_tree_clean,
+            },
             "machine": {
                 "hostname": platform.node(),
                 "platform": platform.platform(),
