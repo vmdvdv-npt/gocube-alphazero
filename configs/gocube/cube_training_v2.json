@@ -1,0 +1,43 @@
+{
+  "auxiliary_heads": {
+    "ownership": true,
+    "score": true
+  },
+  "checkpoint_schema": "gocube-cube-checkpoint-v2",
+  "contract_fingerprint": "sha256:27a779f49669baeec5ed3c706ce7b5c38753647fdc38f6825e6105bd17eda09d",
+  "contract_id": "gocube-cube-training-v2",
+  "losses": {
+    "combined": "policy+wdl+ownership+score",
+    "initial_weights": {
+      "ownership": 1,
+      "policy": 1,
+      "score": 1,
+      "wdl": 1
+    },
+    "ownership": "per-point categorical cross-entropy over OWN/OPPONENT/NEUTRAL, then mean",
+    "policy": "mean(-sum(pi*log_softmax(policy_logits)))",
+    "score": "MSE(raw_score_scalar, normalized_score_target)",
+    "wdl": "mean(-sum(one_hot_wdl*log_softmax(wdl_logits)))"
+  },
+  "optimizer_family": "Adam",
+  "replay_schema": "gocube-cube-replay-v2",
+  "required_architecture": {
+    "fingerprint": "sha256:17e5fada8c69bcf9da0c6c8852af13da7af16c7ce73df7ed0153d4ccc9df77e4",
+    "id": "gocube-cube-graphnet-v2"
+  },
+  "run_owned_fields": [
+    "learning_rate",
+    "batch_size",
+    "optimizer_steps",
+    "replay_generations",
+    "replay_cap"
+  ],
+  "schema_version": 2,
+  "scope": "scientific-training-semantics",
+  "score_normalization": "margin_stm/(P+abs(komi))",
+  "target_contract": {
+    "fingerprint": "sha256:e511188deb4e0bd0c0a3a0335e62f5b379680b09a6ac72af6fd8cbd96d43c2c7",
+    "id": "gocube-cube-training-targets-v2"
+  },
+  "weight_decay": 0
+}
