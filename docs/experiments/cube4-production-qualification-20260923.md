@@ -5,8 +5,10 @@
 **PASS.** The bounded qualification used the proposed Cube4 production
 configuration on the Legion RTX 3060 Laptop GPU. It did not create a real
 production lineage: M0, replay, self-play records, and Arena output were
-written below a temporary directory and removed after the run. The repository
-`runs/` directory remained absent.
+written below a temporary directory and removed after the run. No new
+`runs/cube4/active` or `runs/cube4/archive` production lineage was created;
+pre-existing ignored Stage-8 evaluation fixtures under
+`runs/cube4/evaluations` were not used or modified.
 
 Source provenance at qualification start:
 
@@ -84,7 +86,8 @@ execution qualification only; no model-strength gate was applied.
 - Arena completed all requested games with zero technical or invalid games;
 - colors were paired 32/32;
 - the strict Arena execution path reported `HEALTHY` with no warnings;
-- no production M0, checkpoint, replay, or Arena result was left in the repo.
+- no new production M0, checkpoint, replay, or Arena result was left in the
+  repository's active/archive lineage directories.
 
 The real canonical M0 and the subsequent M1/Arena/resume/M2/continuous chain
 remain post-merge operations, guarded by the clean-main preflight in
