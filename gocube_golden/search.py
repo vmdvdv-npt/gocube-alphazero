@@ -7,7 +7,7 @@ import json
 import math
 from numbers import Real
 import random
-from typing import Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .arena_contract import SEARCH_IMPLEMENTATION_ID, SearchSettings
 from .diagnostics import increment
@@ -38,6 +38,46 @@ class SearchError(RuntimeError):
     pass
 
 
+class SearchPosition(Protocol):
+    """Minimal immutable position surface required by the PUCT core.
+
+    Rules and neural history deliberately stay outside this protocol.  A
+    topology adapter may wrap a rules state when the model needs bounded
+    observation history, while the search algorithm continues to operate on
+    the same position/adapter boundary.
+    """
+
+    @property
+    def state_key(self) -> object:
+        ...
+
+    @property
+    def is_terminal(self) -> bool:
+        ...
+
+
+class SearchAdapter(Protocol):
+    """Structural adapter contract consumed by the shared PUCT algorithm."""
+
+    def prepare_legal_actions(self, state: SearchPosition) -> LegalActionContext:
+        ...
+
+    def apply_action(self, state: SearchPosition, action: int | str) -> SearchPosition:
+        ...
+
+    def is_terminal(self, state: SearchPosition) -> bool:
+        ...
+
+    def terminal_utility(self, state: SearchPosition) -> float:
+        ...
+
+    def action_index(self, state: SearchPosition, action: int | str) -> int:
+        ...
+
+    def action_space(self, state: SearchPosition) -> tuple[int | str, ...]:
+        ...
+
+
 @dataclass(frozen=True)
 class Evaluation:
     policy: Mapping[int | str, float] | Sequence[float]
@@ -45,7 +85,7 @@ class Evaluation:
 
 
 class Evaluator(Protocol):
-    def evaluate(self, state: GoldenState) -> Evaluation:
+    def evaluate(self, state: SearchPosition) -> Evaluation:
         ...
 
 
@@ -63,7 +103,7 @@ class _Edge:
 
 @dataclass
 class _Node:
-    state: GoldenState
+    state: SearchPosition
     expanded: bool = False
     edges: dict[int | str, _Edge] = field(default_factory=dict)
     legal_context: LegalActionContext | None = None
@@ -116,8 +156,8 @@ def _validated_policy_weight(value: object, *, label: object) -> float:
 
 def _validated_policy_vector(
     evaluation: Evaluation,
-    state: GoldenState,
-    adapter: GoldenSearchAdapter,
+    state: SearchPosition,
+    adapter: SearchAdapter,
 ) -> dict[int | str, float]:
     """Validate the entire evaluator policy before any legal masking.
 
@@ -158,9 +198,9 @@ def _validated_policy_vector(
 
 def _policy_for_legal(
     evaluation: Evaluation,
-    state: GoldenState,
+    state: SearchPosition,
     legal: tuple[int | str, ...],
-    adapter: GoldenSearchAdapter,
+    adapter: SearchAdapter,
 ) -> dict[int | str, float]:
     full_weights = _validated_policy_vector(evaluation, state, adapter)
     weights = {action: full_weights[action] for action in legal}
@@ -178,11 +218,11 @@ class _PUCTCore:
         self,
         settings: SearchSettings | None = None,
         *,
-        adapter: GoldenSearchAdapter | None = None,
+        adapter: SearchAdapter | None = None,
         trace: list[dict[str, object]] | None = None,
     ) -> None:
         self.settings = settings or SearchSettings()
-        self.adapter = adapter or GoldenSearchAdapter()
+        self.adapter: SearchAdapter = adapter or GoldenSearchAdapter()
         self.trace = trace
         self._evaluator: Evaluator | None = None
         self._evaluator_calls = 0
@@ -228,7 +268,7 @@ class _PUCTCore:
         self._evaluator_calls += 1
         return self._expand(node, evaluation, context)
 
-    def _tie_key(self, state: GoldenState, action: int | str) -> int:
+    def _tie_key(self, state: SearchPosition, action: int | str) -> int:
         return self.adapter.action_index(state, action)
 
     def _select(self, node: _Node) -> tuple[int | str, _Edge]:
@@ -281,7 +321,7 @@ class _PUCTCore:
         utility = self._evaluate_and_expand(leaf)
         return self._backup(path, utility)
 
-    def _finalize(self, state: GoldenState, root: _Node, evaluator_calls: int) -> SearchResult:
+    def _finalize(self, state: SearchPosition, root: _Node, evaluator_calls: int) -> SearchResult:
         if root.legal_context is None:
             raise SearchError("Golden search root has no prepared legal context")
         legal = root.legal_context.actions
@@ -323,7 +363,7 @@ class _PUCTCore:
 
     def search(
         self,
-        state: GoldenState,
+        state: SearchPosition,
         evaluator: Evaluator,
         *,
         seed: int = 0,
@@ -358,7 +398,7 @@ class SearchEvaluationRequest:
     and resume the session with the resulting ``Evaluation``.
     """
 
-    state: GoldenState
+    state: SearchPosition
     legal_context: LegalActionContext
 
 
@@ -373,13 +413,13 @@ class SequentialPUCTSession(_PUCTCore):
 
     def __init__(
         self,
-        state: GoldenState,
+        state: SearchPosition,
         settings: SearchSettings | None = None,
         *,
-        adapter: GoldenSearchAdapter | None = None,
+        adapter: SearchAdapter | None = None,
         seed: int = 0,
         trace: list[dict[str, object]] | None = None,
-        evaluation_transform: Callable[[Evaluation, GoldenState, LegalActionContext], Evaluation] | None = None,
+        evaluation_transform: Callable[[Evaluation, SearchPosition, LegalActionContext], Evaluation] | None = None,
     ) -> None:
         if state.is_terminal:
             raise SearchError("Search cannot be started from a terminal Golden state")
@@ -399,7 +439,7 @@ class SequentialPUCTSession(_PUCTCore):
     def pending(self) -> SearchEvaluationRequest | None:
         return self._pending
 
-    def _run(self, state: GoldenState):
+    def _run(self, state: SearchPosition):
         before = state.state_key
         increment("searches")
         rng = random.Random(self._seed)

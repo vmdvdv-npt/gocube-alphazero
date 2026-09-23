@@ -17,7 +17,9 @@ from .execution_reference import (
 )
 from .provenance import CodeIdentity, capture_code_identity, derive_seed
 from .search import Evaluation
+from .inference import BatchedPolicyWDLInferenceOwner
 from .selfplay_engine import (
+    CooperativeSelfPlayAdapter,
     GameFinished,
     InferenceNeed,
     InferenceClient,
@@ -26,7 +28,9 @@ from .selfplay_engine import (
     SharedMemorySpec,
     SelfPlayEngine,
     SelfPlayEngineConfig,
+    run_cooperative_selfplay,
 )
+from .selfplay_policy import sample_action_from_search_result
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
     TORUS9_CURRENT_BLOCKS,
@@ -164,10 +168,11 @@ class _Torus9CooperativeGame:
                     raise RuntimeError("Torus9 cooperative search returned malformed result")
                 ply = len(self.trace) + 1
                 search_seed = derive_seed(self.game_seed, ply, "search")
-                action = _t9._sample_action(
+                action = sample_action_from_search_result(
                     step,
                     temperature=1.0 if ply <= self.context.contract.temperature_until_ply else self.context.contract.temperature_after,
                     rng=self.rng,
+                    action_index=_t9._action_index,
                 )
                 self.positions.append(_t9.Torus9SelfPlayPosition(
                     ply=ply,
@@ -220,44 +225,24 @@ def _torus9_record_metrics(record: object) -> Mapping[str, object]:
 
 
 class Torus9CentralInferenceOwner:
-    """The only process that owns the Torus9 neural model/device."""
+    """Compatibility shell around the shared policy/WDL inference owner."""
 
     def __init__(self, model: _t9.Torus9GraphNet, *, device: str | torch.device) -> None:
         if model.topology_fingerprint != _t9.TORUS9_TOPOLOGY_FINGERPRINT:
             raise ValueError("Torus9 central inference received the wrong topology model")
         self.model = model
         self.device = torch.device(device)
-        self.model.to(self.device)
-        self.model.eval()
+        self._owner = BatchedPolicyWDLInferenceOwner(
+            model,
+            device=self.device,
+            expected_observation_shape=(6, _t9.TORUS9_POINT_COUNT),
+            expected_policy_size=TORUS9_ACTION_COUNT,
+            wdl_size=3,
+            forward_policy_wdl_logits=lambda batch: model(batch),
+        )
 
     def evaluate_shared_batch(self, observations: Any) -> SharedInferenceResult:
-        """Forward a preassembled staging tensor without queue payload copies."""
-        if tuple(observations.shape[1:]) != (6, _t9.TORUS9_POINT_COUNT):
-            raise ValueError("Torus9 shared observations must have shape [batch,6,81]")
-        h2d_started = time.perf_counter()
-        device_observations = observations.to(self.device, non_blocking=self.device.type == "cuda")
-        h2d_finished = time.perf_counter()
-        forward_started = time.perf_counter()
-        with torch.inference_mode():
-            policy_logits, value_logits = self.model(device_observations)
-            policies = torch.softmax(policy_logits, dim=1)
-            wdls = torch.softmax(value_logits, dim=1)
-        forward_finished = time.perf_counter()
-        if tuple(policies.shape) != (int(observations.shape[0]), TORUS9_ACTION_COUNT):
-            raise ValueError("Torus9 central policy head shape drift")
-        if tuple(wdls.shape) != (int(observations.shape[0]), 3):
-            raise ValueError("Torus9 central WDL head shape drift")
-        outputs = torch.cat((policies, wdls), dim=1)
-        if not bool(torch.isfinite(outputs).all()) or bool((outputs < 0.0).any()):
-            raise ValueError("Torus9 central inference produced invalid probabilities")
-        return SharedInferenceResult(
-            policy=policies,
-            wdl=wdls,
-            h2d_started_at=h2d_started,
-            h2d_finished_at=h2d_finished,
-            forward_started_at=forward_started,
-            forward_finished_at=forward_finished,
-        )
+        return self._owner.evaluate_shared_batch(observations)
 
 def torus9_game_seed(master_seed: int, run_id: str, game_id: str) -> int:
     """Canonical scheduling-independent Torus9 game seed."""
@@ -434,8 +419,11 @@ def run_torus9_selfplay_games(
     if execution_activity is not None:
         execution_activity.update(reference_fields)
     start_method = "spawn" if torch.device(device).type == "cuda" else "fork"
-    engine = SelfPlayEngine(
-        SelfPlayEngineConfig(
+    raw_telemetry: dict[str, object] = {}
+    common_result = run_cooperative_selfplay(
+        ids,
+        adapter=adapter,
+        engine_config=SelfPlayEngineConfig(
             workers=int(workers),
             inference_batch_cap=batch_cap,
             inference_batch_wait_ms=wait_ms,
@@ -446,23 +434,13 @@ def run_torus9_selfplay_games(
             lanes_per_worker=1,
             active_games_per_worker=active_games,
             total_active_contexts=total_active_contexts,
-        )
-    )
-    raw_telemetry: dict[str, object] = {}
-    records = engine.run(
-        ids,
-        worker_play=None,
-        worker_context=adapter.worker_context,
-        infer_batch=None,
-        record_metrics=adapter.record_metrics,
+        ),
         telemetry=raw_telemetry,
         progress_callback=progress_callback,
-        shared_memory=adapter.shared_memory,
-        infer_shared_batch=adapter.infer_shared_batch,
-        worker_game_factory=adapter.worker_game_factory,
         active_games_per_worker=active_games,
         total_active_contexts=total_active_contexts,
     )
+    records = common_result.records
     engine_wall_time = float(raw_telemetry.get("wall_time_sec", 0.0))
     engine_moves = sum(
         len(record.final_action_trace)

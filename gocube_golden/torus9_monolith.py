@@ -42,6 +42,7 @@ from .search import (
     wdl_to_side_to_move_utility,
 )
 from .search_adapter import GoldenSearchAdapter
+from .selfplay_policy import apply_root_dirichlet_noise, sample_action_from_search_result
 from .state import BLACK, EMPTY, PASS, WHITE, GoldenState, Stone, initial_state
 from .topology import TORUS_5X5, TORUS_9X9, TORUS_9X9_TOPOLOGY_ID
 from .torus9_contract import (
@@ -576,29 +577,16 @@ class Torus9RootNoiseEvaluator:
     ) -> Evaluation:
         if state.state_key != self.root_state_key:
             return base
-        legal_indices = [
-            TORUS9_PASS_INDEX if action == PASS else int(action)
-            for action in legal_context.actions
-        ]
-        prior = torch.tensor(
-            [base.policy[index] for index in legal_indices], dtype=torch.float64
-        )
-        total = float(prior.sum())
-        prior = (
-            prior / total
-            if total > 0.0
-            else torch.full_like(prior, 1.0 / len(prior))
-        )
-        noise = torch._standard_gamma(
-            torch.full((len(prior),), self.alpha, dtype=torch.float64),
+        legal_context.assert_compatible(state)
+        policy = apply_root_dirichlet_noise(
+            tuple(float(value) for value in base.policy),
+            legal_context.actions,
+            action_index=_action_index,
+            epsilon=0.25,
+            alpha=self.alpha,
             generator=self.generator,
         )
-        noise /= noise.sum()
-        mixed = 0.75 * prior + 0.25 * noise
-        policy = list(base.policy)
-        for index, value in zip(legal_indices, mixed.tolist()):
-            policy[index] = float(value)
-        return Evaluation(policy=tuple(policy), wdl=base.wdl)
+        return Evaluation(policy=policy, wdl=base.wdl)
 
     def evaluate(self, state: GoldenState) -> Evaluation:
         if self.evaluator is None:
@@ -632,19 +620,12 @@ def graph_diameter(topology: Any) -> int:
 def _sample_action(result: Any, *, temperature: float, rng: random.Random) -> int | str:
     if len(result.root_visits) != TORUS9_ACTION_COUNT or not result.legal_actions:
         raise SearchError("Torus 9×9 search returned malformed root visits")
-    if temperature <= 0.0:
-        maximum = max(result.root_visits[_action_index(action)] for action in result.legal_actions)
-        return min((action for action in result.legal_actions if result.root_visits[_action_index(action)] == maximum), key=_action_index)
-    weights = [float(result.root_visits[_action_index(action)]) ** (1.0 / temperature) for action in result.legal_actions]
-    total = sum(weights)
-    if total <= 0.0 or not math.isfinite(total):
-        return rng.choice(result.legal_actions)
-    threshold = rng.random() * total
-    for action, weight in zip(result.legal_actions, weights):
-        threshold -= weight
-        if threshold <= 0.0:
-            return action
-    return result.legal_actions[-1]
+    return sample_action_from_search_result(
+        result,
+        temperature=temperature,
+        rng=rng,
+        action_index=_action_index,
+    )  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
