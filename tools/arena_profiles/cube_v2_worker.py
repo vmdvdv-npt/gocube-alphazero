@@ -243,7 +243,7 @@ def run_cube_v2_worker(
                     "replenished": bool(records),
                 }
             )
-            state = initial_cube_state(size)
+            state = initial_cube_state(size=size)
             position = CubeSearchPosition(state, initial_cube_observation_context(state))
             trace: list[dict[str, object]] = []
             formal_result: str | None = None
