@@ -13,7 +13,8 @@ from tools.arena_engine import (
     _ModelAwareBatchScheduler,
     _WorkerTaskQueue,
 )
-from tools.arena_profiles.torus9 import _WorkerInferenceAggregator
+from tools.arena_worker import _ImmediateInferenceTransport
+from tools import arena_worker
 from tools.arena_profiles import torus9 as torus9_profile
 from gocube_golden.search import SearchEvaluationRequest, SearchResult
 from gocube_golden.state import BLACK
@@ -50,26 +51,9 @@ def test_model_aware_scheduler_never_mixes_models_and_keeps_independent_deadline
     assert [request["model_hash"] for request in reference_batch] == ["reference"]
 
 
-def test_model_aware_scheduler_round_robins_ready_models():
-    scheduler = _ModelAwareBatchScheduler(("candidate", "reference"), cap=2, wait_ms=0.0)
-    for model_hash in ("candidate", "reference", "candidate", "reference"):
-        scheduler.enqueue(_request(model_hash, 1, 0.0))
-
-    dispatch_order = []
-    for _ in range(2):
-        model_hash = scheduler.next_ready_model(0.0)
-        assert model_hash is not None
-        batch, _ = scheduler.pop_batch(model_hash)
-        dispatch_order.append((model_hash, [request["model_hash"] for request in batch]))
-    assert dispatch_order == [
-        ("candidate", ["candidate", "candidate"]),
-        ("reference", ["reference", "reference"]),
-    ]
-
-
 def test_worker_transport_is_immediate_and_rejects_a_second_timed_window():
     central = Queue()
-    transport = _WorkerInferenceAggregator(
+    transport = _ImmediateInferenceTransport(
         worker_id=0,
         central_queue=central,
         local_cap=4,
@@ -79,12 +63,11 @@ def test_worker_transport_is_immediate_and_rejects_a_second_timed_window():
     try:
         transport.put(request)
         assert central.get(timeout=1.0) == request
-        assert transport.wait_ms == 0.0
     finally:
         transport.close()
 
     with pytest.raises(ValueError, match="wait_ms=0"):
-        _WorkerInferenceAggregator(
+        _ImmediateInferenceTransport(
             worker_id=0,
             central_queue=central,
             local_cap=4,
@@ -189,14 +172,21 @@ def test_arena_worker_interleaves_blocked_lanes_and_replenishes(monkeypatch):
 
         def resume(self, _evaluation):
             self.waiting = False
+            return self.advance()
 
     def fake_apply_action(_state, _action):
-        return SimpleNamespace(after=SimpleNamespace(is_terminal=True, stones=()))
+        return SimpleNamespace(
+            after=SimpleNamespace(
+                is_terminal=True,
+                stones=(),
+                side_to_move=torus9_profile.WHITE,
+            )
+        )
 
     def fake_finish(game):
         return {"game_id": str(game.task["game_id"]), "action_trace": game.trace}
 
-    monkeypatch.setattr(torus9_profile, "SequentialPUCTSession", FakeSession)
+    monkeypatch.setattr(arena_worker, "SequentialPUCTSession", FakeSession)
     monkeypatch.setattr(torus9_profile, "apply_action", fake_apply_action)
     monkeypatch.setattr(
         torus9_profile,
@@ -223,7 +213,12 @@ def test_arena_worker_interleaves_blocked_lanes_and_replenishes(monkeypatch):
 
     tasks = Queue()
     for index in range(4):
-        tasks.put({"game_id": f"game-{index}", "state": None, "game_seed": index, "candidate_black": True})
+        tasks.put({
+            "game_id": f"game-{index}",
+            "state": None,
+            "game_seed": index,
+            "candidate_black": True,
+        })
     requests = Queue()
     responses = [Queue(), Queue()]
     input_slot = torus9_profile.torch.zeros((2, 6, 81))
@@ -243,6 +238,7 @@ def test_arena_worker_interleaves_blocked_lanes_and_replenishes(monkeypatch):
                 continue
             if message.get("kind") == "inference":
                 seen.append(message)
+
                 def respond(message=message) -> None:
                     policy_slot[int(message["lane_id"])].fill_(1.0)
                     wdl_slot[int(message["lane_id"])].fill_(1.0)

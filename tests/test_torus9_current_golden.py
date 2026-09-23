@@ -13,6 +13,7 @@ from gocube_golden.search import (
     SequentialPUCT,
     SequentialPUCTSession,
 )
+from gocube_golden.torus9 import build_torus9_observation
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_DIRICHLET_ALPHA,
     TORUS9_CURRENT_PROFILE_ID,
@@ -126,7 +127,7 @@ def test_cooperative_session_is_parity_locked_to_sequential_puct():
 def test_arena_remote_evaluator_fails_closed_on_lane_identity_mismatch():
     from queue import Queue
 
-    from tools.arena_profiles.torus9 import _RemoteEvaluator
+    from tools.arena_worker import _RemoteEvaluator
 
     state = g.initial_state(topology=g.TORUS_9X9, komi=0.5)
     context = g.prepare_legal_actions(state)
@@ -135,15 +136,19 @@ def test_arena_remote_evaluator_fails_closed_on_lane_identity_mismatch():
     evaluator = _RemoteEvaluator(
         worker_id=3,
         model_role="candidate",
-        model_hash_value="candidate-hash",
+        model_hash="candidate-hash",
         lane_id=1,
         input_slot=torch.zeros((2, 6, 81)),
         policy_slot=torch.zeros((2, 82)),
         wdl_slot=torch.zeros((2, 3)),
         request_queue=requests,
         response_queue=responses,
+        build_observation=lambda position, legal_context: build_torus9_observation(
+            position,
+            legal_context=legal_context,
+        ),
     )
-    evaluator.submit_prepared(
+    evaluator.submit(
         state,
         context,
         generation=7,
@@ -161,7 +166,7 @@ def test_arena_remote_evaluator_fails_closed_on_lane_identity_mismatch():
             "error": None,
         }
     )
-    with pytest.raises(RuntimeError, match="lane identity mismatch"):
+    with pytest.raises(RuntimeError, match="lane_id mismatch"):
         evaluator.poll()
 
 

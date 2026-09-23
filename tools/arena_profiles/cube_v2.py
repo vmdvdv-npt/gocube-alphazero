@@ -25,6 +25,7 @@ from gocube_golden.cube_network_v2 import (
 from gocube_golden.cube_observation_v2 import CHANNEL_COUNT, concrete_observation_identity
 from gocube_golden.provenance import derive_seed
 from tools.arena_engine import ArenaExecutionConfig, CheckpointIdentity
+from tools.arena_inference import infer_policy_wdl_batch
 
 
 def _same_sha(actual: str, expected: str) -> bool:
@@ -272,21 +273,31 @@ class CubeV2ArenaProfile:
             start_event=start_event,
         )
 
+    @staticmethod
+    def forward_policy_wdl_logits(
+        model: torch.nn.Module,
+        batch: torch.Tensor,
+    ) -> object:
+        return model.infer_policy_wdl(batch)
+
     def infer_batch(
         self,
         model: torch.nn.Module,
         cpu_batch: torch.Tensor,
         device: torch.device,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        device_batch = cpu_batch.to(device, non_blocking=device.type == "cuda")
-        with torch.inference_mode():
-            output = model.infer_policy_wdl(device_batch)
-            policy = torch.softmax(output.policy_logits, dim=1).to("cpu")
-            wdl = torch.softmax(output.wdl_logits, dim=1).to("cpu")
-        if device.type == "cuda":
-            torch.cuda.synchronize(device)
-        self.last_infer_timing = {}
-        return policy, wdl
+        inferred = infer_policy_wdl_batch(
+            model,
+            cpu_batch,
+            device,
+            observation_shape=self.observation_shape,
+            policy_size=self.policy_size,
+            wdl_size=self.wdl_size,
+            forward_key=self.profile_id,
+            forward_policy_wdl_logits=self.forward_policy_wdl_logits,
+        )
+        self.last_infer_timing = inferred.timing
+        return inferred.policy, inferred.wdl
 
     def summarize(
         self,
