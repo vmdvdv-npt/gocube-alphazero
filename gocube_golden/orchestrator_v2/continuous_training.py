@@ -12,6 +12,7 @@ import logging
 
 from ..artifact_graph import CheckpointRef, EffectiveConfig
 from . import _continuous_training_core as _core
+from .arena_runner import ArenaRunnerV2
 from .artifact_resolver import ArtifactResolver, ResolvedCheckpointNode, ResolvedEffectiveConfig
 from .contracts import StartsetRef
 from .experiment_runner import LineageFactory, TrainOne
@@ -288,6 +289,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
 
 
 __all__ = [
+    "ArenaRunnerV2",
     "CONCURRENCY_SWEEP_SCHEMA",
     "CONTINUOUS_TRAINING_SCHEMA",
     "ContinuousTrainingConfig",

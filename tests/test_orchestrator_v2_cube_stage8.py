@@ -31,6 +31,10 @@ from gocube_golden.orchestrator_v2 import (
     ProductionLineage,
     get_topology_binding,
 )
+from gocube_golden.orchestrator_v2.version import (
+    ORCHESTRATOR_VERSION,
+    ORCHESTRATOR_VERSION_ENV,
+)
 import gocube_golden.orchestrator_v2.arena_runner as arena_runner_module
 import gocube_golden.orchestrator_v2.continuous_training as continuous_module
 
@@ -317,7 +321,10 @@ def test_common_lifecycle_has_no_cube_scientific_imports_or_torus_arena_default(
     assert "get_profile(request.profile)" in arena_source
 
 
-def test_cube4_real_orchestrated_m0_to_m2_smoke(tmp_path: Path):
+def test_cube4_real_orchestrated_m0_to_m2_smoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv(ORCHESTRATOR_VERSION_ENV, ORCHESTRATOR_VERSION)
     runs_root = tmp_path / "runs"
     parent_ref = _publish_cube_m0(runs_root, size=4)
     resolver = ArtifactResolver(runs_root)
