@@ -8,7 +8,7 @@ from typing import Any, Mapping, Sequence
 import torch
 
 from gocube_golden.cube_arena_contract_v2 import CubeArenaSearchConfig
-from gocube_golden.cube_checkpoint_v2 import file_sha256
+from gocube_golden.cube_checkpoint_v2 import CHECKPOINT_SCHEMA, file_sha256
 from gocube_golden.cube_family import cube_family_topology, initial_cube_state
 from gocube_golden.cube_game_contract_v2 import (
     concrete_game_fingerprint,
@@ -23,7 +23,6 @@ from gocube_golden.cube_network_v2 import (
     validate_cube_model_metadata,
 )
 from gocube_golden.cube_observation_v2 import CHANNEL_COUNT, concrete_observation_identity
-from gocube_golden.cube_training_contract_v2 import CHECKPOINT_SCHEMA
 from gocube_golden.provenance import derive_seed
 from tools.arena_engine import ArenaExecutionConfig, CheckpointIdentity
 
@@ -78,7 +77,7 @@ class CubeV2ArenaProfile:
         self.size = topology.size
         self.topology = topology
         self.search_config = search_config
-        state = initial_cube_state(self.size)
+        state = initial_cube_state(size=self.size)
         self.expected_game_fingerprint = concrete_game_fingerprint(
             concrete_game_identity(
                 load_contract(),
