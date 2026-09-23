@@ -22,6 +22,7 @@ from .execution_reference import (
 )
 from .neural import GoldenGraphNetV1, build_observation, model_hash
 from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
+from .cube_m0_publisher import CubeM0Publisher, CubeM0Publication, publish_cube_m0
 from .result import Winner
 from .rules import (
     IllegalMoveError,

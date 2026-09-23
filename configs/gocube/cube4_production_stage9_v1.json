@@ -1,0 +1,73 @@
+{
+  "schema": "gocube-effective-config-v2",
+  "version": 2,
+  "topology": "cube4",
+  "compatibility": {
+    "family": "cube-v2",
+    "size": 4,
+    "topology": "cube4",
+    "architecture_id": "CubeGraphNetV2",
+    "network": "CubeGraphNetV2 112×10"
+  },
+  "self_play": {
+    "games_per_iteration": 64,
+    "mcts_simulations": 64,
+    "cpuct": 1.25,
+    "fpu": 0.0,
+    "root_noise": true,
+    "dirichlet_epsilon": 0.25,
+    "dirichlet_alpha": 0.11,
+    "temperature_plies": [1, 8],
+    "temperature_after": 0.0,
+    "resign": false,
+    "technical_move_limit": 600,
+    "komi": 0.5,
+    "master_seed": 2026092301
+  },
+  "training": {
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "optimizer_steps": 80,
+    "weight_decay": 0.0,
+    "ownership_loss": true,
+    "score_loss": true,
+    "model_gating": false
+  },
+  "replay": {
+    "generations": 3,
+    "cap": 20000,
+    "sampling": "deterministic"
+  },
+  "execution": {
+    "workers": 16,
+    "active_games_per_worker": 4,
+    "total_active_contexts": 64,
+    "inference_batch_cap": 64,
+    "inference_batch_wait_ms": 1.0,
+    "device": "cuda",
+    "process_start_method": "spawn"
+  },
+  "arena": {
+    "games": 192,
+    "simulations": 64,
+    "cpuct": 1.25,
+    "fpu": 0.0,
+    "watchdog": 1200,
+    "reference_gap": 5,
+    "workers": 16,
+    "games_per_worker": 12,
+    "inference_batch_rows": 64,
+    "inference_batch_wait_ms": 4.0,
+    "device": "cuda",
+    "strict_production": true,
+    "monitoring_acceptance": false
+  },
+  "supervision": {
+    "model_gating": false
+  },
+  "extensions": {
+    "master_seed": 2026092301,
+    "qualification": "cube4-stage9-production"
+  }
+}

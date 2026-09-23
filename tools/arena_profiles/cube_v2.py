@@ -28,6 +28,16 @@ from tools.arena_engine import ArenaExecutionConfig, CheckpointIdentity
 from tools.arena_inference import infer_policy_wdl_batch
 
 
+# This is the execution preset qualified for the first Cube4 production run.
+# It is intentionally kept in the shared Cube family adapter so Cube2..Cube7
+# receive the same operational admission rules without importing Torus code.
+PRODUCTION_WORKERS = 16
+PRODUCTION_GAMES = 192
+PRODUCTION_GAMES_PER_WORKER = 12
+PRODUCTION_INFERENCE_BATCH_ROWS = 64
+PRODUCTION_INFERENCE_BATCH_WAIT_MS = 4.0
+
+
 def _same_sha(actual: str, expected: str) -> bool:
     return str(actual).removeprefix("sha256:") == str(expected).removeprefix("sha256:")
 
@@ -105,10 +115,31 @@ class CubeV2ArenaProfile:
 
     def validate_execution_config(self, config: ArenaExecutionConfig) -> None:
         config.validate_base()
-        if config.strict_production:
+        if not config.strict_production:
+            return
+        if type(config.monitoring_acceptance) is not bool:
+            raise ValueError("Cube Arena monitoring_acceptance must be boolean")
+        if torch.device(config.device).type != "cuda":
+            raise ValueError("Production Cube Arena requires CUDA central inference")
+        if config.workers != PRODUCTION_WORKERS:
             raise ValueError(
-                "Cube V2 Stage-7 Arena has no production execution profile; "
-                "use explicit non-production execution settings"
+                "Production Cube Arena requires the qualified 16-worker preset"
+            )
+        if not config.monitoring_acceptance and config.games < PRODUCTION_GAMES:
+            raise ValueError(
+                f"Production Cube Arena requires at least {PRODUCTION_GAMES} games"
+            )
+        if config.games_per_worker != PRODUCTION_GAMES_PER_WORKER:
+            raise ValueError(
+                "Production Cube Arena requires the qualified 12-games-per-worker preset"
+            )
+        if config.inference_batch_rows != PRODUCTION_INFERENCE_BATCH_ROWS:
+            raise ValueError(
+                "Production Cube Arena requires inference_batch_rows=64"
+            )
+        if float(config.inference_batch_wait_ms) != PRODUCTION_INFERENCE_BATCH_WAIT_MS:
+            raise ValueError(
+                "Production Cube Arena requires inference_batch_wait_ms=4.0"
             )
 
     def _validate_metadata(self, metadata: Mapping[str, object]) -> None:
