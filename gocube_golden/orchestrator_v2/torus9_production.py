@@ -97,6 +97,15 @@ def _advance_lineage_code_pin(
     return updated
 
 
+def _same_parent_checkpoint_identity(existing: object, expected: object) -> bool:
+    """Compare immutable parent identity while allowing replay references to be enriched."""
+    if isinstance(existing, Mapping) and isinstance(expected, Mapping):
+        existing_identity = dict(existing)
+        existing_identity.pop("replay_references", None)
+        return existing_identity == dict(expected)
+    return existing == expected
+
+
 class Torus9ProductionLineage:
     """Prepare one active arm lineage without copying the external parent."""
 
@@ -142,8 +151,19 @@ class Torus9ProductionLineage:
         }
         if root.is_dir():
             existing = _read_json(root / "manifest.json")
-            for key in ("lineage_id", "topology", "status", "parent_checkpoint", "config_fingerprint"):
-                if existing.get(key) != manifest[key]:
+            for key in (
+                "lineage_id",
+                "topology",
+                "status",
+                "parent_checkpoint",
+                "config_fingerprint",
+            ):
+                matches = (
+                    _same_parent_checkpoint_identity(existing.get(key), manifest[key])
+                    if key == "parent_checkpoint"
+                    else existing.get(key) == manifest[key]
+                )
+                if not matches:
                     raise ValueError(f"Production arm lineage {key} changed: {root}")
             existing_version = existing.get("orchestrator_version")
             if existing_version not in (None, ORCHESTRATOR_VERSION):

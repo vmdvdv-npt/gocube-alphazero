@@ -126,3 +126,55 @@ def test_dirty_worktree_rejects_code_rollover_even_when_allowed(
             allow_code_rollover=True,
             second_worktree_clean=False,
         )
+
+
+def test_replay_reference_enrichment_does_not_change_parent_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config()
+    parent = SimpleNamespace(
+        ref=CheckpointRef(
+            "torus9",
+            "parent",
+            "M95",
+            95,
+            "checkpoints/M95.pt",
+            "sha256:" + "a" * 64,
+        )
+    )
+    identity = CodeIdentity("1" * 40, "2" * 40, True)
+    monkeypatch.setattr(production, "capture_code_identity", lambda _root: identity)
+    lineage = Torus9ProductionLineage(tmp_path / "runs")
+    lineage.prepare(
+        topology="torus9",
+        lineage_id="lineage",
+        parent=parent,
+        effective_config=config,
+        experiment_id="experiment",
+        arm_id="continuous",
+    )
+
+    manifest_path = tmp_path / "runs" / "torus9" / "active" / "lineage" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    references = [
+        {
+            "generation": 90,
+            "path": "replay/iter-90-fresh.jsonl",
+            "sha256": "sha256:" + "b" * 64,
+        }
+    ]
+    manifest["parent_checkpoint"]["replay_references"] = references
+    manifest["parent_replay_references"] = references
+    manifest_path.write_text(json.dumps(manifest))
+
+    lineage.prepare(
+        topology="torus9",
+        lineage_id="lineage",
+        parent=parent,
+        effective_config=config,
+        experiment_id="experiment",
+        arm_id="continuous",
+    )
+
+    resumed = json.loads(manifest_path.read_text())
+    assert resumed["parent_checkpoint"]["replay_references"] == references
