@@ -99,8 +99,8 @@ def validate_run_owned_profile(
 
     _positive_int(self_play.get("mcts_simulations"), "self_play.mcts_simulations")
     komi = float(self_play.get("komi", profile.get("rules", {}).get("komi", 0.5)))
-    if komi not in {0.5, 1.5, 2.5}:
-        raise ValueError("run-owned Torus9 komi must be 0.5, 1.5, or 2.5")
+    if komi not in _contract.TORUS9_ALLOWED_KOMI:
+        raise ValueError("run-owned Torus9 komi is unsupported")
     _positive_float(training.get("learning_rate"), "training.learning_rate")
     _positive_int(replay.get("generations"), "replay.generations")
     _optional_positive_int(replay.get("cap"), "replay.cap")
@@ -228,8 +228,8 @@ def install_selfplay_boundary(module: object) -> None:
         profile_fp: str,
         contract: object,
     ) -> None:
-        if float(getattr(contract, "komi", _contract.TORUS9_KOMI)) not in {0.5, 1.5, 2.5}:
-            raise ValueError("Current Torus9 self-play komi must be 0.5, 1.5, or 2.5")
+        if float(getattr(contract, "komi", _contract.TORUS9_KOMI)) not in _contract.TORUS9_ALLOWED_KOMI:
+            raise ValueError("Current Torus9 self-play komi is unsupported")
         if profile_id != _contract.TORUS9_CURRENT_PROFILE_ID:
             raise ValueError("Torus9 self-play supports only the current profile family")
         if not isinstance(model, _core.Torus9CurrentGraphNet):

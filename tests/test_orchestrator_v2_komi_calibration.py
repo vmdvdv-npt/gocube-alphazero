@@ -81,6 +81,10 @@ def test_calibration_profile_freezes_same_seed_family_with_selected_komi() -> No
     assert profile.profile_id == "torus9-komi-calibration|2.5"
     assert profile.komi == 2.5
     assert profile.scientific_contract(SimpleNamespace(games=1024)) ["komi"] == 2.5
+    for komi in (3.5, 4.5):
+        extended = get_profile(f"torus9-komi-calibration|{komi:g}")
+        assert extended.komi == komi
+        assert extended.scientific_contract(SimpleNamespace(games=1024))["komi"] == komi
 
 
 def test_continuation_config_supports_new_candidates_and_rejects_legacy_komi() -> None:

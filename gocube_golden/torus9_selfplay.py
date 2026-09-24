@@ -33,6 +33,7 @@ from .selfplay_engine import (
 from .selfplay_policy import sample_action_from_search_result
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
+    TORUS9_ALLOWED_KOMI,
     TORUS9_CURRENT_BLOCKS,
     TORUS9_CURRENT_DIRICHLET_ALPHA,
     TORUS9_CURRENT_HIDDEN,
@@ -256,8 +257,8 @@ def _validate_current_scientific_boundary(
     profile_fp: str,
     contract: _t9.Torus9SelfPlaySearchContract,
 ) -> None:
-    if float(contract.komi) not in {0.5, 1.5, 2.5}:
-        raise ValueError("Current Torus9 self-play komi must be 0.5, 1.5, or 2.5")
+    if float(contract.komi) not in TORUS9_ALLOWED_KOMI:
+        raise ValueError("Current Torus9 self-play komi is unsupported")
     if profile_id != TORUS9_CURRENT_PROFILE_ID:
         raise ValueError("Torus9 self-play supports only the current Golden profile")
     profile = load_torus9_current_profile()
