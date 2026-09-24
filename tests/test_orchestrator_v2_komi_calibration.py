@@ -328,6 +328,16 @@ def _runner_fixture(tmp_path: Path, *, ambiguous: bool = False):
     return config, resolver, lineage, arena, parent, child, stops
 
 
+def test_m137_validation_accepts_standard_marker_without_lineage_id(tmp_path: Path) -> None:
+    _config_value, _resolver, _lineage, _arena, parent, _child, _stops = _runner_fixture(tmp_path)
+    marker_path = parent.owner_root / "generation-137.complete.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    marker.pop("lineage_id")
+    marker_path.write_text(json.dumps(marker) + "\n", encoding="utf-8")
+
+    KomiCalibrationRunnerV2._validate_m137(parent)
+
+
 def test_runner_pins_m137_creates_one_child_and_resume_does_not_rerun(tmp_path: Path) -> None:
     config, resolver, lineage, arena, parent, child, stops = _runner_fixture(tmp_path)
     root = tmp_path / "runs" / "torus9" / "evaluations" / config.calibration_id
