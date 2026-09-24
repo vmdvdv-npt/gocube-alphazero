@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 import __main__
 from pathlib import Path
@@ -14,10 +15,13 @@ from ..telegram_notifier import TelegramError, TelegramNotifier, flush_all, tele
 from .artifact_resolver import ArtifactResolver
 from .arena_runner import ArenaRunnerV2
 from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
+from .komi_calibration import KomiCalibrationConfig, KomiCalibrationRunnerV2
 from .experiment_plan import ExperimentConfig
 from .experiment_runner import ExperimentRunnerV2
 from .version import mark_v2_process
-from tools.arena_engine import DEFAULT_MASTER_SEED
+from tools.arena_engine import ArenaExecutionConfig, DEFAULT_MASTER_SEED
+from ..process_supervision import atomic_write_text
+from ..provenance import canonical_json
 
 
 def load_v2_config(path: str | Path) -> dict[str, object]:
@@ -104,6 +108,105 @@ def _experiment_config(payload: Mapping[str, object]) -> ExperimentConfig:
     return ExperimentConfig.from_dict(raw)
 
 
+def _komi_calibration_config(payload: Mapping[str, object]) -> KomiCalibrationConfig:
+    return KomiCalibrationConfig.from_dict(payload)
+
+
+def _request_parent_soft_stop(parent: object) -> None:
+    """Request a safe boundary stop after the pinned parent is committed."""
+    owner_root = Path(getattr(parent, "owner_root")).resolve()
+    control = owner_root / "control" / "soft-stop.json"
+    payload = {
+        "schema": "gocube-continuous-training-soft-stop-v1",
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "requested_by": "komi-calibration",
+        "mode": "finish-current-generation-no-next-generation",
+    }
+    atomic_write_text(control, canonical_json(payload) + "\n")
+
+
+def run_komi_calibration_from_config(
+    payload: Mapping[str, object],
+    *,
+    runs_root: str | Path | None = None,
+    allow_code_rollover: bool | None = None,
+    **runner_kwargs: Any,
+) -> object:
+    _require_file_backed_entrypoint()
+    mark_v2_process()
+    config = _komi_calibration_config(payload)
+    if allow_code_rollover is not None:
+        if type(allow_code_rollover) is not bool:
+            raise ValueError("allow_code_rollover must be a boolean")
+        config = replace(config, allow_code_rollover=allow_code_rollover)
+    resolver = runner_kwargs.pop("resolver", None) or ArtifactResolver(runs_root)
+    experiment_root = runner_kwargs.get("experiment_root")
+    root = (
+        Path(experiment_root).resolve()
+        if experiment_root is not None
+        else resolver.runs_root / "torus9" / "evaluations" / config.calibration_id
+    )
+    notifier = TelegramNotifier(_notification_paths(root))
+    arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2()
+    child_training = runner_kwargs.pop("child_training", None)
+    calibration_config = config
+    if child_training is None:
+        def child_training(
+            *,
+            parent,
+            config,
+            output_lineage,
+            first_generation,
+        ):
+            del first_generation
+            production_arena = calibration_config.production_arena_config
+            if production_arena is None:
+                production_arena = ArenaExecutionConfig()
+            selected = float(
+                config.config.arena.get(
+                    "komi",
+                    config.config.self_play.get("komi", 0.5),
+                )
+            )
+            profile = calibration_config.production_arena_profile
+            if profile == "torus9" and selected != 0.5:
+                profile = f"torus9-komi-calibration|{selected:g}"
+            continuous = ContinuousTrainingConfig(
+                parent_checkpoint=parent.ref,
+                lineage_id=output_lineage.lineage_id,
+                effective_config=config.config,
+                generations=calibration_config.generations,
+                arena_cadence=calibration_config.production_arena_cadence,
+                arena_config=production_arena,
+                arena_master_seed=calibration_config.production_arena_master_seed,
+                arena_profile=profile,
+                arena_workload={"model_gating": "off", "komi": selected},
+                allow_code_rollover=calibration_config.allow_code_rollover,
+            )
+            result = ContinuousTrainingRunnerV2(
+                continuous,
+                resolver=resolver,
+                arena_runner=arena_runner,
+                notifier=notifier,
+            ).run()
+            return result.final_checkpoint
+    stop_parent = runner_kwargs.pop("stop_parent", None) or _request_parent_soft_stop
+    try:
+        runner = KomiCalibrationRunnerV2(
+            config,
+            arena_runner=arena_runner,
+            resolver=resolver,
+            experiment_root=root,
+            child_training=child_training,
+            stop_parent=stop_parent,
+            notifier=notifier,
+            **runner_kwargs,
+        )
+        return runner.run()
+    finally:
+        flush_all()
+
+
 def run_continuous_from_config(
     payload: Mapping[str, object],
     *,
@@ -179,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         "telegram-test", help="send one explicit transport test"
     )
     telegram.set_defaults(kind="telegram")
-    for name in ("continuous", "experiment"):
+    for name in ("continuous", "experiment", "komi-calibration"):
         command = subparsers.add_parser(name, help=f"run a V2 {name} JSON plan")
         command.add_argument("config", type=Path)
         command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
@@ -206,8 +309,14 @@ def main(argv: list[str] | None = None) -> int:
             runs_root=args.runs_root,
             allow_code_rollover=args.allow_code_rollover,
         )
-    else:
+    elif args.kind == "experiment":
         run_experiment_from_config(
+            payload,
+            runs_root=args.runs_root,
+            allow_code_rollover=args.allow_code_rollover,
+        )
+    else:
+        run_komi_calibration_from_config(
             payload,
             runs_root=args.runs_root,
             allow_code_rollover=args.allow_code_rollover,
@@ -223,4 +332,5 @@ __all__ = [
     "load_v2_config",
     "run_continuous_from_config",
     "run_experiment_from_config",
+    "run_komi_calibration_from_config",
 ]

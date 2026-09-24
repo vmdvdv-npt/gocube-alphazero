@@ -100,7 +100,7 @@ def _finish_game(game: _WorkerGame) -> dict[str, object]:
         "candidate_black": candidate_black,
         "candidate_model_hash": str(task["candidate_hash"]),
         "reference_model_hash": str(task["reference_hash"]),
-        "komi": TORUS9_KOMI,
+        "komi": float(state.komi),
         "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
         "start_state": task["state"],
         "start_trace": task["trace"],
@@ -133,13 +133,22 @@ def _finish_game(game: _WorkerGame) -> dict[str, object]:
     return row
 
 
-def _select_starts(master_seed: int, pairs: int) -> tuple[dict[str, object], ...]:
+def _select_starts(
+    master_seed: int,
+    pairs: int,
+    *,
+    komi: float = TORUS9_KOMI,
+    offset_pairs: int = 0,
+) -> tuple[dict[str, object], ...]:
     if pairs <= 0:
         raise ValueError("Arena requires at least one pair")
-    per_stratum = max(1, (pairs + 7) // 8)
+    if offset_pairs < 0:
+        raise ValueError("Arena startset offset must be non-negative")
+    per_stratum = max(1, (pairs + offset_pairs + 7) // 8)
     generated = generate_torus9_evaluation_starts(
         master_seed=master_seed,
         accepted_per_stratum=per_stratum,
+        komi=komi,
     )
     selected: list[dict[str, object]] = []
     for offset in range(per_stratum):
@@ -147,8 +156,8 @@ def _select_starts(master_seed: int, pairs: int) -> tuple[dict[str, object], ...
             index = stratum * per_stratum + offset
             if index < len(generated):
                 selected.append(dict(generated[index]))
-                if len(selected) == pairs:
-                    return tuple(selected)
+                if len(selected) == pairs + offset_pairs:
+                    return tuple(selected[offset_pairs:])
     raise RuntimeError("Could not build requested Torus9 Arena startset")
 
 
@@ -161,6 +170,12 @@ class Torus9ArenaProfile:
     wdl_size = 3
     last_infer_timing: Mapping[str, float] = {}
 
+    def __init__(self, *, komi: float = TORUS9_KOMI, profile_id: str = PROFILE_ID) -> None:
+        if not isinstance(komi, (int, float)) or isinstance(komi, bool) or float(komi) not in {0.5, 1.5, 2.5}:
+            raise ValueError("Torus9 Arena komi must be 0.5, 1.5, or 2.5")
+        self.komi = float(komi)
+        self.profile_id = str(profile_id)
+
     def matches_metadata(self, metadata: Mapping[str, object]) -> bool:
         return (
             metadata.get("profile_id") == TORUS9_CURRENT_PROFILE_ID
@@ -169,8 +184,6 @@ class Torus9ArenaProfile:
         )
 
     def validate_execution_config(self, config: ArenaExecutionConfig) -> None:
-        if TORUS9_KOMI != 0.5:
-            raise RuntimeError("Active Torus9 komi drifted from 0.5")
         if config.strict_production:
             if config.games < PRODUCTION_MIN_GAMES and not config.monitoring_acceptance:
                 raise ValueError(
@@ -192,8 +205,10 @@ class Torus9ArenaProfile:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         if not self.matches_metadata(metadata):
             raise ValueError("Checkpoint does not match Torus9 Arena profile")
-        if float(metadata.get("komi", -1.0)) != 0.5:
-            raise ValueError("Torus9 Arena checkpoint komi must be 0.5")
+        metadata_komi = float(metadata.get("komi", -1.0))
+        allowed_metadata_komi = {0.5} if self.profile_id == PROFILE_ID else {0.5, self.komi}
+        if metadata_komi not in allowed_metadata_komi:
+            raise ValueError("Torus9 Arena checkpoint metadata komi is incompatible")
         architecture = metadata.get("architecture_config")
         if not isinstance(architecture, Mapping):
             raise ValueError("Torus9 checkpoint architecture metadata is malformed")
@@ -232,9 +247,17 @@ class Torus9ArenaProfile:
         master_seed: int,
         games: int,
         workers: int,
+        workload: Mapping[str, object] | None = None,
     ) -> tuple[list[dict[str, object]], int]:
         pairs = games // 2
-        starts = _select_starts(master_seed, pairs)
+        workload = workload or {}
+        offset_pairs = int(workload.get("continuation_offset_pairs", 0))
+        starts = _select_starts(
+            master_seed,
+            pairs,
+            komi=self.komi,
+            offset_pairs=offset_pairs,
+        )
         tasks: list[dict[str, object]] = []
         for row in starts:
             pair_id = f"{comparison}--{row['start_id']}"
@@ -254,6 +277,7 @@ class Torus9ArenaProfile:
                         "reference_hash": reference.model_hash,
                         "candidate_artifact_sha256": candidate.artifact_sha256,
                         "reference_artifact_sha256": reference.artifact_sha256,
+                        "komi": self.komi,
                         "game_seed": derive_seed(master_seed, pair_id, game_id),
                         "worker_id": len(tasks) % workers,
                     }
@@ -419,9 +443,9 @@ class Torus9ArenaProfile:
         config: ArenaExecutionConfig,
     ) -> Mapping[str, object]:
         return {
-            "profile": PROFILE_ID,
+            "profile": self.profile_id,
             "games": config.games,
-            "komi": 0.5,
+            "komi": self.komi,
             "simulations": 64,
             "cpuct": 1.25,
             "fpu": 0.0,

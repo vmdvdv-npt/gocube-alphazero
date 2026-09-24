@@ -257,6 +257,7 @@ def run_arena(
     evaluation_identity: Mapping[str, object] | None = None,
     evaluation_fingerprint: str | None = None,
     allowed_lineage_arena_root: Path | None = None,
+    workload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
     _require_v2_process("tools.arena.run_arena")
@@ -321,6 +322,7 @@ def run_arena(
             expected_reference_artifact_sha256
             or (reference_identity.sha256 if reference_identity else None)
         ),
+        workload=workload,
     )
     if candidate_identity is not None or reference_identity is not None or evaluation_identity is not None:
         candidate_ref = _reference_payload(

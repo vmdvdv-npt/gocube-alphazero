@@ -170,6 +170,7 @@ class ArenaProfile(Protocol):
         master_seed: int,
         games: int,
         workers: int,
+        workload: Mapping[str, object] | None = None,
     ) -> tuple[list[dict[str, object]], int]: ...
     def worker_main(
         self,
@@ -667,6 +668,7 @@ def run_arena(
     expected_reference_model_hash: str | None = None,
     expected_reference_artifact_sha256: str | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    workload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run the single production Arena engine with one game-specific profile."""
     process_started_at = time.perf_counter()
@@ -764,6 +766,7 @@ def run_arena(
             master_seed=master_seed,
             games=config.games,
             workers=config.workers,
+            workload=workload,
         ),
     )
     if len(tasks) != config.games:

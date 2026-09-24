@@ -98,6 +98,9 @@ def validate_run_owned_profile(
         raise ValueError("Run-owned Torus9 profile is missing self_play/training/replay")
 
     _positive_int(self_play.get("mcts_simulations"), "self_play.mcts_simulations")
+    komi = float(self_play.get("komi", profile.get("rules", {}).get("komi", 0.5)))
+    if komi not in {0.5, 1.5, 2.5}:
+        raise ValueError("run-owned Torus9 komi must be 0.5, 1.5, or 2.5")
     _positive_float(training.get("learning_rate"), "training.learning_rate")
     _positive_int(replay.get("generations"), "replay.generations")
     _optional_positive_int(replay.get("cap"), "replay.cap")
@@ -112,6 +115,15 @@ def validate_run_owned_profile(
     # machine-checked validator.
     normalized["self_play"]["mcts_simulations"] = base["self_play"]["mcts_simulations"]
     normalized["self_play"]["fingerprint"] = base["self_play"]["fingerprint"]
+    normalized["self_play"]["komi"] = base["self_play"]["komi"]
+    if isinstance(normalized.get("rules"), Mapping):
+        normalized["rules"] = dict(normalized["rules"])
+        normalized["rules"]["komi"] = base["rules"]["komi"]
+        normalized["rules"]["fingerprint"] = base["rules"]["fingerprint"]
+    if isinstance(normalized.get("arena"), Mapping):
+        normalized["arena"] = dict(normalized["arena"])
+        if "komi" in normalized["arena"]:
+            normalized["arena"]["komi"] = base["arena"]["komi"]
     normalized["training"]["learning_rate"] = base["training"]["learning_rate"]
     normalized["replay"]["window"] = base["replay"]["window"]
     normalized["replay"]["generations"] = base["replay"]["generations"]
@@ -200,6 +212,8 @@ class RunOwnedTorus9SelfPlaySearchContract(_core.Torus9SelfPlaySearchContract):
         expected = asdict(_core.Torus9SelfPlaySearchContract())
         simulations = actual.pop("simulations")
         expected.pop("simulations")
+        actual.pop("komi", None)
+        expected.pop("komi", None)
         _positive_int(simulations, "self_play.mcts_simulations")
         if actual != expected:
             raise ValueError("Torus 9×9 self-play search contract drift outside run-owned MCTS simulations")
@@ -214,8 +228,8 @@ def install_selfplay_boundary(module: object) -> None:
         profile_fp: str,
         contract: object,
     ) -> None:
-        if float(_contract.TORUS9_KOMI) != 0.5:
-            raise RuntimeError("Current Torus9 self-play requires komi 0.5")
+        if float(getattr(contract, "komi", _contract.TORUS9_KOMI)) not in {0.5, 1.5, 2.5}:
+            raise ValueError("Current Torus9 self-play komi must be 0.5, 1.5, or 2.5")
         if profile_id != _contract.TORUS9_CURRENT_PROFILE_ID:
             raise ValueError("Torus9 self-play supports only the current profile family")
         if not isinstance(model, _core.Torus9CurrentGraphNet):

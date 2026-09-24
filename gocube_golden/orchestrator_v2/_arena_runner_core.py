@@ -262,6 +262,7 @@ class ArenaRunner:
             "expected_reference_artifact_sha256": request.reference.ref.sha256,
             "evaluation_identity": identity.to_dict(),
             "evaluation_fingerprint": fingerprint,
+            "workload": dict(request.workload),
         }
         if request.output_dir is not None:
             # The production engine enforces canonical evaluation storage. A

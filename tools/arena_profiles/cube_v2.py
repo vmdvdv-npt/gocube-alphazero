@@ -242,7 +242,9 @@ class CubeV2ArenaProfile:
         master_seed: int,
         games: int,
         workers: int,
+        workload: Mapping[str, object] | None = None,
     ) -> tuple[list[dict[str, object]], int]:
+        del workload
         if candidate.architecture_config != reference.architecture_config:
             raise ValueError("Cube Arena checkpoints are scientifically incompatible")
         pairs = games // 2

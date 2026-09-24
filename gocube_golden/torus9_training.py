@@ -701,11 +701,12 @@ class Torus9TrainingAdapter:
     @property
     def profile_identity(self) -> Mapping[str, object]:
         network = self.profile["network"]
+        rules = self.profile.get("rules", {})
         return {
             "profile_id": TORUS9_CURRENT_PROFILE_ID,
             "profile_fingerprint": self.profile_fingerprint,
             "architecture_id": network["architecture_id"],  # type: ignore[index]
-            "komi": TORUS9_KOMI,
+            "komi": float(rules.get("komi", TORUS9_KOMI)),  # type: ignore[union-attr]
         }
 
     def create_state(
@@ -787,6 +788,7 @@ class Torus9TrainingAdapter:
             selfplay_contract_id=TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
             selfplay_contract_fingerprint=str(self.profile["self_play"]["fingerprint"]),  # type: ignore[index]
             base_commit=self.base_commit,
+            komi=float(self.profile.get("rules", {}).get("komi", TORUS9_KOMI)),  # type: ignore[union-attr]
         )
         metadata.update({
             "adam_step": 0,
@@ -820,7 +822,7 @@ class Torus9TrainingAdapter:
             raise TypeError("Current Torus9 training state is not bound to its trainer")
         if trainer.optimizer is not state.optimizer:
             raise TypeError("Current Torus9 training state is not bound to its optimizer")
-        if float(state.optimizer.param_groups[0]["lr"]) != 0.001:
+        if float(state.optimizer.param_groups[0]["lr"]) != float(self.training_profile["learning_rate"]):  # type: ignore[index]
             raise ValueError("Current Torus9 Adam learning rate drift")
         if float(state.optimizer.param_groups[0]["weight_decay"]) != 0.0:
             raise ValueError("Current Torus9 Adam weight decay drift")
@@ -835,6 +837,11 @@ class Torus9TrainingAdapter:
         self, records: Sequence[object], *, validate_rows: bool
     ) -> Sequence[Mapping[str, object]]:
         ordered = sorted(tuple(records), key=lambda record: str(getattr(record, "game_id", "")))
+        rules = self.profile.get("rules", {})
+        configured_komi = float(rules.get("komi", TORUS9_KOMI))  # type: ignore[union-attr]
+        expected_contract_fingerprint = _core.Torus9SelfPlaySearchContract(
+            komi=configured_komi
+        ).fingerprint
         samples: list[Mapping[str, object]] = []
         for record_index, record in enumerate(ordered, 1):
             validate = getattr(record, "validate", None)
@@ -846,7 +853,7 @@ class Torus9TrainingAdapter:
                 raise ValueError("Current Torus9 training record profile fingerprint mismatch")
             if getattr(record, "selfplay_contract_id", None) != TORUS9_CURRENT_SELFPLAY_CONTRACT_ID:
                 raise ValueError("Current Torus9 training record self-play contract mismatch")
-            if getattr(record, "selfplay_contract_fingerprint", None) != current_torus9_selfplay_contract_fingerprint():
+            if getattr(record, "selfplay_contract_fingerprint", None) != expected_contract_fingerprint:
                 raise ValueError("Current Torus9 training record self-play fingerprint mismatch")
             if getattr(record, "technical_termination", None) is not None:
                 # Technical records remain validated and excluded exactly as
@@ -1549,6 +1556,7 @@ class Torus9TrainingAdapter:
             selfplay_contract_id=TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
             selfplay_contract_fingerprint=str(self.profile["self_play"]["fingerprint"]),  # type: ignore[index]
             base_commit=self.base_commit,
+            komi=float(self.profile.get("rules", {}).get("komi", TORUS9_KOMI)),  # type: ignore[union-attr]
         )
         metadata.update({
             "adam_step": int(state.optimizer_updates),

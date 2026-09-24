@@ -89,9 +89,15 @@ class TopologyBinding:
             raise ValueError("arena_profile must be a non-empty string")
         resolved = get_profile(profile)
         if self.topology == "torus9":
-            if profile != "torus9":
-                raise ValueError("Arena profile is not compatible with topology=torus9")
-            return profile
+            if profile == "torus9":
+                return profile
+            if profile.startswith("torus9-komi-calibration|"):
+                expected = config.arena.get("komi", config.self_play.get("komi"))
+                actual = getattr(resolved, "komi", None)
+                if expected is None or actual is None or float(expected) != float(actual):
+                    raise ValueError("Torus9 Arena profile komi does not match effective config")
+                return profile
+            raise ValueError("Arena profile is not compatible with topology=torus9")
         expected = self.default_arena_profile(config)
         if profile != expected:
             raise ValueError(
