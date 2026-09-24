@@ -15,7 +15,8 @@ from ..telegram_notifier import TelegramError, TelegramNotifier, flush_all, tele
 from .artifact_resolver import ArtifactResolver
 from .arena_runner import ArenaRunnerV2
 from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
-from .komi_calibration import KomiCalibrationConfig, KomiCalibrationRunnerV2
+from .komi_calibration import KomiCalibrationConfig
+from .komi_calibration_production import ProductionKomiCalibrationRunnerV2
 from .experiment_plan import ExperimentConfig
 from .experiment_runner import ExperimentRunnerV2
 from .version import mark_v2_process
@@ -192,7 +193,7 @@ def run_komi_calibration_from_config(
             return result.final_checkpoint
     stop_parent = runner_kwargs.pop("stop_parent", None) or _request_parent_soft_stop
     try:
-        runner = KomiCalibrationRunnerV2(
+        runner = ProductionKomiCalibrationRunnerV2(
             config,
             arena_runner=arena_runner,
             resolver=resolver,
