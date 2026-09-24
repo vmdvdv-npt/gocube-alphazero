@@ -36,6 +36,7 @@ from gocube_golden.torus9 import (
 from gocube_golden.torus9_contract import (
     TORUS9_ACTION_COUNT,
     TORUS9_ARENA_MOVE_LIMIT,
+    TORUS9_ALLOWED_KOMI,
     TORUS9_CURRENT_ARCHITECTURE_ID,
     TORUS9_CURRENT_PROFILE_ID,
     TORUS9_KOMI,
@@ -171,8 +172,8 @@ class Torus9ArenaProfile:
     last_infer_timing: Mapping[str, float] = {}
 
     def __init__(self, *, komi: float = TORUS9_KOMI, profile_id: str = PROFILE_ID) -> None:
-        if not isinstance(komi, (int, float)) or isinstance(komi, bool) or float(komi) not in {0.5, 1.5, 2.5}:
-            raise ValueError("Torus9 Arena komi must be 0.5, 1.5, or 2.5")
+        if not isinstance(komi, (int, float)) or isinstance(komi, bool) or float(komi) not in TORUS9_ALLOWED_KOMI:
+            raise ValueError("Torus9 Arena komi must be one of 0.5, 1.5, 2.5, 3.5, or 4.5")
         self.komi = float(komi)
         self.profile_id = str(profile_id)
 

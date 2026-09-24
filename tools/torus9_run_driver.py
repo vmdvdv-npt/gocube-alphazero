@@ -59,6 +59,7 @@ from gocube_golden.torus9 import (
 )
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_PROFILE_ID,
+    TORUS9_ALLOWED_KOMI,
     TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
     TORUS9_KOMI,
     TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
@@ -1603,8 +1604,8 @@ def _v2_generation_config(
     rules = compatibility.get("rules")
     rules_mapping = rules if isinstance(rules, Mapping) else {}
     komi = float(self_play.get("komi", rules_mapping.get("komi", 0.5)))
-    if komi not in {0.5, 1.5, 2.5}:
-        raise ValueError("effective_config Torus9 komi must be 0.5, 1.5, or 2.5")
+    if komi not in TORUS9_ALLOWED_KOMI:
+        raise ValueError("effective_config Torus9 komi is unsupported")
     seed_values = extensions.get("seeds", execution)
     seeds = _mapping(seed_values, "effective_config.execution seeds")
     workers = int(execution["workers"])

@@ -40,6 +40,7 @@ from .torus9_contract import (
     TORUS9_CURRENT_PROFILE_ID,
     TORUS9_CURRENT_SELFPLAY_CONTRACT_ID,
     TORUS9_CURRENT_TARGET_FINGERPRINT,
+    TORUS9_ALLOWED_KOMI,
     TORUS9_KOMI,
     TORUS9_MAX_REPLAY_POSITIONS,
     TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
@@ -1611,7 +1612,7 @@ class Torus9TrainingAdapter:
                 "model_gating": False,
                 "replay_generations": int(self.replay_profile["generations"]),  # type: ignore[index]
                 "replay_cap": self.replay_profile["cap"],
-                "komi": TORUS9_KOMI,
+                "komi": float(self.profile.get("rules", {}).get("komi", TORUS9_KOMI)),  # type: ignore[union-attr]
                 "ownership_loss": True,
                 "score_loss": True,
             },
@@ -1721,7 +1722,7 @@ class Torus9TrainingAdapter:
             raise ValueError("Current Torus9 checkpoint target fingerprint mismatch")
         if metadata.get("architecture_id") != TORUS9_CURRENT_ARCHITECTURE_ID:
             raise ValueError("Current Torus9 checkpoint architecture mismatch")
-        if metadata.get("topology_fingerprint") != _core.TORUS9_TOPOLOGY_FINGERPRINT or metadata.get("board_size") != [9, 9] or metadata.get("komi") != TORUS9_KOMI:
+        if metadata.get("topology_fingerprint") != _core.TORUS9_TOPOLOGY_FINGERPRINT or metadata.get("board_size") != [9, 9] or float(metadata.get("komi", -1.0)) not in TORUS9_ALLOWED_KOMI:
             raise ValueError("Current Torus9 checkpoint topology/komi mismatch")
         if not _SHA256_RE.fullmatch(str(metadata.get("model_hash"))):
             raise ValueError("Current Torus9 checkpoint model hash is malformed")

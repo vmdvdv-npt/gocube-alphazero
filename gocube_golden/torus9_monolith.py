@@ -47,6 +47,7 @@ from .state import BLACK, EMPTY, PASS, WHITE, GoldenState, Stone, initial_state,
 from .topology import TORUS_5X5, TORUS_9X9, TORUS_9X9_TOPOLOGY_ID
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
+    TORUS9_ALLOWED_KOMI,
     TORUS9_ARCHITECTURE_ID,
     TORUS9_ARENA_CONTRACT_FINGERPRINT,
     TORUS9_ARENA_CONTRACT_ID,
@@ -545,7 +546,7 @@ class Torus9SelfPlaySearchContract:
         expected_values = asdict(expected)
         actual_komi = float(actual.pop("komi"))
         expected_values.pop("komi")
-        if actual != expected_values or actual_komi not in {0.5, 1.5, 2.5}:
+        if actual != expected_values or actual_komi not in TORUS9_ALLOWED_KOMI:
             raise ValueError("Torus 9×9 self-play search contract drift")
 
     @property
@@ -1452,7 +1453,7 @@ def torus9_load_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torc
     if not isinstance(model, Torus9CurrentGraphNet):
         raise ValueError("Current Golden Torus9 checkpoints require Torus9CurrentGraphNet")
     metadata_komi = float(metadata.get("komi", -1.0))
-    if metadata.get("topology_fingerprint") != TORUS9_TOPOLOGY_FINGERPRINT or metadata.get("board_size") != [9, 9] or metadata.get("rules_fingerprint") != rules_fingerprint_for(TORUS_9X9, metadata_komi) or metadata_komi not in {0.5, 1.5, 2.5}:
+    if metadata.get("topology_fingerprint") != TORUS9_TOPOLOGY_FINGERPRINT or metadata.get("board_size") != [9, 9] or metadata.get("rules_fingerprint") != rules_fingerprint_for(TORUS_9X9, metadata_komi) or metadata_komi not in TORUS9_ALLOWED_KOMI:
         raise ValueError("Torus 9×9 checkpoint topology/komi mismatch")
     expected_heads = {"policy": [82], "value": [3]}
     auxiliary = isinstance(model, Torus9OwnershipGraphNet)
