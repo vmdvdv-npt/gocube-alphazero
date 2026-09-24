@@ -67,6 +67,17 @@ def test_publish_allows_subsequent_same_lineage_generation(tmp_path: Path) -> No
         )
 
     publish(96, parent)
+    persisted_with_replay_refs = json.loads((root / "manifest.json").read_text())
+    persisted_with_replay_refs["parent_checkpoint"]["replay_references"] = [
+        {
+            "generation": 95,
+            "path": "/immutable/parent/replay/iter-95-fresh.jsonl",
+            "sha256": "sha256:" + "c" * 64,
+        }
+    ]
+    (root / "manifest.json").write_text(
+        json.dumps(persisted_with_replay_refs), encoding="utf-8"
+    )
     child_m96 = CheckpointRef(
         "torus9", "child", "M96", 96, "checkpoints/M96.pt", "sha256:" + "0" * 64
     )
@@ -75,6 +86,7 @@ def test_publish_allows_subsequent_same_lineage_generation(tmp_path: Path) -> No
     publish(97, child_m96)
 
     persisted = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert persisted["parent_checkpoint"] == parent.to_dict()
+    assert persisted["parent_checkpoint"]["checkpoint_id"] == parent.checkpoint_id
+    assert persisted["parent_checkpoint"]["replay_references"][0]["generation"] == 95
     node = json.loads((root / "metadata" / "checkpoints" / "M97.json").read_text())
     assert node["parent"] == child_m96.to_dict()
