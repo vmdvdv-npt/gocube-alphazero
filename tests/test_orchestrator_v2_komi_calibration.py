@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -16,6 +17,9 @@ from gocube_golden.orchestrator_v2.komi_calibration import (
     KomiCalibrationRunnerV2,
     _summary_stats,
     effective_config_with_komi,
+)
+from gocube_golden.orchestrator_v2.komi_calibration_production import (
+    ProductionKomiCalibrationRunnerV2,
 )
 from gocube_golden.orchestrator_v2.arena_runner import ArenaRunRequest, ArenaRunResult
 from gocube_golden.artifact_resolver import ResolvedCheckpointNode
@@ -77,6 +81,80 @@ def test_calibration_profile_freezes_same_seed_family_with_selected_komi() -> No
     assert profile.profile_id == "torus9-komi-calibration|2.5"
     assert profile.komi == 2.5
     assert profile.scientific_contract(SimpleNamespace(games=1024)) ["komi"] == 2.5
+
+
+def test_continuation_config_supports_new_candidates_and_rejects_legacy_komi() -> None:
+    base = {
+        "calibration_id": "continuation",
+        "parent_checkpoint": {
+            "topology": "torus9",
+            "lineage_id": "parent",
+            "checkpoint_id": "M137",
+            "generation": 137,
+            "path": "checkpoints/M137.pt",
+            "sha256": SHA,
+        },
+        "candidates": [1.5, 2.5, 3.5, 4.5],
+    }
+    config = KomiCalibrationConfig.from_dict(base)
+    assert config.candidates == (1.5, 2.5, 3.5, 4.5)
+    with pytest.raises(ValueError, match="unsupported komi"):
+        KomiCalibrationConfig.from_dict({**base, "candidates": [1.5, 2.5, 7.5]})
+
+
+def test_continuation_reuses_old_candidates_and_runs_only_new_komi(
+    tmp_path: Path,
+) -> None:
+    config, resolver, lineage, arena, _parent, child, _stops = _runner_fixture(tmp_path)
+    initial_root = tmp_path / "runs" / "torus9" / "evaluations" / config.calibration_id
+    initial = KomiCalibrationRunnerV2(
+        config,
+        arena_runner=arena,
+        resolver=resolver,
+        experiment_root=initial_root,
+        lineage_factory=lineage,
+        child_training=lambda **_kwargs: child,
+    )
+    initial.run()
+    source = json.loads((initial_root / "results.json").read_text())
+    for value in source["candidates"].values():
+        output_dir = Path(value["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for name in (
+            "evaluation-identity.json",
+            "games.jsonl",
+            "manifest.json",
+            "provenance.json",
+            "summary.json",
+        ):
+            (output_dir / name).write_text("{}\n")
+
+    continuation = replace(
+        config,
+        calibration_id="continuation-four-candidates",
+        candidates=(1.5, 2.5, 3.5, 4.5),
+        reuse_results_path=str(initial_root / "results.json"),
+        reuse_candidates=(1.5, 2.5),
+    )
+    continuation_root = (
+        tmp_path
+        / "runs"
+        / "torus9"
+        / "evaluations"
+        / continuation.calibration_id
+    )
+    resumed = ProductionKomiCalibrationRunnerV2(
+        continuation,
+        arena_runner=arena,
+        resolver=resolver,
+        experiment_root=continuation_root,
+        lineage_factory=lineage,
+        child_training=lambda **_kwargs: child,
+    )
+    result = resumed.run()
+
+    assert result.selected_komi == 1.5
+    assert [float(request.workload["komi"]) for request in arena.requests[2:]] == [3.5, 4.5]
 
 
 def test_summary_stats_fails_closed_on_technical_games(tmp_path: Path) -> None:

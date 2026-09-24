@@ -180,13 +180,16 @@ class ProductionKomiCalibrationRunnerV2(_BaseKomiCalibrationRunnerV2):
     def _batch_ledger(
         self, state: MutableMapping[str, object]
     ) -> MutableMapping[str, object]:
+        configured = tuple(
+            getattr(self.config, "candidates", KOMI_CALIBRATION_CANDIDATES)
+        )
         raw = state.get("candidate_batches")
         if raw is None:
-            raw = {f"{komi:g}": {} for komi in KOMI_CALIBRATION_CANDIDATES}
+            raw = {f"{komi:g}": {} for komi in configured}
             state["candidate_batches"] = raw
         if not isinstance(raw, MutableMapping):
             self._fail(state, "komi calibration batch ledger is malformed")
-        for komi in KOMI_CALIBRATION_CANDIDATES:
+        for komi in configured:
             key = f"{komi:g}"
             bucket = raw.get(key)
             if bucket is None:
@@ -315,6 +318,31 @@ class ProductionKomiCalibrationRunnerV2(_BaseKomiCalibrationRunnerV2):
     def _select_or_extend(
         self, state: dict[str, object], parent: ResolvedCheckpointNode
     ) -> float:
+        configured = tuple(
+            getattr(self.config, "candidates", KOMI_CALIBRATION_CANDIDATES)
+        )
+        if configured != KOMI_CALIBRATION_CANDIDATES:
+            candidates = state.get("candidates")
+            if not isinstance(candidates, Mapping):
+                self._fail(state, "calibration candidates are malformed")
+            biases: dict[float, float] = {}
+            for komi in configured:
+                key = f"{komi:g}"
+                evidence = self._candidate_batch_evidence(state, key)
+                first = next(
+                    (item for item in evidence if int(item.get("batch", 0)) == 1),
+                    None,
+                )
+                if first is None:
+                    self._fail(state, f"komi {key} first calibration batch is missing")
+                stats = first.get("stats")
+                if not isinstance(stats, Mapping):
+                    self._fail(state, f"komi {key} first-batch stats are malformed")
+                biases[komi] = float(stats["bias"])
+            minimum = min(biases.values())
+            tied = [komi for komi in configured if biases[komi] == minimum]
+            return 1.5 if 1.5 in tied else min(tied)
+
         initial_biases: dict[float, float] = {}
 
         for komi in KOMI_CALIBRATION_CANDIDATES:
