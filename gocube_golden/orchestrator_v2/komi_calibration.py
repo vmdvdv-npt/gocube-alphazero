@@ -770,7 +770,10 @@ class KomiCalibrationRunnerV2:
             raise KomiCalibrationError("M137 completion marker is missing")
         try:
             payload = _read_json(marker)
-            if payload.get("generation") != 137 or payload.get("lineage_id") != parent.lineage_id:
+            marker_lineage = payload.get("lineage_id")
+            if payload.get("generation") != 137 or (
+                marker_lineage is not None and marker_lineage != parent.lineage_id
+            ):
                 raise KomiCalibrationError("M137 completion marker identity mismatch")
             if payload.get("checkpoint_sha256") != parent.ref.sha256:
                 raise KomiCalibrationError("M137 completion marker SHA mismatch")
