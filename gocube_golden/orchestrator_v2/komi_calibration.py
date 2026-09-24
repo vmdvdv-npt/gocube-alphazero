@@ -43,12 +43,14 @@ KOMI_CALIBRATION_AMBIGUITY_THRESHOLD = 0.01
 KOMI_CALIBRATION_PARENT_GENERATION = 137
 KOMI_CALIBRATION_PARENT_CHECKPOINT_ID = "M137"
 KOMI_CALIBRATION_CANDIDATES = (1.5, 2.5)
+KOMI_CALIBRATION_ALLOWED_CANDIDATES = (1.5, 2.5, 3.5, 4.5)
 
 WAITING_FOR_M137 = "WAITING_FOR_M137"
 STOPPING_PARENT = "STOPPING_PARENT"
 M137_PINNED = "M137_PINNED"
 CALIBRATION_KOMI_1_5 = "CALIBRATION_KOMI_1_5"
 CALIBRATION_KOMI_2_5 = "CALIBRATION_KOMI_2_5"
+CALIBRATION_CANDIDATE = "CALIBRATION_CANDIDATE"
 CALIBRATION_EXTENSION = "CALIBRATION_EXTENSION"
 KOMI_SELECTED = "KOMI_SELECTED"
 CHILD_LINEAGE_CREATED = "CHILD_LINEAGE_CREATED"
@@ -62,6 +64,7 @@ KOMI_CALIBRATION_STAGES = (
     M137_PINNED,
     CALIBRATION_KOMI_1_5,
     CALIBRATION_KOMI_2_5,
+    CALIBRATION_CANDIDATE,
     CALIBRATION_EXTENSION,
     KOMI_SELECTED,
     CHILD_LINEAGE_CREATED,
@@ -178,8 +181,8 @@ def _komi(value: object) -> float:
     if isinstance(value, bool):
         raise ValueError("komi must be a finite number")
     result = float(value)
-    if not math.isfinite(result) or result not in KOMI_CALIBRATION_CANDIDATES:
-        raise ValueError("komi must be exactly 1.5 or 2.5")
+    if not math.isfinite(result) or result not in KOMI_CALIBRATION_ALLOWED_CANDIDATES:
+        raise ValueError("komi must be one of 1.5, 2.5, 3.5, or 4.5")
     return result
 
 
@@ -305,6 +308,9 @@ class KomiCalibrationConfig:
     generations: int | None = None
     allow_code_rollover: bool = False
     wait_poll_seconds: float = 5.0
+    candidates: tuple[float, ...] = KOMI_CALIBRATION_CANDIDATES
+    reuse_results_path: str | Path | None = None
+    reuse_candidates: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "calibration_id", _safe_component(self.calibration_id, "calibration_id"))
@@ -316,6 +322,22 @@ class KomiCalibrationConfig:
             )
         elif not isinstance(self.arena_contract, KomiCalibrationArenaContract):
             raise TypeError("arena_contract must be a KomiCalibrationArenaContract or object")
+        candidates = tuple(float(value) for value in self.candidates)
+        if len(candidates) < 2 or len(set(candidates)) != len(candidates):
+            raise ValueError("komi calibration requires at least two unique candidates")
+        if any(value not in KOMI_CALIBRATION_ALLOWED_CANDIDATES for value in candidates):
+            raise ValueError("unsupported komi calibration candidate")
+        if tuple(sorted(candidates)) != candidates:
+            raise ValueError("komi calibration candidates must be sorted")
+        object.__setattr__(self, "candidates", candidates)
+        reuse_candidates = tuple(float(value) for value in self.reuse_candidates)
+        if any(value not in candidates for value in reuse_candidates):
+            raise ValueError("reused komi candidates must be present in candidates")
+        if len(set(reuse_candidates)) != len(reuse_candidates):
+            raise ValueError("reused komi candidates must be unique")
+        object.__setattr__(self, "reuse_candidates", reuse_candidates)
+        if self.reuse_results_path is not None:
+            object.__setattr__(self, "reuse_results_path", str(Path(self.reuse_results_path).resolve()))
         parent = self.parent_checkpoint if isinstance(self.parent_checkpoint, CheckpointRef) else CheckpointRef.from_dict(self.parent_checkpoint)
         if parent.topology != "torus9":
             raise ValueError("komi calibration requires topology=torus9")
@@ -363,7 +385,7 @@ class KomiCalibrationConfig:
         return sha256_fingerprint(self.to_dict())
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "schema": KOMI_CALIBRATION_SCHEMA,
             "type": KOMI_CALIBRATION_TYPE,
             "calibration_id": self.calibration_id,
@@ -382,6 +404,13 @@ class KomiCalibrationConfig:
             "production_arena_profile": self.production_arena_profile,
             "generations": self.generations,
         }
+        if self.candidates != KOMI_CALIBRATION_CANDIDATES:
+            payload["candidates"] = list(self.candidates)
+        if self.reuse_results_path is not None:
+            payload["reuse_results_path"] = self.reuse_results_path
+        if self.reuse_candidates:
+            payload["reuse_candidates"] = list(self.reuse_candidates)
+        return payload
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "KomiCalibrationConfig":
@@ -414,6 +443,9 @@ class KomiCalibrationConfig:
             generations=None if raw.get("generations") is None else int(raw["generations"]),
             allow_code_rollover=bool(raw.get("allow_code_rollover", False)),
             wait_poll_seconds=float(raw.get("wait_poll_seconds", 5.0)),
+            candidates=tuple(float(value) for value in raw.get("candidates", KOMI_CALIBRATION_CANDIDATES)),
+            reuse_results_path=raw.get("reuse_results_path"),
+            reuse_candidates=tuple(float(value) for value in raw.get("reuse_candidates", ())),
         )
 
 
@@ -633,8 +665,9 @@ class KomiCalibrationRunnerV2:
         elif state.get("parent_checkpoint") is None:
             self._transition(state, M137_PINNED, parent=parent)
 
-        self._run_candidate(state, parent, 1.5, CALIBRATION_KOMI_1_5, batch=1)
-        self._run_candidate(state, parent, 2.5, CALIBRATION_KOMI_2_5, batch=1)
+        self._load_reused_candidates(state, parent)
+        for komi in self.config.candidates:
+            self._run_candidate(state, parent, komi, self._candidate_stage(komi), batch=1)
         selected = self._select_or_extend(state, parent)
         previous_selected = state.get("selected_komi")
         if previous_selected is not None and float(previous_selected) != selected:
@@ -657,7 +690,14 @@ class KomiCalibrationRunnerV2:
         state["child_config"] = child_config.config.to_dict()
         state["child_lineage_id"] = child_config.artifact.owner_lineage_id
         state["child_root"] = str(root)
-        if state.get("state") in {KOMI_SELECTED, CALIBRATION_EXTENSION, CALIBRATION_KOMI_2_5, CALIBRATION_KOMI_1_5, M137_PINNED}:
+        if state.get("state") in {
+            KOMI_SELECTED,
+            CALIBRATION_EXTENSION,
+            CALIBRATION_CANDIDATE,
+            CALIBRATION_KOMI_2_5,
+            CALIBRATION_KOMI_1_5,
+            M137_PINNED,
+        }:
             self._transition(state, CHILD_LINEAGE_CREATED)
 
         # Persist the handoff before invoking a potentially long-running child
@@ -693,6 +733,99 @@ class KomiCalibrationRunnerV2:
             self._transition(state, COMPLETE_HANDOFF)
         return self._result(state, parent)
 
+    @staticmethod
+    def _candidate_stage(komi: float) -> str:
+        if komi == 1.5:
+            return CALIBRATION_KOMI_1_5
+        if komi == 2.5:
+            return CALIBRATION_KOMI_2_5
+        return CALIBRATION_CANDIDATE
+
+    def _validate_candidate_evidence(
+        self,
+        raw: Mapping[str, object],
+        parent: ResolvedCheckpointNode,
+        komi: float,
+    ) -> dict[str, object]:
+        if raw.get("validity") != "VALID":
+            self._fail({}, f"reused komi {komi:g} evidence is not VALID")
+        if str(raw.get("evaluation_id", "")).strip() == "":
+            self._fail({}, f"reused komi {komi:g} evaluation id is missing")
+        if str(raw.get("evaluation_fingerprint", "")).strip() == "":
+            self._fail({}, f"reused komi {komi:g} evaluation fingerprint is missing")
+        identity = raw.get("identity")
+        stats = raw.get("stats")
+        if not isinstance(identity, Mapping) or not isinstance(stats, Mapping):
+            self._fail({}, f"reused komi {komi:g} evidence is malformed")
+        parent_ref = parent.ref.to_dict()
+        if identity.get("candidate") != parent_ref or identity.get("reference") != parent_ref:
+            self._fail({}, f"reused komi {komi:g} parent identity changed")
+        expected_startset = self.config.arena_startset or frozen_calibration_startset_ref(
+            master_seed=self.config.arena_master_seed
+        )
+        startset = identity.get("startset")
+        if not isinstance(startset, Mapping) or startset.get("fingerprint") != expected_startset.fingerprint:
+            self._fail({}, f"reused komi {komi:g} startset identity changed")
+        expected_contract = self.config.arena_contract.scientific_contract(
+            komi=komi, games=self.config.initial_games
+        )
+        if identity.get("scientific_contract") != expected_contract:
+            self._fail({}, f"reused komi {komi:g} calibration contract changed")
+        if int(raw.get("batch", 1)) != 1 or float(raw.get("komi", -1.0)) != komi:
+            self._fail({}, f"reused komi {komi:g} batch identity is malformed")
+        if (
+            int(stats.get("games", 0)) != self.config.initial_games
+            or int(stats.get("valid_games", 0)) != self.config.initial_games
+            or int(stats.get("technical_games", 0)) != 0
+            or int(stats.get("invalid_games", 0)) != 0
+        ):
+            self._fail({}, f"reused komi {komi:g} game counters are invalid")
+        output_dir = Path(str(raw.get("output_dir", ""))).resolve()
+        required = (
+            "evaluation-identity.json",
+            "games.jsonl",
+            "manifest.json",
+            "provenance.json",
+            "summary.json",
+        )
+        if not output_dir.is_dir() or any(not (output_dir / name).is_file() for name in required):
+            self._fail({}, f"reused komi {komi:g} evaluation metadata is incomplete")
+        return deepcopy(dict(raw))
+
+    def _load_reused_candidates(
+        self, state: dict[str, object], parent: ResolvedCheckpointNode
+    ) -> None:
+        path_value = self.config.reuse_results_path
+        if path_value is None or not self.config.reuse_candidates:
+            return
+        source = _read_json(Path(path_value))
+        source_candidates = source.get("candidates")
+        candidates = state.get("candidates")
+        if not isinstance(source_candidates, Mapping) or not isinstance(candidates, dict):
+            self._fail(state, "reused calibration results are malformed")
+        candidate_batches = state.setdefault("candidate_batches", {})
+        if not isinstance(candidate_batches, dict):
+            self._fail(state, "reused calibration batch ledger is malformed")
+        for komi in self.config.reuse_candidates:
+            key = f"{komi:g}"
+            raw = source_candidates.get(key)
+            if not isinstance(raw, Mapping):
+                self._fail(state, f"reused komi {key} result is missing")
+            aggregate = self._validate_candidate_evidence(raw, parent, komi)
+            batches = aggregate.get("batches")
+            first = None
+            if isinstance(batches, list):
+                for item in batches:
+                    if isinstance(item, Mapping) and int(item.get("batch", 0)) == 1:
+                        first = self._validate_candidate_evidence(item, parent, komi)
+                        break
+            if first is None:
+                first = aggregate
+            candidates[key] = aggregate
+            candidate_batches[key] = {"1": first}
+        state["reused_candidates"] = list(self.config.reuse_candidates)
+        self._persist(state)
+
     def _load_or_create_state(self) -> dict[str, object]:
         if self.state_path.is_file():
             state = _read_json(self.state_path)
@@ -720,7 +853,7 @@ class KomiCalibrationRunnerV2:
             "state": WAITING_FOR_M137,
             "parent_checkpoint": None,
             "parent_stop_requested": False,
-            "candidates": {"1.5": None, "2.5": None},
+            "candidates": {f"{komi:g}": None for komi in self.config.candidates},
             "selected_komi": None,
             "child_lineage_id": self.config.resolved_child_lineage_id,
             "created_at": now,
@@ -880,10 +1013,15 @@ class KomiCalibrationRunnerV2:
         candidates = state.get("candidates")
         if not isinstance(candidates, Mapping):
             self._fail(state, "calibration candidates are malformed")
-        first = {komi: candidates.get(f"{komi:g}") for komi in KOMI_CALIBRATION_CANDIDATES}
+        configured = tuple(self.config.candidates)
+        first = {komi: candidates.get(f"{komi:g}") for komi in configured}
         if any(not isinstance(value, Mapping) for value in first.values()):
             self._fail(state, "calibration candidates are incomplete")
-        biases = {komi: float(first[komi]["stats"]["bias"]) for komi in KOMI_CALIBRATION_CANDIDATES}  # type: ignore[index]
+        biases = {komi: float(first[komi]["stats"]["bias"]) for komi in configured}  # type: ignore[index]
+        if configured != KOMI_CALIBRATION_CANDIDATES:
+            minimum = min(biases.values())
+            tied = [komi for komi in configured if biases[komi] == minimum]
+            return 1.5 if 1.5 in tied else min(tied)
         if abs(biases[1.5] - biases[2.5]) < self.config.ambiguity_threshold:
             self._transition(state, CALIBRATION_EXTENSION)
             self._run_candidate(state, parent, 1.5, CALIBRATION_EXTENSION, batch=2)
@@ -1003,7 +1141,7 @@ class KomiCalibrationRunnerV2:
                     komi=komi,
                     games=self.config.initial_games,
                 )
-                for komi in KOMI_CALIBRATION_CANDIDATES
+                for komi in self.config.candidates
             },
             "selected_komi": state.get("selected_komi"),
             "selected_effective_config": state.get("child_config"),
