@@ -408,7 +408,16 @@ def publish_checkpoint_graph(
     # lineage boundary.  After the first generation, the immediate parent is
     # the preceding same-lineage CheckpointNode and is intentionally not
     # promoted into that lineage-root field.
-    if parent.lineage_id != checkpoint.lineage_id and manifest.get("parent_checkpoint") != parent.to_dict():
+    manifest_parent = manifest.get("parent_checkpoint")
+    if isinstance(manifest_parent, Mapping):
+        # Torus9 parent replay inheritance is persisted as references on the
+        # lineage-root parent object.  Those references enrich the immutable
+        # checkpoint identity; they do not replace or mutate it.
+        manifest_parent_identity = dict(manifest_parent)
+        manifest_parent_identity.pop("replay_references", None)
+    else:
+        manifest_parent_identity = manifest_parent
+    if parent.lineage_id != checkpoint.lineage_id and manifest_parent_identity != parent.to_dict():
         raise ValueError("lineage manifest parent changed during graph publication")
     hashes = manifest.get("checkpoint_hashes")
     if not isinstance(hashes, Mapping):
