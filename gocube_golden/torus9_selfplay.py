@@ -95,7 +95,7 @@ class _Torus9CooperativeGame:
         self.game_id = str(game_id)
         self.game_seed = derive_seed(context.master_seed, context.run_id, self.game_id, "game")
         self.rng = __import__("random").Random(self.game_seed)
-        self.state = _t9.initial_state(topology=_t9.TORUS_9X9, komi=TORUS9_KOMI)
+        self.state = _t9.initial_state(topology=_t9.TORUS_9X9, komi=context.contract.komi)
         self.start_state = _t9.torus9_state_identity(self.state)
         self.positions: list[_t9.Torus9SelfPlayPosition] = []
         self.trace: list[int | str] = []
@@ -256,8 +256,8 @@ def _validate_current_scientific_boundary(
     profile_fp: str,
     contract: _t9.Torus9SelfPlaySearchContract,
 ) -> None:
-    if float(TORUS9_KOMI) != 0.5:
-        raise RuntimeError("Current Torus9 self-play requires komi 0.5")
+    if float(contract.komi) not in {0.5, 1.5, 2.5}:
+        raise ValueError("Current Torus9 self-play komi must be 0.5, 1.5, or 2.5")
     if profile_id != TORUS9_CURRENT_PROFILE_ID:
         raise ValueError("Torus9 self-play supports only the current Golden profile")
     profile = load_torus9_current_profile()

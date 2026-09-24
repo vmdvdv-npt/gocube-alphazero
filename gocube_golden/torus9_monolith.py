@@ -26,7 +26,7 @@ F = importlib.import_module("torch.nn.functional")
 
 from .arena_contract import SearchSettings
 from .neural import model_hash
-from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256
+from .provenance import CodeIdentity, capture_code_identity, derive_seed, file_sha256, sha256_fingerprint
 from .result import Winner, result_from_terminal
 from .rules import IllegalMoveError, LegalActionContext, apply_action, legal_actions, prepare_legal_actions
 from .scoring import Ownership, score_terminal
@@ -43,7 +43,7 @@ from .search import (
 )
 from .search_adapter import GoldenSearchAdapter
 from .selfplay_policy import apply_root_dirichlet_noise, sample_action_from_search_result
-from .state import BLACK, EMPTY, PASS, WHITE, GoldenState, Stone, initial_state
+from .state import BLACK, EMPTY, PASS, WHITE, GoldenState, Stone, initial_state, rules_fingerprint_for
 from .topology import TORUS_5X5, TORUS_9X9, TORUS_9X9_TOPOLOGY_ID
 from .torus9_contract import (
     TORUS9_ACTION_COUNT,
@@ -171,10 +171,17 @@ def torus9_state_identity(state: GoldenState) -> dict[str, object]:
     }
 
 
-def torus9_state_from_identity(identity: Mapping[str, object]) -> GoldenState:
+def torus9_state_from_identity(
+    identity: Mapping[str, object],
+    *,
+    expected_komi: float | None = None,
+) -> GoldenState:
     if identity.get("topology_id") != TORUS9_TOPOLOGY_ID or identity.get("topology_fingerprint") != TORUS9_TOPOLOGY_FINGERPRINT:
         raise ValueError("Torus 9×9 state topology identity drift")
-    if identity.get("rules_fingerprint") != TORUS9_RULES_FINGERPRINT or float(identity.get("komi", -1.0)) != TORUS9_KOMI:
+    komi = float(identity.get("komi", -1.0))
+    if expected_komi is not None and komi != float(expected_komi):
+        raise ValueError("Torus 9×9 state komi identity drift")
+    if identity.get("rules_fingerprint") != rules_fingerprint_for(TORUS_9X9, komi):
         raise ValueError("Torus 9×9 state rules/komi identity drift")
     return GoldenState(
         stones=tuple(Stone(int(value)) for value in identity["stones"]),  # type: ignore[index]
@@ -184,7 +191,7 @@ def torus9_state_from_identity(identity: Mapping[str, object]) -> GoldenState:
         topology=TORUS_9X9,
         rules_id=str(identity["rules_id"]),
         rules_fingerprint=str(identity["rules_fingerprint"]),
-        komi=float(identity["komi"]),
+        komi=komi,
         history_provenance=str(identity["history_provenance"]),
     )
 
@@ -253,7 +260,7 @@ def build_torus9_observation_into(
     destination[2].fill_(1.0 if own == BLACK else -1.0)
     destination[3].fill_(1.0 if state.consecutive_passes == 1 else 0.0)
     destination[4].copy_(torch.tensor(context.action_mask[:TORUS9_POINT_COUNT], dtype=torch.float32))
-    destination[5].fill_(TORUS9_KOMI)
+    destination[5].fill_(float(state.komi))
 
 
 def build_torus9_observation(state: GoldenState, *, legal_context: LegalActionContext | None = None) -> torch.Tensor:
@@ -526,6 +533,7 @@ class Torus9SelfPlaySearchContract:
     dirichlet_epsilon: float = 0.25
     dirichlet_alpha: float = TORUS9_CURRENT_DIRICHLET_ALPHA
     watchdog: int = TORUS9_MOVE_LIMIT
+    komi: float = TORUS9_KOMI
 
     @property
     def settings(self) -> SearchSettings:
@@ -533,12 +541,17 @@ class Torus9SelfPlaySearchContract:
 
     def validate(self) -> None:
         expected = Torus9SelfPlaySearchContract()
-        if asdict(self) != asdict(expected):
+        actual = asdict(self)
+        expected_values = asdict(expected)
+        actual_komi = float(actual.pop("komi"))
+        expected_values.pop("komi")
+        if actual != expected_values or actual_komi not in {0.5, 1.5, 2.5}:
             raise ValueError("Torus 9×9 self-play search contract drift")
 
     @property
     def fingerprint(self) -> str:
-        return current_torus9_selfplay_contract_fingerprint(self.dirichlet_alpha)
+        base = current_torus9_selfplay_contract_fingerprint(self.dirichlet_alpha)
+        return base if float(self.komi) == TORUS9_KOMI else sha256_fingerprint({"base": base, "komi": float(self.komi)})
 
 
 def _action_index(action: int | str) -> int:
@@ -1337,7 +1350,7 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
         }
 
 
-def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str, parent: str | None, model_seed: int, code: CodeIdentity, profile_fp: str, completed_games: int, replay_positions: int, optimizer_updates: int, samples_consumed: int, ownership_loss_enabled: bool | None = None, score_loss_enabled: bool | None = None, profile_id: str = TORUS9_CURRENT_PROFILE_ID, target_fingerprint: str = TORUS9_CURRENT_TARGET_FINGERPRINT, selfplay_contract_id: str = TORUS9_CURRENT_SELFPLAY_CONTRACT_ID, selfplay_contract_fingerprint: str | None = None, base_commit: str | None = None) -> dict[str, object]:
+def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str, parent: str | None, model_seed: int, code: CodeIdentity, profile_fp: str, completed_games: int, replay_positions: int, optimizer_updates: int, samples_consumed: int, ownership_loss_enabled: bool | None = None, score_loss_enabled: bool | None = None, profile_id: str = TORUS9_CURRENT_PROFILE_ID, target_fingerprint: str = TORUS9_CURRENT_TARGET_FINGERPRINT, selfplay_contract_id: str = TORUS9_CURRENT_SELFPLAY_CONTRACT_ID, selfplay_contract_fingerprint: str | None = None, base_commit: str | None = None, komi: float = TORUS9_KOMI) -> dict[str, object]:
     auxiliary = isinstance(model, Torus9OwnershipGraphNet)
     heads = {
         "policy": [TORUS9_ACTION_COUNT],
@@ -1362,12 +1375,12 @@ def torus9_checkpoint_metadata(*, model: Torus9GraphNet, run_id: str, label: str
         "profile_fingerprint": profile_fp,
         "base_commit": base_commit,
         "rules_profile_id": "graph-area-v1",
-        "rules_fingerprint": TORUS9_RULES_FINGERPRINT,
+        "rules_fingerprint": rules_fingerprint_for(TORUS_9X9, float(komi)),
         "topology_id": TORUS9_TOPOLOGY_ID,
         "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
         "board_size": [9, 9],
         "point_id_order_identity": "row-major-yx:point_id=y*width+x",
-        "komi": TORUS9_KOMI,
+        "komi": float(komi),
         "observation_schema_id": TORUS9_OBSERVATION_SCHEMA_ID,
         "observation_schema_version": TORUS9_OBSERVATION_SCHEMA_VERSION,
         "observation_fingerprint": TORUS9_OBSERVATION_FINGERPRINT,
@@ -1438,7 +1451,8 @@ def torus9_load_checkpoint(path: Path, *, model: Torus9GraphNet, optimizer: torc
         raise ValueError("Only the current Golden Torus9 checkpoint architecture is supported")
     if not isinstance(model, Torus9CurrentGraphNet):
         raise ValueError("Current Golden Torus9 checkpoints require Torus9CurrentGraphNet")
-    if metadata.get("topology_fingerprint") != TORUS9_TOPOLOGY_FINGERPRINT or metadata.get("board_size") != [9, 9] or metadata.get("komi") != TORUS9_KOMI:
+    metadata_komi = float(metadata.get("komi", -1.0))
+    if metadata.get("topology_fingerprint") != TORUS9_TOPOLOGY_FINGERPRINT or metadata.get("board_size") != [9, 9] or metadata.get("rules_fingerprint") != rules_fingerprint_for(TORUS_9X9, metadata_komi) or metadata_komi not in {0.5, 1.5, 2.5}:
         raise ValueError("Torus 9×9 checkpoint topology/komi mismatch")
     expected_heads = {"policy": [82], "value": [3]}
     auxiliary = isinstance(model, Torus9OwnershipGraphNet)
@@ -1566,6 +1580,19 @@ def summarize_torus9_arena(records: Sequence[Mapping[str, object]], *, candidate
         interval = None
     else:
         interval = torus9_hoeffding_interval(pair_scores)
+    black_wins = sum(row.get("formal_result") == "BLACK" for row in valid)
+    white_wins = sum(row.get("formal_result") == "WHITE" for row in valid)
+    draws = sum(row.get("formal_result") == "DRAW" for row in valid)
+    black_rate = black_wins / len(valid) if valid else None
+    if black_rate is None:
+        black_ci = None
+    else:
+        z = 1.959963984540054
+        denominator = 1.0 + z * z / len(valid)
+        centre = (black_rate + z * z / (2.0 * len(valid))) / denominator
+        radius = z * math.sqrt(black_rate * (1.0 - black_rate) / len(valid) + z * z / (4.0 * len(valid) * len(valid))) / denominator
+        black_ci = [max(0.0, centre - radius), min(1.0, centre + radius)]
+    margins = [float(row["margin_black"]) for row in valid if row.get("margin_black") is not None]
     return {
         "candidate": candidate_label,
         "reference": reference_label,
@@ -1576,6 +1603,12 @@ def summarize_torus9_arena(records: Sequence[Mapping[str, object]], *, candidate
         "valid_games": len(valid),
         "technical_games": len(technical),
         "W/L/D": [counts["W"], counts["L"], counts["D"]],
+        "black_wins": black_wins,
+        "white_wins": white_wins,
+        "black_win_rate": black_rate,
+        "black_win_rate_95_percent_ci": black_ci,
+        "black_win_rate_bias": None if black_rate is None else abs(black_rate - 0.5),
+        "raw_score_margin_histogram": margins,
         "wins": counts["W"],
         "losses": counts["L"],
         "draws": counts["D"],
@@ -1587,10 +1620,16 @@ def summarize_torus9_arena(records: Sequence[Mapping[str, object]], *, candidate
     }
 
 
-def _candidate_start(master_seed: int, prefix_length: int, candidate_index: int) -> dict[str, object]:
+def _candidate_start(
+    master_seed: int,
+    prefix_length: int,
+    candidate_index: int,
+    *,
+    komi: float = TORUS9_KOMI,
+) -> dict[str, object]:
     seed = derive_seed(master_seed, prefix_length, candidate_index)
     rng = random.Random(seed)
-    state = initial_state(topology=TORUS_9X9, komi=TORUS9_KOMI)
+    state = initial_state(topology=TORUS_9X9, komi=float(komi))
     trace: list[int] = []
     for _ in range(prefix_length):
         choices = tuple(action for action in legal_actions(state) if action != PASS)
@@ -1602,14 +1641,19 @@ def _candidate_start(master_seed: int, prefix_length: int, candidate_index: int)
     return {"prefix_length": prefix_length, "candidate_index": candidate_index, "candidate_seed": seed, "trace": trace, "state": torus9_state_identity(state)}
 
 
-def generate_torus9_evaluation_starts(*, master_seed: int, accepted_per_stratum: int = 8) -> tuple[dict[str, object], ...]:
+def generate_torus9_evaluation_starts(
+    *,
+    master_seed: int,
+    accepted_per_stratum: int = 8,
+    komi: float = TORUS9_KOMI,
+) -> tuple[dict[str, object], ...]:
     accepted: list[dict[str, object]] = []
     seen: set[str] = set()
     for prefix_length in (2, 4, 6, 8, 10, 12, 14, 16):
         count = 0
         candidate_index = 0
         while count < accepted_per_stratum:
-            row = _candidate_start(master_seed, prefix_length, candidate_index)
+            row = _candidate_start(master_seed, prefix_length, candidate_index, komi=komi)
             exact = "sha256:" + hashlib.sha256(_canonical(row["state"]).encode("utf-8")).hexdigest()
             if exact not in seen:
                 row.update({"start_id": f"prefix-{prefix_length:02d}-accepted-{count:02d}", "exact_identity_fingerprint": exact})

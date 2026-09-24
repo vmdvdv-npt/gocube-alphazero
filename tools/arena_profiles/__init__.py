@@ -19,6 +19,14 @@ def _profiles() -> dict[str, ArenaProfile]:
 
 def get_profile(profile_id: str) -> ArenaProfile:
     value = str(profile_id)
+    if value.startswith("torus9-komi-calibration|"):
+        from tools.arena_profiles.torus9 import Torus9ArenaProfile
+
+        try:
+            komi = float(value.split("|", 1)[1])
+        except (IndexError, ValueError) as exc:
+            raise ValueError(f"Malformed Torus9 komi calibration profile {profile_id!r}") from exc
+        return Torus9ArenaProfile(komi=komi, profile_id=value)
     if value.startswith("cube-v2|"):
         from tools.arena_profiles.cube_v2 import CubeV2ArenaProfile
 

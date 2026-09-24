@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import re
@@ -59,12 +60,15 @@ from gocube_golden.torus9 import (
 from gocube_golden.torus9_contract import (
     TORUS9_CURRENT_PROFILE_ID,
     TORUS9_GOLDEN_LINEAGE_BASE_COMMIT,
+    TORUS9_KOMI,
     TORUS9_OPTIMIZER_STEPS_PER_ITERATION,
     current_torus9_content_fingerprint,
     current_torus9_profile_fingerprint,
     load_torus9_current_profile,
     profile_fingerprint,
 )
+from gocube_golden.state import rules_fingerprint_for
+from gocube_golden.topology import TORUS_9X9
 from gocube_golden.torus9_training import (
     TORUS9_REPLAY_COMPOSITION_IDENTITY_SCHEMA,
     TORUS9_REPLAY_GENERATION_IDENTITY_SCHEMA,
@@ -357,6 +361,8 @@ class _Heartbeat:
         self._minimum_write_interval = min(1.0, max(0.1, self.interval / 2.0))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._liveness_stop: object | None = None
+        self._liveness_process: multiprocessing.Process | None = None
 
     def advance(
         self,
@@ -436,6 +442,22 @@ class _Heartbeat:
 
     def __enter__(self) -> "_Heartbeat":
         self.write()
+        # Replay reload and commit validation can spend several minutes in
+        # C/Python code that starves a thread holding the GIL.  Keep the
+        # supervisor's liveness signal in a separate process so a healthy
+        # worker is not mistaken for a hung worker during that bounded work.
+        context_name = "fork" if os.name == "posix" else "spawn"
+        context = multiprocessing.get_context(context_name)
+        liveness_stop = context.Event()
+        liveness_process = context.Process(
+            target=_heartbeat_liveness_loop,
+            args=(self.path, self.generation, self.interval, os.getpid(), liveness_stop),
+            name="torus9-production-liveness",
+        )
+        liveness_process.daemon = True
+        liveness_process.start()
+        self._liveness_stop = liveness_stop
+        self._liveness_process = liveness_process
         self._thread = threading.Thread(
             target=self._loop,
             name="torus9-production-heartbeat",
@@ -450,7 +472,43 @@ class _Heartbeat:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=max(2.0, self.interval * 2.0))
+        if self._liveness_stop is not None:
+            self._liveness_stop.set()
+        if self._liveness_process is not None:
+            self._liveness_process.join(timeout=max(2.0, self.interval * 2.0))
+            if self._liveness_process.is_alive():
+                self._liveness_process.terminate()
+                self._liveness_process.join(timeout=1.0)
         self.write()
+
+
+def _heartbeat_liveness_loop(
+    path: Path,
+    generation: int,
+    interval: float,
+    parent_pid: int,
+    stop: object,
+) -> None:
+    """Refresh only liveness while the driver performs long blocking work.
+
+    The child deliberately preserves the semantic progress fields written by
+    the driver.  It exits when the driver exits or when the context asks it to
+    stop, so a crashed driver cannot leave an immortal heartbeat behind.
+    """
+    wait = getattr(stop, "wait")
+    while os.getppid() == int(parent_pid):
+        if bool(wait(max(0.1, float(interval)))):
+            return
+        try:
+            payload = _read_json(path) if path.is_file() else {}
+        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        payload.setdefault("schema", HEARTBEAT_SCHEMA)
+        payload.setdefault("generation", int(generation))
+        payload.setdefault("pid", int(parent_pid))
+        payload.setdefault("phase", "running")
+        payload["liveness_at"] = time.time()
+        _atomic_json(path, payload)
 
 
 def _environment(generation: int) -> tuple[Path, str, Path, str, CodeIdentity]:
@@ -527,6 +585,7 @@ def _contract(profile: Mapping[str, object]) -> Torus9SelfPlaySearchContract:
         dirichlet_epsilon=float(settings["dirichlet_epsilon"]),
         dirichlet_alpha=float(settings["dirichlet_alpha"]),
         watchdog=int(settings["watchdog"]),
+        komi=float(settings.get("komi", TORUS9_KOMI)),
     )
 
 
@@ -1535,11 +1594,17 @@ def _v2_generation_config(
 ) -> dict[str, object]:
     """Translate the resolved V2 config to the mature driver vocabulary."""
     effective = _v2_effective_config(effective_config)
+    compatibility = _mapping(effective.get("compatibility", {}), "effective_config.compatibility")
     self_play = _mapping(effective.get("self_play"), "effective_config.self_play")
     training = _mapping(effective.get("training"), "effective_config.training")
     replay = _mapping(effective.get("replay"), "effective_config.replay")
     execution = _mapping(effective.get("execution"), "effective_config.execution")
     extensions = _mapping(effective.get("extensions", {}), "effective_config.extensions")
+    rules = compatibility.get("rules")
+    rules_mapping = rules if isinstance(rules, Mapping) else {}
+    komi = float(self_play.get("komi", rules_mapping.get("komi", 0.5)))
+    if komi not in {0.5, 1.5, 2.5}:
+        raise ValueError("effective_config Torus9 komi must be 0.5, 1.5, or 2.5")
     seed_values = extensions.get("seeds", execution)
     seeds = _mapping(seed_values, "effective_config.execution seeds")
     workers = int(execution["workers"])
@@ -1604,6 +1669,7 @@ def _v2_generation_config(
         "mcts_simulations": int(self_play["mcts_simulations"]),
         "replay_generations": int(replay["generations"]),
         "replay_cap": None if replay.get("cap") is None else int(replay["cap"]),
+        "komi": komi,
     }
 
 
@@ -1615,12 +1681,18 @@ def _v2_profile(value: object, config: Mapping[str, object]) -> dict[str, object
         "effective_config_fingerprint": getattr(value, "fingerprint", None),
     }
     profile["self_play"]["mcts_simulations"] = int(config["mcts_simulations"])
+    komi = float(config.get("komi", TORUS9_KOMI))
+    profile["rules"]["komi"] = komi
+    profile["rules"]["fingerprint"] = rules_fingerprint_for(TORUS_9X9, komi)
+    profile["self_play"]["komi"] = komi
+    profile["arena"]["komi"] = komi
     profile["training"]["learning_rate"] = float(config["learning_rate"])
     profile["replay"]["window"] = (
         f"rolling last {int(config['replay_generations'])} generations"
     )
     profile["replay"]["generations"] = int(config["replay_generations"])
     profile["replay"]["cap"] = config["replay_cap"]
+    profile["self_play"]["fingerprint"] = _contract(profile).fingerprint
     profile["content_fingerprint"] = current_torus9_content_fingerprint(profile)
     profile["profile_fingerprint"] = profile_fingerprint(profile)
     return profile
