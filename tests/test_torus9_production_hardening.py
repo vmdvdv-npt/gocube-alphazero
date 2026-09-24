@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import time
 
 import pytest
 
@@ -182,6 +183,21 @@ def test_semantic_heartbeat_publishes_incremental_counts() -> None:
             assert payload["completed"] == 7
             assert payload["total"] == 64
             assert payload["progress_token"] == "self-play:7/64 games"
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_heartbeat_liveness_process_refreshes_without_driver_thread() -> None:
+    path = Path("/tmp") / f"torus9-heartbeat-liveness-test-{id(object())}.json"
+    try:
+        with run_driver._Heartbeat(path, generation=3, interval=0.1) as heartbeat:
+            heartbeat._stop.set()
+            if heartbeat._thread is not None:
+                heartbeat._thread.join(timeout=1.0)
+            before = json.loads(path.read_text(encoding="utf-8"))["liveness_at"]
+            time.sleep(0.4)
+            after = json.loads(path.read_text(encoding="utf-8"))["liveness_at"]
+            assert after > before
     finally:
         path.unlink(missing_ok=True)
 

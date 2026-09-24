@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import re
@@ -357,6 +358,8 @@ class _Heartbeat:
         self._minimum_write_interval = min(1.0, max(0.1, self.interval / 2.0))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._liveness_stop: object | None = None
+        self._liveness_process: multiprocessing.Process | None = None
 
     def advance(
         self,
@@ -436,6 +439,22 @@ class _Heartbeat:
 
     def __enter__(self) -> "_Heartbeat":
         self.write()
+        # Replay reload and commit validation can spend several minutes in
+        # C/Python code that starves a thread holding the GIL.  Keep the
+        # supervisor's liveness signal in a separate process so a healthy
+        # worker is not mistaken for a hung worker during that bounded work.
+        context_name = "fork" if os.name == "posix" else "spawn"
+        context = multiprocessing.get_context(context_name)
+        liveness_stop = context.Event()
+        liveness_process = context.Process(
+            target=_heartbeat_liveness_loop,
+            args=(self.path, self.generation, self.interval, os.getpid(), liveness_stop),
+            name="torus9-production-liveness",
+        )
+        liveness_process.daemon = True
+        liveness_process.start()
+        self._liveness_stop = liveness_stop
+        self._liveness_process = liveness_process
         self._thread = threading.Thread(
             target=self._loop,
             name="torus9-production-heartbeat",
@@ -450,7 +469,43 @@ class _Heartbeat:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=max(2.0, self.interval * 2.0))
+        if self._liveness_stop is not None:
+            self._liveness_stop.set()
+        if self._liveness_process is not None:
+            self._liveness_process.join(timeout=max(2.0, self.interval * 2.0))
+            if self._liveness_process.is_alive():
+                self._liveness_process.terminate()
+                self._liveness_process.join(timeout=1.0)
         self.write()
+
+
+def _heartbeat_liveness_loop(
+    path: Path,
+    generation: int,
+    interval: float,
+    parent_pid: int,
+    stop: object,
+) -> None:
+    """Refresh only liveness while the driver performs long blocking work.
+
+    The child deliberately preserves the semantic progress fields written by
+    the driver.  It exits when the driver exits or when the context asks it to
+    stop, so a crashed driver cannot leave an immortal heartbeat behind.
+    """
+    wait = getattr(stop, "wait")
+    while os.getppid() == int(parent_pid):
+        if bool(wait(max(0.1, float(interval)))):
+            return
+        try:
+            payload = _read_json(path) if path.is_file() else {}
+        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        payload.setdefault("schema", HEARTBEAT_SCHEMA)
+        payload.setdefault("generation", int(generation))
+        payload.setdefault("pid", int(parent_pid))
+        payload.setdefault("phase", "running")
+        payload["liveness_at"] = time.time()
+        _atomic_json(path, payload)
 
 
 def _environment(generation: int) -> tuple[Path, str, Path, str, CodeIdentity]:
