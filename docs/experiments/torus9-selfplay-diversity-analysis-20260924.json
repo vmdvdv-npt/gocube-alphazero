@@ -1,0 +1,1668 @@
+{
+  "analysis_date": "2026-09-24",
+  "artifacts": {
+    "plot_note": "Raw per-ply/per-position records are intentionally not tracked; rerun the read-only analyzer with an explicit debug output outside the repository if needed.",
+    "plots": [],
+    "report": "docs/experiments/torus9-selfplay-diversity-analysis-20260924.md",
+    "summary": "docs/experiments/torus9-selfplay-diversity-analysis-20260924.json"
+  },
+  "completion_records": {
+    "current": [
+      {
+        "exists": true,
+        "generation": 130,
+        "label": "M130",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m125-continuous-v2-gen6-20260922-v1/generation-130.complete.json",
+        "replay_generations": [
+          125,
+          126,
+          127,
+          128,
+          129,
+          130
+        ],
+        "replay_row_count": 217561,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-130-games.jsonl",
+        "sha256": "sha256:f25b4270bf760aaac759725306738e10b7b1133faf7c8481c746634977bf0a95"
+      },
+      {
+        "exists": true,
+        "generation": 131,
+        "label": "M131",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m125-continuous-v2-gen6-20260922-v1/generation-131.complete.json",
+        "replay_generations": [
+          126,
+          127,
+          128,
+          129,
+          130,
+          131
+        ],
+        "replay_row_count": 217594,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-131-games.jsonl",
+        "sha256": "sha256:316555b44cbe2ed4a53f23a50a52a49aaffea272ea81d2aeecfaa9d0da2b5fea"
+      },
+      {
+        "exists": true,
+        "generation": 132,
+        "label": "M132",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m125-continuous-v2-gen6-20260922-v1/generation-132.complete.json",
+        "replay_generations": [
+          127,
+          128,
+          129,
+          130,
+          131,
+          132
+        ],
+        "replay_row_count": 216905,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-132-games.jsonl",
+        "sha256": "sha256:586f9640f6ac2cebe3183a454a6467873341930d5f9c7fed4eb90ffb96d553e9"
+      },
+      {
+        "exists": true,
+        "generation": 133,
+        "label": "M133",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m125-continuous-v2-gen6-20260922-v1/generation-133.complete.json",
+        "replay_generations": [
+          128,
+          129,
+          130,
+          131,
+          132,
+          133
+        ],
+        "replay_row_count": 217098,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-133-games.jsonl",
+        "sha256": "sha256:cbdbf3c38076300a9e8d439c1bd94ef846ec47142213be09c774ca844b0673d1"
+      },
+      {
+        "exists": true,
+        "generation": 134,
+        "label": "M134",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m125-continuous-v2-gen6-20260922-v1/generation-134.complete.json",
+        "replay_generations": [
+          129,
+          130,
+          131,
+          132,
+          133,
+          134
+        ],
+        "replay_row_count": 217367,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-134-games.jsonl",
+        "sha256": "sha256:003d83080b085d0bd0a1bf016ffce68301bab28f4009dc2b32316a1742df1428"
+      },
+      {
+        "exists": true,
+        "generation": 135,
+        "label": "M135",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m125-continuous-v2-gen6-20260922-v1/generation-135.complete.json",
+        "replay_generations": [
+          130,
+          131,
+          132,
+          133,
+          134,
+          135
+        ],
+        "replay_row_count": 216759,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-135-games.jsonl",
+        "sha256": "sha256:40b259fc886499c58e1cbadf92ea189d514f1d41c5912b9ee9458cdecc22ef4c"
+      }
+    ],
+    "historical": [
+      {
+        "exists": true,
+        "generation": 100,
+        "label": "M100",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m92-continuous-v2-20260920-v1/generation-100.complete.json",
+        "replay_generations": [
+          99,
+          100
+        ],
+        "replay_row_count": 71478,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-100-games.jsonl",
+        "sha256": "sha256:ad830f3e9f2ccf898f02de43ce1cc2dd786ef4949b8e581cd2382d5256932428"
+      },
+      {
+        "exists": true,
+        "generation": 101,
+        "label": "M101",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m92-continuous-v2-20260920-v1/generation-101.complete.json",
+        "replay_generations": [
+          100,
+          101
+        ],
+        "replay_row_count": 73183,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-101-games.jsonl",
+        "sha256": "sha256:0edcfa58a5998bd7eafb17b40e99649f91db0af2883581dd45ecb29542b51adb"
+      },
+      {
+        "exists": true,
+        "generation": 102,
+        "label": "M102",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m92-continuous-v2-20260920-v1/generation-102.complete.json",
+        "replay_generations": [
+          101,
+          102
+        ],
+        "replay_row_count": 73148,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-102-games.jsonl",
+        "sha256": "sha256:42e9a396a8b00c425d3f960417cb3c3d8f96ad59937ada4f6c8bfe646f828cbe"
+      },
+      {
+        "exists": true,
+        "generation": 103,
+        "label": "M103",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m92-continuous-v2-20260920-v1/generation-103.complete.json",
+        "replay_generations": [
+          102,
+          103
+        ],
+        "replay_row_count": 72741,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-103-games.jsonl",
+        "sha256": "sha256:1c4292d283cdfdc80cba4d5ddfb29048071b754c4d55c74629e92593068d064b"
+      },
+      {
+        "exists": true,
+        "generation": 104,
+        "label": "M104",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m92-continuous-v2-20260920-v1/generation-104.complete.json",
+        "replay_generations": [
+          103,
+          104
+        ],
+        "replay_row_count": 71771,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-104-games.jsonl",
+        "sha256": "sha256:d91f03afb6e8d92422b0e290e67c0209ccd18e28bf49a05c2068121d2064b8ff"
+      },
+      {
+        "exists": true,
+        "generation": 105,
+        "label": "M105",
+        "path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m92-continuous-v2-20260920-v1/generation-105.complete.json",
+        "replay_generations": [
+          104,
+          105
+        ],
+        "replay_row_count": 71668,
+        "schema": "training-generation-commit-v1",
+        "selfplay_artifact_path": "selfplay/iter-105-games.jsonl",
+        "sha256": "sha256:ce040c6f28fc2efd511b60c9f6ffe222afb5ba868640aea719e2ec42128a9185"
+      }
+    ]
+  },
+  "conclusions": [
+    "Self-play diversity has not collapsed: exact-game and exact-position uniqueness remain high in the current window.",
+    "The post-ply-8 change is localized to MCTS search branching; aggregate selected-action entropy is a coarse mixed-state metric.",
+    "No production parameters were changed; the report is observational and does not establish temperature causality."
+  ],
+  "methodology": {
+    "aggregate_entropy_note": "Aggregate selected-action entropy pools actions from different states and is coarse branching only.",
+    "conditional_entropy": "Computed from choices observed at repeated exact state signatures.",
+    "full_game_signature": "Exact ordered final_action_trace including PASS; metadata excluded.",
+    "mcts_metrics": "Root visit counts normalized per position; entropy is natural-log entropy and effective candidates is exp(entropy).",
+    "position_signature": "SHA-256 of canonical JSON of complete saved position.state.",
+    "position_state_fields": [
+      "stones",
+      "side_to_move",
+      "consecutive_passes",
+      "komi",
+      "rules_id",
+      "rules_fingerprint",
+      "topology_id",
+      "topology_fingerprint",
+      "superko_history"
+    ],
+    "prefix_family_top_percent": "Top fraction of distinct prefix families, with covered-game share.",
+    "symmetry_canonicalization": "Not computed; no production-trusted full-state canonicalizer was available."
+  },
+  "new_selfplay_started": false,
+  "read_only": true,
+  "runs_modified": false,
+  "schema": "torus9-selfplay-diversity-analysis-compact-summary-v1",
+  "window_comparison": {
+    "moves_1_8_action_entropy": {
+      "current": 4.38586074,
+      "current_minus_historical": -0.00052398,
+      "historical": 4.38638472
+    },
+    "moves_9_12_action_entropy": {
+      "current": 4.3776343,
+      "current_minus_historical": -0.00032782,
+      "historical": 4.37796212
+    },
+    "moves_9_12_mcts_entropy": {
+      "current": 2.38133322,
+      "current_minus_historical": -0.11501495,
+      "historical": 2.49634817
+    },
+    "position_repeat_rate": {
+      "current": 0.02283181,
+      "current_minus_historical": 8.281e-05,
+      "historical": 0.022749
+    },
+    "prefix_12_unique_ratio": {
+      "current": 1.0,
+      "current_minus_historical": 0.0,
+      "historical": 1.0
+    },
+    "prefix_16_unique_ratio": {
+      "current": 1.0,
+      "current_minus_historical": 0.0,
+      "historical": 1.0
+    },
+    "prefix_8_unique_ratio": {
+      "current": 1.0,
+      "current_minus_historical": 0.0,
+      "historical": 1.0
+    },
+    "unique_game_ratio": {
+      "current": 0.99913194,
+      "current_minus_historical": 0.00043403,
+      "historical": 0.99869792
+    },
+    "unique_position_ratio": {
+      "current": 0.97716819,
+      "current_minus_historical": -8.281e-05,
+      "historical": 0.977251
+    }
+  },
+  "windows": {
+    "current": {
+      "config_path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m125-continuous-v2-gen6-20260922-v1/metadata/effective-config-v2/sha256:0aa3a1c4987618683f479f4464a346476961bc16371f23ad071e3b88b014684c.json",
+      "config_sha256": "sha256:bdfd8145905a51df0003156b0b499145045deb72332c234539ae598b1f76b4e1",
+      "effective_config": {
+        "execution": {
+          "active_games_per_worker": 4,
+          "coalescing": true,
+          "device": "cuda",
+          "games": 384,
+          "heartbeat_interval_seconds": 5,
+          "inference_batch_cap": 64,
+          "inference_batch_wait_ms": 1,
+          "model_init_seed": 202609131001,
+          "optimizer_steps_per_iteration": 160,
+          "selfplay_master_seed": 202609131002,
+          "total_active_contexts": 64,
+          "training_master_seed": 202609131003,
+          "workers": 16
+        },
+        "replay": {
+          "cap": null,
+          "generations": 6,
+          "policy": "rolling-recent-generations",
+          "sampling": "deterministic / reproducible",
+          "window": "rolling last 6 generations"
+        },
+        "self_play": {
+          "contract_fingerprint": "sha256:22a4e4dd37d70bd3d712b909476120b96385802ec874b99358fab256c4e3351f",
+          "contract_id": "torus9-golden-current-selfplay-search-v1",
+          "cpuct": 1.25,
+          "dirichlet_alpha": 0.11,
+          "dirichlet_epsilon": 0.25,
+          "existing_batch_size": 64,
+          "fast_search": false,
+          "fingerprint": "sha256:22a4e4dd37d70bd3d712b909476120b96385802ec874b99358fab256c4e3351f",
+          "fpu": 0.0,
+          "games_per_iteration": 384,
+          "komi": 0.5,
+          "mcts_simulations": 200,
+          "resign": false,
+          "root_noise": true,
+          "temperature": "1.0 on plies 1–8, then 0",
+          "temperature_after": 0.0,
+          "temperature_plies": [
+            1,
+            8
+          ],
+          "watchdog": 500,
+          "workers": 16
+        }
+      },
+      "families": {
+        "12": {
+          "distinct_families": 2257,
+          "eligible_games": 2257,
+          "top_family_concentration": {
+            "top_10pct": {
+              "covered_game_share": 0.10013292,
+              "covered_games": 226,
+              "distinct_family_count": 2257,
+              "families_in_top_set": 226
+            },
+            "top_1pct": {
+              "covered_game_share": 0.01019052,
+              "covered_games": 23,
+              "distinct_family_count": 2257,
+              "families_in_top_set": 23
+            },
+            "top_5pct": {
+              "covered_game_share": 0.05006646,
+              "covered_games": 113,
+              "distinct_family_count": 2257,
+              "families_in_top_set": 113
+            }
+          }
+        },
+        "16": {
+          "distinct_families": 2257,
+          "eligible_games": 2257,
+          "top_family_concentration": {
+            "top_10pct": {
+              "covered_game_share": 0.10013292,
+              "covered_games": 226,
+              "distinct_family_count": 2257,
+              "families_in_top_set": 226
+            },
+            "top_1pct": {
+              "covered_game_share": 0.01019052,
+              "covered_games": 23,
+              "distinct_family_count": 2257,
+              "families_in_top_set": 23
+            },
+            "top_5pct": {
+              "covered_game_share": 0.05006646,
+              "covered_games": 113,
+              "distinct_family_count": 2257,
+              "families_in_top_set": 113
+            }
+          }
+        },
+        "8": {
+          "distinct_families": 2268,
+          "eligible_games": 2268,
+          "top_family_concentration": {
+            "top_10pct": {
+              "covered_game_share": 0.10008818,
+              "covered_games": 227,
+              "distinct_family_count": 2268,
+              "families_in_top_set": 227
+            },
+            "top_1pct": {
+              "covered_game_share": 0.01014109,
+              "covered_games": 23,
+              "distinct_family_count": 2268,
+              "families_in_top_set": 23
+            },
+            "top_5pct": {
+              "covered_game_share": 0.05026455,
+              "covered_games": 114,
+              "distinct_family_count": 2268,
+              "families_in_top_set": 114
+            }
+          }
+        }
+      },
+      "file_summaries": [
+        {
+          "complete_games": 384,
+          "generation": 130,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 35968,
+          "sha256": "sha256:47bb845f4a8df44fb82b91a5366a710ce954320458fd56ec93ba67c680100264",
+          "size_bytes": 488303371
+        },
+        {
+          "complete_games": 384,
+          "generation": 131,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 36328,
+          "sha256": "sha256:ca3f2f30a601db4e5db65eff7d0ba71b5991e10045fb6955f97518d291ca5fa0",
+          "size_bytes": 497774213
+        },
+        {
+          "complete_games": 384,
+          "generation": 132,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 35649,
+          "sha256": "sha256:c5ff577301bfde2e91040717f01ac61538a6e6025295d2810c89c90e4d6541ee",
+          "size_bytes": 482994894
+        },
+        {
+          "complete_games": 384,
+          "generation": 133,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 36351,
+          "sha256": "sha256:4e6edc14f1b3380742b502c7688567a0a3de9e3300b2da699d325d6050693c63",
+          "size_bytes": 494566043
+        },
+        {
+          "complete_games": 384,
+          "generation": 134,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 36513,
+          "sha256": "sha256:ea548c966b572dd2c82e313f823d625b7900c1370cca421877ddd99b89db4d08",
+          "size_bytes": 499453417
+        },
+        {
+          "complete_games": 384,
+          "generation": 135,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 35950,
+          "sha256": "sha256:34b30362a3665cafb10ce210819c741dd8cd20f19dfa819713b8d76640b421a8",
+          "size_bytes": 488680377
+        }
+      ],
+      "game_length_plies": {
+        "max": 195,
+        "mean": 94.07942708,
+        "median": 91.0,
+        "min": 2,
+        "p90": 123.0
+      },
+      "games": {
+        "complete_games": 2304,
+        "exact_unique_games": 2302,
+        "full_game_duplicates": 2,
+        "invalid_records": 0,
+        "parsed_records": 2304,
+        "total_games_found": 2304,
+        "unique_game_ratio": 0.99913194
+      },
+      "generations": [
+        130,
+        131,
+        132,
+        133,
+        134,
+        135
+      ],
+      "interval_diagnostics": {
+        "moves_13_16": {
+          "end_ply": 16,
+          "mcts_effective_candidate_moves_mean": 17.79483802,
+          "mcts_entropy_nats_mean": 2.34901113,
+          "mcts_positions": 9028,
+          "mcts_top1_visit_share_mean": 0.40288658,
+          "mcts_top2_visit_share_mean": 0.53131092,
+          "mcts_top3_visit_share_mean": 0.59984603,
+          "mean_per_ply_action_entropy_nats": 4.37666139,
+          "plies_observed": [
+            13,
+            14,
+            15,
+            16
+          ],
+          "pooled_action_encounters": 9028,
+          "pooled_action_entropy_nats": 4.38993764,
+          "pooled_top1_action_share": 0.01495348,
+          "pooled_unique_actions": 81,
+          "selected_is_visit_argmax_rate": 1.0,
+          "start_ply": 13
+        },
+        "moves_17_24": {
+          "end_ply": 24,
+          "mcts_effective_candidate_moves_mean": 15.34121641,
+          "mcts_entropy_nats_mean": 2.24939155,
+          "mcts_positions": 18056,
+          "mcts_top1_visit_share_mean": 0.42225604,
+          "mcts_top2_visit_share_mean": 0.55364449,
+          "mcts_top3_visit_share_mean": 0.62272569,
+          "mean_per_ply_action_entropy_nats": 4.37688759,
+          "plies_observed": [
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24
+          ],
+          "pooled_action_encounters": 18056,
+          "pooled_action_entropy_nats": 4.39289825,
+          "pooled_top1_action_share": 0.01406735,
+          "pooled_unique_actions": 82,
+          "selected_is_visit_argmax_rate": 0.99994462,
+          "start_ply": 17
+        },
+        "moves_1_8": {
+          "end_ply": 8,
+          "mcts_effective_candidate_moves_mean": 28.28171697,
+          "mcts_entropy_nats_mean": 2.90009854,
+          "mcts_positions": 18317,
+          "mcts_top1_visit_share_mean": 0.25983376,
+          "mcts_top2_visit_share_mean": 0.37720587,
+          "mcts_top3_visit_share_mean": 0.44571873,
+          "mean_per_ply_action_entropy_nats": 4.38586074,
+          "plies_observed": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ],
+          "pooled_action_encounters": 18317,
+          "pooled_action_entropy_nats": 4.4021816,
+          "pooled_top1_action_share": 0.01403068,
+          "pooled_unique_actions": 82,
+          "selected_is_visit_argmax_rate": 0.26762024,
+          "start_ply": 1
+        },
+        "moves_25_plus": {
+          "end_ply": null,
+          "mcts_effective_candidate_moves_mean": 9.16414581,
+          "mcts_entropy_nats_mean": 1.82552245,
+          "mcts_positions": 162321,
+          "mcts_top1_visit_share_mean": 0.44183738,
+          "mcts_top2_visit_share_mean": 0.59765237,
+          "mcts_top3_visit_share_mean": 0.68898593,
+          "mean_per_ply_action_entropy_nats": 2.96033158,
+          "plies_observed": [
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81,
+            82,
+            83,
+            84,
+            85,
+            86,
+            87,
+            88,
+            89,
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            134,
+            135,
+            136,
+            137,
+            138,
+            139,
+            140,
+            141,
+            142,
+            143,
+            144,
+            145,
+            146,
+            147,
+            148,
+            149,
+            150,
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177,
+            178,
+            179,
+            180,
+            181,
+            182,
+            183,
+            184,
+            185,
+            186,
+            187,
+            188,
+            189,
+            190,
+            191,
+            192,
+            193,
+            194,
+            195
+          ],
+          "pooled_action_encounters": 162321,
+          "pooled_action_entropy_nats": 4.25194493,
+          "pooled_top1_action_share": 0.11238842,
+          "pooled_unique_actions": 82,
+          "selected_is_visit_argmax_rate": 0.88761158,
+          "start_ply": 25
+        },
+        "moves_9_12": {
+          "end_ply": 12,
+          "mcts_effective_candidate_moves_mean": 19.02857682,
+          "mcts_entropy_nats_mean": 2.38133322,
+          "mcts_positions": 9037,
+          "mcts_top1_visit_share_mean": 0.39902346,
+          "mcts_top2_visit_share_mean": 0.52683468,
+          "mcts_top3_visit_share_mean": 0.59465088,
+          "mean_per_ply_action_entropy_nats": 4.3776343,
+          "plies_observed": [
+            9,
+            10,
+            11,
+            12
+          ],
+          "pooled_action_encounters": 9037,
+          "pooled_action_entropy_nats": 4.39286068,
+          "pooled_top1_action_share": 0.01538121,
+          "pooled_unique_actions": 82,
+          "selected_is_visit_argmax_rate": 0.99900409,
+          "start_ply": 9
+        }
+      },
+      "issues": [],
+      "lineage_path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m125-continuous-v2-gen6-20260922-v1",
+      "mcts_policy": {
+        "policy_target_records": 216759,
+        "policy_targets_saved": true,
+        "root_visit_records": 216759,
+        "root_visits_saved": true
+      },
+      "name": "current-M130-M135",
+      "positions": {
+        "conditional_choice_entropy_nats_unweighted_mean": 1.03455911,
+        "conditional_choice_entropy_nats_weighted": 3.29133081,
+        "conditional_choice_top1_share_weighted": 0.13046688,
+        "frequency_buckets": {
+          "1": {
+            "encountered_position_share": 0.97499988,
+            "encountered_positions": 211340,
+            "unique_key_share": 0.99778103,
+            "unique_position_keys": 211340
+          },
+          "2": {
+            "encountered_position_share": 0.00325707,
+            "encountered_positions": 706,
+            "unique_key_share": 0.00166659,
+            "unique_position_keys": 353
+          },
+          "3-5": {
+            "encountered_position_share": 0.00049364,
+            "encountered_positions": 107,
+            "unique_key_share": 0.00016524,
+            "unique_position_keys": 35
+          },
+          ">5": {
+            "encountered_position_share": 0.02124941,
+            "encountered_positions": 4606,
+            "unique_key_share": 0.00038714,
+            "unique_position_keys": 82
+          }
+        },
+        "repeat_rate": 0.02283181,
+        "repeated_state_keys": 470,
+        "repeated_state_occurrence_share": 0.02500012,
+        "repeated_state_occurrences": 5419,
+        "symmetry_canonicalized": false,
+        "symmetry_note": "Skipped: no production-trusted canonicalizer for full state including superko_history.",
+        "total_encountered_positions": 216759,
+        "unique_position_ratio": 0.97716819,
+        "unique_raw_positions": 211810
+      },
+      "prefixes": {
+        "10": {
+          "eligible_games": 2257,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2257
+        },
+        "112": {
+          "eligible_games": 380,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 380
+        },
+        "12": {
+          "eligible_games": 2257,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2257
+        },
+        "128": {
+          "eligible_games": 185,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 185
+        },
+        "16": {
+          "eligible_games": 2257,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2257
+        },
+        "160": {
+          "eligible_games": 31,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 31
+        },
+        "192": {
+          "eligible_games": 1,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 1
+        },
+        "20": {
+          "eligible_games": 2257,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2257
+        },
+        "24": {
+          "eligible_games": 2257,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2257
+        },
+        "256": {
+          "eligible_games": 0,
+          "largest_equal_prefix_cluster": 0,
+          "unique_prefix_ratio": 0.0,
+          "unique_prefixes": 0
+        },
+        "28": {
+          "eligible_games": 2256,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2256
+        },
+        "32": {
+          "eligible_games": 2256,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2256
+        },
+        "4": {
+          "eligible_games": 2291,
+          "largest_equal_prefix_cluster": 2,
+          "unique_prefix_ratio": 0.99650808,
+          "unique_prefixes": 2283
+        },
+        "40": {
+          "eligible_games": 2256,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2256
+        },
+        "48": {
+          "eligible_games": 2256,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2256
+        },
+        "56": {
+          "eligible_games": 2249,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2249
+        },
+        "64": {
+          "eligible_games": 2210,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2210
+        },
+        "72": {
+          "eligible_games": 2147,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2147
+        },
+        "8": {
+          "eligible_games": 2268,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2268
+        },
+        "80": {
+          "eligible_games": 1955,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 1955
+        },
+        "96": {
+          "eligible_games": 856,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 856
+        }
+      },
+      "termination_counts": {
+        "none": 2304
+      }
+    },
+    "historical": {
+      "config_path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m92-continuous-v2-20260920-v1/metadata/effective-config-v2/sha256:732e85720e5df70b675b537d4fd97c42e99efef119379e58298f097cd0552d22.json",
+      "config_sha256": "sha256:16d7d3d63cca199a8f9c9a2e23f239709ae685cd0a39760fbe86ddc7e78fdf4e",
+      "effective_config": {
+        "execution": {
+          "active_games_per_worker": 4,
+          "coalescing": true,
+          "device": "cuda",
+          "games": 384,
+          "heartbeat_interval_seconds": 5,
+          "inference_batch_cap": 64,
+          "inference_batch_wait_ms": 1,
+          "model_init_seed": 202609131001,
+          "optimizer_steps_per_iteration": 160,
+          "selfplay_master_seed": 202609131002,
+          "total_active_contexts": 64,
+          "training_master_seed": 202609131003,
+          "workers": 16
+        },
+        "replay": {
+          "cap": null,
+          "generations": 2,
+          "policy": "rolling-recent-generations",
+          "sampling": "deterministic / reproducible",
+          "window": "rolling last 2 generations"
+        },
+        "self_play": {
+          "contract_fingerprint": "sha256:22a4e4dd37d70bd3d712b909476120b96385802ec874b99358fab256c4e3351f",
+          "contract_id": "torus9-golden-current-selfplay-search-v1",
+          "cpuct": 1.25,
+          "dirichlet_alpha": 0.11,
+          "dirichlet_epsilon": 0.25,
+          "existing_batch_size": 64,
+          "fast_search": false,
+          "fingerprint": "sha256:22a4e4dd37d70bd3d712b909476120b96385802ec874b99358fab256c4e3351f",
+          "fpu": 0.0,
+          "games_per_iteration": 384,
+          "komi": 0.5,
+          "mcts_simulations": 200,
+          "resign": false,
+          "root_noise": true,
+          "temperature": "1.0 on plies 1–8, then 0",
+          "temperature_after": 0.0,
+          "temperature_plies": [
+            1,
+            8
+          ],
+          "watchdog": 500,
+          "workers": 16
+        }
+      },
+      "families": {
+        "12": {
+          "distinct_families": 2261,
+          "eligible_games": 2261,
+          "top_family_concentration": {
+            "top_10pct": {
+              "covered_game_share": 0.10039805,
+              "covered_games": 227,
+              "distinct_family_count": 2261,
+              "families_in_top_set": 227
+            },
+            "top_1pct": {
+              "covered_game_share": 0.01017249,
+              "covered_games": 23,
+              "distinct_family_count": 2261,
+              "families_in_top_set": 23
+            },
+            "top_5pct": {
+              "covered_game_share": 0.05042017,
+              "covered_games": 114,
+              "distinct_family_count": 2261,
+              "families_in_top_set": 114
+            }
+          }
+        },
+        "16": {
+          "distinct_families": 2261,
+          "eligible_games": 2261,
+          "top_family_concentration": {
+            "top_10pct": {
+              "covered_game_share": 0.10039805,
+              "covered_games": 227,
+              "distinct_family_count": 2261,
+              "families_in_top_set": 227
+            },
+            "top_1pct": {
+              "covered_game_share": 0.01017249,
+              "covered_games": 23,
+              "distinct_family_count": 2261,
+              "families_in_top_set": 23
+            },
+            "top_5pct": {
+              "covered_game_share": 0.05042017,
+              "covered_games": 114,
+              "distinct_family_count": 2261,
+              "families_in_top_set": 114
+            }
+          }
+        },
+        "8": {
+          "distinct_families": 2269,
+          "eligible_games": 2269,
+          "top_family_concentration": {
+            "top_10pct": {
+              "covered_game_share": 0.10004407,
+              "covered_games": 227,
+              "distinct_family_count": 2269,
+              "families_in_top_set": 227
+            },
+            "top_1pct": {
+              "covered_game_share": 0.01013662,
+              "covered_games": 23,
+              "distinct_family_count": 2269,
+              "families_in_top_set": 23
+            },
+            "top_5pct": {
+              "covered_game_share": 0.0502424,
+              "covered_games": 114,
+              "distinct_family_count": 2269,
+              "families_in_top_set": 114
+            }
+          }
+        }
+      },
+      "file_summaries": [
+        {
+          "complete_games": 384,
+          "generation": 100,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 36721,
+          "sha256": "sha256:27d738933da069b539d850260dfee2b111fa1de010ae3c4fb56471c12864c39f",
+          "size_bytes": 503578159
+        },
+        {
+          "complete_games": 384,
+          "generation": 101,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 36462,
+          "sha256": "sha256:d7efb8301a99d1edd74979504a0dfc21104274998157a9ae8fa754b8bbe9839a",
+          "size_bytes": 496924990
+        },
+        {
+          "complete_games": 384,
+          "generation": 102,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 36686,
+          "sha256": "sha256:060aa5eb8c11e270fbaa41cd74df4a52a526ab64bc3ec370dc81eab38599b8a5",
+          "size_bytes": 504788878
+        },
+        {
+          "complete_games": 384,
+          "generation": 103,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 36055,
+          "sha256": "sha256:f2869c5b58e2912e47a50ee13fc3efde60f3f23a5138dd1126a14d752504b875",
+          "size_bytes": 491715673
+        },
+        {
+          "complete_games": 384,
+          "generation": 104,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 35716,
+          "sha256": "sha256:c651f10ce938ad8e2b0fa8a23a55493c4da365169ba7d21dcfa4157e5871dd4f",
+          "size_bytes": 480446661
+        },
+        {
+          "complete_games": 384,
+          "generation": 105,
+          "invalid_records": 0,
+          "issues": [],
+          "lines_seen": 384,
+          "parsed_records": 384,
+          "positions_parsed": 35952,
+          "sha256": "sha256:63becb5fa8484506d2e36f0d4f4d859deebbffcac3fd97fd1cd777a399cb16ab",
+          "size_bytes": 486691075
+        }
+      ],
+      "game_length_plies": {
+        "max": 208,
+        "mean": 94.44097222,
+        "median": 89.0,
+        "min": 2,
+        "p90": 127.0
+      },
+      "games": {
+        "complete_games": 2304,
+        "exact_unique_games": 2301,
+        "full_game_duplicates": 3,
+        "invalid_records": 0,
+        "parsed_records": 2304,
+        "total_games_found": 2304,
+        "unique_game_ratio": 0.99869792
+      },
+      "generations": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105
+      ],
+      "interval_diagnostics": {
+        "moves_13_16": {
+          "end_ply": 16,
+          "mcts_effective_candidate_moves_mean": 17.71322031,
+          "mcts_entropy_nats_mean": 2.39052977,
+          "mcts_positions": 9044,
+          "mcts_top1_visit_share_mean": 0.41205716,
+          "mcts_top2_visit_share_mean": 0.53113777,
+          "mcts_top3_visit_share_mean": 0.59482198,
+          "mean_per_ply_action_entropy_nats": 4.37741122,
+          "plies_observed": [
+            13,
+            14,
+            15,
+            16
+          ],
+          "pooled_action_encounters": 9044,
+          "pooled_action_entropy_nats": 4.39028993,
+          "pooled_top1_action_share": 0.01547988,
+          "pooled_unique_actions": 81,
+          "selected_is_visit_argmax_rate": 1.0,
+          "start_ply": 13
+        },
+        "moves_17_24": {
+          "end_ply": 24,
+          "mcts_effective_candidate_moves_mean": 14.5216453,
+          "mcts_entropy_nats_mean": 2.23531405,
+          "mcts_positions": 18088,
+          "mcts_top1_visit_share_mean": 0.43967879,
+          "mcts_top2_visit_share_mean": 0.56642083,
+          "mcts_top3_visit_share_mean": 0.6325,
+          "mean_per_ply_action_entropy_nats": 4.37849813,
+          "plies_observed": [
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24
+          ],
+          "pooled_action_encounters": 18088,
+          "pooled_action_entropy_nats": 4.39267957,
+          "pooled_top1_action_share": 0.01448474,
+          "pooled_unique_actions": 81,
+          "selected_is_visit_argmax_rate": 1.0,
+          "start_ply": 17
+        },
+        "moves_1_8": {
+          "end_ply": 8,
+          "mcts_effective_candidate_moves_mean": 34.94125778,
+          "mcts_entropy_nats_mean": 3.17461048,
+          "mcts_positions": 18319,
+          "mcts_top1_visit_share_mean": 0.22971587,
+          "mcts_top2_visit_share_mean": 0.33217807,
+          "mcts_top3_visit_share_mean": 0.39364403,
+          "mean_per_ply_action_entropy_nats": 4.38638472,
+          "plies_observed": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ],
+          "pooled_action_encounters": 18319,
+          "pooled_action_entropy_nats": 4.40083487,
+          "pooled_top1_action_share": 0.01495715,
+          "pooled_unique_actions": 82,
+          "selected_is_visit_argmax_rate": 0.23833179,
+          "start_ply": 1
+        },
+        "moves_25_plus": {
+          "end_ply": null,
+          "mcts_effective_candidate_moves_mean": 8.62055648,
+          "mcts_entropy_nats_mean": 1.78402202,
+          "mcts_positions": 163089,
+          "mcts_top1_visit_share_mean": 0.45491296,
+          "mcts_top2_visit_share_mean": 0.61104605,
+          "mcts_top3_visit_share_mean": 0.70172789,
+          "mean_per_ply_action_entropy_nats": 2.7068153,
+          "plies_observed": [
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81,
+            82,
+            83,
+            84,
+            85,
+            86,
+            87,
+            88,
+            89,
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            134,
+            135,
+            136,
+            137,
+            138,
+            139,
+            140,
+            141,
+            142,
+            143,
+            144,
+            145,
+            146,
+            147,
+            148,
+            149,
+            150,
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177,
+            178,
+            179,
+            180,
+            181,
+            182,
+            183,
+            184,
+            185,
+            186,
+            187,
+            188,
+            189,
+            190,
+            191,
+            192,
+            193,
+            194,
+            195,
+            196,
+            197,
+            198,
+            199,
+            200,
+            201,
+            202,
+            203,
+            204,
+            205,
+            206,
+            207,
+            208
+          ],
+          "pooled_action_encounters": 163089,
+          "pooled_action_entropy_nats": 4.23246764,
+          "pooled_top1_action_share": 0.1205906,
+          "pooled_unique_actions": 82,
+          "selected_is_visit_argmax_rate": 0.8794094,
+          "start_ply": 25
+        },
+        "moves_9_12": {
+          "end_ply": 12,
+          "mcts_effective_candidate_moves_mean": 19.81041495,
+          "mcts_entropy_nats_mean": 2.49634817,
+          "mcts_positions": 9052,
+          "mcts_top1_visit_share_mean": 0.38899746,
+          "mcts_top2_visit_share_mean": 0.50997846,
+          "mcts_top3_visit_share_mean": 0.57365113,
+          "mean_per_ply_action_entropy_nats": 4.37796212,
+          "plies_observed": [
+            9,
+            10,
+            11,
+            12
+          ],
+          "pooled_action_encounters": 9052,
+          "pooled_action_entropy_nats": 4.39398262,
+          "pooled_top1_action_share": 0.01535572,
+          "pooled_unique_actions": 82,
+          "selected_is_visit_argmax_rate": 0.99911622,
+          "start_ply": 9
+        }
+      },
+      "issues": [],
+      "lineage_path": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m92-continuous-v2-20260920-v1",
+      "mcts_policy": {
+        "policy_target_records": 217592,
+        "policy_targets_saved": true,
+        "root_visit_records": 217592,
+        "root_visits_saved": true
+      },
+      "name": "historical-M100-M105",
+      "positions": {
+        "conditional_choice_entropy_nats_unweighted_mean": 1.05195832,
+        "conditional_choice_entropy_nats_weighted": 3.29776912,
+        "conditional_choice_top1_share_weighted": 0.12869822,
+        "frequency_buckets": {
+          "1": {
+            "encountered_position_share": 0.97514615,
+            "encountered_positions": 212184,
+            "unique_key_share": 0.99784615,
+            "unique_position_keys": 212184
+          },
+          "2": {
+            "encountered_position_share": 0.00304239,
+            "encountered_positions": 662,
+            "unique_key_share": 0.00155661,
+            "unique_position_keys": 331
+          },
+          "3-5": {
+            "encountered_position_share": 0.00064341,
+            "encountered_positions": 140,
+            "unique_key_share": 0.00021162,
+            "unique_position_keys": 45
+          },
+          ">5": {
+            "encountered_position_share": 0.02116806,
+            "encountered_positions": 4606,
+            "unique_key_share": 0.00038562,
+            "unique_position_keys": 82
+          }
+        },
+        "repeat_rate": 0.022749,
+        "repeated_state_keys": 458,
+        "repeated_state_occurrence_share": 0.02485385,
+        "repeated_state_occurrences": 5408,
+        "symmetry_canonicalized": false,
+        "symmetry_note": "Skipped: no production-trusted canonicalizer for full state including superko_history.",
+        "total_encountered_positions": 217592,
+        "unique_position_ratio": 0.977251,
+        "unique_raw_positions": 212642
+      },
+      "prefixes": {
+        "10": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "112": {
+          "eligible_games": 396,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 396
+        },
+        "12": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "128": {
+          "eligible_games": 224,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 224
+        },
+        "16": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "160": {
+          "eligible_games": 36,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 36
+        },
+        "192": {
+          "eligible_games": 2,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2
+        },
+        "20": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "24": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "256": {
+          "eligible_games": 0,
+          "largest_equal_prefix_cluster": 0,
+          "unique_prefix_ratio": 0.0,
+          "unique_prefixes": 0
+        },
+        "28": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "32": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "4": {
+          "eligible_games": 2291,
+          "largest_equal_prefix_cluster": 2,
+          "unique_prefix_ratio": 0.99825404,
+          "unique_prefixes": 2287
+        },
+        "40": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "48": {
+          "eligible_games": 2261,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2261
+        },
+        "56": {
+          "eligible_games": 2260,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2260
+        },
+        "64": {
+          "eligible_games": 2249,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2249
+        },
+        "72": {
+          "eligible_games": 2209,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2209
+        },
+        "8": {
+          "eligible_games": 2269,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 2269
+        },
+        "80": {
+          "eligible_games": 1939,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 1939
+        },
+        "96": {
+          "eligible_games": 801,
+          "largest_equal_prefix_cluster": 1,
+          "unique_prefix_ratio": 1.0,
+          "unique_prefixes": 801
+        }
+      },
+      "termination_counts": {
+        "none": 2304
+      }
+    }
+  }
+}
