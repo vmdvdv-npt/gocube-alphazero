@@ -18,6 +18,7 @@ from .torus9_run_owned import (
 
 install_profile_loader()
 
+from . import torus9_monolith as _torus9_monolith
 from .torus9_monolith import (
     TORUS9_OBSERVATION_CHANNELS,
     TORUS9_TOPOLOGY_FINGERPRINT,
@@ -59,6 +60,36 @@ from .torus9_monolith import (
     write_json,
     write_jsonl,
 )
+
+# Existing Torus9 checkpoints were trained with the sixth observation plane at
+# komi=0.5.  Rules/scoring may use a calibrated komi, but the network input
+# must stay on that historical baseline so changing the rules does not create
+# an out-of-distribution neural input.  Keep the 6x81 shape and checkpoint
+# compatibility unchanged; only the value written into plane 5 is pinned.
+_TORUS9_NETWORK_KOMI_INPUT = 0.5
+_raw_build_torus9_observation_into = build_torus9_observation_into
+
+
+def build_torus9_observation_into(
+    state,
+    destination,
+    *,
+    legal_context=None,
+) -> None:
+    _raw_build_torus9_observation_into(
+        state,
+        destination,
+        legal_context=legal_context,
+    )
+    destination[5].fill_(_TORUS9_NETWORK_KOMI_INPUT)
+
+
+# Monolith-owned evaluators, replay builders, and the self-play adapter resolve
+# this symbol from the module at runtime.  Patch the single scientific boundary
+# before importing those adapters so every Torus9 inference/training path sees
+# the same fixed feature plane.
+_torus9_monolith.build_torus9_observation_into = build_torus9_observation_into
+
 from . import torus9_selfplay as _torus9_selfplay
 
 install_selfplay_boundary(_torus9_selfplay)
