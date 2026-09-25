@@ -206,7 +206,7 @@ def build_training_ready_checkpoint(
     destination: str | Path,
     converter_git_commit: str,
 ) -> dict[str, object]:
-    """Create the lineage-owned 5CH bootstrap checkpoint with migrated Adam."""
+    """Create the lineage-owned 5CH optimizer-ready bootstrap checkpoint."""
     source_path = Path(source_checkpoint).resolve()
     actual_sha = file_sha256(source_path)
     if _sha_body(actual_sha) != NEW_KOMI_SOURCE_CHECKPOINT_SHA256:
@@ -238,7 +238,7 @@ def build_training_ready_checkpoint(
         "architecture_id": M137_FIVE_CHANNEL_ARCHITECTURE_ID,
         "architecture_config": {
             **target_model.architecture_config,
-            "training_ready": True,
+            "training_ready": False,
         },
         "observation_shape": [5, TORUS9_POINT_COUNT],
         "source_lineage": NEW_KOMI_SOURCE_LINEAGE,
@@ -250,7 +250,8 @@ def build_training_ready_checkpoint(
         "conversion_formula": M137_FIVE_CHANNEL_FORMULA,
         "optimizer_conversion": NEW_KOMI_OPTIMIZER_CONVERSION,
         "optimizer_migration": migration,
-        "training_ready": True,
+        "optimizer_migration_ready": True,
+        "training_ready": False,
         "replay_bootstrap": NEW_KOMI_REPLAY_POLICY,
         "replay_references": [],
         "selected_komi": None,
@@ -293,6 +294,9 @@ def create_new_komi_lineage(
         "topology": "torus9",
         "status": "ACTIVE",
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": str(converter_git_commit),
+        "config_fingerprint": "bootstrap-pending-komi-calibration",
+        "checkpoint_hashes": {},
         "parent_checkpoint": {
             "lineage_id": NEW_KOMI_SOURCE_LINEAGE,
             "checkpoint_id": NEW_KOMI_SOURCE_CHECKPOINT,
@@ -329,6 +333,9 @@ def create_new_komi_lineage(
             "path": checkpoint_path.relative_to(root).as_posix(),
             "sha256": metadata["artifact_sha256"],
             "model_hash": metadata["converted_model_hash"],
+        }
+        manifest["checkpoint_hashes"] = {
+            "M137-5CH-bootstrap": metadata["artifact_sha256"]
         }
         (root / "manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",

@@ -21,7 +21,7 @@ PR #198 established the 5-channel representation:
 
 `own stones · opponent stones · side-to-move color · previous pass · legal mask`
 
-The persistent komi input is removed.  For the M137 model trained with fixed
+The persistent komi input is removed. For the M137 model trained with fixed
 komi `0.5`, the first affine layer is folded as:
 
 `W5 = W[:,0:5]`
@@ -36,7 +36,7 @@ Converted M137 model hash:
 
 PR #198 parity evidence: policy max abs diff `9.536743e-06`, WDL
 `3.814697e-06`, ownership `3.397465e-06`, score `1.341105e-07`;
-selected MCTS action parity `256/256`.  This is an inference/model conversion
+selected MCTS action parity `256/256`. This is an inference/model conversion
 result, not proof that future training trajectories are identical.
 
 ## `new_komi` lineage
@@ -57,7 +57,7 @@ unambiguous:
 - `input_projection.weight` Adam tensor states are cropped from 6 columns to
   the first 5 columns;
 - `input_projection.bias` is the folded parameter `b + 0.5*W6`, so no exact
-  merged Adam moment history exists.  Only this parameter's first/second
+  merged Adam moment history exists. Only this parameter's first/second
   moments are reset to zero;
 - the global Adam step for the folded bias is retained, so the optimizer clock
   stays continuous with the migrated parameters.
@@ -70,23 +70,29 @@ This conversion is explicitly recorded as
 `new_komi` starts with **no inherited replay history**.
 
 No M137 parent replay, rolling replay, self-play rows, or replay references are
-carried into the lineage.  The new line may accumulate only self-play generated
+carried into the lineage. The new line may accumulate only self-play generated
 after its own scientific komi contract is selected.
 
 The parent checkpoint remains a provenance dependency only.
 
-### Komi status
+### Komi and training status
 
 The source M137 was trained under actual komi `0.5`.
 
-`new_komi` does **not** silently choose a replacement komi.  Its bootstrap
+`new_komi` does **not** silently choose a replacement komi. Its bootstrap
 status is:
 
 `BLOCKED_PENDING_KOMI_CALIBRATION`
 
-A fresh 5-channel calibration must select the real rules komi first.  After
-selection, self-play, WDL/score targets, Arena, and all new replay data must use
-that same actual komi.
+The bootstrap checkpoint is **optimizer-ready but not yet production-training-ready**.
+No immutable `new_komi` training configuration is published before calibration,
+so selecting the actual rules komi does not require mutating an already-pinned
+scientific training contract.
+
+A fresh 5-channel calibration must select the real rules komi first. After
+selection, the production training binding must consume this bootstrap and
+self-play, WDL/score targets, Arena, and all new replay data must use that same
+actual komi.
 
 `7.5` is legacy/error and must not be used.
 
@@ -98,4 +104,4 @@ Active lineage location:
 
 The lineage owns its derived 5CH bootstrap checkpoint and future artifacts.
 The canonical M137 source remains in its original lineage and is referenced by
-identity.  No parent checkpoint or replay dataset is duplicated.
+identity. No parent checkpoint or replay dataset is duplicated.

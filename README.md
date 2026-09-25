@@ -29,8 +29,9 @@ the verified 6CH -> 5CH model conversion. Adam state is preserved everywhere
 with an unambiguous mapping; only the folded input bias moments are reset.
 Parent replay/history is not inherited.
 
-The bootstrap does not choose a new rules komi. Training remains blocked until
-a fresh 5-channel komi calibration selects it.
+The bootstrap does not choose a new rules komi. It is optimizer-ready but is
+not published as a production-training checkpoint until a fresh 5-channel
+komi calibration selects the immutable rules komi.
 
 ## GoCube Protocol V1
 
