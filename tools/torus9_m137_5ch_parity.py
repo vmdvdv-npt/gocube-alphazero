@@ -87,10 +87,25 @@ class ErrorAccumulator:
                 "nonfinite_values": self.nonfinite_values,
                 "compared_values": self.compared_values,
             }
-        values = torch.cat(self.chunks)
+        total_finite = sum(int(chunk.numel()) for chunk in self.chunks)
+        exact_max = max(float(chunk.max()) for chunk in self.chunks)
+        exact_sum = sum(float(chunk.sum()) for chunk in self.chunks)
+        # torch.quantile rejects very large input tensors.  Select evenly spaced
+        # values from the complete deterministic stream for a bounded p99 sample;
+        # max and mean above remain exact over every finite comparison.
+        sample_budget = 1_000_000
+        sampled: list[torch.Tensor] = []
+        offset = 0
+        for chunk in self.chunks:
+            count = int(chunk.numel())
+            take = max(1, min(count, (count * sample_budget + total_finite - 1) // total_finite))
+            indices = torch.linspace(0, count - 1, steps=take, dtype=torch.long)
+            sampled.append(chunk[indices])
+            offset += count
+        values = torch.cat(sampled)
         return {
-            "max_abs_error": float(values.max()),
-            "mean_abs_error": float(values.mean()),
+            "max_abs_error": exact_max,
+            "mean_abs_error": exact_sum / total_finite,
             "p99_abs_error": float(torch.quantile(values, 0.99)),
             "nonfinite_values": self.nonfinite_values,
             "compared_values": self.compared_values,
