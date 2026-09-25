@@ -6,8 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from gocube_golden.orchestrator_v2.execution_permit import _test_authority
-
 
 # These pre-boundary regression tests intentionally exercise production internals
 # directly. Give only those exact tests the private unit-test authority; boundary
@@ -65,6 +63,11 @@ def _legacy_orchestrator_v2_internal_authority(request: pytest.FixtureRequest):
     if identity is None:
         yield
         return
+
+    # Import lazily so lightweight suites that share this conftest (notably the
+    # pinned KataGo differential job) do not import gocube_golden and therefore
+    # do not acquire the heavyweight torch runtime dependency.
+    from gocube_golden.orchestrator_v2.execution_permit import _test_authority
 
     topology, run_id = identity
 
