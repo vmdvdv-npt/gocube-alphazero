@@ -81,6 +81,7 @@ def _canonical_evaluation_output(
     output_dir: Path,
     *,
     allowed_lineage_arena_root: Path | None = None,
+    allowed_evaluation_root: Path | None = None,
 ) -> Path:
     output_dir = Path(output_dir).resolve()
     root = evaluations_root(topology_for_profile(profile_id)).resolve()
@@ -91,6 +92,14 @@ def _canonical_evaluation_output(
             lineage_arena_root = Path(allowed_lineage_arena_root).resolve()
             try:
                 output_dir.relative_to(lineage_arena_root)
+            except ValueError:
+                pass
+            else:
+                return output_dir
+        if allowed_evaluation_root is not None:
+            evaluation_root = Path(allowed_evaluation_root).resolve()
+            try:
+                output_dir.relative_to(evaluation_root)
             except ValueError:
                 pass
             else:
@@ -257,6 +266,7 @@ def run_arena(
     evaluation_identity: Mapping[str, object] | None = None,
     evaluation_fingerprint: str | None = None,
     allowed_lineage_arena_root: Path | None = None,
+    allowed_evaluation_root: Path | None = None,
     workload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
@@ -294,6 +304,7 @@ def run_arena(
         profile.profile_id,
         output_dir or _default_output(profile.profile_id, candidate_path, reference_path),
         allowed_lineage_arena_root=allowed_lineage_arena_root,
+        allowed_evaluation_root=allowed_evaluation_root,
     )
     result = run_engine(
         profile=profile,

@@ -1005,7 +1005,8 @@ class KomiCalibrationRunnerV2:
         self._persist(state)
         self._notify(
             f"KOMI_{key.replace('.', '_')}_COMPLETED",
-            f"Komi {key}: Black {float(stats['black_win_rate']) * 100:.1f}% / White {(1.0 - float(stats['black_win_rate'])) * 100:.1f}%",
+            f"Komi {key}: Black {float(stats['black_win_rate']) * 100:.1f}% / White {(1.0 - float(stats['black_win_rate'])) * 100:.1f}% "
+            f"(execution={str(result.execution_code_commit or '')[:12] or 'synthetic'})",
             f"completed:{key}:{batch}:{result.evaluation_id}",
         )
 

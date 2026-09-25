@@ -77,9 +77,12 @@ def _advance_lineage_code_pin(
     working_tree_clean: bool,
     allow_code_rollover: bool,
 ) -> dict[str, object]:
-    """Record a clean application-code rollover while preserving lineage origin."""
+    """Record a clean code rollover while preserving the lineage origin."""
     updated = dict(manifest)
-    previous = str(updated.get("git_commit", ""))
+    previous = str(
+        updated.get("execution_code_commit")
+        or updated.get("git_commit", "")
+    )
     if previous == git_commit:
         return updated
     if not allow_code_rollover:
@@ -94,7 +97,47 @@ def _advance_lineage_code_pin(
     )
     updated["git_commit"] = git_commit
     updated["current_git_tree"] = git_tree
+    updated["execution_code_commit"] = git_commit
+    updated["execution_code_tree"] = git_tree
+    history_value = updated.get("code_revision_history", [])
+    history = [
+        dict(item) for item in history_value if isinstance(item, Mapping)
+    ] if isinstance(history_value, list) else []
+    history.append(
+        {
+            "git_commit_sha": git_commit,
+            "git_tree_sha": git_tree,
+            "previous_git_commit_sha": previous,
+            "first_seen_generation": None,
+            "phase": "lineage-boundary",
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "reason": "explicit code rollover; applies from next child",
+        }
+    )
+    updated["code_revision_history"] = history
+    updated["last_code_rollover"] = {
+        "from": previous,
+        "to": git_commit,
+        "applies_from": "next child",
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
     return updated
+
+
+def _durable_execution_commit(manifest: Mapping[str, object]) -> str:
+    value = manifest.get("execution_code_commit") or manifest.get("git_commit")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Production arm lineage has no durable execution code commit")
+    return value
+
+
+def _assert_no_active_child(root: Path) -> None:
+    active = root / "runtime" / "active-child.json"
+    if active.is_file():
+        raise RuntimeError(
+            "code rollover is only allowed between child tasks; "
+            f"active child marker exists: {active}"
+        )
 
 
 def _same_parent_checkpoint_identity(existing: object, expected: object) -> bool:
@@ -134,21 +177,40 @@ class Torus9ProductionLineage:
         if not hasattr(config, "to_dict") or not hasattr(config, "fingerprint"):
             raise TypeError("production lineage requires an EffectiveConfig")
         root = (self.runs_root / topology / run_storage.ACTIVE / lineage_id).resolve()
-        code = capture_code_identity(self.repo_root)
-        manifest = {
-            "schema": "gocube-orchestrator-v2-production-lineage-v1",
-            "orchestrator_version": ORCHESTRATOR_VERSION,
-            "orchestrator_entrypoint": ORCHESTRATOR_ENTRYPOINT,
+        expected_identity = {
             "lineage_id": lineage_id,
             "topology": topology,
             "status": "ACTIVE",
             "parent_checkpoint": parent.ref.to_dict(),
-            "git_commit": code.git_commit_sha,
             "config_fingerprint": config.fingerprint,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "checkpoint_hashes": {},
-            "experiment": {"id": experiment_id, "arm": arm_id},
         }
+        manifest: dict[str, object]
+        code = None
+        if not root.is_dir():
+            # A new production lineage pins HEAD, never the dirty worktree.
+            # The runtime manager materializes only this real Git commit.
+            code = capture_code_identity(self.repo_root)
+            manifest = {
+                "schema": "gocube-orchestrator-v2-production-lineage-v1",
+                "orchestrator_version": ORCHESTRATOR_VERSION,
+                "orchestrator_entrypoint": ORCHESTRATOR_ENTRYPOINT,
+                "lineage_id": lineage_id,
+                "topology": topology,
+                "status": "ACTIVE",
+                "parent_checkpoint": parent.ref.to_dict(),
+                "git_commit": code.git_commit_sha,
+                "lineage_initial_git_commit": code.git_commit_sha,
+                "current_git_tree": code.git_tree_sha,
+                "execution_code_commit": code.git_commit_sha,
+                "execution_code_tree": code.git_tree_sha,
+                "execution_rollover": "no",
+                "config_fingerprint": config.fingerprint,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "checkpoint_hashes": {},
+                "experiment": {"id": experiment_id, "arm": arm_id},
+            }
+        else:
+            manifest = {}
         if root.is_dir():
             existing = _read_json(root / "manifest.json")
             for key in (
@@ -159,9 +221,9 @@ class Torus9ProductionLineage:
                 "config_fingerprint",
             ):
                 matches = (
-                    _same_parent_checkpoint_identity(existing.get(key), manifest[key])
+                    _same_parent_checkpoint_identity(existing.get(key), expected_identity[key])
                     if key == "parent_checkpoint"
-                    else existing.get(key) == manifest[key]
+                    else existing.get(key) == expected_identity[key]
                 )
                 if not matches:
                     raise ValueError(f"Production arm lineage {key} changed: {root}")
@@ -170,13 +232,30 @@ class Torus9ProductionLineage:
                 raise ValueError(
                     f"Production arm lineage uses unsupported orchestrator version: {existing_version!r}"
                 )
-            manifest = _advance_lineage_code_pin(
-                existing,
-                git_commit=code.git_commit_sha,
-                git_tree=code.git_tree_sha,
-                working_tree_clean=code.working_tree_clean,
-                allow_code_rollover=allow_code_rollover,
+            manifest = dict(existing)
+            stored_commit = _durable_execution_commit(manifest)
+            manifest.setdefault("lineage_initial_git_commit", stored_commit)
+            manifest.setdefault("execution_code_commit", stored_commit)
+            manifest.setdefault(
+                "execution_code_tree", manifest.get("current_git_tree", "")
             )
+            manifest.setdefault("execution_rollover", "no")
+            if allow_code_rollover:
+                _assert_no_active_child(root)
+                code = capture_code_identity(self.repo_root)
+                if code.git_commit_sha != stored_commit:
+                    manifest = _advance_lineage_code_pin(
+                        manifest,
+                        git_commit=code.git_commit_sha,
+                        git_tree=code.git_tree_sha,
+                        working_tree_clean=code.working_tree_clean,
+                        allow_code_rollover=True,
+                    )
+                    manifest["execution_rollover"] = "yes"
+                else:
+                    manifest["execution_rollover"] = "no"
+            else:
+                manifest["execution_rollover"] = "no"
             manifest.setdefault("orchestrator_version", ORCHESTRATOR_VERSION)
             manifest.setdefault("orchestrator_entrypoint", ORCHESTRATOR_ENTRYPOINT)
             if manifest != existing:

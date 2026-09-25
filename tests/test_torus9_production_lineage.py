@@ -73,16 +73,17 @@ def _prepare_lineage(
     )
 
 
-def test_clean_code_change_without_allow_code_rollover_is_rejected(
+def test_clean_code_change_without_allow_code_rollover_keeps_previous_execution_pin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with pytest.raises(ValueError, match="allow_code_rollover=True"):
-        _prepare_lineage(
-            tmp_path,
-            monkeypatch,
-            allow_code_rollover=False,
-            second_worktree_clean=True,
-        )
+    manifest = _prepare_lineage(
+        tmp_path,
+        monkeypatch,
+        allow_code_rollover=False,
+        second_worktree_clean=True,
+    )
+    assert manifest["execution_code_commit"] == "1" * 40
+    assert manifest["lineage_initial_git_commit"] == "1" * 40
 
 
 def test_lineage_manifest_records_orchestrator_v2(

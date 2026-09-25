@@ -19,6 +19,11 @@ from ..provenance import canonical_json
 from .artifact_resolver import ArtifactResolver, ResolvedCheckpointNode, ResolvedEffectiveConfig
 from .contracts import CheckpointRef, EffectiveConfigRef
 from .generation_runner import GenerationRunner, OutputLineage, ResolvedGenerationInput
+from .immutable_runtime import (
+    ImmutableRuntimeManager,
+    execution_commit_from_lineage,
+    validate_runtime_head,
+)
 from .supervisor import SupervisorPolicy, SupervisorV2
 from .topology_binding import get_topology_binding, production_path_for
 
@@ -67,6 +72,7 @@ def _request_payload(
     config: ResolvedEffectiveConfig,
     output_lineage: OutputLineage,
     execution_overrides: Mapping[str, object] | None = None,
+    execution_code_commit: str | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "schema": TRAIN_ONE_REQUEST_SCHEMA,
@@ -79,6 +85,8 @@ def _request_payload(
             "root": str(output_lineage.root),
         },
     }
+    if execution_code_commit is not None:
+        payload["execution_code_commit"] = execution_code_commit
     if execution_overrides is not None:
         payload["execution_overrides"] = dict(execution_overrides)
     return payload
@@ -153,6 +161,7 @@ class ProductionTrainOne:
         )
         self.python_executable = str(python_executable or sys.executable)
         self.supervisor_policy = supervisor_policy
+        self.runtime_manager = ImmutableRuntimeManager(self.repo_root)
 
     def __call__(
         self,
@@ -172,6 +181,11 @@ class ProductionTrainOne:
         if type(acknowledge_stopped_execution) is not bool:
             raise TypeError("acknowledge_stopped_execution must be a boolean")
         generation = parent.generation + 1
+        runtime = None
+        execution_commit: str | None = None
+        if (output_lineage.root / "manifest.json").is_file():
+            execution_commit = execution_commit_from_lineage(output_lineage.root)
+            runtime = self.runtime_manager.ensure(execution_commit)
         reused = _reuse_committed_child(
             self.resolver,
             parent=parent,
@@ -220,6 +234,7 @@ class ProductionTrainOne:
                 config=config,
                 output_lineage=output_lineage,
                 execution_overrides=execution_overrides,
+                execution_code_commit=None if runtime is None else runtime.commit,
             ),
         )
         heartbeat_path = (
@@ -229,12 +244,8 @@ class ProductionTrainOne:
             / f"generation-{generation:04d}.json"
         )
         env = dict(os.environ)
-        existing_pythonpath = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = (
-            str(self.repo_root)
-            if not existing_pythonpath
-            else str(self.repo_root) + os.pathsep + existing_pythonpath
-        )
+        if runtime is not None:
+            env = runtime.environment(env)
         env["AZ_DRIVER_HEARTBEAT_PATH"] = str(heartbeat_path)
         env["AZ_GENERATION_RESULT_PATH"] = str(
             output_lineage.root
@@ -256,7 +267,7 @@ class ProductionTrainOne:
                 "--result",
                 str(result_path),
             ],
-            cwd=self.repo_root,
+            cwd=self.repo_root if runtime is None else runtime.path,
             env=env,
             policy=self.supervisor_policy,
         )
@@ -306,6 +317,10 @@ def run_generation_worker(request_path: str | Path, result_path: str | Path) -> 
     payload = _read_json(Path(request_path).resolve())
     if payload.get("schema") != TRAIN_ONE_REQUEST_SCHEMA:
         raise ValueError("unsupported train_one request schema")
+    execution_commit = payload.get("execution_code_commit")
+    if not isinstance(execution_commit, str) or not execution_commit:
+        raise ValueError("train-one request is missing execution_code_commit")
+    validate_runtime_head(Path.cwd(), execution_commit)
     raw_lineage = payload.get("output_lineage")
     if not isinstance(raw_lineage, Mapping):
         raise ValueError("train-one output_lineage must be an object")
@@ -345,6 +360,7 @@ def run_generation_worker(request_path: str | Path, result_path: str | Path) -> 
             "schema": TRAIN_ONE_RESULT_SCHEMA,
             "generation": result.generation,
             "checkpoint": result.checkpoint.to_dict(),
+            "execution_code_commit": execution_commit,
         },
     )
 
