@@ -22,11 +22,26 @@ def get_profile(profile_id: str) -> ArenaProfile:
     if value.startswith("torus9-komi-calibration|"):
         from tools.arena_profiles.torus9 import Torus9ArenaProfile
 
+        fields = value.split("|")
         try:
-            komi = float(value.split("|", 1)[1])
+            komi = float(fields[1])
+            simulations = 64
+            five_channel = False
+            for field in fields[2:]:
+                if field == "5ch":
+                    five_channel = True
+                elif field.startswith("simulations="):
+                    simulations = int(field.split("=", 1)[1])
+                elif field:
+                    raise ValueError(f"unknown Torus9 komi calibration profile field {field!r}")
         except (IndexError, ValueError) as exc:
             raise ValueError(f"Malformed Torus9 komi calibration profile {profile_id!r}") from exc
-        return Torus9ArenaProfile(komi=komi, profile_id=value)
+        return Torus9ArenaProfile(
+            komi=komi,
+            profile_id=value,
+            simulations=simulations,
+            five_channel=five_channel,
+        )
     if value.startswith("cube-v2|"):
         from tools.arena_profiles.cube_v2 import CubeV2ArenaProfile
 

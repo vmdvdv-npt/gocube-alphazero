@@ -17,7 +17,7 @@ import torch
 
 from gocube_golden.arena_contract import SearchSettings
 from gocube_golden.neural import model_hash
-from gocube_golden.provenance import derive_seed, file_sha256
+from gocube_golden.provenance import derive_seed, file_sha256, sha256_fingerprint
 from gocube_golden.result import result_from_terminal
 from gocube_golden.rules import IllegalMoveError, apply_action
 from gocube_golden.scoring import score_terminal
@@ -32,6 +32,11 @@ from gocube_golden.torus9 import (
     torus9_load_checkpoint,
     torus9_model_from_metadata,
     torus9_state_from_identity,
+)
+from gocube_golden.torus9_m137_5ch import (
+    M137_FIVE_CHANNEL_ARCHITECTURE_ID,
+    Torus9M137FiveChannelGraphNet,
+    build_m137_five_channel_observation,
 )
 from gocube_golden.torus9_contract import (
     TORUS9_ACTION_COUNT,
@@ -70,7 +75,9 @@ class _WorkerGame:
 def _make_game(task: Mapping[str, object]) -> _WorkerGame:
     return _WorkerGame(
         task=task,
-        state=torus9_state_from_identity(task["state"]),  # type: ignore[arg-type]
+        state=torus9_state_from_identity(
+            task["state"], expected_komi=float(task["komi"])  # type: ignore[arg-type]
+        ),
         trace=[],
         ply=0,
         started_at=time.perf_counter(),
@@ -162,6 +169,65 @@ def _select_starts(
     raise RuntimeError("Could not build requested Torus9 Arena startset")
 
 
+def _state_for_komi(state: Mapping[str, object], komi: float) -> dict[str, object]:
+    """Rebind only the referee-owned komi fields of a frozen legal start."""
+    from gocube_golden.state import rules_fingerprint_for
+    from gocube_golden.topology import TORUS_9X9
+
+    result = dict(state)
+    result["komi"] = float(komi)
+    result["rules_fingerprint"] = rules_fingerprint_for(TORUS_9X9, float(komi))
+    return result
+
+
+def _load_frozen_starts(
+    path: Path,
+    *,
+    master_seed: int,
+    pair_indices: object,
+    expected_fingerprint: str | None,
+    komi: float,
+) -> tuple[dict[str, object], ...]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read frozen Arena startset: {path}") from exc
+    if not isinstance(payload, Mapping) or payload.get("schema") != "torus9-frozen-startset-v1":
+        raise ValueError("Arena frozen startset schema mismatch")
+    if int(payload.get("master_seed", -1)) != int(master_seed):
+        raise ValueError("Arena frozen startset master seed mismatch")
+    pairs = payload.get("pairs")
+    if isinstance(pairs, (str, bytes)) or not isinstance(pairs, Sequence) or not pairs:
+        raise ValueError("Arena frozen startset pairs are malformed")
+    body = {str(key): value for key, value in payload.items() if key != "fingerprint"}
+    actual_fingerprint = sha256_fingerprint(body)
+    declared_fingerprint = str(payload.get("fingerprint", ""))
+    if declared_fingerprint != actual_fingerprint or (
+        expected_fingerprint is not None and expected_fingerprint != actual_fingerprint
+    ):
+        raise ValueError("Arena frozen startset fingerprint mismatch")
+    if pair_indices is None:
+        selected_indices = list(range(len(pairs)))
+    else:
+        if isinstance(pair_indices, (str, bytes)) or not isinstance(pair_indices, Sequence):
+            raise ValueError("Arena workload pair_indices must be a sequence")
+        selected_indices = [int(value) for value in pair_indices]
+    selected: list[dict[str, object]] = []
+    for index in selected_indices:
+        if index < 0 or index >= len(pairs):
+            raise ValueError("Arena frozen startset pair index is out of range")
+        raw = pairs[index]
+        if not isinstance(raw, Mapping):
+            raise ValueError("Arena frozen startset pair is malformed")
+        start = dict(raw)
+        state = start.get("state")
+        if not isinstance(state, Mapping):
+            raise ValueError("Arena frozen startset pair has no state")
+        start["state"] = _state_for_komi(state, komi)
+        selected.append(start)
+    return tuple(selected)
+
+
 class Torus9ArenaProfile:
     profile_id = PROFILE_ID
     run_id_prefix = "torus9-arena"
@@ -171,18 +237,36 @@ class Torus9ArenaProfile:
     wdl_size = 3
     last_infer_timing: Mapping[str, float] = {}
 
-    def __init__(self, *, komi: float = TORUS9_KOMI, profile_id: str = PROFILE_ID) -> None:
+    def __init__(
+        self,
+        *,
+        komi: float = TORUS9_KOMI,
+        profile_id: str = PROFILE_ID,
+        simulations: int = 64,
+        five_channel: bool = False,
+    ) -> None:
         if not isinstance(komi, (int, float)) or isinstance(komi, bool) or float(komi) not in TORUS9_ALLOWED_KOMI:
             raise ValueError("Torus9 Arena komi must be one of 0.5, 1.5, 2.5, 3.5, or 4.5")
+        if isinstance(simulations, bool) or not isinstance(simulations, int) or simulations <= 0:
+            raise ValueError("Torus9 Arena simulations must be a positive integer")
         self.komi = float(komi)
         self.profile_id = str(profile_id)
+        self.simulations = int(simulations)
+        self._five_channel = bool(five_channel)
+        self.observation_shape = (5 if self._five_channel else 6, TORUS9_POINT_COUNT)
 
     def matches_metadata(self, metadata: Mapping[str, object]) -> bool:
-        return (
+        legacy = (
             metadata.get("profile_id") == TORUS9_CURRENT_PROFILE_ID
             and metadata.get("architecture_id") == TORUS9_CURRENT_ARCHITECTURE_ID
             and metadata.get("topology_fingerprint") == TORUS9_TOPOLOGY_FINGERPRINT
         )
+        five_channel = (
+            metadata.get("architecture_id") == M137_FIVE_CHANNEL_ARCHITECTURE_ID
+            and metadata.get("topology_fingerprint") == TORUS9_TOPOLOGY_FINGERPRINT
+            and metadata.get("observation_shape") == [5, TORUS9_POINT_COUNT]
+        )
+        return legacy or five_channel
 
     def validate_execution_config(self, config: ArenaExecutionConfig) -> None:
         if config.strict_production:
@@ -206,16 +290,30 @@ class Torus9ArenaProfile:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         if not self.matches_metadata(metadata):
             raise ValueError("Checkpoint does not match Torus9 Arena profile")
-        metadata_komi = float(metadata.get("komi", -1.0))
-        allowed_metadata_komi = {0.5} if self.profile_id == PROFILE_ID else {0.5, self.komi}
-        if metadata_komi not in allowed_metadata_komi:
-            raise ValueError("Torus9 Arena checkpoint metadata komi is incompatible")
         architecture = metadata.get("architecture_config")
         if not isinstance(architecture, Mapping):
             raise ValueError("Torus9 checkpoint architecture metadata is malformed")
+        is_five_channel = metadata.get("architecture_id") == M137_FIVE_CHANNEL_ARCHITECTURE_ID
+        if is_five_channel:
+            if architecture.get("input_channels") != 5:
+                raise ValueError("Torus9 5CH checkpoint input_channels drift")
+            if metadata.get("observation_shape") != [5, TORUS9_POINT_COUNT]:
+                raise ValueError("Torus9 5CH checkpoint observation shape drift")
+        else:
+            metadata_komi = float(metadata.get("komi", -1.0))
+            allowed_metadata_komi = {0.5} if self.profile_id == PROFILE_ID else {0.5, self.komi}
+            if metadata_komi not in allowed_metadata_komi:
+                raise ValueError("Torus9 Arena checkpoint metadata komi is incompatible")
+        if self._five_channel != is_five_channel:
+            raise ValueError("Torus9 Arena profile/checkpoint channel contract mismatch")
+        self._five_channel = is_five_channel
+        self.observation_shape = (5 if is_five_channel else 6, TORUS9_POINT_COUNT)
+        identity_model_hash = metadata.get("model_hash", metadata.get("converted_model_hash"))
+        if not isinstance(identity_model_hash, str) or not identity_model_hash:
+            raise ValueError("Torus9 checkpoint metadata has no model hash")
         return CheckpointIdentity(
             path=path,
-            model_hash=str(metadata["model_hash"]),
+            model_hash=identity_model_hash,
             artifact_sha256=file_sha256(path),
             architecture_config=dict(architecture),
             metadata=dict(metadata),
@@ -226,6 +324,19 @@ class Torus9ArenaProfile:
         identity: CheckpointIdentity,
         device: torch.device,
     ) -> torch.nn.Module:
+        if identity.metadata.get("architecture_id") == M137_FIVE_CHANNEL_ARCHITECTURE_ID:
+            try:
+                payload = torch.load(identity.path, map_location=device, weights_only=False)
+            except TypeError:
+                payload = torch.load(identity.path, map_location=device)
+            if not isinstance(payload, Mapping) or not isinstance(payload.get("model_state_dict"), Mapping):
+                raise ValueError("Torus9 5CH checkpoint payload is malformed")
+            model = Torus9M137FiveChannelGraphNet().to(device)
+            model.load_state_dict(payload["model_state_dict"], strict=True)
+            if model_hash(model) != identity.model_hash:
+                raise RuntimeError("Parent inference broker loaded the wrong Torus9 5CH checkpoint")
+            model.eval()
+            return model
         model = torus9_model_from_metadata(identity.metadata).to(device)
         torus9_load_checkpoint(
             identity.path,
@@ -253,17 +364,41 @@ class Torus9ArenaProfile:
         pairs = games // 2
         workload = workload or {}
         offset_pairs = int(workload.get("continuation_offset_pairs", 0))
-        starts = _select_starts(
-            master_seed,
-            pairs,
-            komi=self.komi,
-            offset_pairs=offset_pairs,
-        )
+        startset_path = workload.get("startset_path")
+        pair_indices = workload.get("pair_indices")
+        selected_game_ids = workload.get("game_ids")
+        if startset_path is not None:
+            starts = _load_frozen_starts(
+                Path(str(startset_path)),
+                master_seed=master_seed,
+                pair_indices=pair_indices,
+                expected_fingerprint=(
+                    None
+                    if workload.get("startset_fingerprint") is None
+                    else str(workload["startset_fingerprint"])
+                ),
+                komi=self.komi,
+            )
+        else:
+            starts = _select_starts(
+                master_seed,
+                pairs,
+                komi=self.komi,
+                offset_pairs=offset_pairs,
+            )
+        if selected_game_ids is not None:
+            if isinstance(selected_game_ids, (str, bytes)) or not isinstance(selected_game_ids, Sequence):
+                raise ValueError("Arena workload game_ids must be a sequence")
+            selected = {str(value) for value in selected_game_ids}
+        else:
+            selected = None
         tasks: list[dict[str, object]] = []
         for row in starts:
-            pair_id = f"{comparison}--{row['start_id']}"
+            pair_id = str(row.get("pair_id") or f"{comparison}--{row['start_id']}")
             for suffix, candidate_black in (("g1", True), ("g2", False)):
                 game_id = f"{pair_id}--{suffix}"
+                if selected is not None and game_id not in selected:
+                    continue
                 tasks.append(
                     {
                         "run_id": run_id,
@@ -356,7 +491,7 @@ class Torus9ArenaProfile:
 
         callbacks = CooperativeArenaCallbacks(
             search_settings=SearchSettings(
-                simulations=64,
+                simulations=self.simulations,
                 cpuct=1.25,
                 fpu=0.0,
                 deterministic_tie_break=True,
@@ -373,9 +508,10 @@ class Torus9ArenaProfile:
             model_role=lambda game: (
                 "candidate" if _candidate_turn(game) else "reference"
             ),
-            build_observation=lambda state, legal_context: build_torus9_observation(
-                state,
-                legal_context=legal_context,
+            build_observation=(
+                self._build_five_channel_observation
+                if self._five_channel
+                else self._build_six_channel_observation
             ),
             apply_search_result=apply_search_result,
             mark_search_error=mark_search_error,
@@ -397,6 +533,14 @@ class Torus9ArenaProfile:
             response_queues=response_queues,
             start_event=start_event,
         )
+
+    @staticmethod
+    def _build_five_channel_observation(state: Any, legal_context: Any) -> torch.Tensor:
+        return build_m137_five_channel_observation(state, legal_context=legal_context)
+
+    @staticmethod
+    def _build_six_channel_observation(state: Any, legal_context: Any) -> torch.Tensor:
+        return build_torus9_observation(state, legal_context=legal_context)
 
     @staticmethod
     def forward_policy_wdl_logits(
@@ -447,7 +591,7 @@ class Torus9ArenaProfile:
             "profile": self.profile_id,
             "games": config.games,
             "komi": self.komi,
-            "simulations": 64,
+            "simulations": self.simulations,
             "cpuct": 1.25,
             "fpu": 0.0,
             "noise": False,
@@ -458,6 +602,8 @@ class Torus9ArenaProfile:
             "paired_starts_color_swap": True,
             "deterministic_tie_break": True,
             "technical_fail_closed": True,
+            "input_channels": 5 if self._five_channel else 6,
+            "komi_observation_channel": not self._five_channel,
         }
 
 
