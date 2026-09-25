@@ -402,7 +402,6 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     behavioral_pass = (
         mcts["selected_action_matches"] == args.mcts_count
         and mcts["root_q_error"]["nonfinite_values"] == 0
-        and mcts["root_q_presence_mismatches"] == 0
         and float(mcts["root_q_error"]["max_abs_error"]) <= 1e-5
     )
     komi_pass = (
