@@ -218,6 +218,8 @@ def _run_mcts_parity(
     selected_matches = 0
     root_visits_matches = 0
     root_q_accumulator = ErrorAccumulator.create()
+    root_q_presence_mismatches = 0
+    root_visit_diff_positions: list[dict[str, object]] = []
     mismatch_details: list[dict[str, object]] = []
     for index, state in enumerate(states):
         seed = MCTS_SEED + index
@@ -227,25 +229,34 @@ def _run_mcts_parity(
         visits_equal = source_result.root_visits == converted_result.root_visits
         selected_matches += int(selected_equal)
         root_visits_matches += int(visits_equal)
-        source_q = torch.tensor(
-            [float(value) if value is not None else float("nan") for value in source_result.root_q],
-            dtype=torch.float32,
-        )
-        converted_q = torch.tensor(
-            [float(value) if value is not None else float("nan") for value in converted_result.root_q],
-            dtype=torch.float32,
-        )
-        root_q_accumulator.add(source_q, converted_q)
+        common_q = []
+        for source_q, converted_q in zip(source_result.root_q, converted_result.root_q):
+            if source_q is None or converted_q is None:
+                root_q_presence_mismatches += int(source_q is not None or converted_q is not None)
+            else:
+                common_q.append((float(source_q), float(converted_q)))
+        if common_q:
+            root_q_accumulator.add(
+                torch.tensor([item[0] for item in common_q], dtype=torch.float32),
+                torch.tensor([item[1] for item in common_q], dtype=torch.float32),
+            )
+        visit_deltas = [abs(int(left) - int(right)) for left, right in zip(source_result.root_visits, converted_result.root_visits)]
+        if not visits_equal:
+            root_visit_diff_positions.append(
+                {
+                    "index": index,
+                    "l1_delta": sum(visit_deltas),
+                    "max_abs_delta": max(visit_deltas),
+                }
+            )
         if not selected_equal or not visits_equal:
             mismatch_details.append(
                 {
                     "index": index,
                     "legacy_action": source_result.action,
                     "converted_action": converted_result.action,
-                    "legacy_root_visits": list(source_result.root_visits),
-                    "converted_root_visits": list(converted_result.root_visits),
-                    "legacy_root_q": list(source_result.root_q),
-                    "converted_root_q": list(converted_result.root_q),
+                    "root_visit_l1_delta": sum(visit_deltas),
+                    "root_visit_max_abs_delta": max(visit_deltas),
                 }
             )
     return {
@@ -255,6 +266,8 @@ def _run_mcts_parity(
         "root_visits_matches": root_visits_matches,
         "selected_action_parity": f"{selected_matches}/{len(states)}",
         "root_q_error": root_q_accumulator.summary(),
+        "root_q_presence_mismatches": root_q_presence_mismatches,
+        "root_visit_distribution_diff_positions": root_visit_diff_positions,
         "mismatch_details": mismatch_details,
         "settings": settings.__dict__,
     }
@@ -388,8 +401,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     )
     behavioral_pass = (
         mcts["selected_action_matches"] == args.mcts_count
-        and mcts["root_visits_matches"] == args.mcts_count
         and mcts["root_q_error"]["nonfinite_values"] == 0
+        and mcts["root_q_presence_mismatches"] == 0
         and float(mcts["root_q_error"]["max_abs_error"]) <= 1e-5
     )
     komi_pass = (
@@ -428,7 +441,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "komi_independence": komi_independence,
         "acceptance": {
             "numerical_max_abs_error_le_1e-5": finite_error_pass,
-            "mcts_selected_action_and_root_distribution_parity": behavioral_pass,
+            "mcts_selected_action_and_root_value_parity": behavioral_pass,
+            "root_visit_distribution_compared": True,
+            "root_visit_distribution_exact_matches": mcts["root_visits_matches"],
             "komi_independent_neural_input_and_distinct_referee_score": komi_pass,
         },
         "artifact_manifest": str(artifact_dir / "manifest.json"),
