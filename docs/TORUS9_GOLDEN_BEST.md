@@ -75,6 +75,38 @@ after its own scientific komi contract is selected.
 
 The parent checkpoint remains a provenance dependency only.
 
+### Permanent no-komi observation invariant
+
+From this transition onward, **komi is forbidden as a neural-network observation
+channel for the `new_komi` training line**.
+
+Komi may exist only in the referee/rules/scoring contract. It must not be fed
+into the neural observation tensor.
+
+The canonical trainable observation contract is exactly these five channels:
+
+`own stones · opponent stones · side-to-move color · previous pass · legal mask`
+
+Training/bootstrap must fail closed before the first optimizer step when any of
+the following is true:
+
+- the network input width is not exactly 5;
+- the declared observation-channel list contains `komi`;
+- the old `GoldenGraphNetV2-Torus9` 6-channel architecture is selected as the
+  trainable network;
+- the observation channel order differs from the canonical 5CH contract.
+
+The historical M137 6CH checkpoint remains allowed **only as a read-only source
+for the deterministic 6CH -> 5CH conversion**. It is not an admissible
+trainable checkpoint for `new_komi`.
+
+Runtime policy ID:
+
+`torus9-no-komi-observation-channel-v1`
+
+Regression coverage explicitly verifies that the legacy 6CH/`komi=0.5`
+observation contract is rejected.
+
 ### Komi and training status
 
 The source M137 was trained under actual komi `0.5`.
