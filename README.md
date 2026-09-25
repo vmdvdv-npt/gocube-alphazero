@@ -19,6 +19,19 @@ Torus9 and Cube use profile-specific scientific adapters over the shared
 incremental `SequentialPUCTSession`). The standalone Arena CLI is
 `tools/arena.py`.
 
+## Torus9 `new_komi` transition
+
+The current Torus9 transition is documented in
+`docs/TORUS9_GOLDEN_BEST.md`.
+
+`new_komi` is a fresh-history lineage bootstrapped from canonical M137 after
+the verified 6CH -> 5CH model conversion. Adam state is preserved everywhere
+with an unambiguous mapping; only the folded input bias moments are reset.
+Parent replay/history is not inherited.
+
+The bootstrap does not choose a new rules komi. Training remains blocked until
+a fresh 5-channel komi calibration selects it.
+
 ## GoCube Protocol V1
 
 Run the service with the Golden catalog:

@@ -1,17 +1,101 @@
-# CURRENT TORUS9 GOLDEN BEST
+# CURRENT TORUS9 GOLDEN / `new_komi` TRANSITION
 
-Status: **CURRENT_BEST**
+Status: **M137 REFERENCE FROZEN · `new_komi` PREPARED FOR FRESH 5CH KOMI CALIBRATION**
 
-Run/checkpoint: `torus9-stable-learning-20260913-v1 / M8`
+## Reference checkpoint
 
-Model hash: `sha256:0c2beca91354b04b26f7092c94b5c60b217c5db2d5e8cb5403a124bb39738761`
+Canonical parent lineage: `torus9-m125-continuous-v2-gen6-20260922-v1`
 
-Checkpoint artifact SHA-256: `sha256:a0e54de1e4370979d8447867113c9594817638dab3816634ef3722e6103529d0`
+Canonical parent checkpoint: `M137`
 
-Artifact source commit: `25dc804cced364c4289e4b0580e3799c4437e288`; PR #86 merge anchor: `88b1803cf179c6fa93f2e9610963eeed931d09b1`.
+Checkpoint artifact SHA-256:
 
-Architecture: `GoldenGraphNetV2-Torus9-8Block`, hidden 64, 8 blocks, policy `[82]`, WDL `[3]`, komi `0.5`.
+`71cfc78dab3fe217b3c435a765790efe6f6c4fa42a7d21479f3fd909adf341fe`
 
-Training: 8 × 64 self-play games; rolling replay 3 generations / 20,000 positions; Adam `lr=0.001`, `wd=0`, 80 optimizer steps × batch 64 per iteration.
+The historical M137 network is `GoldenGraphNetV2-Torus9`, hidden 80, 8 blocks,
+policy `[82]`, WDL `[3]`, ownership `[81,3]`, score `[1]`.
 
-Arena evidence: NEW M8 vs OLD M8 `59 / 3 / 0`; M8 vs M1 `128 / 0 / 0`; M8 vs M0 `119 / 7 / 0`; M8 vs M4 `92 / 24 / 0`. Technical games are stored separately and excluded from W/L/D.
+## M137 6CH -> 5CH conversion
+
+PR #198 established the 5-channel representation:
+
+`own stones · opponent stones · side-to-move color · previous pass · legal mask`
+
+The persistent komi input is removed.  For the M137 model trained with fixed
+komi `0.5`, the first affine layer is folded as:
+
+`W5 = W[:,0:5]`
+
+`b5 = b + 0.5 * W[:,5]`
+
+All remaining model parameters are copied unchanged.
+
+Converted M137 model hash:
+
+`sha256:f4fc0e173ed9cea1a6274bb613a95cb6ba428461f87eb60313deb390261927bc`
+
+PR #198 parity evidence: policy max abs diff `9.536743e-06`, WDL
+`3.814697e-06`, ownership `3.397465e-06`, score `1.341105e-07`;
+selected MCTS action parity `256/256`.  This is an inference/model conversion
+result, not proof that future training trajectories are identical.
+
+## `new_komi` lineage
+
+Lineage ID: **`new_komi`**
+
+Bootstrap model: M137-5CH derived from the canonical M137 checkpoint above.
+
+The parent M137 checkpoint is referenced by lineage/checkpoint/SHA identity.
+It is not copied.
+
+### Adam migration
+
+The bootstrap keeps the M137 Adam state wherever the 6CH -> 5CH mapping is
+unambiguous:
+
+- all unchanged trunk/head parameter states are copied exactly;
+- `input_projection.weight` Adam tensor states are cropped from 6 columns to
+  the first 5 columns;
+- `input_projection.bias` is the folded parameter `b + 0.5*W6`, so no exact
+  merged Adam moment history exists.  Only this parameter's first/second
+  moments are reset to zero;
+- the global Adam step for the folded bias is retained, so the optimizer clock
+  stays continuous with the migrated parameters.
+
+This conversion is explicitly recorded as
+`adam-preserve-exact-crop-input-reset-folded-bias-moments-v1`.
+
+### Replay/history boundary
+
+`new_komi` starts with **no inherited replay history**.
+
+No M137 parent replay, rolling replay, self-play rows, or replay references are
+carried into the lineage.  The new line may accumulate only self-play generated
+after its own scientific komi contract is selected.
+
+The parent checkpoint remains a provenance dependency only.
+
+### Komi status
+
+The source M137 was trained under actual komi `0.5`.
+
+`new_komi` does **not** silently choose a replacement komi.  Its bootstrap
+status is:
+
+`BLOCKED_PENDING_KOMI_CALIBRATION`
+
+A fresh 5-channel calibration must select the real rules komi first.  After
+selection, self-play, WDL/score targets, Arena, and all new replay data must use
+that same actual komi.
+
+`7.5` is legacy/error and must not be used.
+
+## Storage
+
+Active lineage location:
+
+`runs/torus9/active/new_komi/`
+
+The lineage owns its derived 5CH bootstrap checkpoint and future artifacts.
+The canonical M137 source remains in its original lineage and is referenced by
+identity.  No parent checkpoint or replay dataset is duplicated.
