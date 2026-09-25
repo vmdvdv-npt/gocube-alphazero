@@ -71,10 +71,28 @@ class Torus9M137FiveChannelGraphNet(Torus9CurrentGraphNet):
             observation = observation.unsqueeze(0)
         if tuple(observation.shape[1:]) != (5, TORUS9_POINT_COUNT):
             raise ValueError("M137-derived Torus9 network expects [batch,5,81]")
-        nodes = self.input_projection(observation.transpose(1, 2))
+        nodes = self.project_input(observation)
         for block in self.blocks:
             nodes = block(nodes)
         return torch.nn.functional.relu(self.output_norm(nodes))
+
+    def project_input(self, observation: torch.Tensor) -> torch.Tensor:
+        """Return the folded first-projection activation used at inference."""
+
+        if observation.ndim == 2:
+            observation = observation.unsqueeze(0)
+        if tuple(observation.shape[1:]) != (5, TORUS9_POINT_COUNT):
+            raise ValueError("M137-derived Torus9 network expects [batch,5,81]")
+        # Keep stored parameters and returned activations in FP32, but use
+        # FP64 accumulation for this inference-only folded affine boundary.
+        # This removes backend-dependent width/order rounding from the 6->5
+        # identity before the shared residual trunk.
+        projection_input = observation.transpose(1, 2)
+        return torch.nn.functional.linear(
+            projection_input.to(dtype=torch.float64),
+            self.input_projection.weight.to(dtype=torch.float64),
+            self.input_projection.bias.to(dtype=torch.float64),
+        ).to(dtype=projection_input.dtype)
 
 
 def build_m137_five_channel_observation(

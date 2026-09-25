@@ -178,7 +178,7 @@ def _run_numerical_parity(
             old = torch.stack(legacy_observations[start : start + batch_size]).to(device)
             new = torch.stack(converted_observations[start : start + batch_size]).to(device)
             source_projection = source_model.input_projection(old.transpose(1, 2))
-            converted_projection = converted_model.input_projection(new.transpose(1, 2))
+            converted_projection = converted_model.project_input(new)
             source_nodes = source_model.encode(old)
             converted_nodes = converted_model.encode(new)
             source_outputs = source_model.forward_auxiliary(old)
