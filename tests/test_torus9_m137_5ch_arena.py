@@ -24,7 +24,6 @@ def _checkpoint(tmp_path: Path) -> Path:
         "architecture_id": M137_FIVE_CHANNEL_ARCHITECTURE_ID,
         "architecture_config": model.architecture_config,
         "observation_shape": [5, 81],
-        "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
         "converted_model_hash": model_hash(model),
     }
     torch.save(

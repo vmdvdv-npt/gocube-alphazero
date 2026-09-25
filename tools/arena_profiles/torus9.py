@@ -256,14 +256,21 @@ class Torus9ArenaProfile:
         self.observation_shape = (5 if self._five_channel else 6, TORUS9_POINT_COUNT)
 
     def matches_metadata(self, metadata: Mapping[str, object]) -> bool:
+        architecture = metadata.get("architecture_config")
+        architecture_topology = (
+            architecture.get("topology_fingerprint")
+            if isinstance(architecture, Mapping)
+            else None
+        )
+        topology_fingerprint = metadata.get("topology_fingerprint", architecture_topology)
         legacy = (
             metadata.get("profile_id") == TORUS9_CURRENT_PROFILE_ID
             and metadata.get("architecture_id") == TORUS9_CURRENT_ARCHITECTURE_ID
-            and metadata.get("topology_fingerprint") == TORUS9_TOPOLOGY_FINGERPRINT
+            and topology_fingerprint == TORUS9_TOPOLOGY_FINGERPRINT
         )
         five_channel = (
             metadata.get("architecture_id") == M137_FIVE_CHANNEL_ARCHITECTURE_ID
-            and metadata.get("topology_fingerprint") == TORUS9_TOPOLOGY_FINGERPRINT
+            and topology_fingerprint == TORUS9_TOPOLOGY_FINGERPRINT
             and metadata.get("observation_shape") == [5, TORUS9_POINT_COUNT]
         )
         return legacy or five_channel
