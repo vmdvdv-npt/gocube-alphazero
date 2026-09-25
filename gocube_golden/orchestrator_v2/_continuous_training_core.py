@@ -27,6 +27,7 @@ from .contracts import EvaluationIdentity, StartsetRef
 from .experiment_runner import LineageFactory, TrainOne
 from .generation_runner import OutputLineage
 from .production_generation import ProductionTrainOne
+from .immutable_runtime import execution_report_from_lineage
 from .torus9_production import Torus9ProductionLineage
 from .version import ORCHESTRATOR_VERSION
 
@@ -1525,6 +1526,7 @@ class ContinuousTrainingRunnerV2:
             reference_generation=reference.generation,
             validity=result.validity,
             wld=list(result.wld),
+            execution_code_commit=result.execution_code_commit,
         )
         self._notify_operator(
             "ARENA_COMPLETED",
@@ -1662,6 +1664,10 @@ class ContinuousTrainingRunnerV2:
         replay = effective.replay
         self_play = effective.self_play
         training = effective.training
+        runtime = execution_report_from_lineage(self.lineage_root)
+        execution_commit = str(runtime["execution_code_commit"])
+        initial_commit = str(runtime["initial_lineage_code_commit"])
+        rollover = str(runtime["rollover"])
         message = (
             "Training started — GoCube AlphaZero; "
             f"parent={parent.topology}/{parent.lineage_id}/{parent.checkpoint_id}; "
@@ -1671,7 +1677,9 @@ class ContinuousTrainingRunnerV2:
             f"{replay.get('cap', '-')} positions; "
             f"self-play MCTS={self_play.get('mcts_simulations', self_play.get('simulations', '-'))} sims; "
             f"games/generation={self_play.get('games_per_iteration', self_play.get('games', '-'))}; "
-            f"Arena cadence=every {self.config.arena_cadence} generations"
+            f"Arena cadence=every {self.config.arena_cadence} generations; "
+            f"execution={execution_commit[:12]}; initial={initial_commit[:12]}; "
+            f"rollover={rollover}"
         )
         details = {
             "parent": parent.ref.to_dict(),
@@ -1686,6 +1694,9 @@ class ContinuousTrainingRunnerV2:
                 "games_per_iteration", self_play.get("games")
             ),
             "arena_cadence": self.config.arena_cadence,
+            "execution_code_commit": execution_commit,
+            "initial_lineage_code_commit": initial_commit,
+            "rollover": rollover,
         }
         self._report("started", message, **details)
         self._notify_operator(

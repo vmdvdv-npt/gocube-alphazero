@@ -9,8 +9,12 @@ engine.  It intentionally has no checkpoint lookup or copying logic.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 from typing import Callable, Mapping
 
 from ..arena_identity import (
@@ -26,6 +30,11 @@ from .contracts import (
     ArtifactRef,
     EvaluationIdentity,
     StartsetRef,
+)
+from .immutable_runtime import (
+    ImmutableRuntime,
+    ImmutableRuntimeManager,
+    execution_commit_from_lineage,
 )
 from .version import require_v2_process
 
@@ -81,6 +90,7 @@ class ArenaRunRequest:
     # A coordinator may opt a same-lineage evaluation into its owning lineage
     # without changing the Arena identity or execution semantics.
     output_dir: Path | None = None
+    execution_code_commit: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidate, ResolvedCheckpointNode):
@@ -122,6 +132,7 @@ class ArenaRunResult:
     identity: EvaluationIdentity
     summary: Mapping[str, object]
     validity: str
+    execution_code_commit: str | None = None
 
     @property
     def wld(self) -> tuple[int, int, int]:
@@ -139,6 +150,86 @@ class ArenaRunner:
         engine: Callable[..., Mapping[str, object]] | None = None,
     ) -> None:
         self.engine = engine or production_arena
+        self._repo_root = Path(__file__).resolve().parents[2]
+        self._runtime_manager = ImmutableRuntimeManager(self._repo_root)
+        self._python_executable = sys.executable
+
+    def _production_summary(
+        self,
+        *,
+        request: ArenaRunRequest,
+        output: Path,
+        engine_kwargs: Mapping[str, object],
+    ) -> tuple[dict[str, object], ImmutableRuntime]:
+        pinned = request.execution_code_commit or execution_commit_from_lineage(
+            request.candidate.owner_root
+        )
+        runtime = self._runtime_manager.ensure(pinned)
+        request_path = output / ".arena-child-request.json"
+        result_path = output / ".arena-child-result.json"
+        payload = {
+            "schema": "gocube-orchestrator-v2-arena-request-v1",
+            "execution_code_commit": runtime.commit,
+            "candidate_path": str(engine_kwargs["candidate_path"]),
+            "reference_path": str(engine_kwargs["reference_path"]),
+            "profile_name": str(engine_kwargs["profile_name"]),
+            "output_dir": str(output),
+            "candidate_label": str(engine_kwargs["candidate_label"]),
+            "reference_label": str(engine_kwargs["reference_label"]),
+            "run_id": str(engine_kwargs["run_id"]),
+            "comparison": str(engine_kwargs["comparison"]),
+            "master_seed": int(engine_kwargs["master_seed"]),
+            "config": asdict(request.config),
+            "expected_candidate_artifact_sha256": str(
+                engine_kwargs["expected_candidate_artifact_sha256"]
+            ),
+            "expected_reference_artifact_sha256": str(
+                engine_kwargs["expected_reference_artifact_sha256"]
+            ),
+            "evaluation_identity": engine_kwargs["evaluation_identity"],
+            "evaluation_fingerprint": str(engine_kwargs["evaluation_fingerprint"]),
+            "workload": dict(request.workload),
+            "allowed_lineage_arena_root": (
+                None
+                if engine_kwargs.get("allowed_lineage_arena_root") is None
+                else str(engine_kwargs["allowed_lineage_arena_root"])
+            ),
+            # The coordinator has already selected this output directory from
+            # the configured Run Storage root.  The runtime checkout has its
+            # own source-tree-relative ``runs`` directory, so carry the
+            # coordinator's verified evaluation root across the process
+            # boundary without copying or rediscovering artifacts.
+            "allowed_evaluation_root": str(output.parent),
+        }
+        request_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        env = runtime.environment(os.environ)
+        env["AZ_ORCHESTRATOR_VERSION"] = "V2"
+        completed = subprocess.run(
+            [
+                self._python_executable,
+                "-m",
+                "gocube_golden.orchestrator_v2.arena_child",
+                "--request",
+                str(request_path),
+                "--result",
+                str(result_path),
+            ],
+            cwd=runtime.path,
+            env=env,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                "immutable production Arena child failed with exit code "
+                f"{completed.returncode} (execution commit {runtime.commit})"
+            )
+        try:
+            summary = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("immutable production Arena child returned no summary") from exc
+        if not isinstance(summary, dict):
+            raise RuntimeError("immutable production Arena child returned a non-object summary")
+        return summary, runtime
 
     @staticmethod
     def _identity(request: ArenaRunRequest) -> EvaluationIdentity:
@@ -239,6 +330,7 @@ class ArenaRunner:
                     identity=identity,
                     summary=existing,
                     validity=self._boundary_validity(existing),
+                    execution_code_commit=request.execution_code_commit,
                 )
             # The identity marker is already checked above; only incomplete
             # Arena output is removable. Checkpoints are in lineage storage and
@@ -273,10 +365,16 @@ class ArenaRunner:
             engine_kwargs["allowed_lineage_arena_root"] = (
                 Path(request.candidate.owner_root).resolve() / "arena"
             )
+        runtime: ImmutableRuntime | None = None
         try:
-            summary = dict(
-                self.engine(**engine_kwargs)
-            )
+            if self.engine is production_arena:
+                summary, runtime = self._production_summary(
+                    request=request,
+                    output=output,
+                    engine_kwargs=engine_kwargs,
+                )
+            else:
+                summary = dict(self.engine(**engine_kwargs))
         except Exception:
             # Keep the identity marker for fail-closed diagnosis/retry, just as
             # the staged V1 mechanism does for interrupted Arenas.
@@ -289,6 +387,7 @@ class ArenaRunner:
             identity=identity,
             summary=summary,
             validity=self._boundary_validity(summary),
+            execution_code_commit=(None if runtime is None else runtime.commit),
         )
 
 

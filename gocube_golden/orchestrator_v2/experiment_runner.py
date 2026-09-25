@@ -556,11 +556,12 @@ class ExperimentRunnerV2:
             _write_json(self.state_path, state)
         winner_label = candidate_label if decision.winner == candidate.ref else reference_label
         self._notify_operator(
-            f"STAGE{stage}_ARENA_COMPLETED",
-            f"Stage {stage} Arena completed: W/L/D={decision.wins}/{decision.losses}/{decision.draws}; "
-            f"winner={winner_label} ({decision.winner.lineage_id}/{decision.winner.checkpoint_id}).",
-            key_suffix=f"stage{stage}-arena:{arena_result.evaluation_id}",
-        )
+                f"STAGE{stage}_ARENA_COMPLETED",
+                f"Stage {stage} Arena completed: W/L/D={decision.wins}/{decision.losses}/{decision.draws}; "
+                f"winner={winner_label} ({decision.winner.lineage_id}/{decision.winner.checkpoint_id}); "
+                f"execution={str(arena_result.execution_code_commit or '')[:12] or 'synthetic'}.",
+                key_suffix=f"stage{stage}-arena:{arena_result.evaluation_id}",
+            )
         return arena_result, decision
 
     def _run_arena(
