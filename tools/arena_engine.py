@@ -1450,22 +1450,22 @@ def run_arena(
         }
         while len(done) < config.workers:
             ingress.raise_if_failed()
+            dead = _unreported_worker_exits(
+                processes,
+                done,
+                dead_since,
+                now=time.monotonic(),
+            )
+            if dead:
+                raise RuntimeError(
+                    "Arena worker process exited without a done message: "
+                    + ", ".join(dead)
+                )
             with scheduler.condition:
                 if control_pending:
                     message = control_pending.popleft()
                     ready_model = None
                 else:
-                    dead = _unreported_worker_exits(
-                        processes,
-                        done,
-                        dead_since,
-                        now=time.monotonic(),
-                    )
-                    if dead:
-                        raise RuntimeError(
-                            "Arena worker process exited without a done message: "
-                            + ", ".join(dead)
-                        )
                     message = None
                     now = time.perf_counter()
                     ready_model = scheduler.next_ready_model(now)
