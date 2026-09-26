@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from gocube_golden.arena_identity import evaluation_fingerprint, write_evaluation_identity
+from gocube_golden.process_supervision import atomic_write_json, process_group_exists
 from gocube_golden.orchestrator_v2 import (
     ArenaRunRequest,
     ArenaRunner,
@@ -21,6 +23,10 @@ from gocube_golden.orchestrator_v2.contracts import (
 )
 from tools.arena import _canonical_evaluation_output
 from tools.arena_engine import ArenaExecutionConfig
+from gocube_golden.orchestrator_v2.supervisor import (
+    ACTIVE_CHILD_SCHEMA,
+    SUPERVISOR_SCHEMA,
+)
 
 
 SHA_A = "sha256:" + "a" * 64
@@ -177,6 +183,75 @@ def test_runner_reclaims_markerless_stale_directory(tmp_path: Path, monkeypatch)
     assert calls == [1]
     assert result.validity == "VALID"
     assert (result.output_dir / "evaluation-identity.json").is_file()
+
+
+def test_runner_reclaims_dead_active_child_and_old_supervisor_result(
+    tmp_path: Path, monkeypatch
+) -> None:
+    calls: list[int] = []
+
+    def engine(**kwargs: object) -> dict[str, object]:
+        calls.append(1)
+        return _fake_engine(**kwargs)
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    runner = ArenaRunner(engine=engine)
+    request = _request(tmp_path)
+    stale = tmp_path / "evaluations" / runner._evaluation_id(request)
+    identity = runner._identity(request).to_dict()
+    write_evaluation_identity(
+        stale,
+        stale.name,
+        identity,
+        evaluation_fingerprint(identity),
+    )
+    runtime = stale / "runtime"
+    runtime.mkdir()
+    stale_group = 10_000_000
+    while process_group_exists(stale_group):
+        stale_group += 1
+    atomic_write_json(
+        runtime / "active-child.json",
+        {
+            "schema": ACTIVE_CHILD_SCHEMA,
+            "supervisor_schema": SUPERVISOR_SCHEMA,
+            "execution_id": f"{runner._evaluation_id(request)}:arena",
+            "attempt": 3,
+            "pid": stale_group,
+            "process_group": stale_group,
+            "started_at": 1.0,
+            "liveness_path": "runtime/arena-liveness.json",
+            "progress_path": "runtime/arena-progress.json",
+        },
+    )
+    atomic_write_json(
+        runtime / "execution-intent.json",
+        {
+            "schema": "gocube-orchestrator-v2-execution-intent-v1",
+            "supervisor_schema": SUPERVISOR_SCHEMA,
+            "execution_id": f"{runner._evaluation_id(request)}:arena",
+            "attempt": 3,
+            "updated_at": 1.0,
+        },
+    )
+    atomic_write_json(
+        runtime / "supervisor-result.json",
+        {
+            "schema": "gocube-orchestrator-supervisor-result-v1",
+            "execution_id": f"{runner._evaluation_id(request)}:arena",
+            "status": "FAILURE",
+            "attempts": 0,
+        },
+    )
+
+    result = runner.run(request)
+
+    assert calls == [1]
+    assert result.validity == "VALID"
+    assert not (result.output_dir / "runtime" / "supervisor-result.json").exists()
 
 
 def test_runner_can_store_same_lineage_result_under_generation_directory(

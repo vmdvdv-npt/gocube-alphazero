@@ -38,6 +38,7 @@ from .immutable_runtime import (
 )
 from .version import require_v2_process
 from .supervisor import SupervisorPolicy, SupervisorV2
+from ..process_supervision import process_group_exists
 
 from tools.arena import (
     ARENA_RESULT_PROVENANCE_SCHEMA,
@@ -344,6 +345,36 @@ class ArenaRunner:
             return normalized
         return "INVALID"
 
+    @staticmethod
+    def _reclaim_stale_supervision(output: Path, run_id: str) -> bool:
+        """Clear a dead child marker before retrying incomplete Arena output.
+
+        A coordinator can disappear after the child has already exited.  In
+        that case the durable ``active-child`` and supervisor result records
+        outlive the process and must not be mistaken for a live reattachable
+        execution.  A live process group, malformed ownership record, or
+        explicit durable stop remains fail-closed.
+        """
+        supervisor = SupervisorV2(
+            output,
+            execution_id=f"{run_id}:arena",
+            liveness_path=output / "runtime" / "arena-liveness.json",
+            progress_path=output / "runtime" / "arena-progress.json",
+        )
+        if supervisor.stop_path.is_file():
+            return False
+        plan = supervisor.plan()
+        active = plan.active_child
+        if active is None or process_group_exists(active.process_group):
+            return False
+
+        # Revalidate and clear only the supervisor-owned identity records.
+        # The caller will then reclaim the incomplete evaluation directory
+        # through the existing markerless/incomplete-output path.
+        supervisor.reconcile_completed_execution()
+        supervisor.result_path.unlink(missing_ok=True)
+        return True
+
     def run(self, request: ArenaRunRequest) -> ArenaRunResult:
         """Run exactly one evaluation for the supplied explicit refs."""
         if self.engine is production_arena:
@@ -383,6 +414,8 @@ class ArenaRunner:
         stopped_supervision = (
             supervised_runtime / "supervisor-stop.json"
         ).is_file()
+        if output.exists() and active_supervision:
+            active_supervision = not self._reclaim_stale_supervision(output, run_id)
         if output.exists():
             try:
                 existing = load_reusable_evaluation(
