@@ -110,18 +110,22 @@ def _permit_payload(
     run_id: str,
     code_identity: str,
     ttl_seconds: float,
+    attempt: int = 1,
 ) -> tuple[dict[str, object], bytes]:
     now = time.time()
     if not math.isfinite(float(ttl_seconds)) or float(ttl_seconds) <= 0:
         raise ValueError("permit ttl_seconds must be finite and positive")
     if topology != authority.topology:
         raise RuntimeError("Orchestrator V2 cannot mint a permit for a different topology")
+    if type(attempt) is not int or attempt < 1:
+        raise ValueError("permit attempt must be a positive integer")
     key = secrets.token_bytes(32)
     payload: dict[str, object] = {
         "schema": PERMIT_SCHEMA,
         "launch_id": authority.launch_id,
         "action_id": uuid.uuid4().hex,
         "action_type": _component(action_type, "action_type"),
+        "attempt": attempt,
         "topology": _component(topology, "topology"),
         "run_id": _component(run_id, "run_id"),
         "orchestrator_version": ORCHESTRATOR_VERSION,
@@ -143,6 +147,7 @@ def _child_execution_permit(
     run_id: str,
     code_identity: str,
     ttl_seconds: float = DEFAULT_PERMIT_TTL_SECONDS,
+    attempt: int = 1,
 ) -> Iterator[Mapping[str, object]]:
     """Mint a child capability and expose it only for supervised process spawn."""
     authority = active_authority()
@@ -155,6 +160,7 @@ def _child_execution_permit(
         run_id=run_id,
         code_identity=code_identity,
         ttl_seconds=ttl_seconds,
+        attempt=attempt,
     )
     previous_permit = os.environ.get(PERMIT_ENV)
     previous_key = os.environ.get(PERMIT_KEY_ENV)
@@ -221,6 +227,7 @@ def require_child_execution_permit(
     topology: str | None = None,
     run_id: str | None = None,
     code_identity: str | None = None,
+    attempt: int | None = None,
     environ: Mapping[str, str] | None = None,
     now: float | None = None,
     parent_pid: int | None = None,
@@ -239,6 +246,7 @@ def require_child_execution_permit(
         "topology": topology,
         "run_id": run_id,
         "code_identity": code_identity,
+        "attempt": attempt,
     }
     for key, value in expected.items():
         if value is not None and str(payload.get(key)) != str(value):

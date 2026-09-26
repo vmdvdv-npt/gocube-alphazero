@@ -20,7 +20,17 @@ class _RunOwnedExecutionMixin:
 class _RunOwnedTorus9ProfileMixin(_RunOwnedExecutionMixin):
     """Remove historical komi-candidate whitelist from Torus semantics."""
 
-    def __init__(self, *, komi: float = 0.5, profile_id: str = "torus9", simulations: int = 64, five_channel: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        komi: float = 0.5,
+        profile_id: str = "torus9",
+        simulations: int = 64,
+        cpuct: float = 1.25,
+        fpu: float = 0.0,
+        watchdog: int = 500,
+        five_channel: bool = False,
+    ) -> None:
         if isinstance(komi, bool) or not isinstance(komi, (int, float)) or not math.isfinite(float(komi)):
             raise ValueError("Torus9 Arena komi must be a finite number")
         if isinstance(simulations, bool) or not isinstance(simulations, int) or simulations <= 0:
@@ -29,17 +39,43 @@ class _RunOwnedTorus9ProfileMixin(_RunOwnedExecutionMixin):
         self.komi = float(komi)
         self.profile_id = str(profile_id)
         self.simulations = int(simulations)
+        if not math.isfinite(float(cpuct)) or float(cpuct) <= 0:
+            raise ValueError("Torus9 Arena cpuct must be finite and positive")
+        if not math.isfinite(float(fpu)):
+            raise ValueError("Torus9 Arena fpu must be finite")
+        if isinstance(watchdog, bool) or not isinstance(watchdog, int) or watchdog <= 0:
+            raise ValueError("Torus9 Arena watchdog must be a positive integer")
+        self.cpuct = float(cpuct)
+        self.fpu = float(fpu)
+        self.watchdog = int(watchdog)
         self._five_channel = bool(five_channel)
         self.observation_shape = (5 if self._five_channel else 6, TORUS9_POINT_COUNT)
 
 
-def _torus_profile(*, komi: float = 0.5, simulations: int = 64, five_channel: bool = False, profile_id: str = "torus9") -> ArenaProfile:
+def _torus_profile(
+    *,
+    komi: float = 0.5,
+    simulations: int = 64,
+    cpuct: float = 1.25,
+    fpu: float = 0.0,
+    watchdog: int = 500,
+    five_channel: bool = False,
+    profile_id: str = "torus9",
+) -> ArenaProfile:
     from tools.arena_profiles.torus9 import Torus9ArenaProfile
 
     class RunOwnedTorus9ArenaProfile(_RunOwnedTorus9ProfileMixin, Torus9ArenaProfile):
         pass
 
-    return RunOwnedTorus9ArenaProfile(komi=komi, profile_id=profile_id, simulations=simulations, five_channel=five_channel)
+    return RunOwnedTorus9ArenaProfile(
+        komi=komi,
+        profile_id=profile_id,
+        simulations=simulations,
+        cpuct=cpuct,
+        fpu=fpu,
+        watchdog=watchdog,
+        five_channel=five_channel,
+    )
 
 
 def _cube_profile(value: str) -> ArenaProfile:
@@ -58,10 +94,13 @@ def _profiles() -> dict[str, ArenaProfile]:
     return {profile.profile_id: profile}
 
 
-def _parse_torus_fields(value: str) -> tuple[float, int, bool]:
+def _parse_torus_fields(value: str) -> tuple[float, int, float, float, int, bool]:
     fields = value.split("|")
     komi = 0.5
     simulations = 64
+    cpuct = 1.25
+    fpu = 0.0
+    watchdog = 500
     five_channel = False
     if value.startswith("torus9-komi-calibration|"):
         try:
@@ -79,18 +118,32 @@ def _parse_torus_fields(value: str) -> tuple[float, int, bool]:
                 komi = float(field.split("=", 1)[1])
             elif field.startswith("simulations="):
                 simulations = int(field.split("=", 1)[1])
+            elif field.startswith("cpuct="):
+                cpuct = float(field.split("=", 1)[1])
+            elif field.startswith("fpu="):
+                fpu = float(field.split("=", 1)[1])
+            elif field.startswith("watchdog=") or field.startswith("technical_move_limit="):
+                watchdog = int(field.split("=", 1)[1])
             elif field:
                 raise ValueError(f"unknown Torus9 profile field {field!r}")
     except ValueError as exc:
         raise ValueError(f"Malformed Torus9 profile {value!r}") from exc
-    return komi, simulations, five_channel
+    return komi, simulations, cpuct, fpu, watchdog, five_channel
 
 
 def get_profile(profile_id: str) -> ArenaProfile:
     value = str(profile_id)
     if value.startswith("torus9-komi-calibration|") or value.startswith("torus9|"):
-        komi, simulations, five_channel = _parse_torus_fields(value)
-        return _torus_profile(komi=komi, profile_id=value, simulations=simulations, five_channel=five_channel)
+        komi, simulations, cpuct, fpu, watchdog, five_channel = _parse_torus_fields(value)
+        return _torus_profile(
+            komi=komi,
+            profile_id=value,
+            simulations=simulations,
+            cpuct=cpuct,
+            fpu=fpu,
+            watchdog=watchdog,
+            five_channel=five_channel,
+        )
     if value.startswith("cube-v2|"):
         return _cube_profile(value)
     profiles = _profiles()

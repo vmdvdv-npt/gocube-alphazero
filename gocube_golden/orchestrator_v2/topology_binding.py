@@ -47,13 +47,19 @@ def _torus_profile_id(config: EffectiveConfig) -> str:
     if simulations <= 0:
         raise ValueError("Torus9 Arena simulations must be a positive integer")
     komi = float(arena.get("komi", config.self_play.get("komi", 0.5)))
+    cpuct = float(arena.get("cpuct", 1.25))
+    fpu = float(arena.get("fpu", 0.0))
+    watchdog = int(arena.get("watchdog", arena.get("technical_move_limit", 500)))
     compatibility = config.compatibility
     channels = compatibility.get("input_channels")
     if channels is None:
         shape = compatibility.get("observation_shape")
         if isinstance(shape, (list, tuple)) and shape:
             channels = shape[0]
-    profile = f"torus9|komi={komi:g}|simulations={simulations}"
+    profile = (
+        f"torus9|komi={komi:g}|simulations={simulations}"
+        f"|cpuct={cpuct:g}|fpu={fpu:g}|watchdog={watchdog}"
+    )
     if channels == 5:
         profile += "|5ch"
     return profile
@@ -87,14 +93,9 @@ class TopologyBinding:
         resolved = get_profile(profile)
         if self.topology == "torus9":
             if profile == "torus9" or profile.startswith("torus9|") or profile.startswith("torus9-komi-calibration|"):
-                expected = config.arena.get("komi", config.self_play.get("komi"))
-                actual = getattr(resolved, "komi", None)
-                if expected is not None and actual is not None and float(expected) != float(actual):
-                    raise ValueError("Torus9 Arena profile komi does not match effective config")
-                configured_sims = config.arena.get("simulations", config.arena.get("mcts_simulations"))
-                actual_sims = getattr(resolved, "simulations", None)
-                if configured_sims is not None and actual_sims is not None and int(configured_sims) != int(actual_sims):
-                    raise ValueError("Torus9 Arena profile simulations do not match effective config")
+                # Search/rules values are owned by this evaluation run.  The
+                # effective training config is used only for model-format and
+                # lineage compatibility; it is not an Arena whitelist.
                 return profile
             raise ValueError("Arena profile is not compatible with topology=torus9")
         expected = self.default_arena_profile(config)

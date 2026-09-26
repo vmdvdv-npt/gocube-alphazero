@@ -9,6 +9,7 @@ from .execution_permit import _child_execution_permit
 from .immutable_runtime import execution_commit_from_lineage
 from .operator_messages import format_arena_started
 from .version import require_v2_process
+from .supervisor import SupervisorPolicy
 from tools.arena_profiles import get_profile
 
 ARENA_RESULT_PROVENANCE_SCHEMA = _core.ARENA_RESULT_PROVENANCE_SCHEMA
@@ -36,8 +37,14 @@ def _is_real_telegram(notifier: object | None) -> bool:
 class ArenaRunner(_core.ArenaRunner):
     """Run one V2 Arena evaluation with profile-owned scientific semantics."""
 
-    def __init__(self, engine=None, *, notifier: object | None = None) -> None:
-        super().__init__(engine=engine)
+    def __init__(
+        self,
+        engine=None,
+        *,
+        notifier: object | None = None,
+        supervisor_policy: SupervisorPolicy | None = None,
+    ) -> None:
+        super().__init__(engine=engine, supervisor_policy=supervisor_policy)
         self.notifier = notifier
 
     @staticmethod

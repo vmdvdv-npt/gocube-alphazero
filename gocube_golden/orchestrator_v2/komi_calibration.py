@@ -30,6 +30,7 @@ from .generation_runner import OutputLineage
 from .experiment_runner import LineageFactory
 from .torus9_production import Torus9ProductionLineage
 from .version import ORCHESTRATOR_VERSION
+from ..torus9_contract import TORUS9_ALLOWED_KOMI
 
 from tools.arena_engine import ArenaExecutionConfig
 
@@ -43,7 +44,7 @@ KOMI_CALIBRATION_AMBIGUITY_THRESHOLD = 0.01
 KOMI_CALIBRATION_PARENT_GENERATION = 137
 KOMI_CALIBRATION_PARENT_CHECKPOINT_ID = "M137"
 KOMI_CALIBRATION_CANDIDATES = (1.5, 2.5)
-KOMI_CALIBRATION_ALLOWED_CANDIDATES = (1.5, 2.5, 3.5, 4.5)
+KOMI_CALIBRATION_ALLOWED_CANDIDATES = tuple(sorted(TORUS9_ALLOWED_KOMI))
 
 WAITING_FOR_M137 = "WAITING_FOR_M137"
 STOPPING_PARENT = "STOPPING_PARENT"
@@ -112,20 +113,28 @@ class KomiCalibrationArenaContract:
     inference_wait_ms: float = 4.0
 
     def __post_init__(self) -> None:
-        if type(self.simulations) is not int or self.simulations != 64:
-            raise ValueError("Komi calibration requires exactly 64 MCTS simulations")
-        if float(self.cpuct) != 1.25 or float(self.fpu) != 0.0:
-            raise ValueError("Komi calibration cpuct/FPU contract drift")
+        if type(self.simulations) is not int or self.simulations <= 0:
+            raise ValueError("Komi calibration simulations must be a positive integer")
+        if not math.isfinite(float(self.cpuct)) or float(self.cpuct) <= 0:
+            raise ValueError("Komi calibration cpuct must be finite and positive")
+        if not math.isfinite(float(self.fpu)):
+            raise ValueError("Komi calibration fpu must be finite")
         if self.root_noise or float(self.temperature) != 0.0 or self.fast_search or self.resign:
             raise ValueError("Komi calibration search switches must be OFF/zero")
-        if type(self.watchdog) is not int or self.watchdog != 1000:
-            raise ValueError("Komi calibration watchdog must be 1000")
+        if type(self.watchdog) is not int or self.watchdog <= 0:
+            raise ValueError("Komi calibration watchdog must be a positive integer")
         if not self.deterministic_tie_break or not self.batching:
             raise ValueError("Komi calibration requires deterministic tie-break and batching")
-        if (self.workers, self.active_contexts, self.inference_batch_cap) != (16, 192, 64):
-            raise ValueError("Komi calibration execution contract drift")
-        if float(self.inference_wait_ms) != 4.0:
-            raise ValueError("Komi calibration inference wait must be 4 ms")
+        if type(self.workers) is not int or self.workers <= 0:
+            raise ValueError("Komi calibration workers must be a positive integer")
+        if type(self.active_contexts) is not int or self.active_contexts <= 0:
+            raise ValueError("Komi calibration active_contexts must be a positive integer")
+        if self.active_contexts < self.workers:
+            raise ValueError("Komi calibration active_contexts must cover all workers")
+        if type(self.inference_batch_cap) is not int or self.inference_batch_cap <= 0:
+            raise ValueError("Komi calibration inference_batch_cap must be positive")
+        if not math.isfinite(float(self.inference_wait_ms)) or float(self.inference_wait_ms) < 0:
+            raise ValueError("Komi calibration inference wait must be finite and non-negative")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -162,7 +171,7 @@ class KomiCalibrationArenaContract:
         return ArenaExecutionConfig(
             games=int(games),
             workers=self.workers,
-            games_per_worker=self.active_contexts // self.workers,
+            games_per_worker=max(1, self.active_contexts // self.workers),
             inference_batch_rows=self.inference_batch_cap,
             inference_batch_wait_ms=self.inference_wait_ms,
             device="cuda",
@@ -421,6 +430,12 @@ class KomiCalibrationConfig:
         if not isinstance(raw_contract, Mapping):
             raise ValueError("komi calibration arena_contract must be an object")
         contract_fields = set(KomiCalibrationArenaContract.__dataclass_fields__)
+        unknown_contract = set(raw_contract) - contract_fields
+        if unknown_contract:
+            raise ValueError(
+                "komi calibration arena_contract contains unsupported fields: "
+                + ", ".join(sorted(map(str, unknown_contract)))
+            )
         contract = KomiCalibrationArenaContract(**{key: raw_contract[key] for key in contract_fields if key in raw_contract})
         production = raw.get("production_effective_config", raw.get("effective_config"))
         arena_startset = raw.get("arena_startset", raw.get("startset"))
@@ -958,7 +973,13 @@ class KomiCalibrationRunnerV2:
         continuation_offset_pairs = 0 if batch == 1 else self.config.initial_games // 2
         startset = self.config.arena_startset or frozen_calibration_startset_ref(master_seed=self.config.arena_master_seed)
         execution = self.config.arena_contract.execution_config(games)
-        profile = f"torus9-komi-calibration|{key}"
+        contract = self.config.arena_contract
+        profile = (
+            f"torus9-komi-calibration|{key}"
+            f"|simulations={contract.simulations}"
+            f"|cpuct={contract.cpuct:g}|fpu={contract.fpu:g}"
+            f"|watchdog={contract.watchdog}|5ch"
+        )
         request = ArenaRunRequest(
             candidate=parent,
             reference=parent,

@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any, Mapping, Sequence
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -268,6 +269,7 @@ def run_arena(
     allowed_lineage_arena_root: Path | None = None,
     allowed_evaluation_root: Path | None = None,
     workload: Mapping[str, object] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
     _require_v2_process("tools.arena.run_arena")
@@ -334,6 +336,7 @@ def run_arena(
             or (reference_identity.sha256 if reference_identity else None)
         ),
         workload=workload,
+        progress_callback=progress_callback,
     )
     if candidate_identity is not None or reference_identity is not None or evaluation_identity is not None:
         candidate_ref = _reference_payload(

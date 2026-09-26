@@ -25,9 +25,11 @@ from .immutable_runtime import execution_commit_from_lineage, resolve_execution_
 from .komi_calibration import KomiCalibrationConfig
 from .komi_calibration_production import ProductionKomiCalibrationRunnerV2
 from .operator_messages import format_action_started
-from .run_spec import RunMode, RunSpecV2
+from .run_spec import RunMode, RunSpecV2, supervision_policy_for
+from .supervisor import SupervisorPolicy
 from .topology_binding import get_topology_binding
 from .version import mark_v2_process
+from .workflow import WorkflowRunner, WorkflowSpec
 from tools.arena_engine import ArenaExecutionConfig, DEFAULT_MASTER_SEED
 
 
@@ -105,6 +107,7 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
         arena_reference_gap=None if raw.get("arena_reference_gap") is None else int(raw["arena_reference_gap"]),
         allow_code_rollover=raw.get("allow_code_rollover", False),  # type: ignore[arg-type]
         self_play_concurrency_sweep=raw.get("self_play_concurrency_sweep"),  # type: ignore[arg-type]
+        supervision=dict(raw.get("supervision", {})),  # type: ignore[arg-type]
     )
 
 
@@ -131,12 +134,99 @@ def _request_parent_soft_stop(parent: object) -> None:
     atomic_write_text(control, canonical_json(payload) + "\n")
 
 
+_ARENA_SEARCH_FIELDS = frozenset(
+    {
+        "simulations",
+        "mcts_simulations",
+        "cpuct",
+        "fpu",
+        "watchdog",
+        "technical_move_limit",
+        "komi",
+        "root_noise",
+        "temperature",
+        "fast_search",
+        "resign",
+        "deterministic_tie_break",
+    }
+)
+
+
 def _arena_config(value: object) -> ArenaExecutionConfig:
     if isinstance(value, ArenaExecutionConfig):
         return value
     if not isinstance(value, Mapping):
         raise ValueError("arena_config must be an object")
-    return ArenaExecutionConfig(**dict(value))
+    raw = dict(value)
+    aliases = {
+        "inference_batch_cap": "inference_batch_rows",
+        "inference_wait": "inference_batch_wait_ms",
+        "inference_wait_ms": "inference_batch_wait_ms",
+        "contexts": "games_per_worker",
+    }
+    for source, target in aliases.items():
+        if source in raw:
+            if target in raw:
+                raise ValueError(f"arena_config specifies both {source} and {target}")
+            raw[target] = raw.pop(source)
+    unknown = set(raw) - set(ArenaExecutionConfig.__dataclass_fields__) - _ARENA_SEARCH_FIELDS
+    unknown -= {"search"}
+    if unknown:
+        raise ValueError(
+            "arena_config contains unsupported fields: "
+            + ", ".join(sorted(map(str, unknown)))
+        )
+    raw.pop("search", None)
+    for field in _ARENA_SEARCH_FIELDS:
+        raw.pop(field, None)
+    return ArenaExecutionConfig(**raw)
+
+
+def _arena_search(raw: Mapping[str, object], config: ArenaExecutionConfig) -> dict[str, object]:
+    nested = raw.get("search", raw.get("evaluation", {}))
+    if nested is None:
+        nested = {}
+    if not isinstance(nested, Mapping):
+        raise ValueError("Arena search/evaluation config must be an object")
+    if "search" in raw and isinstance(raw["search"], Mapping):
+        unknown = set(raw["search"]) - _ARENA_SEARCH_FIELDS
+        if unknown:
+            raise ValueError(
+                "Arena search contains unsupported fields: "
+                + ", ".join(sorted(map(str, unknown)))
+            )
+    values: dict[str, object] = {}
+    for key in _ARENA_SEARCH_FIELDS:
+        if key in nested:
+            values[key] = nested[key]
+        elif key in raw:
+            values[key] = raw[key]
+    if "simulations" not in values and "mcts_simulations" in values:
+        values["simulations"] = values.pop("mcts_simulations")
+    if "watchdog" not in values and "technical_move_limit" in values:
+        values["watchdog"] = values.pop("technical_move_limit")
+    return values
+
+
+def _torus_profile_with_search(profile: str, search: Mapping[str, object]) -> str:
+    from tools.arena_profiles import get_profile
+
+    parsed = get_profile(profile)
+    komi = float(search.get("komi", getattr(parsed, "komi", 0.5)))
+    simulations = int(search.get("simulations", getattr(parsed, "simulations", 64)))
+    cpuct = float(search.get("cpuct", getattr(parsed, "cpuct", 1.25)))
+    fpu = float(search.get("fpu", getattr(parsed, "fpu", 0.0)))
+    watchdog = int(
+        search.get(
+            "watchdog",
+            search.get("technical_move_limit", getattr(parsed, "watchdog", 500)),
+        )
+    )
+    channel_suffix = "|5ch" if getattr(parsed, "observation_shape", (6,))[0] == 5 else ""
+    return (
+        f"torus9|komi={komi:g}|simulations={simulations}"
+        f"|cpuct={cpuct:g}|fpu={fpu:g}|watchdog={watchdog}{channel_suffix}"
+    )
 
 
 def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResolver) -> ArenaRunRequest:
@@ -149,9 +239,27 @@ def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResol
     if candidate.topology != reference.topology:
         raise ValueError("Arena candidate/reference topologies differ")
     binding = get_topology_binding(candidate.topology)
-    config = _arena_config(raw.get("arena_config", raw.get("config", {})))
+    raw_config = raw.get("arena_config", raw.get("config"))
+    if raw_config is None:
+        raw_config = {
+            key: raw[key]
+            for key in ArenaExecutionConfig.__dataclass_fields__
+            if key in raw
+        }
+    config = _arena_config(raw_config)
     seed = int(raw.get("master_seed", DEFAULT_MASTER_SEED))
     profile = str(raw.get("profile") or binding.default_arena_profile(candidate.effective_config.config))
+    search_source = dict(raw)
+    if isinstance(raw_config, Mapping):
+        nested_search = raw_config.get("search")
+        if nested_search is not None:
+            search_source["search"] = nested_search
+        for key in _ARENA_SEARCH_FIELDS:
+            if key in raw_config and key not in search_source:
+                search_source[key] = raw_config[key]
+    search = _arena_search(search_source, config)
+    if candidate.topology == "torus9":
+        profile = _torus_profile_with_search(profile, search)
     binding.validate_arena_profile(profile, candidate.effective_config.config)
     startset_raw = raw.get("startset")
     startset = (
@@ -184,6 +292,8 @@ def run_arena_from_config(payload: Mapping[str, object], *, runs_root: str | Pat
     resolver = ArtifactResolver(runs_root)
     request = _standalone_arena_request(raw, resolver)
     runner = arena_runner or ArenaRunnerV2()
+    if hasattr(runner, "supervisor_policy"):
+        setattr(runner, "supervisor_policy", supervision_policy_for(raw, "arena"))
     evaluation_id = runner._evaluation_id(request) if isinstance(runner, ArenaRunnerV2) else str(raw.get("evaluation_id", "evaluation"))
     root = resolver.runs_root / request.candidate.topology / "evaluations" / evaluation_id
     notifier = TelegramNotifier(_notification_paths(root))
@@ -216,6 +326,8 @@ def run_calibration_from_config(payload: Mapping[str, object], *, runs_root: str
         resolver = ArtifactResolver(runs_root)
         request = _standalone_arena_request(merged, resolver)
         runner = arena_runner or ArenaRunnerV2()
+        if hasattr(runner, "supervisor_policy"):
+            setattr(runner, "supervisor_policy", supervision_policy_for(raw, "calibration"))
         evaluation_id = runner._evaluation_id(request) if isinstance(runner, ArenaRunnerV2) else f"{calibration_id}-arm-{index}"
         root = resolver.runs_root / request.candidate.topology / "evaluations" / evaluation_id
         notifier = TelegramNotifier(_notification_paths(root))
@@ -255,6 +367,11 @@ def run_komi_calibration_from_config(payload: Mapping[str, object], *, runs_root
     root = Path(experiment_root).resolve() if experiment_root is not None else resolver.runs_root / "torus9" / "evaluations" / config.calibration_id
     notifier = TelegramNotifier(_notification_paths(root))
     arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2(notifier=notifier)
+    if hasattr(arena_runner, "supervisor_policy"):
+        policy_source = payload.get("calibration", payload)
+        if not isinstance(policy_source, Mapping):
+            raise ValueError("calibration config must be an object")
+        setattr(arena_runner, "supervisor_policy", supervision_policy_for(policy_source, "calibration"))
     child_training = runner_kwargs.pop("child_training", None)
     calibration_config = config
     if child_training is None:
@@ -264,7 +381,12 @@ def run_komi_calibration_from_config(payload: Mapping[str, object], *, runs_root
             selected = float(config.config.arena.get("komi", config.config.self_play.get("komi", 0.5)))
             profile = calibration_config.production_arena_profile
             if profile == "torus9":
-                profile = f"torus9|komi={selected:g}|simulations={config.config.arena.get('simulations', config.config.arena.get('mcts_simulations', 64))}"
+                contract = calibration_config.arena_contract
+                profile = (
+                    f"torus9|komi={selected:g}|simulations={contract.simulations}"
+                    f"|cpuct={contract.cpuct:g}|fpu={contract.fpu:g}"
+                    f"|watchdog={contract.watchdog}|5ch"
+                )
             continuous = ContinuousTrainingConfig(
                 parent_checkpoint=parent.ref,
                 lineage_id=output_lineage.lineage_id,
@@ -329,7 +451,78 @@ def run_experiment_from_config(payload: Mapping[str, object], *, runs_root: str 
     try:
         with _authority(mode="experiment", topology=config.topology, run_id=config.experiment_id):
             runner = ExperimentRunnerV2(config, arena_runner=arena_runner, resolver=resolver, notifier=notifier, **runner_kwargs)
+            policy_source = payload.get("experiment", payload)
+            if not isinstance(policy_source, Mapping):
+                raise ValueError("experiment config must be an object")
+            policy = supervision_policy_for(policy_source, "arena")
+            selected_arena_runner = getattr(runner, "arena_runner", None)
+            if hasattr(selected_arena_runner, "supervisor_policy"):
+                setattr(selected_arena_runner, "supervisor_policy", policy)
+            selected_train_one = getattr(runner, "train_one", None)
+            if hasattr(selected_train_one, "supervisor_policy"):
+                setattr(selected_train_one, "supervisor_policy", supervision_policy_for(policy_source, "generation"))
             return runner.run()
+    finally:
+        flush_all()
+
+
+def run_workflow_from_config(
+    payload: Mapping[str, object],
+    *,
+    runs_root: str | Path | None = None,
+    workflow_handlers: Mapping[str, Any] | None = None,
+    **runner_kwargs: Any,
+) -> object:
+    """Run a durable composition of existing V2 actions."""
+    _require_file_backed_entrypoint()
+    raw = payload.get("workflow", payload.get("scenario", payload))
+    if not isinstance(raw, Mapping):
+        raise ValueError("workflow/scenario config must be an object")
+    spec = WorkflowSpec.from_dict(raw)
+    root = (
+        Path(runs_root or RUNS_ROOT).resolve()
+        / spec.topology
+        / "orchestration"
+        / "workflows"
+        / spec.workflow_id
+    )
+    handlers = dict(workflow_handlers or {})
+
+    def action_config(config: Mapping[str, object]) -> dict[str, object]:
+        selected = dict(config)
+        if spec.supervision and "supervision" not in selected:
+            selected["supervision"] = dict(spec.supervision)
+        return selected
+
+    # These adapters intentionally call the already-existing entrypoints.  A
+    # workflow is not a second implementation of Arena/training/calibration.
+    handlers.setdefault(
+        "arena",
+        lambda *, config, **_: run_arena_from_config(
+            {"arena": action_config(config)}, runs_root=runs_root, **runner_kwargs
+        ),
+    )
+    handlers.setdefault(
+        "calibration",
+        lambda *, config, **_: run_calibration_from_config(
+            {"calibration": action_config(config)}, runs_root=runs_root, **runner_kwargs
+        ),
+    )
+    handlers.setdefault(
+        "continuous_training",
+        lambda *, config, **_: run_continuous_from_config(
+            {"continuous": action_config(config)}, runs_root=runs_root, **runner_kwargs
+        ),
+    )
+    handlers.setdefault(
+        "experiment",
+        lambda *, config, **_: run_experiment_from_config(
+            {"experiment": action_config(config)}, runs_root=runs_root, **runner_kwargs
+        ),
+    )
+    try:
+        with _authority(mode="workflow", topology=spec.topology, run_id=spec.workflow_id):
+            return WorkflowRunner(spec, root=root, handlers=handlers).run()
     finally:
         flush_all()
 
@@ -345,6 +538,8 @@ def run_spec(payload: Mapping[str, object], *, runs_root: str | Path | None = No
         return run_experiment_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
     if spec.mode is RunMode.CALIBRATION:
         return run_calibration_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
+    if spec.mode in {RunMode.WORKFLOW, RunMode.SCENARIO}:
+        return run_workflow_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
     raise AssertionError(spec.mode)
 
 
@@ -357,7 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     command.add_argument("config", type=Path)
     command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     command.set_defaults(kind="run")
-    for name in ("continuous", "experiment", "komi-calibration"):
+    for name in ("continuous", "experiment", "komi-calibration", "workflow"):
         command = subparsers.add_parser(name, help=f"legacy-compatible V2 {name} JSON plan")
         command.add_argument("config", type=Path)
         command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
@@ -389,5 +584,5 @@ if __name__ == "__main__":
 
 __all__ = [
     "load_v2_config", "run_arena_from_config", "run_calibration_from_config", "run_continuous_from_config",
-    "run_experiment_from_config", "run_komi_calibration_from_config", "run_spec",
+    "run_experiment_from_config", "run_komi_calibration_from_config", "run_workflow_from_config", "run_spec",
 ]

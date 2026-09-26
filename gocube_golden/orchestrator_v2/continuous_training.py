@@ -46,6 +46,7 @@ class ContinuousTrainingConfig:
     arena_reference_gap: int | None = None
     allow_code_rollover: bool = False
     self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None
+    supervision: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         parent = self.parent_checkpoint if isinstance(self.parent_checkpoint, CheckpointRef) else CheckpointRef.from_dict(self.parent_checkpoint)
@@ -86,6 +87,8 @@ class ContinuousTrainingConfig:
             raise ValueError("arena_workload must be an object")
         if type(self.allow_code_rollover) is not bool:
             raise ValueError("allow_code_rollover must be a boolean")
+        if not isinstance(self.supervision, Mapping):
+            raise ValueError("supervision must be an object")
         startset = self.arena_startset
         if startset is None:
             startset = binding.arena_startset(master_seed=int(self.arena_master_seed), games=int(arena_config.games))
@@ -129,6 +132,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         arena_reference_gap: int | None = None,
         allow_code_rollover: bool | None = None,
         self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None,
+        supervision: Mapping[str, object] | None = None,
         resolver: ArtifactResolver | None = None,
         arena_runner=None,
         lineage_factory: LineageFactory | None = None,
@@ -159,6 +163,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
                 arena_reference_gap=arena_reference_gap,
                 allow_code_rollover=False if allow_code_rollover is None else allow_code_rollover,
                 self_play_concurrency_sweep=self_play_concurrency_sweep,
+                supervision={} if supervision is None else supervision,
             )
         else:
             direct_override = (parent_checkpoint, parent, lineage_id, effective_config, arena_cadence, arena_config)
@@ -169,8 +174,17 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
                     raise TypeError("allow_code_rollover must be a boolean")
                 config = replace(config, allow_code_rollover=allow_code_rollover)
         selected_resolver = resolver or ArtifactResolver()
-        selected_train_one = train_one or ProductionTrainOne(resolver=selected_resolver)
-        selected_arena_runner = arena_runner or ArenaRunnerV2(notifier=notifier)
+        from .run_spec import supervision_policy_for
+
+        policy_payload = {"supervision": config.supervision}
+        selected_train_one = train_one or ProductionTrainOne(
+            resolver=selected_resolver,
+            supervisor_policy=supervision_policy_for(policy_payload, "generation"),
+        )
+        selected_arena_runner = arena_runner or ArenaRunnerV2(
+            notifier=notifier,
+            supervisor_policy=supervision_policy_for(policy_payload, "arena"),
+        )
         if notifier is not None and hasattr(selected_arena_runner, "notifier"):
             setattr(selected_arena_runner, "notifier", notifier)
         super().__init__(

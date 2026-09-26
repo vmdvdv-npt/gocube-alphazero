@@ -37,6 +37,7 @@ from .immutable_runtime import (
     execution_commit_from_lineage,
 )
 from .version import require_v2_process
+from .supervisor import SupervisorPolicy, SupervisorV2
 
 from tools.arena import (
     ARENA_RESULT_PROVENANCE_SCHEMA,
@@ -44,7 +45,7 @@ from tools.arena import (
     run_arena as production_arena,
 )
 from tools.arena_engine import ArenaExecutionConfig
-from tools.arena_profiles.torus9 import PROFILE as TORUS9_ARENA_PROFILE
+from tools.arena_profiles import get_profile
 
 
 def torus9_startset_ref(*, master_seed: int, games: int) -> StartsetRef:
@@ -148,11 +149,14 @@ class ArenaRunner:
     def __init__(
         self,
         engine: Callable[..., Mapping[str, object]] | None = None,
+        *,
+        supervisor_policy: SupervisorPolicy | None = None,
     ) -> None:
         self.engine = engine or production_arena
         self._repo_root = Path(__file__).resolve().parents[2]
         self._runtime_manager = ImmutableRuntimeManager(self._repo_root)
         self._python_executable = sys.executable
+        self.supervisor_policy = supervisor_policy
 
     def _production_summary(
         self,
@@ -200,28 +204,64 @@ class ArenaRunner:
             # coordinator's verified evaluation root across the process
             # boundary without copying or rediscovering artifacts.
             "allowed_evaluation_root": str(output.parent),
+            "liveness_path": str(output / "runtime" / "arena-liveness.json"),
+            "progress_path": str(output / "runtime" / "arena-progress.json"),
         }
         request_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-        env = runtime.environment(os.environ)
-        env["AZ_ORCHESTRATOR_VERSION"] = "V2"
-        completed = subprocess.run(
-            [
-                self._python_executable,
-                "-m",
-                "gocube_golden.orchestrator_v2.arena_child",
-                "--request",
-                str(request_path),
-                "--result",
-                str(result_path),
-            ],
-            cwd=runtime.path,
-            env=env,
-            check=False,
+        command = (
+            self._python_executable,
+            "-m",
+            "gocube_golden.orchestrator_v2.arena_child",
+            "--request",
+            str(request_path),
+            "--result",
+            str(result_path),
         )
-        if completed.returncode != 0:
+        from ..process_supervision import start_owned_child
+        from .execution_permit import _child_execution_permit
+
+        def launch(child_request):
+            # Mint inside the launcher, not around SupervisorV2.run_once().
+            # Supervisor calls this once for every actual spawn, so a retry
+            # receives a fresh PID-bound, signed capability even when the
+            # original attempt outlived the historical 24-hour TTL.
+            env = runtime.environment(os.environ)
+            env["AZ_ORCHESTRATOR_VERSION"] = "V2"
+            with _child_execution_permit(
+                action_type="arena",
+                topology=request.candidate.topology,
+                run_id=str(engine_kwargs["run_id"]),
+                code_identity=runtime.commit,
+                attempt=int(child_request.attempt),
+            ) as permit:
+                env["AZ_V2_EXECUTION_PERMIT"] = json.dumps(dict(permit), sort_keys=True)
+                # The key is deliberately copied from the current parent
+                # environment only while the permit context is active.
+                import os as _os
+
+                env["AZ_V2_EXECUTION_PERMIT_KEY"] = _os.environ["AZ_V2_EXECUTION_PERMIT_KEY"]
+                return start_owned_child(
+                    command,
+                    cwd=runtime.path,
+                    env=env,
+                    popen=subprocess.Popen,
+                )
+
+        supervisor = SupervisorV2(
+            output,
+            execution_id=f"{engine_kwargs['run_id']}:arena",
+            liveness_path=Path(str(payload["liveness_path"])),
+            progress_path=Path(str(payload["progress_path"])),
+            launcher=launch,
+            command=command,
+            cwd=runtime.path,
+            policy=self.supervisor_policy,
+        )
+        result = supervisor.run_once()
+        if not result.success:
             raise RuntimeError(
-                "immutable production Arena child failed with exit code "
-                f"{completed.returncode} (execution commit {runtime.commit})"
+                "immutable production Arena child was stopped by SupervisorV2: "
+                f"{result.reason or result.returncode} (execution commit {runtime.commit})"
             )
         try:
             summary = json.loads(result_path.read_text(encoding="utf-8"))
@@ -233,9 +273,10 @@ class ArenaRunner:
 
     @staticmethod
     def _identity(request: ArenaRunRequest) -> EvaluationIdentity:
+        profile = get_profile(request.profile)
         scientific = dict(
             request.scientific_contract
-            or TORUS9_ARENA_PROFILE.scientific_contract(request.config)
+            or profile.scientific_contract(request.config)
         )
         if request.candidate.topology.startswith("cube"):
             scientific.update(
@@ -327,6 +368,13 @@ class ArenaRunner:
         else:
             output = evaluation_dir(request.candidate.topology, run_id).resolve()
 
+        supervised_runtime = output / "runtime"
+        active_supervision = (
+            supervised_runtime / "active-child.json"
+        ).is_file()
+        stopped_supervision = (
+            supervised_runtime / "supervisor-stop.json"
+        ).is_file()
         if output.exists():
             existing = load_reusable_evaluation(
                 output,
@@ -345,12 +393,19 @@ class ArenaRunner:
                     validity=self._boundary_validity(existing),
                     execution_code_commit=request.execution_code_commit,
                 )
-            # The identity marker is already checked above; only incomplete
-            # Arena output is removable. Checkpoints are in lineage storage and
-            # are never children of this evaluation directory.
-            shutil.rmtree(output)
+            if stopped_supervision:
+                raise RuntimeError(
+                    "Arena has a durable SupervisorV2 stop; acknowledge it before retrying: "
+                    f"{supervised_runtime / 'supervisor-stop.json'}"
+                )
+            if not active_supervision:
+                # The identity marker is already checked above; only
+                # incomplete Arena output is removable. Checkpoints are in
+                # lineage storage and are never children of this evaluation.
+                shutil.rmtree(output)
 
-        write_evaluation_identity(output, run_id, identity.to_dict(), fingerprint)
+        if not active_supervision:
+            write_evaluation_identity(output, run_id, identity.to_dict(), fingerprint)
         engine_kwargs: dict[str, object] = {
             "candidate_path": request.candidate.path,
             "reference_path": request.reference.path,
