@@ -115,3 +115,11 @@ from .komi_calibration import (  # noqa: F401
     effective_config_with_komi,
     frozen_calibration_startset_ref,
 )
+from .workflow import (  # noqa: F401
+    WORKFLOW_SCHEMA,
+    WORKFLOW_STATE_SCHEMA,
+    WorkflowError,
+    WorkflowRunner,
+    WorkflowSpec,
+    WorkflowStep,
+)

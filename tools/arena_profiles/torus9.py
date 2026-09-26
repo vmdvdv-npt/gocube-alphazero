@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -243,15 +244,27 @@ class Torus9ArenaProfile:
         komi: float = TORUS9_KOMI,
         profile_id: str = PROFILE_ID,
         simulations: int = 64,
+        cpuct: float = 1.25,
+        fpu: float = 0.0,
+        watchdog: int = TORUS9_ARENA_MOVE_LIMIT,
         five_channel: bool = False,
     ) -> None:
         if not isinstance(komi, (int, float)) or isinstance(komi, bool) or float(komi) not in TORUS9_ALLOWED_KOMI:
             raise ValueError("Torus9 Arena komi must be one of 0.5, 1.5, 2.5, 3.5, or 4.5")
         if isinstance(simulations, bool) or not isinstance(simulations, int) or simulations <= 0:
             raise ValueError("Torus9 Arena simulations must be a positive integer")
+        if not isinstance(cpuct, (int, float)) or isinstance(cpuct, bool) or not math.isfinite(float(cpuct)) or float(cpuct) <= 0:
+            raise ValueError("Torus9 Arena cpuct must be finite and positive")
+        if not isinstance(fpu, (int, float)) or isinstance(fpu, bool) or not math.isfinite(float(fpu)):
+            raise ValueError("Torus9 Arena fpu must be finite")
+        if isinstance(watchdog, bool) or not isinstance(watchdog, int) or watchdog <= 0:
+            raise ValueError("Torus9 Arena watchdog must be a positive integer")
         self.komi = float(komi)
         self.profile_id = str(profile_id)
         self.simulations = int(simulations)
+        self.cpuct = float(cpuct)
+        self.fpu = float(fpu)
+        self.watchdog = int(watchdog)
         self._five_channel = bool(five_channel)
         self.observation_shape = (5 if self._five_channel else 6, TORUS9_POINT_COUNT)
 
@@ -483,11 +496,11 @@ class Torus9ArenaProfile:
             if next_state.is_terminal:
                 game.formal = result_from_terminal(next_state).winner.value
                 return True
-            if game.ply >= TORUS9_ARENA_MOVE_LIMIT:
+            if game.ply >= self.watchdog:
                 game.technical = "TRUNCATED_MOVE_LIMIT"
                 game.error = (
                     "Torus 9x9 Arena watchdog reached "
-                    f"{TORUS9_ARENA_MOVE_LIMIT} actions"
+                    f"{self.watchdog} actions"
                 )
                 return True
             return False
@@ -499,8 +512,8 @@ class Torus9ArenaProfile:
         callbacks = CooperativeArenaCallbacks(
             search_settings=SearchSettings(
                 simulations=self.simulations,
-                cpuct=1.25,
-                fpu=0.0,
+                cpuct=self.cpuct,
+                fpu=self.fpu,
                 deterministic_tie_break=True,
             ),
             search_adapter=search_adapter,
@@ -599,13 +612,13 @@ class Torus9ArenaProfile:
             "games": config.games,
             "komi": self.komi,
             "simulations": self.simulations,
-            "cpuct": 1.25,
-            "fpu": 0.0,
+            "cpuct": self.cpuct,
+            "fpu": self.fpu,
             "noise": False,
             "temperature": 0.0,
             "fast_search": False,
             "resign": False,
-            "watchdog": TORUS9_ARENA_MOVE_LIMIT,
+            "watchdog": self.watchdog,
             "paired_starts_color_swap": True,
             "deterministic_tie_break": True,
             "technical_fail_closed": True,

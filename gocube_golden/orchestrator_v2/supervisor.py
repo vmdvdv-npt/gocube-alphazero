@@ -74,6 +74,61 @@ class SupervisorPolicy:
     poll_interval_seconds: float = 1.0
     termination_grace_seconds: float = 5.0
 
+    FIELD_NAMES = frozenset(
+        {
+            "max_retries",
+            "liveness_timeout_seconds",
+            "progress_timeout_seconds",
+            "heartbeat_grace_seconds",
+            "poll_interval_seconds",
+            "termination_grace_seconds",
+        }
+    )
+
+    @classmethod
+    def from_dict(
+        cls,
+        value: Mapping[str, object] | None,
+        *,
+        base: "SupervisorPolicy | None" = None,
+        label: str = "supervision",
+    ) -> "SupervisorPolicy":
+        """Parse a run-spec policy and fail before launching a child.
+
+        ``None`` keeps the current V2 defaults.  A base policy is useful for
+        per-action overrides: omitted fields inherit the common policy while
+        explicitly supplied fields remain visible in the persisted run-spec.
+        """
+        if value is None:
+            return base or cls()
+        if not isinstance(value, Mapping):
+            raise ValueError(f"{label} must be an object")
+        unknown = set(value) - cls.FIELD_NAMES
+        if unknown:
+            raise ValueError(
+                f"{label} contains unsupported fields: {', '.join(sorted(map(str, unknown)))}"
+            )
+        current = base or cls()
+        payload = {
+            name: getattr(current, name)
+            for name in cls.FIELD_NAMES
+        }
+        payload.update(dict(value))
+        return cls(**payload)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            name: getattr(self, name)
+            for name in (
+                "max_retries",
+                "liveness_timeout_seconds",
+                "progress_timeout_seconds",
+                "heartbeat_grace_seconds",
+                "poll_interval_seconds",
+                "termination_grace_seconds",
+            )
+        }
+
     def __post_init__(self) -> None:
         if self.heartbeat_grace_seconds < 0:
             raise ValueError("heartbeat_grace_seconds must be non-negative")
@@ -299,6 +354,10 @@ class SupervisorV2:
     def stop_path(self) -> Path:
         return self.root / "runtime" / "supervisor-stop.json"
 
+    @property
+    def result_path(self) -> Path:
+        return self.root / "runtime" / "supervisor-result.json"
+
     def plan(self) -> RecoveryPlan:
         """Decide whether to start, reattach, or stop without launching."""
         try:
@@ -362,6 +421,23 @@ class SupervisorV2:
         return self.run_once()
 
     def run_once(self) -> ProcessResult:
+        result = self._run_once()
+        atomic_write_json(
+            self.result_path,
+            {
+                "schema": "gocube-orchestrator-supervisor-result-v1",
+                "execution_id": self.execution_id,
+                "status": result.status.value,
+                "returncode": result.returncode,
+                "attempts": result.attempts,
+                "reattached": result.reattached,
+                "reason": result.reason,
+                "recorded_at": self.clock(),
+            },
+        )
+        return result
+
+    def _run_once(self) -> ProcessResult:
         """Supervise one command, including bounded same-command retries."""
         plan = self.plan()
         if plan.action is SupervisorAction.STOP:

@@ -4,10 +4,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import threading
+import time
 from typing import Mapping
 
 from tools.arena import run_arena
 from tools.arena_engine import ArenaExecutionConfig
+from gocube_golden.process_supervision import atomic_write_json
 
 from .execution_permit import require_child_execution_permit
 from .immutable_runtime import validate_runtime_head
@@ -18,6 +21,19 @@ def _read(path: Path) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise ValueError(f"JSON object required: {path}")
     return value
+
+
+def _clear_incomplete_output(output: Path) -> None:
+    """Remove only retryable Arena products; identity remains immutable."""
+    for name in (
+        "games.jsonl",
+        "summary.json",
+        "manifest.json",
+        "provenance.json",
+        "telemetry.json",
+        "startup-failure.json",
+    ):
+        (output / name).unlink(missing_ok=True)
 
 
 def run_arena_worker(request_path: str | Path, result_path: str | Path) -> None:
@@ -48,25 +64,78 @@ def run_arena_worker(request_path: str | Path, result_path: str | Path) -> None:
         run_id=str(request["run_id"]),
         code_identity=execution_commit,
     )
-    summary = run_arena(
-        candidate_path=Path(str(request["candidate_path"])),
-        reference_path=Path(str(request["reference_path"])),
-        profile_name=str(request["profile_name"]),
-        output_dir=Path(str(request["output_dir"])),
-        candidate_label=str(request["candidate_label"]),
-        reference_label=str(request["reference_label"]),
-        run_id=str(request["run_id"]),
-        comparison=str(request["comparison"]),
-        master_seed=int(request["master_seed"]),
-        config=ArenaExecutionConfig(**dict(raw_config)),
-        expected_candidate_artifact_sha256=str(request["expected_candidate_artifact_sha256"]),
-        expected_reference_artifact_sha256=str(request["expected_reference_artifact_sha256"]),
-        evaluation_identity=evaluation_identity if isinstance(evaluation_identity, Mapping) else None,
-        evaluation_fingerprint=str(request["evaluation_fingerprint"]),
-        allowed_lineage_arena_root=None if request.get("allowed_lineage_arena_root") is None else Path(str(request["allowed_lineage_arena_root"])),
-        allowed_evaluation_root=None if request.get("allowed_evaluation_root") is None else Path(str(request["allowed_evaluation_root"])),
-        workload=workload,
-    )
+    raw_liveness_path = request.get("liveness_path")
+    raw_progress_path = request.get("progress_path")
+    if not isinstance(raw_liveness_path, str) or not raw_liveness_path:
+        raise ValueError("Arena child request is missing heartbeat paths")
+    if not isinstance(raw_progress_path, str) or not raw_progress_path:
+        raise ValueError("Arena child request is missing heartbeat paths")
+    liveness_path = Path(raw_liveness_path).resolve()
+    progress_path = Path(raw_progress_path).resolve()
+    output_path = Path(str(request["output_dir"])).resolve()
+    _clear_incomplete_output(output_path)
+    stop_heartbeat = threading.Event()
+    started_at = time.time()
+    progress_state = {"completed_games": 0, "total_games": int(raw_config.get("games", 0))}
+
+    def publish(*, progress: bool = False) -> None:
+        now = time.time()
+        payload = {
+            "schema": "gocube-orchestrator-v2-arena-heartbeat-v1",
+            "liveness_at": now,
+            "progress_at": now if progress else progress_state.get("progress_at", started_at),
+            "progress_token": f"games:{progress_state['completed_games']}/{progress_state['total_games']}",
+            "progress": dict(progress_state),
+        }
+        atomic_write_json(liveness_path, payload)
+        if progress_path != liveness_path:
+            atomic_write_json(progress_path, payload)
+
+    def heartbeat_loop() -> None:
+        while not stop_heartbeat.is_set():
+            try:
+                publish()
+            except OSError:
+                pass
+            stop_heartbeat.wait(1.0)
+
+    def progress_callback(completed: int, total: int) -> None:
+        progress_state["completed_games"] = int(completed)
+        progress_state["total_games"] = int(total)
+        progress_state["progress_at"] = time.time()
+        publish(progress=True)
+
+    publish()
+    heartbeat = threading.Thread(target=heartbeat_loop, name="arena-heartbeat", daemon=True)
+    heartbeat.start()
+    try:
+        summary = run_arena(
+            candidate_path=Path(str(request["candidate_path"])),
+            reference_path=Path(str(request["reference_path"])),
+            profile_name=str(request["profile_name"]),
+            output_dir=output_path,
+            candidate_label=str(request["candidate_label"]),
+            reference_label=str(request["reference_label"]),
+            run_id=str(request["run_id"]),
+            comparison=str(request["comparison"]),
+            master_seed=int(request["master_seed"]),
+            config=ArenaExecutionConfig(**dict(raw_config)),
+            expected_candidate_artifact_sha256=str(request["expected_candidate_artifact_sha256"]),
+            expected_reference_artifact_sha256=str(request["expected_reference_artifact_sha256"]),
+            evaluation_identity=evaluation_identity if isinstance(evaluation_identity, Mapping) else None,
+            evaluation_fingerprint=str(request["evaluation_fingerprint"]),
+            allowed_lineage_arena_root=None if request.get("allowed_lineage_arena_root") is None else Path(str(request["allowed_lineage_arena_root"])),
+            allowed_evaluation_root=None if request.get("allowed_evaluation_root") is None else Path(str(request["allowed_evaluation_root"])),
+            workload=workload,
+            progress_callback=progress_callback,
+        )
+    finally:
+        stop_heartbeat.set()
+        heartbeat.join(timeout=2.0)
+        try:
+            publish(progress=True)
+        except OSError:
+            pass
     result = Path(result_path).resolve()
     result.parent.mkdir(parents=True, exist_ok=True)
     result.write_text(json.dumps(summary, sort_keys=True), encoding="utf-8")
