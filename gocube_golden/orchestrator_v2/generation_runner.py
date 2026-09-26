@@ -43,6 +43,8 @@ class ResolvedGenerationInput:
     effective_config: ResolvedEffectiveConfig
     output_lineage: OutputLineage
     execution_overrides: Mapping[str, object] | None = None
+    action_id: str | None = None
+    scientific_contract_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.generation) is not int or self.generation < 0:
@@ -60,6 +62,12 @@ class ResolvedGenerationInput:
                     if type(value) is not int or value <= 0:
                         raise ValueError(f"execution_overrides.{key} must be positive")
             object.__setattr__(self, "execution_overrides", dict(self.execution_overrides))
+        if self.action_id is not None:
+            if not isinstance(self.action_id, str) or not self.action_id.strip():
+                raise ValueError("action_id must be a non-empty string")
+        if self.scientific_contract_fingerprint is not None:
+            if not isinstance(self.scientific_contract_fingerprint, str) or not self.scientific_contract_fingerprint:
+                raise ValueError("scientific_contract_fingerprint must be a non-empty string")
 
 
 @dataclass(frozen=True)

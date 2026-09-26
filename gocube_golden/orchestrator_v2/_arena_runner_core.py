@@ -379,7 +379,10 @@ class ArenaRunner:
     def _clear_incomplete_evaluation(output: Path) -> None:
         # Standalone entrypoints attach their notifier before Arena creates its
         # identity. Recovery must not erase pending messages or sent receipts.
+        # The new structured service owns ``output/notifications`` directly;
+        # it is deliberately outside the engine's disposable products.
         retained = {
+            "notifications": None,
             "runtime": {"telegram-outbox", "telegram-notifications.jsonl"},
             "logs": {"telegram-notifier-errors.jsonl"},
         }
@@ -391,7 +394,9 @@ class ArenaRunner:
                 path.unlink(missing_ok=True)
 
         for path in output.iterdir():
-            if path.name in retained and path.is_dir() and not path.is_symlink():
+            if path.name == "notifications" and path.is_dir() and not path.is_symlink():
+                continue
+            if path.name in retained and retained[path.name] is not None and path.is_dir() and not path.is_symlink():
                 for child in path.iterdir():
                     if child.name not in retained[path.name]:
                         remove(child)

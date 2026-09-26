@@ -11,6 +11,7 @@ RUN_SPEC_SCHEMA = "gocube-orchestrator-v2-run-spec-v1"
 
 class RunMode(str, Enum):
     CONTINUOUS = "continuous"
+    PERFORMANCE_TUNING = "performance_tuning"
     ARENA = "arena"
     EVALUATION = "evaluation"
     EXPERIMENT = "experiment"

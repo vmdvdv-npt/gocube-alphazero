@@ -9,7 +9,7 @@ from . import _arena_runner_core as _core
 from .contracts import EvaluationIdentity
 from .execution_permit import _child_execution_permit
 from .immutable_runtime import execution_commit_from_lineage
-from .operator_messages import format_action_started, format_arena_started, format_arena_completed
+from ..notifications import EventType, OperatorEvent, coerce_event_sink
 from .version import require_v2_process
 from .supervisor import SupervisorPolicy
 from tools.arena_profiles import get_profile
@@ -48,10 +48,6 @@ def _common_wld_result(result: ArenaRunResult) -> ArenaRunResult:
     return replace(result, summary=summary)
 
 
-def _is_real_telegram(notifier: object | None) -> bool:
-    return notifier is not None and notifier.__class__.__module__ == "gocube_golden.telegram_notifier"
-
-
 class ArenaRunner(_core.ArenaRunner):
     """Run one V2 Arena evaluation with profile-owned scientific semantics."""
 
@@ -60,9 +56,14 @@ class ArenaRunner(_core.ArenaRunner):
         engine=None,
         *,
         notifier: object | None = None,
+        event_sink: object | None = None,
         supervisor_policy: SupervisorPolicy | None = None,
     ) -> None:
         super().__init__(engine=engine, supervisor_policy=supervisor_policy)
+        self.event_sink = coerce_event_sink(event_sink if event_sink is not None else notifier)
+        # Kept as a compatibility attribute for callers that used to share a
+        # notifier instance with ContinuousTrainingRunnerV2.  V2 itself uses
+        # event_sink and never inspects the notifier class or module.
         self.notifier = notifier
 
     @staticmethod
@@ -121,48 +122,90 @@ class ArenaRunner(_core.ArenaRunner):
         )
 
     def _notify_start(self, request: ArenaRunRequest, evaluation_id: str) -> None:
-        if not _is_real_telegram(self.notifier):
+        # Old injected send_now fakes predate structured start events.  The
+        # real compatibility facade opts in explicitly; structured sinks
+        # receive the event without any transport/class inspection.
+        if hasattr(self.event_sink, "notifier") and not getattr(self.event_sink, "supports_starts", False):
             return
         profile = get_profile(request.profile)
         scientific = dict(request.scientific_contract or {})
         simulations = getattr(profile, "simulations", scientific.get("simulations"))
         komi = getattr(profile, "komi", scientific.get("komi"))
-        text = format_arena_started(
+        event = OperatorEvent.create(
+            EventType.ARENA_STARTED,
             topology=request.candidate.topology,
-            evaluation_id=evaluation_id,
-            candidate=request.candidate_label or request.candidate.checkpoint_id,
-            reference=request.reference_label or request.reference.checkpoint_id,
-            profile=request.profile,
-            komi=komi,
-            games=int(request.config.games),
-            simulations=simulations,
-            seed=int(request.master_seed),
-            workers=int(request.config.workers),
-            contexts=int(request.config.workers) * int(request.config.games_per_worker),
-            batch_cap=int(request.config.inference_batch_rows),
-            wait_ms=float(request.config.inference_batch_wait_ms),
+            owner_type="evaluation",
+            owner_id=evaluation_id,
+            action_id=evaluation_id,
+            payload={
+                "evaluation_id": evaluation_id,
+                "candidate": request.candidate_label or request.candidate.checkpoint_id,
+                "reference": request.reference_label or request.reference.checkpoint_id,
+                "candidate_lineage": request.candidate.lineage_id,
+                "reference_lineage": request.reference.lineage_id,
+                "profile": request.profile,
+                "komi": komi,
+                "games": int(request.config.games),
+                "simulations": simulations,
+                "seed": int(request.master_seed),
+                "workers": int(request.config.workers),
+                "contexts": int(request.config.workers) * int(request.config.games_per_worker),
+                "batch_cap": int(request.config.inference_batch_rows),
+                "wait_ms": float(request.config.inference_batch_wait_ms),
+            },
+            evidence_refs=[{"ref": str(request.candidate.ref.path), "kind": "candidate"}, {"ref": str(request.reference.ref.path), "kind": "reference"}],
+            producer_version="orchestrator-v2",
+            execution_code_commit=request.execution_code_commit,
+            identity={"evaluation_identity": self._identity(request).to_dict(), "phase": "started"},
         )
         try:
-            getattr(self.notifier, "send_now")(f"arena-start:{evaluation_id}", text)
+            self.event_sink.publish(event)
         except Exception:
             pass
 
     def _notify_completed(self, request: ArenaRunRequest, result: ArenaRunResult) -> None:
-        if self.notifier is None:
-            return
+        summary = dict(result.summary)
+        safe_summary = {
+            key: value
+            for key, value in summary.items()
+            if key in {
+                "games", "valid_games", "technical_games", "invalid_games",
+                "performance_status", "inference_mean_batch_rows", "evaluation_report",
+            }
+            and isinstance(value, (str, int, float, bool))
+        }
+        candidate = request.candidate_label or request.candidate.checkpoint_id
+        reference = request.reference_label or request.reference.checkpoint_id
+        event = OperatorEvent.create(
+            EventType.ARENA_COMPLETED,
+            topology=request.candidate.topology,
+            owner_type="evaluation",
+            owner_id=result.evaluation_id,
+            action_id=result.evaluation_id,
+            payload={
+                "evaluation_id": result.evaluation_id,
+                "evaluation_fingerprint": result.evaluation_fingerprint,
+                "candidate": candidate,
+                "reference": reference,
+                "candidate_lineage": request.candidate.lineage_id,
+                "reference_lineage": request.reference.lineage_id,
+                "wld": list(result.wld),
+                "validity": result.validity,
+                "evaluation_report": str(result.output_dir / "result.json"),
+                **safe_summary,
+            },
+            evidence_refs=[
+                {"ref": str(result.output_dir / "result.json"), "kind": "arena-result", "evaluation_fingerprint": result.evaluation_fingerprint},
+                {"ref": str(result.output_dir / "provenance.json"), "kind": "provenance"},
+            ],
+            producer_version="orchestrator-v2",
+            execution_code_commit=result.execution_code_commit,
+            identity={"evaluation_identity": result.identity.to_dict(), "phase": "completed"},
+        )
         try:
-            self.notifier.send_now(
-                f"arena-complete:{result.evaluation_id}",
-                format_arena_completed(
-                    topology=request.candidate.topology,
-                    evaluation_id=result.evaluation_id,
-                    candidate=request.candidate_label or request.candidate.checkpoint_id,
-                    reference=request.reference_label or request.reference.checkpoint_id,
-                    validity=result.validity,
-                    wld=result.wld,
-                    summary=result.summary,
-                    execution_code_commit=result.execution_code_commit,
-                ),
+            self.event_sink.reconcile_completed(
+                {"action_id": result.evaluation_id, "event_type": EventType.ARENA_COMPLETED.value},
+                event.to_dict(),
             )
         except Exception:
             pass  # Notification failures cannot invalidate completed Arena work.
@@ -194,21 +237,31 @@ class ArenaRunner(_core.ArenaRunner):
             with permit:
                 result = execute()
         except Exception as exc:
-            if self.notifier is not None:
-                try:
-                    self.notifier.send_now(
-                        f"arena-failed:{self._evaluation_id(request)}",
-                        format_action_started(
-                            "ARENA FAILED",
-                            topology=request.candidate.topology,
-                            evaluation=self._evaluation_id(request),
-                            candidate=request.candidate_label or request.candidate.checkpoint_id,
-                            reference=request.reference_label or request.reference.checkpoint_id,
-                            error=exc.__class__.__name__,
-                        ),
+            evaluation_id = self._evaluation_id(request)
+            try:
+                self.event_sink.publish(
+                    OperatorEvent.create(
+                        EventType.ARENA_FAILED,
+                        topology=request.candidate.topology,
+                        owner_type="evaluation",
+                        owner_id=evaluation_id,
+                        action_id=evaluation_id,
+                        payload={
+                            "evaluation_id": evaluation_id,
+                            "candidate": request.candidate_label or request.candidate.checkpoint_id,
+                            "reference": request.reference_label or request.reference.checkpoint_id,
+                            "candidate_lineage": request.candidate.lineage_id,
+                            "reference_lineage": request.reference.lineage_id,
+                            "error_code": exc.__class__.__name__,
+                        },
+                        evidence_refs=[{"ref": str(request.output_dir) if request.output_dir else "evaluation-output", "kind": "execution"}],
+                        producer_version="orchestrator-v2",
+                        execution_code_commit=request.execution_code_commit,
+                        identity={"evaluation_identity": self._identity(request).to_dict(), "phase": "failed"},
                     )
-                except Exception:
-                    pass
+                )
+            except Exception:
+                pass
             raise
         self._notify_completed(request, result)
         return result

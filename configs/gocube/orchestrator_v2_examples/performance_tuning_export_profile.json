@@ -1,0 +1,51 @@
+{
+  "schema": "gocube-orchestrator-v2-run-spec-v1",
+  "mode": "performance_tuning",
+  "performance_tuning": {
+    "tuning_id": "example-torus9-concurrency",
+    "lineage_id": "example-torus9-tuning",
+    "topology": "torus9",
+    "parent_checkpoint": {
+      "topology": "torus9",
+      "lineage_id": "existing-owner",
+      "checkpoint_id": "M20",
+      "generation": 20,
+      "path": "checkpoints/M20.pt",
+      "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "effective_config": {
+      "schema": "gocube-effective-config-v2",
+      "version": 2,
+      "topology": "torus9",
+      "compatibility": {"topology": "torus9"},
+      "self_play": {"games_per_iteration": 128, "mcts_simulations": 128},
+      "training": {"learning_rate": 0.0003, "optimizer_steps": 160},
+      "replay": {"window": 6, "cap": 40000},
+      "execution": {"workers": 16, "active_contexts": 64, "active_games_per_worker": 4},
+      "arena": {},
+      "supervision": {},
+      "extensions": {}
+    },
+    "workers": 16,
+    "baseline": {
+      "label": "baseline",
+      "active_games_per_worker": 4,
+      "total_active_contexts": 64
+    },
+    "modes": [
+      {
+        "label": "six-by-96",
+        "active_games_per_worker": 6,
+        "total_active_contexts": 96
+      }
+    ],
+    "measurement_budget": {
+      "max_actions": 3,
+      "baseline_repetitions": 1,
+      "repetitions_per_mode": 1,
+      "baseline_recovery_actions": 1
+    },
+    "finish_behavior": "export_profile",
+    "dry_run": true
+  }
+}

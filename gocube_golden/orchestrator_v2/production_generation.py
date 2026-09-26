@@ -27,6 +27,10 @@ from .immutable_runtime import ImmutableRuntimeManager, execution_commit_from_li
 from .supervisor import SupervisorPolicy, SupervisorV2
 from .topology_binding import get_topology_binding, production_path_for
 from .version import require_v2_process
+from ..performance_tuning.contracts import (
+    scientific_contract_fingerprint as scientific_contract_fingerprint_for,
+    validate_execution_overrides,
+)
 
 TRAIN_ONE_REQUEST_SCHEMA = "gocube-orchestrator-v2-train-one-request-v1"
 TRAIN_ONE_RESULT_SCHEMA = "gocube-orchestrator-v2-train-one-result-v1"
@@ -63,7 +67,7 @@ def _record_post_commit_validation_timing(output_root: Path, generation: int, el
     _write_json(result_path, payload)
 
 
-def _request_payload(*, resolver: ArtifactResolver, parent: ResolvedCheckpointNode, config: ResolvedEffectiveConfig, output_lineage: OutputLineage, execution_overrides: Mapping[str, object] | None = None, execution_code_commit: str | None = None) -> dict[str, object]:
+def _request_payload(*, resolver: ArtifactResolver, parent: ResolvedCheckpointNode, config: ResolvedEffectiveConfig, output_lineage: OutputLineage, execution_overrides: Mapping[str, object] | None = None, execution_code_commit: str | None = None, action_id: str | None = None, scientific_contract_fingerprint_value: str | None = None) -> dict[str, object]:
     payload: dict[str, object] = {
         "schema": TRAIN_ONE_REQUEST_SCHEMA,
         "runs_root": str(resolver.runs_root),
@@ -78,7 +82,13 @@ def _request_payload(*, resolver: ArtifactResolver, parent: ResolvedCheckpointNo
     if execution_code_commit is not None:
         payload["execution_code_commit"] = execution_code_commit
     if execution_overrides is not None:
-        payload["execution_overrides"] = dict(execution_overrides)
+        normalized_overrides = validate_execution_overrides(execution_overrides)
+        payload["execution_overrides"] = normalized_overrides
+        payload["execution_profile"] = dict(normalized_overrides)
+    if action_id is not None:
+        payload["action_id"] = action_id
+    if scientific_contract_fingerprint_value is not None:
+        payload["scientific_contract_fingerprint"] = scientific_contract_fingerprint_value
     return payload
 
 
@@ -113,13 +123,17 @@ class ProductionTrainOne:
         self.supervisor_policy = supervisor_policy
         self.runtime_manager = ImmutableRuntimeManager(self.repo_root)
 
-    def __call__(self, *, parent: ResolvedCheckpointNode, config: ResolvedEffectiveConfig, output_lineage: OutputLineage, execution_overrides: Mapping[str, object] | None = None, acknowledge_stopped_execution: bool = False) -> ResolvedCheckpointNode:
+    def __call__(self, *, parent: ResolvedCheckpointNode, config: ResolvedEffectiveConfig, output_lineage: OutputLineage, execution_overrides: Mapping[str, object] | None = None, acknowledge_stopped_execution: bool = False, action_id: str | None = None, scientific_contract_fingerprint: str | None = None) -> ResolvedCheckpointNode:
         require_v2_process("gocube_golden.orchestrator_v2.ProductionTrainOne")
         get_topology_binding(output_lineage.topology)
         if parent.ref.topology != output_lineage.topology or config.config.topology != output_lineage.topology:
             raise ValueError("production train_one topology identities disagree")
         if type(acknowledge_stopped_execution) is not bool:
             raise TypeError("acknowledge_stopped_execution must be a boolean")
+        normalized_overrides = validate_execution_overrides(execution_overrides)
+        expected_scientific_fingerprint = scientific_contract_fingerprint or scientific_contract_fingerprint_for(config)
+        if expected_scientific_fingerprint != scientific_contract_fingerprint_for(config):
+            raise ValueError("execution profile scientific contract does not match resolved config")
         generation = parent.generation + 1
         runtime = None
         execution_commit: str | None = None
@@ -151,8 +165,10 @@ class ProductionTrainOne:
                 parent=parent,
                 config=config,
                 output_lineage=output_lineage,
-                execution_overrides=execution_overrides,
+                execution_overrides=normalized_overrides or None,
                 execution_code_commit=runtime.commit,
+                action_id=action_id,
+                scientific_contract_fingerprint_value=expected_scientific_fingerprint,
             ),
         )
         heartbeat_path = output_lineage.root / "runtime" / "heartbeats" / f"generation-{generation:04d}.json"
@@ -250,15 +266,29 @@ def run_generation_worker(request_path: str | Path, result_path: str | Path) -> 
         lineage_id=output.lineage_id,
         owner_status="ACTIVE",
     )
+    declared_scientific = payload.get("scientific_contract_fingerprint")
+    if declared_scientific is not None:
+        if not isinstance(declared_scientific, str) or declared_scientific != scientific_contract_fingerprint_for(config):
+            raise ValueError("train-one request scientific contract fingerprint does not match effective config")
     raw_overrides = payload.get("execution_overrides")
     if raw_overrides is not None and not isinstance(raw_overrides, Mapping):
         raise ValueError("train-one execution_overrides must be an object")
+    raw_profile = payload.get("execution_profile")
+    if raw_profile is not None:
+        if not isinstance(raw_profile, Mapping):
+            raise ValueError("train-one execution_profile must be an object")
+        if validate_execution_overrides(raw_profile) != validate_execution_overrides(raw_overrides):
+            raise ValueError("train-one execution profile conflicts with execution_overrides")
     resolved = ResolvedGenerationInput(
         parent_checkpoint=parent,
         generation=parent.generation + 1,
         effective_config=config,
         output_lineage=output,
         execution_overrides=None if raw_overrides is None else dict(raw_overrides),
+        action_id=None if payload.get("action_id") is None else str(payload["action_id"]),
+        scientific_contract_fingerprint=None
+        if payload.get("scientific_contract_fingerprint") is None
+        else str(payload["scientific_contract_fingerprint"]),
     )
     result = GenerationRunner(production_path_for(output.topology)).run(resolved)
     _write_json(

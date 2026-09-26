@@ -288,6 +288,9 @@ _instances: weakref.WeakSet = weakref.WeakSet()
 
 class TelegramNotifier:
     retry_interval_seconds = 30.0
+    # The structured EventSink compatibility adapter may emit start facts for
+    # this real facade; test doubles do not opt in merely by exposing send_now.
+    supports_structured_starts = True
 
     def __init__(self, paths: object) -> None:
         self.paths = paths
