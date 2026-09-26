@@ -365,6 +365,18 @@ def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResol
             search_config=cube_search,
         ).profile_id
     binding.validate_arena_profile(profile, candidate.effective_config.config)
+    requested_execution_commit = raw.get("execution_code_commit")
+    if requested_execution_commit is None:
+        execution_code_commit = execution_commit_from_lineage(candidate.owner_root)
+    else:
+        # Historical converted checkpoints can be referenced by a current
+        # production workflow without mutating their lineage manifest.  The
+        # explicit pin is still resolved against this repository before any
+        # child is spawned; ImmutableRuntimeManager repeats the same check at
+        # the process boundary and materializes the exact immutable worktree.
+        execution_code_commit = resolve_execution_commit(
+            _repo_root(), requested_execution_commit
+        )
     startset_raw = raw.get("startset")
     startset = (
         binding.arena_startset(master_seed=seed, games=int(config.games))
@@ -384,7 +396,7 @@ def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResol
         candidate_label=None if raw.get("candidate_label") is None else str(raw["candidate_label"]),
         reference_label=None if raw.get("reference_label") is None else str(raw["reference_label"]),
         comparison=None if raw.get("comparison") is None else str(raw["comparison"]),
-        execution_code_commit=execution_commit_from_lineage(candidate.owner_root),
+        execution_code_commit=execution_code_commit,
     )
 
 
