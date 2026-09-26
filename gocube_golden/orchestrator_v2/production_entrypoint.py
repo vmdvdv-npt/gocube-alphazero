@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import __main__
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
@@ -91,10 +92,26 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
     missing = [key for key in required if key not in raw]
     if missing:
         raise ValueError(f"continuous config is missing: {', '.join(missing)}")
+    effective_config = raw["effective_config"]
+    # Workflow selection commonly resolves a scalar komi while the training
+    # action still receives the base effective config.  Apply it to the real
+    # immutable config contract here; a free-standing ``config.komi`` field
+    # must never be silently ignored by the training runner.
+    if "komi" in raw:
+        from .komi_calibration import effective_config_with_komi
+        from ._continuous_training_core import _effective_config as normalize_effective_config
+
+        try:
+            effective_config = normalize_effective_config(effective_config)  # type: ignore[arg-type]
+            effective_config = effective_config_with_komi(
+                effective_config, float(raw["komi"])
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"continuous.komi cannot be applied to effective_config: {exc}") from exc
     return ContinuousTrainingConfig(
         parent_checkpoint=raw["parent_checkpoint"],  # type: ignore[arg-type]
         lineage_id=str(raw["lineage_id"]),
-        effective_config=raw["effective_config"],  # type: ignore[arg-type]
+        effective_config=effective_config,  # type: ignore[arg-type]
         generations=None if raw.get("generations") is None else int(raw["generations"]),
         arena_cadence=int(raw["arena_cadence"]),
         arena_config=raw["arena_config"],  # type: ignore[arg-type]
@@ -170,19 +187,22 @@ def _arena_config(value: object) -> ArenaExecutionConfig:
                 raise ValueError(f"arena_config specifies both {source} and {target}")
             raw[target] = raw.pop(source)
     unknown = set(raw) - set(ArenaExecutionConfig.__dataclass_fields__) - _ARENA_SEARCH_FIELDS
-    unknown -= {"search"}
+    unknown -= {"search", "evaluation"}
     if unknown:
         raise ValueError(
             "arena_config contains unsupported fields: "
             + ", ".join(sorted(map(str, unknown)))
         )
     raw.pop("search", None)
+    raw.pop("evaluation", None)
     for field in _ARENA_SEARCH_FIELDS:
         raw.pop(field, None)
     return ArenaExecutionConfig(**raw)
 
 
 def _arena_search(raw: Mapping[str, object], config: ArenaExecutionConfig) -> dict[str, object]:
+    if "search" in raw and "evaluation" in raw:
+        raise ValueError("Arena config specifies both search and evaluation")
     nested = raw.get("search", raw.get("evaluation", {}))
     if nested is None:
         nested = {}
@@ -195,6 +215,11 @@ def _arena_search(raw: Mapping[str, object], config: ArenaExecutionConfig) -> di
                 "Arena search contains unsupported fields: "
                 + ", ".join(sorted(map(str, unknown)))
             )
+    for key in nested:
+        if key in raw and key not in {"search", "evaluation"}:
+            raise ValueError(
+                f"Arena search field {key!r} conflicts with its top-level value"
+            )
     values: dict[str, object] = {}
     for key in _ARENA_SEARCH_FIELDS:
         if key in nested:
@@ -203,8 +228,36 @@ def _arena_search(raw: Mapping[str, object], config: ArenaExecutionConfig) -> di
             values[key] = raw[key]
     if "simulations" not in values and "mcts_simulations" in values:
         values["simulations"] = values.pop("mcts_simulations")
+    elif "simulations" in values and "mcts_simulations" in values:
+        raise ValueError("Arena search specifies both simulations and mcts_simulations")
     if "watchdog" not in values and "technical_move_limit" in values:
         values["watchdog"] = values.pop("technical_move_limit")
+    elif "watchdog" in values and "technical_move_limit" in values:
+        raise ValueError("Arena search specifies both watchdog and technical_move_limit")
+    fixed = {
+        "root_noise": False,
+        "temperature": 0.0,
+        "fast_search": False,
+        "resign": False,
+        "deterministic_tie_break": True,
+    }
+    for key, expected in fixed.items():
+        if key not in values:
+            continue
+        actual = values[key]
+        if key == "temperature":
+            import math
+            try:
+                valid = math.isfinite(float(actual)) and float(actual) == 0.0
+            except (TypeError, ValueError):
+                valid = False
+        else:
+            valid = type(actual) is bool and actual is expected
+        if not valid:
+            raise ValueError(
+                f"Arena search.{key} is not supported by the Arena engine; "
+                f"the only supported value is {expected!r}"
+            )
     return values
 
 
@@ -212,6 +265,30 @@ def _torus_profile_with_search(profile: str, search: Mapping[str, object]) -> st
     from tools.arena_profiles import get_profile
 
     parsed = get_profile(profile)
+    fixed = {
+        "root_noise": False,
+        "temperature": 0.0,
+        "fast_search": False,
+        "resign": False,
+        "deterministic_tie_break": True,
+    }
+    for key, expected in fixed.items():
+        if key not in search:
+            continue
+        actual = search[key]
+        if key == "temperature":
+            import math
+            try:
+                valid = math.isfinite(float(actual)) and float(actual) == 0.0
+            except (TypeError, ValueError):
+                valid = False
+        else:
+            valid = type(actual) is bool and actual is expected
+        if not valid:
+            raise ValueError(
+                f"Arena search.{key} is not supported by the Torus9 engine; "
+                f"the only supported value is {expected!r}"
+            )
     komi = float(search.get("komi", getattr(parsed, "komi", 0.5)))
     simulations = int(search.get("simulations", getattr(parsed, "simulations", 64)))
     cpuct = float(search.get("cpuct", getattr(parsed, "cpuct", 1.25)))
@@ -248,6 +325,7 @@ def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResol
         }
     config = _arena_config(raw_config)
     seed = int(raw.get("master_seed", DEFAULT_MASTER_SEED))
+    profile_was_explicit = raw.get("profile") is not None
     profile = str(raw.get("profile") or binding.default_arena_profile(candidate.effective_config.config))
     search_source = dict(raw)
     if isinstance(raw_config, Mapping):
@@ -260,6 +338,32 @@ def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResol
     search = _arena_search(search_source, config)
     if candidate.topology == "torus9":
         profile = _torus_profile_with_search(profile, search)
+    elif search:
+        if "komi" in search:
+            raise ValueError(
+                "Cube Arena does not expose komi as a search parameter; "
+                "put rules compatibility in the effective config"
+            )
+        if profile_was_explicit:
+            raise ValueError(
+                "Cube Arena config specifies both an explicit profile and independent search values"
+            )
+        from gocube_golden.cube_arena_contract_v2 import CubeArenaSearchConfig
+        from tools.arena_profiles import get_profile
+
+        default_profile = get_profile(profile)
+        defaults = default_profile.search_config
+        cube_search = CubeArenaSearchConfig(
+            simulations=int(search.get("simulations", defaults.simulations)),
+            cpuct=float(search.get("cpuct", defaults.cpuct)),
+            fpu=float(search.get("fpu", defaults.fpu)),
+            watchdog=int(search.get("watchdog", defaults.watchdog)),
+            deterministic_tie_break=True,
+        )
+        profile = type(default_profile)(
+            size=int(getattr(default_profile, "size")),
+            search_config=cube_search,
+        ).profile_id
     binding.validate_arena_profile(profile, candidate.effective_config.config)
     startset_raw = raw.get("startset")
     startset = (
@@ -306,7 +410,78 @@ def run_arena_from_config(payload: Mapping[str, object], *, runs_root: str | Pat
         flush_all()
 
 
-def run_calibration_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, arena_runner: object | None = None) -> list[object]:
+def _calibration_result_record(
+    result: object,
+    *,
+    request: ArenaRunRequest,
+    arm: Mapping[str, object],
+    arm_index: int,
+) -> dict[str, object]:
+    """Persist the small, JSON-only result contract used by workflow refs."""
+    if isinstance(result, Mapping):
+        summary_value = result.get("summary", result)
+        summary = dict(summary_value) if isinstance(summary_value, Mapping) else {}
+        identity_value = result.get("identity", request.identity if hasattr(request, "identity") else {})
+        evaluation_id = result.get("evaluation_id", arm.get("evaluation_id", f"calibration-arm-{arm_index}"))
+        evaluation_fingerprint = result.get("evaluation_fingerprint")
+        validity = str(result.get("validity", summary.get("validity", "INVALID"))).upper()
+    else:
+        summary_value = getattr(result, "summary", {})
+        summary = dict(summary_value) if isinstance(summary_value, Mapping) else {}
+        raw_identity = getattr(result, "identity", None)
+        identity_value = raw_identity.to_dict() if hasattr(raw_identity, "to_dict") else raw_identity
+        evaluation_id = getattr(result, "evaluation_id", f"calibration-arm-{arm_index}")
+        evaluation_fingerprint = getattr(result, "evaluation_fingerprint", None)
+        validity = str(getattr(result, "validity", summary.get("validity", "INVALID"))).upper()
+    if not isinstance(identity_value, Mapping):
+        identity_value = {}
+    if evaluation_fingerprint is None:
+        evaluation_fingerprint = identity_value.get("fingerprint")
+    scientific = dict(request.scientific_contract or {})
+    if not scientific:
+        from tools.arena_profiles import get_profile
+        scientific = dict(get_profile(request.profile).scientific_contract(request.config))
+    komi = scientific.get("komi", arm.get("komi"))
+    wld = summary.get("W/L/D")
+    if isinstance(wld, (list, tuple)) and len(wld) == 3:
+        black_wins, white_wins, draws = (int(wld[0]), int(wld[1]), int(wld[2]))
+    else:
+        black_wins = int(summary.get("black_wins", summary.get("candidate_wins", 0)))
+        white_wins = int(summary.get("white_wins", summary.get("reference_wins", 0)))
+        draws = int(summary.get("draws", 0))
+    valid_games = int(summary.get("valid_games", summary.get("games_valid", black_wins + white_wins + draws)))
+    black_win_rate = (black_wins / valid_games) if valid_games else float("nan")
+    if not math.isfinite(black_win_rate):
+        metrics: dict[str, object] = {"valid_games": valid_games}
+    else:
+        metrics = {
+            "games": int(summary.get("games", summary.get("games_requested", valid_games))),
+            "valid_games": valid_games,
+            "black_wins": black_wins,
+            "white_wins": white_wins,
+            "draws": draws,
+            "black_win_rate": black_win_rate,
+            "bias": abs(black_win_rate - 0.5),
+        }
+    return {
+        "schema": "gocube-orchestrator-v2-calibration-result-v1",
+        "arm_index": arm_index,
+        "arm_id": arm.get("id", arm_index),
+        "parameters": scientific,
+        "komi": komi,
+        "evaluation_id": str(evaluation_id),
+        "result_id": str(evaluation_id),
+        "evaluation_fingerprint": evaluation_fingerprint,
+        "identity": dict(identity_value),
+        "validity": validity,
+        "metrics": metrics,
+        "summary": summary,
+        # This is a compact config contract, never a model/replay artifact.
+        "effective_config": request.candidate.effective_config.config.to_dict(),
+    }
+
+
+def run_calibration_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, arena_runner: object | None = None) -> list[dict[str, object]]:
     _require_file_backed_entrypoint()
     raw = payload.get("calibration", payload)
     if not isinstance(raw, Mapping):
@@ -346,10 +521,18 @@ def run_calibration_from_config(payload: Mapping[str, object], *, runs_root: str
                         games=request.config.games,
                     ),
                 )
-            except BaseException:
+            except Exception:
                 pass
             with _authority(mode="calibration", topology=request.candidate.topology, run_id=evaluation_id):
-                results.append(runner.run(request))  # type: ignore[attr-defined]
+                result = runner.run(request)  # type: ignore[attr-defined]
+                results.append(
+                    _calibration_result_record(
+                        result,
+                        request=request,
+                        arm=arm,
+                        arm_index=index,
+                    )
+                )
         finally:
             flush_all()
     return results
@@ -466,6 +649,79 @@ def run_experiment_from_config(payload: Mapping[str, object], *, runs_root: str 
         flush_all()
 
 
+def _workflow_checkpoint_ref(value: object) -> dict[str, object]:
+    candidate = getattr(value, "ref", value)
+    if hasattr(candidate, "to_dict") and callable(getattr(candidate, "to_dict")):
+        payload = candidate.to_dict()
+    elif isinstance(candidate, Mapping):
+        payload = dict(candidate)
+    else:
+        raise ValueError("workflow action returned no checkpoint reference")
+    if not isinstance(payload, dict) or not {"topology", "lineage_id", "checkpoint_id"} <= set(payload):
+        raise ValueError("workflow action returned an incomplete checkpoint reference")
+    return payload
+
+
+def _workflow_arena_result(result: object, *, resolver: ArtifactResolver) -> dict[str, object]:
+    summary_value = getattr(result, "summary", None)
+    summary = dict(summary_value) if isinstance(summary_value, Mapping) else {}
+    identity = getattr(result, "identity", None)
+    candidate = getattr(identity, "candidate", None)
+    reference = getattr(identity, "reference", None)
+    if candidate is None or reference is None:
+        raise ValueError("workflow Arena result has no checkpoint identity")
+    candidate_ref = _workflow_checkpoint_ref(candidate)
+    reference_ref = _workflow_checkpoint_ref(reference)
+    candidate_node = resolver.checkpoint(candidate)
+    metrics = summary.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ValueError("workflow Arena result has no scientific metrics")
+    return {
+        "schema": "gocube-orchestrator-v2-arena-result-v1",
+        "evaluation_id": str(getattr(result, "evaluation_id", "")),
+        "evaluation_fingerprint": str(getattr(result, "evaluation_fingerprint", "")),
+        "validity": str(getattr(result, "validity", "INVALID")),
+        "candidate_checkpoint": candidate_ref,
+        "reference_checkpoint": reference_ref,
+        "effective_config": candidate_node.effective_config.config.to_dict(),
+        "identity": identity.to_dict() if hasattr(identity, "to_dict") else {},
+        "metrics": dict(metrics),
+        "summary": summary,
+        "output_dir": str(getattr(result, "output_dir", "")),
+    }
+
+
+def _workflow_training_result(result: object) -> dict[str, object]:
+    final_checkpoint = getattr(result, "final_checkpoint", None)
+    if final_checkpoint is None:
+        raise ValueError("workflow training result has no final checkpoint")
+    effective = getattr(final_checkpoint, "effective_config", None)
+    effective_config = getattr(effective, "config", effective)
+    if not hasattr(effective_config, "to_dict"):
+        raise ValueError("workflow training result has no effective config contract")
+    arenas: list[dict[str, object]] = []
+    for arena in getattr(result, "arenas", ()):
+        arenas.append(
+            {
+                "evaluation_id": str(getattr(arena, "evaluation_id", "")),
+                "evaluation_fingerprint": str(getattr(arena, "evaluation_fingerprint", "")),
+                "validity": str(getattr(arena, "validity", "INVALID")),
+                "summary": dict(getattr(arena, "summary", {})),
+            }
+        )
+    checkpoint = _workflow_checkpoint_ref(final_checkpoint)
+    return {
+        "schema": "gocube-orchestrator-v2-training-result-v1",
+        "state": str(getattr(result, "state", "UNKNOWN")),
+        "checkpoint": checkpoint,
+        "final_checkpoint": checkpoint,
+        "effective_config": effective_config.to_dict(),
+        "lineage_root": str(getattr(result, "lineage_root", "")),
+        "soft_stop_requested": bool(getattr(result, "soft_stop_requested", False)),
+        "arenas": arenas,
+    }
+
+
 def run_workflow_from_config(
     payload: Mapping[str, object],
     *,
@@ -494,26 +750,35 @@ def run_workflow_from_config(
             selected["supervision"] = dict(spec.supervision)
         return selected
 
+    workflow_resolver = runner_kwargs.get("resolver") or ArtifactResolver(runs_root)
+    arena_kwargs = {
+        key: runner_kwargs[key]
+        for key in ("arena_runner",)
+        if key in runner_kwargs
+    }
+
+    def arena_action(*, config, **_):
+        result = run_arena_from_config(
+            {"arena": action_config(config)}, runs_root=runs_root, **arena_kwargs
+        )
+        return _workflow_arena_result(result, resolver=workflow_resolver)
+
+    def calibration_action(*, config, **_):
+        return run_calibration_from_config(
+            {"calibration": action_config(config)}, runs_root=runs_root, **arena_kwargs
+        )
+
+    def training_action(*, config, **_):
+        result = run_continuous_from_config(
+            {"continuous": action_config(config)}, runs_root=runs_root, **runner_kwargs
+        )
+        return _workflow_training_result(result)
+
     # These adapters intentionally call the already-existing entrypoints.  A
     # workflow is not a second implementation of Arena/training/calibration.
-    handlers.setdefault(
-        "arena",
-        lambda *, config, **_: run_arena_from_config(
-            {"arena": action_config(config)}, runs_root=runs_root, **runner_kwargs
-        ),
-    )
-    handlers.setdefault(
-        "calibration",
-        lambda *, config, **_: run_calibration_from_config(
-            {"calibration": action_config(config)}, runs_root=runs_root, **runner_kwargs
-        ),
-    )
-    handlers.setdefault(
-        "continuous_training",
-        lambda *, config, **_: run_continuous_from_config(
-            {"continuous": action_config(config)}, runs_root=runs_root, **runner_kwargs
-        ),
-    )
+    handlers.setdefault("arena", arena_action)
+    handlers.setdefault("calibration", calibration_action)
+    handlers.setdefault("continuous_training", training_action)
     handlers.setdefault(
         "experiment",
         lambda *, config, **_: run_experiment_from_config(
@@ -567,14 +832,21 @@ def main(argv: list[str] | None = None) -> int:
         print("Telegram test message sent.")
         return 0
     payload = load_v2_config(args.config)
+    result: object
     if args.kind == "run":
-        run_spec(payload, runs_root=args.runs_root)
+        result = run_spec(payload, runs_root=args.runs_root)
     elif args.kind == "continuous":
-        run_continuous_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
+        result = run_continuous_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
     elif args.kind == "experiment":
-        run_experiment_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
+        result = run_experiment_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
+    elif args.kind == "workflow":
+        result = run_workflow_from_config(payload, runs_root=args.runs_root)
     else:
-        run_komi_calibration_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
+        result = run_komi_calibration_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
+    if hasattr(result, "to_dict") and callable(getattr(result, "to_dict")):
+        result = result.to_dict()
+    if isinstance(result, Mapping):
+        print(json.dumps(dict(result), indent=2, sort_keys=True, default=str))
     return 0
 
 

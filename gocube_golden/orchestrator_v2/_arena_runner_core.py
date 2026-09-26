@@ -183,7 +183,15 @@ class ArenaRunner:
             "run_id": str(engine_kwargs["run_id"]),
             "comparison": str(engine_kwargs["comparison"]),
             "master_seed": int(engine_kwargs["master_seed"]),
-            "config": asdict(request.config),
+            # Keep the child protocol compatible with runtimes created before
+            # the optional strict-performance gate was introduced.  The
+            # default is false in both schemas; only an explicit true value
+            # requires the newer runtime contract.
+            "config": {
+                key: value
+                for key, value in asdict(request.config).items()
+                if key != "strict_performance" or request.config.strict_performance
+            },
             "expected_candidate_artifact_sha256": str(
                 engine_kwargs["expected_candidate_artifact_sha256"]
             ),

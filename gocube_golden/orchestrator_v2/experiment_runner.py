@@ -350,7 +350,9 @@ class ExperimentRunnerV2:
                             config=effective_config,
                             output_lineage=output_lineage,
                         )
-                    except BaseException as exc:
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
+                    except Exception as exc:
                         self._notify_operator(
                             "CRITICAL",
                             f"Arm {arm.arm_id} generation M{next_generation} failed: "
@@ -601,7 +603,9 @@ class ExperimentRunnerV2:
         )
         try:
             return self.arena_runner.run(request)
-        except BaseException as exc:
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
             self._notify_operator(
                 "CRITICAL",
                 f"Stage Arena execution failed: {exc.__class__.__name__}.",
@@ -1065,7 +1069,7 @@ class ExperimentRunnerV2:
                 f"experiment:{self.config.experiment_id}:{key_suffix}",
                 f"{event} — {message}",
             )
-        except BaseException:
+        except Exception:
             self.logger.warning("operator notification failed", exc_info=True)
 
 

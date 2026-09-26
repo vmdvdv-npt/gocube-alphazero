@@ -1,0 +1,49 @@
+{
+  "schema": "gocube-orchestrator-v2-run-spec-v1",
+  "mode": "workflow",
+  "workflow": {
+    "workflow_id": "arena-only-placeholder",
+    "topology": "cube4",
+    "steps": [
+      {
+        "step_id": "arena",
+        "action": "arena",
+        "config": {
+          "candidate_checkpoint": {
+            "topology": "cube4",
+            "lineage_id": "PLACEHOLDER_LINEAGE",
+            "checkpoint_id": "M0",
+            "generation": 0,
+            "path": "checkpoints/M0.pt",
+            "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "reference_checkpoint": {
+            "topology": "cube4",
+            "lineage_id": "PLACEHOLDER_REFERENCE_LINEAGE",
+            "checkpoint_id": "M0",
+            "generation": 0,
+            "path": "checkpoints/M0.pt",
+            "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "arena_config": {
+            "games": 64,
+            "workers": 16,
+            "games_per_worker": 12,
+            "inference_batch_rows": 64,
+            "inference_batch_wait_ms": 4.0,
+            "device": "cuda",
+            "strict_production": true,
+            "monitoring_acceptance": true,
+            "search": {
+              "simulations": 256,
+              "cpuct": 1.25,
+              "fpu": 0.0,
+              "watchdog": 500,
+              "deterministic_tie_break": true
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -668,7 +668,7 @@ class KomiCalibrationRunnerV2:
         if self.stop_parent is not None and not state.get("parent_stop_requested"):
             try:
                 self.stop_parent(parent)
-            except BaseException as exc:
+            except Exception as exc:
                 self._fail(state, f"parent graceful stop failed: {exc}")
             state["parent_stop_requested"] = True
             self._persist(state)
@@ -698,7 +698,7 @@ class KomiCalibrationRunnerV2:
             child, child_config, root = self._create_child(state, parent, selected)
         except KomiCalibrationError:
             raise
-        except BaseException as exc:
+        except Exception as exc:
             self._fail(state, f"child lineage creation failed closed: {exc}")
         if child is not None:
             state["child_checkpoint"] = child.ref.to_dict()
@@ -730,7 +730,7 @@ class KomiCalibrationRunnerV2:
                 )
             except KomiCalibrationError:
                 raise
-            except BaseException as exc:
+            except Exception as exc:
                 self._fail(state, f"child training failed closed: {exc}")
             if isinstance(returned, ResolvedCheckpointNode):
                 if returned.generation < parent.generation + 1 or returned.node.parent != parent.ref:
@@ -1018,7 +1018,7 @@ class KomiCalibrationRunnerV2:
             stats = _summary_stats(result)
         except KomiCalibrationError as exc:
             self._fail(state, str(exc))
-        except BaseException as exc:
+        except Exception as exc:
             self._fail(state, f"komi {key} Arena failed closed: {exc}")
         if int(stats["valid_games"]) != games:
             self._fail(state, f"komi {key} received {stats['valid_games']} valid games, expected {games}")

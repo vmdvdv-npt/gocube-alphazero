@@ -11,11 +11,13 @@ from collections.abc import Mapping
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
 from ..artifact_graph import validate_generation_commit
 from ..process_supervision import atomic_write_text
+from ..process_supervision import start_owned_child
 from ..provenance import canonical_json
 from .artifact_resolver import ArtifactResolver, ResolvedCheckpointNode, ResolvedEffectiveConfig
 from .contracts import CheckpointRef, EffectiveConfigRef
@@ -154,30 +156,57 @@ class ProductionTrainOne:
             ),
         )
         heartbeat_path = output_lineage.root / "runtime" / "heartbeats" / f"generation-{generation:04d}.json"
-        with _child_execution_permit(
-            action_type="generation",
-            topology=output_lineage.topology,
-            run_id=output_lineage.lineage_id,
-            code_identity=runtime.commit,
-        ):
+        command = [
+            self.python_executable,
+            "-m",
+            "gocube_golden.orchestrator_v2.generation_child",
+            "--request",
+            str(request_path),
+            "--result",
+            str(result_path),
+        ]
+
+        def launch(child_request):
+            # A permit belongs to one actual child attempt.  It is minted in
+            # the launcher so a retry after a long generation gets a fresh
+            # TTL, while a supervisor restart can still reattach to the
+            # existing child without changing its capability.
             env = runtime.environment(os.environ)
             env["AZ_DRIVER_HEARTBEAT_PATH"] = str(heartbeat_path)
-            env["AZ_GENERATION_RESULT_PATH"] = str(output_lineage.root / "runtime" / "results" / f"generation-{generation:04d}.json")
-            supervisor = SupervisorV2(
-                output_lineage.root,
-                execution_id=f"{output_lineage.lineage_id}:generation:{generation}",
-                liveness_path=heartbeat_path,
-                progress_path=heartbeat_path,
-                command=[self.python_executable, "-m", "gocube_golden.orchestrator_v2.generation_child", "--request", str(request_path), "--result", str(result_path)],
-                cwd=runtime.path,
-                env=env,
-                policy=self.supervisor_policy,
+            env["AZ_GENERATION_RESULT_PATH"] = str(
+                output_lineage.root / "runtime" / "results" / f"generation-{generation:04d}.json"
             )
-            if acknowledge_stopped_execution:
-                acknowledgement = supervisor.acknowledge_stopped_execution()
-                if not acknowledgement.success:
-                    raise RuntimeError(f"could not acknowledge stopped execution: {acknowledgement.reason or 'unknown reason'}")
-            result = supervisor.run_once()
+            with _child_execution_permit(
+                action_type="generation",
+                topology=output_lineage.topology,
+                run_id=output_lineage.lineage_id,
+                code_identity=runtime.commit,
+                attempt=int(child_request.attempt),
+            ) as permit:
+                env["AZ_V2_EXECUTION_PERMIT"] = canonical_json(dict(permit))
+                env["AZ_V2_EXECUTION_PERMIT_KEY"] = os.environ["AZ_V2_EXECUTION_PERMIT_KEY"]
+                return start_owned_child(
+                    command,
+                    cwd=runtime.path,
+                    env=env,
+                    popen=subprocess.Popen,
+                )
+
+        supervisor = SupervisorV2(
+            output_lineage.root,
+            execution_id=f"{output_lineage.lineage_id}:generation:{generation}",
+            liveness_path=heartbeat_path,
+            progress_path=heartbeat_path,
+            launcher=launch,
+            command=command,
+            cwd=runtime.path,
+            policy=self.supervisor_policy,
+        )
+        if acknowledge_stopped_execution:
+            acknowledgement = supervisor.acknowledge_stopped_execution()
+            if not acknowledgement.success:
+                raise RuntimeError(f"could not acknowledge stopped execution: {acknowledgement.reason or 'unknown reason'}")
+        result = supervisor.run_once()
         if not result.success:
             raise RuntimeError(f"production generation M{generation} stopped: {result.reason or output_lineage.root / 'runtime' / 'supervisor-stop.json'}")
 
