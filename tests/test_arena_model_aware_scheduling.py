@@ -12,6 +12,8 @@ from tools.arena_engine import (
     _ArenaBrokerIngress,
     _ModelAwareBatchScheduler,
     _WorkerTaskQueue,
+    _report_progress_from_activity,
+    _unreported_worker_exits,
 )
 from tools.arena_worker import _ImmediateInferenceTransport
 from tools import arena_worker
@@ -84,6 +86,30 @@ def test_worker_task_queue_uses_global_replenishment_after_initial_lane_fill():
 
     assert task_queue.get(timeout=1.0) == {"task": "initial"}
     assert task_queue.get(timeout=1.0) == {"task": "replenished"}
+
+
+def test_move_activity_refreshes_supervision_progress_without_incrementing_games():
+    progress: list[tuple[int, int]] = []
+
+    callback = lambda completed, total: progress.append((completed, total))
+    _report_progress_from_activity("move_completed", 0, 1024, callback)
+    _report_progress_from_activity("game_started", 0, 1024, callback)
+    _report_progress_from_activity("game_completed", 1, 1024, callback)
+
+    assert progress == [(0, 1024), (1, 1024)]
+
+
+def test_worker_exit_without_done_message_fails_after_short_grace():
+    process = SimpleNamespace(name="arena-worker-00", exitcode=0, is_alive=lambda: False)
+    dead_since: dict[str, float] = {}
+
+    assert _unreported_worker_exits([], {}, dead_since, now=0.0) == []
+    assert _unreported_worker_exits(
+        [process], {}, dead_since, now=0.0
+    ) == []
+    assert _unreported_worker_exits(
+        [process], {}, dead_since, now=5.0
+    ) == ["arena-worker-00 (exitcode=0)"]
 
 
 def test_broker_ingress_accepts_requests_during_a_slow_forward_and_preserves_timestamp():

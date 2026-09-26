@@ -43,6 +43,36 @@ DEFAULT_NON_STANDARD_MIN_MEAN_INFERENCE_BATCH_ROWS = 16.0
 MIN_EFFECTIVE_CPU_CORES = 8.0
 
 
+def _report_progress_from_activity(
+    event: str,
+    completed_games: int,
+    total_games: int,
+    progress_callback: Callable[[int, int], None] | None,
+) -> None:
+    """Expose move activity to supervision without changing game counts."""
+    if event in {"move_completed", "game_completed"} and progress_callback is not None:
+        progress_callback(completed_games, total_games)
+
+
+def _unreported_worker_exits(
+    processes: Sequence[Any],
+    done: Mapping[int, Mapping[str, object]],
+    dead_since: dict[str, float],
+    *,
+    now: float,
+    grace_seconds: float = 5.0,
+) -> list[str]:
+    """Return workers that exited without delivering their terminal message."""
+    failures: list[str] = []
+    for process in processes:
+        if process.is_alive() or process.name in done:
+            continue
+        first_seen = dead_since.setdefault(process.name, now)
+        if process.exitcode not in (0, None) or now - first_seen >= grace_seconds:
+            failures.append(f"{process.name} (exitcode={process.exitcode})")
+    return failures
+
+
 def _expected_lane_ids_by_worker(
     initial_task_counts: Sequence[int], games_per_worker: int
 ) -> dict[int, tuple[int, ...]]:
@@ -990,6 +1020,7 @@ def run_arena(
             [os.getpid(), *worker_pids], interval_s=1.0
         ).start()
         done: dict[int, Mapping[str, object]] = {}
+        dead_since: dict[str, float] = {}
         records: list[dict[str, object]] = []
         batch_rows: list[int] = []
         queue_wait_ms: list[float] = []
@@ -1142,8 +1173,6 @@ def run_arena(
                         steady_state_started_at = at
             elif event == "game_completed":
                 completed_games += 1
-                if progress_callback is not None:
-                    progress_callback(completed_games, config.games)
                 active_contexts_current = max(0, active_contexts_current - 1)
                 if worker_id in per_worker_active:
                     per_worker_active[worker_id] = max(
@@ -1153,6 +1182,13 @@ def run_arena(
                     first_completed_game_at = at
             elif event == "move_completed" and first_completed_move_at is None:
                 first_completed_move_at = at
+            # A long game can legitimately take longer than the supervisor's
+            # completed-game timeout at high simulation budgets. Report move
+            # activity as progress too, while keeping the scientific
+            # completed-game count unchanged.
+            _report_progress_from_activity(
+                event, completed_games, config.games, progress_callback
+            )
             active_context_samples.append(active_contexts_current)
             if (
                 steady_state_started_at is not None
@@ -1414,13 +1450,17 @@ def run_arena(
         }
         while len(done) < config.workers:
             ingress.raise_if_failed()
-            dead = [
-                process.name
-                for process in processes
-                if not process.is_alive() and process.exitcode not in (0, None)
-            ]
+            dead = _unreported_worker_exits(
+                processes,
+                done,
+                dead_since,
+                now=time.monotonic(),
+            )
             if dead:
-                raise RuntimeError(f"Arena worker process died during run: {dead}")
+                raise RuntimeError(
+                    "Arena worker process exited without a done message: "
+                    + ", ".join(dead)
+                )
             with scheduler.condition:
                 if control_pending:
                     message = control_pending.popleft()
