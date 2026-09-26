@@ -66,7 +66,8 @@ class CubeArenaSearchConfig:
             "resign": False,
             "watchdog": int(self.watchdog),
             "paired_starts_color_swap": True,
-            "opening": "canonical-empty-board",
+            "opening": "cube-evaluation-starts-v1",
+            "empty_board_control_pair": True,
             "deterministic_tie_break": True,
             "technical_fail_closed": True,
         }

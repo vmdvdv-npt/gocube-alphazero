@@ -1,7 +1,7 @@
 """Cube V2 wrapper around the single board-agnostic Arena engine."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -40,6 +40,11 @@ class CubeArenaResult:
     completion_status: str
     timing: Mapping[str, object]
     output_dir: str
+    unique_start_count: int = 0
+    empty_control_pairs: int = 0
+    diverse_pairs: int = 0
+    valid_paired_starts: int = 0
+    empty_control_results: Mapping[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -62,6 +67,11 @@ class CubeArenaResult:
             "completion_status": self.completion_status,
             "timing": dict(self.timing),
             "output_dir": self.output_dir,
+            "unique_start_count": self.unique_start_count,
+            "empty_control_pairs": self.empty_control_pairs,
+            "diverse_pairs": self.diverse_pairs,
+            "valid_paired_starts": self.valid_paired_starts,
+            "empty_control_results": dict(self.empty_control_results or {}),
         }
 
 
@@ -221,6 +231,15 @@ def run_cube_arena(
         completion_status=str(summary.get("completion_status", "COMPLETE")),
         timing=timing,
         output_dir=str(target),
+        unique_start_count=int(summary.get("unique_start_count", 0)),
+        empty_control_pairs=int(summary.get("empty_control_pairs", 0)),
+        diverse_pairs=int(summary.get("diverse_pairs", 0)),
+        valid_paired_starts=int(summary.get("valid_paired_starts", 0)),
+        empty_control_results=(
+            dict(summary.get("empty_control_results", {}))
+            if isinstance(summary.get("empty_control_results", {}), Mapping)
+            else {}
+        ),
     )
     _write_result(target / "arena-result.json", result.to_dict())
     return result

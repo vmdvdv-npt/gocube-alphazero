@@ -44,6 +44,17 @@ class ArenaRunner(_core.ArenaRunner):
     def _identity(request: ArenaRunRequest) -> EvaluationIdentity:
         profile = get_profile(request.profile)
         scientific = dict(request.scientific_contract or profile.scientific_contract(request.config))
+        if request.candidate.topology.startswith("cube"):
+            scientific.update(
+                {
+                    "startset_id": request.startset.id,
+                    "startset_fingerprint": request.startset.fingerprint,
+                    "startset_master_seed": int(request.master_seed),
+                    "startset_pairs": int(request.config.games) // 2,
+                    "startset_paired_colors": True,
+                    "startset_empty_control": True,
+                }
+            )
         execution = dict(
             request.execution_contract
             or {
@@ -60,6 +71,8 @@ class ArenaRunner(_core.ArenaRunner):
         workload.setdefault("pairs", int(request.config.games) // 2)
         workload.setdefault("paired_starts", True)
         workload.setdefault("color_swap", True)
+        workload.setdefault("startset_fingerprint", request.startset.fingerprint)
+        workload.setdefault("startset_id", request.startset.id)
         return EvaluationIdentity(
             candidate=request.candidate.ref,
             reference=request.reference.ref,

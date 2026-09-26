@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from training_engine import CheckpointContext, TrainingEngine, TrainingIterationResult, TrainingState, sequence_fingerprint
 
 from .cube_checkpoint_v2 import (
+    CubeConfigTransition,
     file_sha256,
     load_payload,
     restore_model_optimizer,
@@ -379,7 +380,7 @@ class CubeTrainingAdapter:
 
     def prepare_checkpoint(self, state: TrainingState, context: CheckpointContext, training_metrics: Mapping[str, object]) -> Mapping[str, object]:
         self.validate_state(state)
-        return {
+        metadata = {
             "checkpoint_schema": CHECKPOINT_SCHEMA,
             "checkpoint_schema_version": 2,
             "generation": context.generation,
@@ -414,6 +415,15 @@ class CubeTrainingAdapter:
             "parent_checkpoint": None if context.parent_checkpoint_identity is None else dict(context.parent_checkpoint_identity),
             "git_commit": getattr(context.code_identity, "git_commit", None) if context.code_identity is not None else None,
         }
+        transition = getattr(state, "config_transition", None)
+        if transition is not None:
+            if not isinstance(transition, CubeConfigTransition):
+                raise ValueError("Cube training config transition has the wrong type")
+            metadata["training_config_transition"] = transition.to_dict()
+            # Provenance belongs to the first child checkpoint only.  The
+            # transaction snapshot restores this marker if publication fails.
+            state.config_transition = None
+        return metadata
 
     def _metadata_kwargs(self) -> dict[str, object]:
         return {
@@ -463,6 +473,7 @@ class CubeTrainingAdapter:
             "completed_games": state.completed_games,
             "parent_checkpoint_identity": deepcopy(state.parent_checkpoint_identity),
             "runtime_state": deepcopy(state.adapter_state),
+            "config_transition": deepcopy(getattr(state, "config_transition", None)),
             "replay_rows": deepcopy(list(replay.rows)),
             "replay_last_generation": int(getattr(replay, "_last_generation", 0)),
             "replay_total_evictions": replay.total_evictions,
@@ -477,6 +488,7 @@ class CubeTrainingAdapter:
         state.completed_games = int(snapshot["completed_games"])
         state.parent_checkpoint_identity = deepcopy(snapshot["parent_checkpoint_identity"])
         state.adapter_state = deepcopy(snapshot["runtime_state"])
+        state.config_transition = deepcopy(snapshot.get("config_transition"))
         replay = RollingGenerationReplay(generations=self.config.replay_generations, maximum_positions=self.config.replay_cap)
         replay._rows = deepcopy(list(snapshot["replay_rows"]))
         replay._last_generation = int(snapshot["replay_last_generation"])
@@ -532,6 +544,26 @@ def _restore_replay(adapter: CubeTrainingAdapter, rows: Sequence[Mapping[str, ob
     return replay
 
 
+def _source_config_from_metadata(metadata: Mapping[str, object]) -> CubeTrainingConfig:
+    raw_config = metadata.get("concrete_training_config")
+    source = CubeTrainingConfig.from_identity_payload(raw_config)  # type: ignore[arg-type]
+    saved_fingerprint = metadata.get("concrete_training_config_fingerprint")
+    if source.fingerprint != saved_fingerprint:
+        raise ValueError("Cube checkpoint source config metadata/fingerprint mismatch")
+    return source
+
+
+def _checkpoint_source_metadata(checkpoint_path: str | Path) -> dict[str, object]:
+    metadata_path = sidecar_path(checkpoint_path)
+    if not metadata_path.is_file():
+        raise ValueError("Cube checkpoint metadata sidecar is missing")
+    raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("Cube checkpoint metadata sidecar is invalid")
+    _source_config_from_metadata(raw)
+    return raw
+
+
 def load_cube_checkpoint(
     checkpoint_path: str | Path,
     *,
@@ -549,6 +581,7 @@ def load_cube_checkpoint(
     size = validate_cube_size(raw.get("size"))
     if expected_size is not None and size != validate_cube_size(expected_size):
         raise ValueError("Cube checkpoint topology size mismatch")
+    source_config = _source_config_from_metadata(raw)
     adapter = CubeTrainingAdapter(size=size, config=config)
     payload, metadata = load_payload(checkpoint_path, map_location=map_location, **adapter._metadata_kwargs())
     model, optimizer = restore_model_optimizer(payload, metadata, map_location=map_location)
@@ -581,6 +614,157 @@ def load_cube_checkpoint(
     )
     adapter.validate_state(state)
     return adapter, state, metadata
+
+
+def load_cube_checkpoint_for_config_transition(
+    checkpoint_path: str | Path,
+    *,
+    config: CubeTrainingConfig,
+    replay_path: str | Path,
+    map_location: str | torch.device = "cpu",
+    expected_size: int | None = None,
+    source_checkpoint_identity: Mapping[str, object] | None = None,
+) -> tuple[CubeTrainingAdapter, TrainingState, CubeConfigTransition]:
+    """Load a parent checkpoint under a new run-owned config explicitly.
+
+    This API is intentionally separate from :func:`load_cube_checkpoint`.
+    Immutable scientific compatibility is validated against the source
+    metadata first; only the five run-owned fields may differ.
+    """
+
+    raw = _checkpoint_source_metadata(checkpoint_path)
+    size = validate_cube_size(raw.get("size"))
+    if expected_size is not None and size != validate_cube_size(expected_size):
+        raise ValueError("Cube checkpoint topology size mismatch")
+    source_config = _source_config_from_metadata(raw)
+    if source_config.fingerprint == config.fingerprint:
+        raise ValueError(
+            "Cube config transition requires a changed run-owned config; use strict load"
+        )
+    if source_config.weight_decay != config.weight_decay:
+        raise ValueError("Cube config transition cannot change weight-decay semantics")
+    if source_checkpoint_identity is not None:
+        expected_sha = source_checkpoint_identity.get("sha256") or source_checkpoint_identity.get(
+            "artifact_sha256"
+        )
+        if expected_sha is not None and str(expected_sha) != str(raw.get("checkpoint_sha256")):
+            raise ValueError("Cube parent checkpoint SHA-256 mismatch")
+
+    source_adapter = CubeTrainingAdapter(size=size, config=source_config)
+    payload, metadata = load_payload(
+        checkpoint_path,
+        map_location=map_location,
+        **source_adapter._metadata_kwargs(),
+    )
+    model, optimizer = restore_model_optimizer(payload, metadata, map_location=map_location)
+    if cube_graphnet_v2_model_hash(model) != str(metadata.get("model_hash")):
+        raise ValueError("Cube checkpoint model hash mismatch during transition")
+    if any(
+        float(group.get("lr", float("nan"))) != float(source_config.learning_rate)
+        or float(group.get("weight_decay", float("nan"))) != 0.0
+        for group in optimizer.param_groups
+    ):
+        raise ValueError("Cube checkpoint optimizer config is inconsistent with source config")
+    runtime_raw = payload.get("runtime_state")
+    if not isinstance(runtime_raw, Mapping):
+        raise ValueError("Cube checkpoint runtime state is invalid")
+    runtime = CubeTrainingRuntimeState(
+        int(runtime_raw["sampling_seed"]), int(runtime_raw["sampling_counter"])
+    )
+    runtime.validate()
+
+    source_rows = _read_replay(replay_path)
+    _restore_replay(source_adapter, source_rows)
+    source_fingerprint = sequence_fingerprint(source_rows)
+    if (
+        len(source_rows) != int(metadata["replay_positions"])
+        or source_fingerprint != metadata["replay_fingerprint"]
+    ):
+        raise ValueError("Cube checkpoint source replay identity mismatch")
+
+    target_adapter = CubeTrainingAdapter(size=size, config=config)
+    target_replay = RollingGenerationReplay(
+        generations=config.replay_generations,
+        maximum_positions=config.replay_cap,
+    )
+    source_generations = {
+        int(row["source_generation"])
+        for row in source_rows
+        if row.get("source_generation") is not None
+    }
+    grouped: dict[int, list[Mapping[str, object]]] = {}
+    for row in source_rows:
+        grouped.setdefault(int(row["source_generation"]), []).append(row)
+    for generation in sorted(grouped):
+        target_replay.append_generation(generation, grouped[generation])
+    target_rows = tuple(target_replay.rows)
+    target_adapter.validate_replay(target_rows)
+    target_fingerprint = sequence_fingerprint(target_rows)
+    target_generations = {
+        int(row["source_generation"])
+        for row in target_rows
+        if row.get("source_generation") is not None
+    }
+    changed_fields: dict[str, Mapping[str, object]] = {}
+    source_values = source_config.identity_payload()
+    target_values = config.identity_payload()
+    for field in (
+        "learning_rate",
+        "batch_size",
+        "optimizer_steps",
+        "replay_generations",
+        "replay_cap",
+    ):
+        if source_values[field] != target_values[field]:
+            changed_fields[field] = {"old": source_values[field], "new": target_values[field]}
+
+    source_identity = dict(source_checkpoint_identity or {})
+    source_identity.setdefault("checkpoint_id", metadata.get("label"))
+    source_identity.setdefault("label", metadata.get("label"))
+    source_identity.setdefault("generation", int(metadata["generation"]))
+    source_identity.setdefault("path", str(Path(checkpoint_path).resolve()))
+    source_identity.setdefault("sha256", metadata.get("checkpoint_sha256"))
+    source_identity.setdefault("artifact_sha256", metadata.get("checkpoint_sha256"))
+    transition = CubeConfigTransition(
+        schema="cube-training-config-transition-v1",
+        source_checkpoint=source_identity,
+        source_config_fingerprint=source_config.fingerprint,
+        target_config_fingerprint=config.fingerprint,
+        changed_fields=changed_fields,
+        optimizer_state_preserved=True,
+        source_replay_fingerprint=source_fingerprint,
+        source_replay_count=len(source_rows),
+        target_replay_fingerprint=target_fingerprint,
+        target_replay_count=len(target_rows),
+        evicted_generation_count=len(source_generations - target_generations),
+        evicted_position_count=len(source_rows) - len(target_rows),
+        target_replay_generations=config.replay_generations,
+        target_replay_cap=config.replay_cap,
+        effective_generation=int(metadata["generation"]) + 1,
+    )
+
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = float(config.learning_rate)
+    if not all(
+        float(parameter_group["lr"]) == float(config.learning_rate)
+        for parameter_group in optimizer.param_groups
+    ):
+        raise ValueError("Cube config transition failed to apply target learning rate")
+    state = TrainingState(
+        model=model,
+        optimizer=optimizer,
+        optimizer_updates=int(payload["optimizer_updates"]),
+        samples_consumed=int(payload["samples_consumed"]),
+        current_generation=int(metadata["generation"]),
+        rolling_replay=target_replay,
+        profile_identity=dict(target_adapter.profile_identity),
+        target_identity=dict(target_adapter.target_identity),
+        parent_checkpoint_identity=source_identity,
+        adapter_state=runtime,
+        config_transition=transition,
+    )
+    target_adapter.validate_state(state)
+    return target_adapter, state, transition
 
 
 def run_cube_training_generation(
@@ -658,11 +842,13 @@ def run_cube_training_generation(
 
 
 __all__ = [
+    "CubeConfigTransition",
     "CubeTrainingAdapter",
     "CubeTrainingConfig",
     "CubeTrainingGenerationResult",
     "CubeTrainingRuntimeState",
     "create_cube_m0_state",
     "load_cube_checkpoint",
+    "load_cube_checkpoint_for_config_transition",
     "run_cube_training_generation",
 ]

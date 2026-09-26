@@ -22,7 +22,12 @@ from ..cube_generation_v2 import CubeSelfPlayPlan, build_cube_generation_request
 from ..cube_selfplay_contract import CubeSelfPlaySearchContract
 from ..cube_selfplay_v2 import CubeSelfPlayExecutionConfig
 from ..cube_training_contract_v2 import CubeTrainingConfig
-from ..cube_training_v2 import CubeTrainingGenerationResult, load_cube_checkpoint
+from ..cube_training_v2 import (
+    CubeTrainingGenerationResult,
+    _checkpoint_source_metadata,
+    load_cube_checkpoint,
+    load_cube_checkpoint_for_config_transition,
+)
 from .generation_runner import GenerationExecutionResult, ResolvedGenerationInput
 
 
@@ -288,22 +293,42 @@ class CubeProductionGenerationPath:
         training_config = _training_config(resolved)
         replay_path = _rolling_replay(resolved.parent_checkpoint)
         execution = _execution_config(resolved)
-        adapter, state, parent_metadata = load_cube_checkpoint(
-            resolved.parent_checkpoint.path,
-            config=training_config,
-            replay_path=replay_path,
-            expected_size=self.size,
-            map_location=execution.device,
-        )
         parent_reference = resolved.parent_checkpoint.ref.to_dict()
+        source_metadata = _checkpoint_source_metadata(resolved.parent_checkpoint.path)
         parent_reference.update(
             path=str(resolved.parent_checkpoint.path),
             metadata_path=str(resolved.parent_checkpoint.path.with_suffix(".metadata.json")),
-            model_hash=parent_metadata.get("model_hash"),
+            model_hash=source_metadata.get("model_hash"),
             artifact_sha256=resolved.parent_checkpoint.ref.sha256,
             sha256=resolved.parent_checkpoint.ref.sha256,
             size=self.size,
         )
+        source_config = CubeTrainingConfig.from_identity_payload(
+            source_metadata.get("concrete_training_config")  # type: ignore[arg-type]
+        )
+        transition = None
+        if source_config.fingerprint == training_config.fingerprint:
+            adapter, state, _ = load_cube_checkpoint(
+                resolved.parent_checkpoint.path,
+                config=training_config,
+                replay_path=replay_path,
+                expected_size=self.size,
+                map_location=execution.device,
+            )
+        else:
+            if resolved.output_lineage.lineage_id == resolved.parent_checkpoint.lineage_id:
+                raise ValueError(
+                    "Cube config transition requires a new child-lineage; "
+                    "existing lineage config_fingerprint is immutable"
+                )
+            adapter, state, transition = load_cube_checkpoint_for_config_transition(
+                resolved.parent_checkpoint.path,
+                config=training_config,
+                replay_path=replay_path,
+                expected_size=self.size,
+                map_location=execution.device,
+                source_checkpoint_identity=parent_reference,
+            )
         state.parent_checkpoint_identity = dict(parent_reference)
 
         committed: dict[str, object] = {}
