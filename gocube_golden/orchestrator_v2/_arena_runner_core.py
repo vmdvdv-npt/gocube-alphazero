@@ -229,6 +229,25 @@ class ArenaRunner:
         from ..process_supervision import start_owned_child
         from .execution_permit import _child_execution_permit
 
+        def completion_check() -> bool:
+            # A reattached supervisor cannot reap an orphaned child, so a
+            # successful child must leave a domain-validated durable result
+            # marker before exiting.  This avoids rerunning a complete Arena
+            # merely because its original controller disappeared.
+            try:
+                completed = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                return False
+            if not isinstance(completed, Mapping):
+                return False
+            if int(completed.get("games", -1)) != int(request.config.games):
+                return False
+            validity = str(completed.get("validity", "")).upper()
+            if validity not in {"VALID", "TECHNICAL", "CRITICAL", "INVALID"}:
+                return False
+            wld = completed.get("W/L/D")
+            return isinstance(wld, list) and len(wld) == 3
+
         def launch(child_request):
             # Mint inside the launcher, not around SupervisorV2.run_once().
             # Supervisor calls this once for every actual spawn, so a retry
@@ -269,6 +288,7 @@ class ArenaRunner:
             launcher=launch,
             command=command,
             cwd=runtime.path,
+            completion_check=completion_check,
             policy=self.supervisor_policy,
         )
         result = supervisor.run_once()
