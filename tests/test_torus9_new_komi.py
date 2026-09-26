@@ -1,12 +1,21 @@
+import json
+from pathlib import Path
+
 import torch
 
+from gocube_golden.artifact_catalog import ArtifactCatalog
+from gocube_golden.artifact_resolver import ArtifactResolver
+from gocube_golden.provenance import file_sha256
 from gocube_golden.torus9_m137_5ch import convert_m137_model
-from gocube_golden.torus9_monolith import Torus9CurrentGraphNet
+from gocube_golden.torus9_m137_5ch import M137_FIVE_CHANNEL_ARCHITECTURE_ID
+from gocube_golden.torus9_monolith import TORUS9_TOPOLOGY_FINGERPRINT, Torus9CurrentGraphNet
 from gocube_golden.torus9_new_komi import (
+    NEW_KOMI_CONVERTED_MODEL_HASH,
     NEW_KOMI_LINEAGE_ID,
     NEW_KOMI_OPTIMIZER_CONVERSION,
     NEW_KOMI_REPLAY_POLICY,
     migrate_m137_adam,
+    publish_new_komi_bootstrap_graph,
 )
 
 
@@ -31,6 +40,70 @@ def test_new_komi_identity_is_explicit_and_fresh_history() -> None:
     assert NEW_KOMI_LINEAGE_ID == "new_komi"
     assert NEW_KOMI_REPLAY_POLICY == "fresh-only-no-parent-history"
     assert "reset-folded-bias-moments" in NEW_KOMI_OPTIMIZER_CONVERSION
+
+
+def test_new_komi_bootstrap_is_published_as_resolvable_v2_genesis(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    root = runs_root / "torus9" / "active" / NEW_KOMI_LINEAGE_ID
+    checkpoint = root / "checkpoints" / "M137-5CH-bootstrap.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"test-only immutable M137 5CH artifact")
+    artifact_sha = file_sha256(checkpoint)
+    metadata = {
+        "architecture_id": M137_FIVE_CHANNEL_ARCHITECTURE_ID,
+        "architecture_config": {
+            "topology_id": "torus-9x9-row-major-v1",
+            "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
+            "input_channels": 5,
+            "hidden": 80,
+            "blocks": 8,
+        },
+        "observation_shape": [5, 81],
+        "converted_model_hash": NEW_KOMI_CONVERTED_MODEL_HASH,
+        "source_checkpoint": "M137",
+        "source_checkpoint_sha256": "sha256:71cfc78dab3fe217b3c435a765790efe6f6c4fa42a7d21479f3fd909adf341fe",
+        "conversion_formula": "W5 = W[:, 0:5]; b5 = b + 0.5 * W[:, 5]",
+        "optimizer_conversion": "not-performed",
+    }
+    checkpoint.with_suffix(".metadata.json").write_text(
+        json.dumps(metadata, sort_keys=True), encoding="utf-8"
+    )
+    manifest = {
+        "lineage_id": NEW_KOMI_LINEAGE_ID,
+        "topology": "torus9",
+        "status": "ACTIVE",
+        "parent_checkpoint": {
+            "lineage_id": "torus9-m125-continuous-v2-gen6-20260922-v1",
+            "checkpoint_id": "M137",
+            "generation": 137,
+            "sha256": metadata["source_checkpoint_sha256"],
+        },
+        "bootstrap_checkpoint": {
+            "path": "checkpoints/M137-5CH-bootstrap.pt",
+            "sha256": artifact_sha,
+            "model_hash": NEW_KOMI_CONVERTED_MODEL_HASH,
+        },
+        "checkpoint_hashes": {"M137-5CH-bootstrap": artifact_sha},
+    }
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True), encoding="utf-8"
+    )
+    ArtifactCatalog.initialize(
+        root / "runtime" / "artifact-catalog.json",
+        lineage_id=NEW_KOMI_LINEAGE_ID,
+        root=root,
+    )
+
+    evidence = publish_new_komi_bootstrap_graph(root)
+    resolved = ArtifactResolver(runs_root).checkpoint(evidence["checkpoint"])
+
+    assert resolved.node.genesis is True
+    assert resolved.ref.checkpoint_id == "M137-5CH-bootstrap"
+    assert resolved.ref.generation == 137
+    assert resolved.effective_config.config.compatibility["input_channels"] == 5
+    assert resolved.effective_config.config.compatibility["model_hash"] == NEW_KOMI_CONVERTED_MODEL_HASH
+    assert resolved.provenance.path.name == "M137-5CH-bootstrap.json"
 
 
 def test_m137_adam_migration_preserves_exact_states_and_resets_only_folded_bias() -> None:

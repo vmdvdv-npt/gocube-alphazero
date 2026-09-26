@@ -18,18 +18,27 @@ from typing import Mapping
 
 import torch
 
-from .artifact_catalog import ArtifactCatalog
+from .artifact_catalog import ArtifactCatalog, sha256_file
+from .artifact_graph import (
+    ArtifactRef,
+    CheckpointNode,
+    CheckpointRef,
+    EffectiveConfig,
+    EffectiveConfigRef,
+)
+from .process_supervision import atomic_write_text
 from .neural import model_hash
-from .provenance import file_sha256
+from .provenance import canonical_json, file_sha256
 from .run_storage import ACTIVE, ensure_lineage_layout
 from .torus9_m137_5ch import (
+    M137_FIVE_CHANNEL_CHANNELS,
     M137_FIVE_CHANNEL_ARCHITECTURE_ID,
     M137_FIVE_CHANNEL_FORMULA,
     Torus9M137FiveChannelGraphNet,
     convert_m137_model,
     load_canonical_m137,
 )
-from .torus9_monolith import Torus9CurrentGraphNet
+from .torus9_monolith import TORUS9_TOPOLOGY_FINGERPRINT, Torus9CurrentGraphNet
 from .torus9_contract import TORUS9_POINT_COUNT
 
 
@@ -39,10 +48,213 @@ NEW_KOMI_SOURCE_CHECKPOINT = "M137"
 NEW_KOMI_SOURCE_CHECKPOINT_SHA256 = (
     "71cfc78dab3fe217b3c435a765790efe6f6c4fa42a7d21479f3fd909adf341fe"
 )
+NEW_KOMI_CONVERTED_MODEL_HASH = (
+    "sha256:f4fc0e173ed9cea1a6274bb613a95cb6ba428461f87eb60313deb390261927bc"
+)
 NEW_KOMI_OPTIMIZER_CONVERSION = (
     "adam-preserve-exact-crop-input-reset-folded-bias-moments-v1"
 )
 NEW_KOMI_REPLAY_POLICY = "fresh-only-no-parent-history"
+
+
+def _write_immutable_json(path: Path, payload: Mapping[str, object]) -> None:
+    """Publish one immutable JSON graph artifact, refusing content drift."""
+
+    content = canonical_json(dict(payload)) + "\n"
+    if path.is_file():
+        if path.read_text(encoding="utf-8") != content:
+            raise ValueError(f"Refusing to overwrite immutable bootstrap graph artifact: {path}")
+        return
+    atomic_write_text(path, content)
+
+
+def _bootstrap_effective_config(metadata: Mapping[str, object]) -> EffectiveConfig:
+    architecture = metadata.get("architecture_config")
+    if not isinstance(architecture, Mapping):
+        raise ValueError("M137 5CH metadata has no architecture_config")
+    return EffectiveConfig(
+        topology="torus9",
+        compatibility={
+            "topology": "torus9",
+            "topology_id": architecture.get("topology_id"),
+            "topology_fingerprint": architecture.get("topology_fingerprint"),
+            "architecture_id": metadata.get("architecture_id"),
+            "input_channels": metadata.get("observation_shape", [None])[0],
+            "observation_shape": metadata.get("observation_shape"),
+            "model_hash": metadata.get("converted_model_hash"),
+            "source_checkpoint": metadata.get("source_checkpoint"),
+            "source_checkpoint_sha256": metadata.get("source_checkpoint_sha256"),
+        },
+        self_play={"komi": 0.5},
+        training={"training_ready": False},
+        replay={"policy": NEW_KOMI_REPLAY_POLICY},
+        execution={},
+        arena={"model_hash": metadata.get("converted_model_hash")},
+        extensions={
+            "kind": "m137-6ch-to-5ch-inference-bootstrap",
+            "conversion_formula": metadata.get("conversion_formula"),
+            "optimizer_conversion": metadata.get("optimizer_conversion"),
+        },
+    )
+
+
+def publish_new_komi_bootstrap_graph(root: str | Path) -> dict[str, object]:
+    """Publish the canonical V2 genesis reference for the existing 5CH model.
+
+    The bootstrap checkpoint is already the lineage-owned converted artifact.
+    This function only adds immutable graph/config/provenance references and
+    catalog evidence; it never copies or rewrites model weights.
+    """
+
+    lineage_root = Path(root).resolve()
+    manifest_path = lineage_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, Mapping):
+        raise ValueError("new_komi manifest must be an object")
+    if manifest.get("lineage_id") != NEW_KOMI_LINEAGE_ID or manifest.get("topology") != "torus9":
+        raise ValueError("bootstrap graph owner is not the canonical new_komi Torus9 lineage")
+    if manifest.get("status") != "ACTIVE":
+        raise ValueError("cannot publish a bootstrap graph for an inactive lineage")
+
+    bootstrap = manifest.get("bootstrap_checkpoint")
+    parent = manifest.get("parent_checkpoint")
+    if not isinstance(bootstrap, Mapping) or not isinstance(parent, Mapping):
+        raise ValueError("new_komi manifest lacks bootstrap/source checkpoint evidence")
+    checkpoint_rel = str(bootstrap.get("path", ""))
+    checkpoint_path = (lineage_root / checkpoint_rel).resolve()
+    if checkpoint_rel != "checkpoints/M137-5CH-bootstrap.pt" or not checkpoint_path.is_file():
+        raise ValueError("canonical M137 5CH bootstrap checkpoint is missing")
+    if str(parent.get("checkpoint_id")) != "M137" or str(parent.get("sha256")) != (
+        "sha256:" + NEW_KOMI_SOURCE_CHECKPOINT_SHA256
+    ):
+        raise ValueError("new_komi source parent is not the canonical M137 identity")
+
+    metadata_path = checkpoint_path.with_suffix(".metadata.json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if not isinstance(metadata, Mapping):
+        raise ValueError("M137 5CH checkpoint metadata must be an object")
+    architecture = metadata.get("architecture_config")
+    if (
+        metadata.get("architecture_id") != M137_FIVE_CHANNEL_ARCHITECTURE_ID
+        or metadata.get("converted_model_hash") != NEW_KOMI_CONVERTED_MODEL_HASH
+        or metadata.get("source_checkpoint") != "M137"
+        or metadata.get("source_checkpoint_sha256")
+        != "sha256:" + NEW_KOMI_SOURCE_CHECKPOINT_SHA256
+        or metadata.get("observation_shape") != [5, TORUS9_POINT_COUNT]
+        or not isinstance(architecture, Mapping)
+        or architecture.get("input_channels") != 5
+        or architecture.get("blocks") != 8
+        or architecture.get("hidden") != 80
+        or architecture.get("topology_fingerprint") != TORUS9_TOPOLOGY_FINGERPRINT
+    ):
+        raise ValueError("M137 5CH checkpoint metadata does not match the canonical identity")
+    artifact_sha = file_sha256(checkpoint_path)
+    declared_sha = str(bootstrap.get("sha256", ""))
+    if declared_sha != artifact_sha:
+        raise ValueError("new_komi manifest/bootstrap checkpoint SHA mismatch")
+
+    checkpoint = CheckpointRef(
+        topology="torus9",
+        lineage_id=NEW_KOMI_LINEAGE_ID,
+        checkpoint_id="M137-5CH-bootstrap",
+        generation=137,
+        path=checkpoint_rel,
+        sha256=artifact_sha,
+    )
+    effective = _bootstrap_effective_config(metadata)
+    config_rel = f"metadata/effective-config-v2/{effective.fingerprint}.json"
+    config_path = lineage_root / config_rel
+    _write_immutable_json(config_path, effective.to_dict())
+    config_ref = EffectiveConfigRef(
+        artifact=ArtifactRef(config_rel, sha256_file(config_path)),
+        fingerprint=effective.fingerprint,
+    )
+
+    provenance_rel = "metadata/provenance-v2/M137-5CH-bootstrap.json"
+    provenance_path = lineage_root / provenance_rel
+    provenance_payload = {
+        "schema": "gocube-orchestrator-v2-m137-5ch-bootstrap-provenance-v1",
+        "version": 1,
+        "genesis": True,
+        "checkpoint": checkpoint.to_dict(),
+        "source_checkpoint": dict(parent),
+        "checkpoint_metadata": {
+            "path": metadata_path.relative_to(lineage_root).as_posix(),
+            "sha256": file_sha256(metadata_path),
+        },
+        "converted_model_hash": NEW_KOMI_CONVERTED_MODEL_HASH,
+        "architecture_id": M137_FIVE_CHANNEL_ARCHITECTURE_ID,
+        "observation_channels": list(M137_FIVE_CHANNEL_CHANNELS),
+        "observation_shape": [5, TORUS9_POINT_COUNT],
+        "conversion_formula": metadata.get("conversion_formula"),
+        "optimizer_conversion": metadata.get("optimizer_conversion"),
+        "effective_config": config_ref.to_dict(),
+        "weights_copied": False,
+    }
+    _write_immutable_json(provenance_path, provenance_payload)
+    provenance_ref = ArtifactRef(provenance_rel, sha256_file(provenance_path))
+    node = CheckpointNode(
+        checkpoint=checkpoint,
+        genesis=True,
+        parent=None,
+        fresh_replay=None,
+        effective_config=config_ref,
+        provenance=provenance_ref,
+    )
+    node_rel = "metadata/checkpoints/M137-5CH-bootstrap.json"
+    node_path = lineage_root / node_rel
+    _write_immutable_json(node_path, node.to_dict())
+
+    catalog_path = lineage_root / "runtime" / "artifact-catalog.json"
+    catalog = ArtifactCatalog.load(catalog_path, root=lineage_root)
+    catalog.register_generation(
+        137,
+        (
+            {
+                "path": checkpoint_rel,
+                "sha256": artifact_sha,
+                "size_bytes": checkpoint_path.stat().st_size,
+                "kind": "checkpoint",
+                "model_hash": NEW_KOMI_CONVERTED_MODEL_HASH,
+            },
+            {
+                "path": config_rel,
+                "sha256": config_ref.artifact.sha256,
+                "size_bytes": config_path.stat().st_size,
+                "kind": "effective_config",
+            },
+            {
+                "path": provenance_rel,
+                "sha256": provenance_ref.sha256,
+                "size_bytes": provenance_path.stat().st_size,
+                "kind": "provenance",
+            },
+            {
+                "path": node_rel,
+                "sha256": file_sha256(node_path),
+                "size_bytes": node_path.stat().st_size,
+                "kind": "checkpoint_node",
+            },
+        ),
+    )
+
+    updated_manifest = dict(manifest)
+    checkpoint_hashes = dict(updated_manifest.get("checkpoint_hashes", {}))
+    checkpoint_hashes[checkpoint_rel] = artifact_sha
+    updated_manifest["checkpoint_hashes"] = checkpoint_hashes
+    updated_manifest["effective_config"] = config_ref.to_dict()
+    updated_manifest["v2_bootstrap_checkpoint"] = {
+        "checkpoint": checkpoint.to_dict(),
+        "node": {"path": node_rel, "sha256": file_sha256(node_path)},
+        "provenance": provenance_ref.to_dict(),
+        "effective_config": config_ref.to_dict(),
+        "converted_model_hash": NEW_KOMI_CONVERTED_MODEL_HASH,
+    }
+    atomic_write_text(
+        manifest_path,
+        json.dumps(updated_manifest, indent=2, sort_keys=True) + "\n",
+    )
+    return updated_manifest["v2_bootstrap_checkpoint"]  # type: ignore[return-value]
 
 
 def _sha_body(value: object) -> str:
@@ -341,6 +553,7 @@ def create_new_komi_lineage(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        publish_new_komi_bootstrap_graph(root)
     except Exception:
         manifest["status"] = "DISCARDED"
         manifest["discard_reason"] = "bootstrap failed before training-ready checkpoint publication"
@@ -356,10 +569,12 @@ __all__ = [
     "NEW_KOMI_LINEAGE_ID",
     "NEW_KOMI_OPTIMIZER_CONVERSION",
     "NEW_KOMI_REPLAY_POLICY",
+    "NEW_KOMI_CONVERTED_MODEL_HASH",
     "NEW_KOMI_SOURCE_CHECKPOINT",
     "NEW_KOMI_SOURCE_CHECKPOINT_SHA256",
     "NEW_KOMI_SOURCE_LINEAGE",
     "build_training_ready_checkpoint",
     "create_new_komi_lineage",
     "migrate_m137_adam",
+    "publish_new_komi_bootstrap_graph",
 ]
