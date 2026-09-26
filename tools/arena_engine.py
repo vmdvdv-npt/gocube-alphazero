@@ -54,25 +54,6 @@ def _report_progress_from_activity(
         progress_callback(completed_games, total_games)
 
 
-def _unreported_worker_exits(
-    processes: Sequence[Any],
-    done: Mapping[int, Mapping[str, object]],
-    dead_since: dict[str, float],
-    *,
-    now: float,
-    grace_seconds: float = 5.0,
-) -> list[str]:
-    """Return workers that exited without delivering their terminal message."""
-    failures: list[str] = []
-    for process in processes:
-        if process.is_alive() or process.name in done:
-            continue
-        first_seen = dead_since.setdefault(process.name, now)
-        if process.exitcode not in (0, None) or now - first_seen >= grace_seconds:
-            failures.append(f"{process.name} (exitcode={process.exitcode})")
-    return failures
-
-
 def _expected_lane_ids_by_worker(
     initial_task_counts: Sequence[int], games_per_worker: int
 ) -> dict[int, tuple[int, ...]]:
@@ -1020,7 +1001,6 @@ def run_arena(
             [os.getpid(), *worker_pids], interval_s=1.0
         ).start()
         done: dict[int, Mapping[str, object]] = {}
-        dead_since: dict[str, float] = {}
         records: list[dict[str, object]] = []
         batch_rows: list[int] = []
         queue_wait_ms: list[float] = []
@@ -1455,17 +1435,13 @@ def run_arena(
                     message = control_pending.popleft()
                     ready_model = None
                 else:
-                    dead = _unreported_worker_exits(
-                        processes,
-                        done,
-                        dead_since,
-                        now=time.monotonic(),
-                    )
+                    dead = [
+                        process.name
+                        for process in processes
+                        if not process.is_alive() and process.exitcode not in (0, None)
+                    ]
                     if dead:
-                        raise RuntimeError(
-                            "Arena worker process exited without a done message: "
-                            + ", ".join(dead)
-                        )
+                        raise RuntimeError(f"Arena worker process died during run: {dead}")
                     message = None
                     now = time.perf_counter()
                     ready_model = scheduler.next_ready_model(now)
