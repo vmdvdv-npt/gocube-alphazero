@@ -15,8 +15,12 @@ import fcntl
 import inspect
 import json
 import math
+import os
 from pathlib import Path
 import re
+import threading
+import time
+import uuid
 
 from ..process_supervision import atomic_write_json
 from ..provenance import sha256_fingerprint
@@ -29,12 +33,79 @@ WORKFLOW_ACTIONS = frozenset(
 )
 WORKFLOW_STATUSES = frozenset({"PENDING", "RUNNING", "COMPLETED", "FAILED", "SKIPPED"})
 WORKFLOW_STATES = frozenset({"RUNNING", "COMPLETED", "FAILED", "STOPPED"})
+CONTROLLER_SCHEMA = "gocube-orchestrator-v2-controller-v1"
 _COMPONENT_RE = re.compile(r"^[^/\\]+$")
 _REF_RE = re.compile(r"^\$\{([^}]+)\}$")
 
 
 class WorkflowError(RuntimeError):
     """A workflow cannot safely continue from its durable state."""
+
+
+class WorkflowControllerLease:
+    """Publish the durable controller that owns a running workflow.
+
+    The workflow lock prevents duplicate coordinators while this lease makes
+    ownership observable and recoverable after the launching shell disappears.
+    A replacement controller may safely overwrite a stale lease after it has
+    acquired the same workflow lock.
+    """
+
+    def __init__(self, root: Path, workflow_id: str, *, interval_seconds: float = 1.0) -> None:
+        self.root = root
+        self.workflow_id = workflow_id
+        self.interval_seconds = max(0.1, float(interval_seconds))
+        self.path = root / "runtime" / "controller.json"
+        self.token = uuid.uuid4().hex
+        self.started_at = time.time()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _payload(self) -> dict[str, object]:
+        return {
+            "schema": CONTROLLER_SCHEMA,
+            "workflow_id": self.workflow_id,
+            "controller_token": self.token,
+            "pid": os.getpid(),
+            "process_group": os.getpgid(os.getpid()),
+            "started_at": self.started_at,
+            "heartbeat_at": time.time(),
+            "state": "RUNNING",
+        }
+
+    def _write(self) -> None:
+        atomic_write_json(self.path, self._payload())
+
+    def _heartbeat(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            try:
+                self._write()
+            except OSError:
+                # The action's durable state remains authoritative if a
+                # transient filesystem error prevents one lease refresh.
+                pass
+
+    def __enter__(self) -> "WorkflowControllerLease":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._write()
+        self._thread = threading.Thread(
+            target=self._heartbeat,
+            name="orchestrator-v2-controller-heartbeat",
+            daemon=True,
+        )
+        self._thread.start()
+        return self
+
+    def __exit__(self, _exc_type: object, _exc: object, _tb: object) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(1.0, self.interval_seconds * 2.0))
+        try:
+            current = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            current = None
+        if isinstance(current, Mapping) and current.get("controller_token") == self.token:
+            self.path.unlink(missing_ok=True)
 
 
 def _component(value: object, label: str) -> str:
@@ -409,7 +480,8 @@ class WorkflowRunner:
                 raise WorkflowError(
                     f"workflow {self.spec.workflow_id!r} is already managed by another coordinator"
                 ) from exc
-            yield
+            with WorkflowControllerLease(self.root, self.spec.workflow_id):
+                yield
         finally:
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,12 @@ from gocube_golden.orchestrator_v2.execution_permit import (
 )
 import gocube_golden.orchestrator_v2.execution_permit as execution_permit
 from gocube_golden.orchestrator_v2.run_spec import RunSpecV2
-from gocube_golden.orchestrator_v2.workflow import WorkflowError, WorkflowRunner, WorkflowSpec
+from gocube_golden.orchestrator_v2.workflow import (
+    WorkflowControllerLease,
+    WorkflowError,
+    WorkflowRunner,
+    WorkflowSpec,
+)
 from gocube_golden.orchestrator_v2.production_entrypoint import _continuous_config
 from tools.arena_profiles import get_profile
 
@@ -35,6 +42,19 @@ def test_run_spec_validates_supervision_and_run_owned_search() -> None:
         RunSpecV2.from_dict(
             {"mode": "arena", "arena": {"search": {"historical_whitelist": True}}}
         )
+
+
+def test_workflow_controller_lease_is_durable_and_cleans_up_its_own_token(tmp_path: Path) -> None:
+    root = tmp_path / "workflow"
+    with WorkflowControllerLease(root, "durable-workflow"):
+        record = json.loads(
+            (root / "runtime" / "controller.json").read_text(encoding="utf-8")
+        )
+        assert record["schema"] == "gocube-orchestrator-v2-controller-v1"
+        assert record["workflow_id"] == "durable-workflow"
+        assert record["pid"] == os.getpid()
+        assert record["process_group"] == os.getpgid(os.getpid())
+    assert not (root / "runtime" / "controller.json").exists()
     with pytest.raises(ValueError, match="unsupported"):
         RunSpecV2.from_dict(
             {"mode": "arena", "arena": {"supervision": {"arena": {"typo": 1}}}}

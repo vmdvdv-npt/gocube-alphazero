@@ -685,6 +685,7 @@ def run_arena(
     expected_reference_model_hash: str | None = None,
     expected_reference_artifact_sha256: str | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    activity_callback: Callable[[Mapping[str, object]], None] | None = None,
     workload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run the single production Arena engine with one game-specific profile."""
@@ -1055,6 +1056,8 @@ def run_arena(
             worker_id: set() for worker_id in range(config.workers)
         }
         activity_events = 0
+        move_events = 0
+        last_move_at: float | None = None
         started_games = 0
         completed_games = 0
         lane_replenishments = 0
@@ -1115,6 +1118,8 @@ def run_arena(
             nonlocal active_contexts_current
             nonlocal active_context_last_at
             nonlocal activity_events
+            nonlocal last_move_at
+            nonlocal move_events
             nonlocal first_completed_move_at
             nonlocal first_completed_game_at
             nonlocal lane_replenishments
@@ -1162,6 +1167,9 @@ def run_arena(
                     first_completed_game_at = at
             elif event == "move_completed" and first_completed_move_at is None:
                 first_completed_move_at = at
+            if event == "move_completed":
+                move_events += 1
+                last_move_at = time.time()
             # A long game can legitimately take longer than the supervisor's
             # completed-game timeout at high simulation budgets. Report move
             # activity as progress too, while keeping the scientific
@@ -1169,6 +1177,27 @@ def run_arena(
             _report_progress_from_activity(
                 event, completed_games, config.games, progress_callback
             )
+            if activity_callback is not None:
+                try:
+                    activity_callback(
+                        {
+                            "event": event,
+                            "at": time.time(),
+                            "completed_games": completed_games,
+                            "total_games": config.games,
+                            "started_games": started_games,
+                            "move_events": move_events,
+                            "last_move_at": last_move_at,
+                            "inference_batches": len(batch_rows),
+                            "inference_rows": sum(batch_rows),
+                            "active_contexts": active_contexts_current,
+                        }
+                    )
+                except Exception:
+                    # Runtime observability must never alter scientific Arena
+                    # semantics or turn a successful game into a technical
+                    # failure because a telemetry sink is unavailable.
+                    pass
             active_context_samples.append(active_contexts_current)
             if (
                 steady_state_started_at is not None
@@ -1678,6 +1707,10 @@ def run_arena(
         "peak_contexts_global": peak_active_contexts,
         "number_of_lane_replenishments": lane_replenishments,
         "activity_event_count": activity_events,
+        "started_games": started_games,
+        "completed_games": completed_games,
+        "move_events": move_events,
+        "last_move_at": last_move_at,
         "global_task_replenishment": lane_replenishments > 0,
         "tail_phase": {
             "pending_empty_at_sec": (

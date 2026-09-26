@@ -165,6 +165,11 @@ def test_stale_progress_terminates_even_when_liveness_changes(tmp_path: Path) ->
     assert not result.success
     assert "progress" in (result.reason or "")
     assert not supervisor.active_child_path.exists()
+    events = [
+        json.loads(line)
+        for line in supervisor.attempts_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[-1]["reason"] == "progress heartbeat is missing or stale"
 
 
 def test_stagnant_progress_is_allowed_when_progress_timeout_is_disabled(tmp_path: Path) -> None:
@@ -430,6 +435,33 @@ def test_reattach_works_with_only_opaque_execution_identity(tmp_path: Path) -> N
             process.wait(timeout=5)
         except ChildProcessError:
             pass
+
+
+def test_dead_child_recovery_preserves_next_attempt_and_same_execution(tmp_path: Path) -> None:
+    first = _supervisor(
+        tmp_path,
+        execution_id="recoverable-execution",
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        policy=SupervisorPolicy(max_retries=2, termination_grace_seconds=0.05),
+    )
+    process, active = first._start(1)
+    os.killpg(active.process_group, signal.SIGKILL)
+    process.wait(timeout=5)
+
+    second = _supervisor(
+        tmp_path,
+        execution_id="recoverable-execution",
+        command=None,
+        policy=first.policy,
+    )
+    result = second.reclaim_dead_child()
+
+    assert result.success
+    assert result.attempts == 2
+    assert not second.active_child_path.exists()
+    intent = json.loads(second.execution_intent_path.read_text(encoding="utf-8"))
+    assert intent["execution_id"] == "recoverable-execution"
+    assert intent["attempt"] == 2
 
 
 def test_reconcile_completed_execution_stops_owned_live_child(tmp_path: Path) -> None:

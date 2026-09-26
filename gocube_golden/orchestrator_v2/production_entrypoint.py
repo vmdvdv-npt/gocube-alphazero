@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 import json
 import __main__
 import math
+import os
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 from typing import Any, Mapping
 
@@ -895,6 +898,66 @@ def _workflow_training_result(result: object) -> dict[str, object]:
     }
 
 
+def _workflow_spec_from_payload(payload: Mapping[str, object]) -> WorkflowSpec:
+    raw = payload.get("workflow", payload.get("scenario", payload))
+    if not isinstance(raw, Mapping):
+        raise ValueError("workflow/scenario config must be an object")
+    return WorkflowSpec.from_dict(raw)
+
+
+def _launch_durable_workflow_controller(
+    config_path: Path,
+    *,
+    runs_root: Path,
+) -> dict[str, object]:
+    """Start a detached controller which owns the workflow until completion."""
+    payload = load_v2_config(config_path)
+    spec = _workflow_spec_from_payload(payload)
+    root = runs_root.resolve() / spec.topology / "orchestration" / "workflows" / spec.workflow_id
+    controller_path = root / "runtime" / "controller.json"
+    if controller_path.is_file():
+        try:
+            current = json.loads(controller_path.read_text(encoding="utf-8"))
+            pid = int(current["pid"])
+            process_group = int(current["process_group"])
+            if os.getpgid(pid) == process_group:
+                raise RuntimeError(
+                    f"workflow {spec.workflow_id!r} already has a live controller {pid}"
+                )
+        except (OSError, KeyError, TypeError, ValueError, ProcessLookupError):
+            pass
+    root.mkdir(parents=True, exist_ok=True)
+    log_path = root / "controller.log"
+    command = [
+        sys.executable,
+        "-m",
+        "gocube_golden.orchestrator_v2.production_entrypoint",
+        "workflow",
+        str(config_path.resolve()),
+        "--runs-root",
+        str(runs_root.resolve()),
+        "--controller",
+    ]
+    with log_path.open("ab") as log:
+        process = subprocess.Popen(
+            command,
+            cwd=_repo_root(),
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
+    return {
+        "state": "STARTED",
+        "workflow_id": spec.workflow_id,
+        "controller_pid": int(process.pid),
+        "controller_process_group": int(os.getpgid(process.pid)),
+        "controller_root": str(root),
+        "log": str(log_path),
+    }
+
+
 def run_workflow_from_config(
     payload: Mapping[str, object],
     *,
@@ -1014,6 +1077,8 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("config", type=Path)
         command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
         command.add_argument("--allow-code-rollover", action="store_true", default=None)
+        if name == "workflow":
+            command.add_argument("--controller", action="store_true", help=argparse.SUPPRESS)
         command.set_defaults(kind=name)
     args = parser.parse_args(argv)
     if args.kind == "telegram":
@@ -1037,7 +1102,13 @@ def main(argv: list[str] | None = None) -> int:
     elif args.kind == "performance-tuning":
         result = run_performance_tuning_from_config(payload, runs_root=args.runs_root)
     elif args.kind == "workflow":
-        result = run_workflow_from_config(payload, runs_root=args.runs_root)
+        if getattr(args, "controller", False):
+            result = run_workflow_from_config(payload, runs_root=args.runs_root)
+        else:
+            result = _launch_durable_workflow_controller(
+                args.config,
+                runs_root=args.runs_root,
+            )
     else:
         result = run_komi_calibration_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
     if hasattr(result, "to_dict") and callable(getattr(result, "to_dict")):
