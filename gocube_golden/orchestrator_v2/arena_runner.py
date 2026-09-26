@@ -1,73 +1,58 @@
-"""Topology-neutral public ArenaRunner V2 facade.
-
-The execution/storage implementation remains shared; this facade removes the
-historical Torus scientific default and resolves scientific semantics through
-the common Arena profile registry.
-"""
+"""Topology-neutral public ArenaRunner V2 facade."""
 from __future__ import annotations
 
 from dataclasses import asdict, replace
 
 from . import _arena_runner_core as _core
 from .contracts import EvaluationIdentity
+from .execution_permit import _child_execution_permit
+from .immutable_runtime import execution_commit_from_lineage
+from .operator_messages import format_arena_started
+from .version import require_v2_process
 from tools.arena_profiles import get_profile
 
 ARENA_RESULT_PROVENANCE_SCHEMA = _core.ARENA_RESULT_PROVENANCE_SCHEMA
 ArenaRunRequest = _core.ArenaRunRequest
 ArenaRunResult = _core.ArenaRunResult
 torus9_startset_ref = _core.torus9_startset_ref
-
-# Preserve the historical module-level patch seam used by synthetic tests and
-# callers that redirect cross-lineage evaluation storage.  Production keeps
-# the original function, so the core module is not mutated in normal runs.
 evaluation_dir = _core.evaluation_dir
 
 
 def _common_wld_result(result: ArenaRunResult) -> ArenaRunResult:
-    """Expose profile-neutral candidate/reference/draw counts through legacy W/L/D.
-
-    Torus summaries already publish ``W/L/D``.  The common Arena profile API
-    used by Cube publishes the equivalent canonical counters instead.  Keep the
-    scientific summary untouched on disk and add only an in-memory compatibility
-    view for existing Orchestrator reporting/state code.
-    """
     if "W/L/D" in result.summary:
         return result
     summary = dict(result.summary)
-    candidate_wins = summary.get("candidate_wins")
-    reference_wins = summary.get("reference_wins")
-    draws = summary.get("draws")
-    values = (candidate_wins, reference_wins, draws)
+    values = (summary.get("candidate_wins"), summary.get("reference_wins"), summary.get("draws"))
     if not all(type(value) is int and value >= 0 for value in values):
         return result
-    summary["W/L/D"] = [int(candidate_wins), int(reference_wins), int(draws)]
+    summary["W/L/D"] = [int(values[0]), int(values[1]), int(values[2])]
     return replace(result, summary=summary)
+
+
+def _is_real_telegram(notifier: object | None) -> bool:
+    return notifier is not None and notifier.__class__.__module__ == "gocube_golden.telegram_notifier"
 
 
 class ArenaRunner(_core.ArenaRunner):
     """Run one V2 Arena evaluation with profile-owned scientific semantics."""
 
+    def __init__(self, engine=None, *, notifier: object | None = None) -> None:
+        super().__init__(engine=engine)
+        self.notifier = notifier
+
     @staticmethod
     def _identity(request: ArenaRunRequest) -> EvaluationIdentity:
         profile = get_profile(request.profile)
-        scientific = dict(
-            request.scientific_contract
-            or profile.scientific_contract(request.config)
-        )
+        scientific = dict(request.scientific_contract or profile.scientific_contract(request.config))
         execution = dict(
             request.execution_contract
             or {
                 "engine": "process-central-inference-v1",
                 "workers": int(request.config.workers),
-                "contexts": int(request.config.workers)
-                * int(request.config.games_per_worker),
+                "contexts": int(request.config.workers) * int(request.config.games_per_worker),
                 "inference_batch_cap": int(request.config.inference_batch_rows),
-                "inference_batch_wait_ms": float(
-                    request.config.inference_batch_wait_ms
-                ),
-                "monitoring_acceptance": bool(
-                    request.config.monitoring_acceptance
-                ),
+                "inference_batch_wait_ms": float(request.config.inference_batch_wait_ms),
+                "monitoring_acceptance": bool(request.config.monitoring_acceptance),
                 "config": asdict(request.config),
             }
         )
@@ -86,30 +71,73 @@ class ArenaRunner(_core.ArenaRunner):
             workload=workload,
         )
 
-    def run(self, request: ArenaRunRequest) -> ArenaRunResult:
-        # `_arena_runner_core` is the unchanged Stage-7 execution/storage
-        # implementation. Only propagate a deliberately overridden public
-        # evaluation_dir seam (normally used by tests); production takes the
-        # fast path without touching module globals.
-        if evaluation_dir is _core.evaluation_dir:
-            return _common_wld_result(super().run(request))
-        original = _core.evaluation_dir
-        _core.evaluation_dir = evaluation_dir
+    def _evaluation_id(self, request: ArenaRunRequest) -> str:
+        identity = self._identity(request)
+        fingerprint = _core.evaluation_fingerprint(identity.to_dict())
+        return _core.evaluation_id(
+            candidate_lineage_id=request.candidate.lineage_id,
+            candidate_generation=request.candidate.generation,
+            reference_lineage_id=request.reference.lineage_id,
+            reference_generation=request.reference.generation,
+            fingerprint=fingerprint,
+        )
+
+    def _notify_start(self, request: ArenaRunRequest, evaluation_id: str) -> None:
+        if not _is_real_telegram(self.notifier):
+            return
+        profile = get_profile(request.profile)
+        scientific = dict(request.scientific_contract or {})
+        simulations = getattr(profile, "simulations", scientific.get("simulations"))
+        komi = getattr(profile, "komi", scientific.get("komi"))
+        text = format_arena_started(
+            topology=request.candidate.topology,
+            evaluation_id=evaluation_id,
+            candidate=request.candidate_label or request.candidate.checkpoint_id,
+            reference=request.reference_label or request.reference.checkpoint_id,
+            profile=request.profile,
+            komi=komi,
+            games=int(request.config.games),
+            simulations=simulations,
+            seed=int(request.master_seed),
+            workers=int(request.config.workers),
+            contexts=int(request.config.workers) * int(request.config.games_per_worker),
+            batch_cap=int(request.config.inference_batch_rows),
+            wait_ms=float(request.config.inference_batch_wait_ms),
+        )
         try:
-            return _common_wld_result(super().run(request))
-        finally:
-            _core.evaluation_dir = original
+            getattr(self.notifier, "send_now")(f"arena-start:{evaluation_id}", text)
+        except BaseException:
+            pass
+
+    def run(self, request: ArenaRunRequest) -> ArenaRunResult:
+        def execute() -> ArenaRunResult:
+            if evaluation_dir is _core.evaluation_dir:
+                return _common_wld_result(super(ArenaRunner, self).run(request))
+            original = _core.evaluation_dir
+            _core.evaluation_dir = evaluation_dir
+            try:
+                return _common_wld_result(super(ArenaRunner, self).run(request))
+            finally:
+                _core.evaluation_dir = original
+
+        if self.engine is not _core.production_arena:
+            return execute()
+        require_v2_process("gocube_golden.orchestrator_v2.ArenaRunnerV2")
+        evaluation_id = self._evaluation_id(request)
+        code_identity = request.execution_code_commit or execution_commit_from_lineage(request.candidate.owner_root)
+        self._notify_start(request, evaluation_id)
+        with _child_execution_permit(
+            action_type="arena",
+            topology=request.candidate.topology,
+            run_id=evaluation_id,
+            code_identity=code_identity,
+        ):
+            return execute()
 
 
 ArenaRunnerV2 = ArenaRunner
 
-
 __all__ = [
-    "ARENA_RESULT_PROVENANCE_SCHEMA",
-    "ArenaRunRequest",
-    "ArenaRunResult",
-    "ArenaRunner",
-    "ArenaRunnerV2",
-    "evaluation_dir",
-    "torus9_startset_ref",
+    "ARENA_RESULT_PROVENANCE_SCHEMA", "ArenaRunRequest", "ArenaRunResult", "ArenaRunner",
+    "ArenaRunnerV2", "evaluation_dir", "torus9_startset_ref",
 ]

@@ -34,7 +34,12 @@ def _continuous_payload() -> dict[str, object]:
         },
         "generations": 0,
         "arena_cadence": 5,
-        "arena_config": {"games": 4, "workers": 1, "games_per_worker": 2, "inference_batch_rows": 2},
+        "arena_config": {
+            "games": 4,
+            "workers": 1,
+            "games_per_worker": 2,
+            "inference_batch_rows": 2,
+        },
     }
 
 
@@ -48,7 +53,9 @@ def test_production_entrypoint_rejects_stdin_main(monkeypatch, tmp_path: Path) -
         )
 
 
-def test_production_entrypoint_injects_notifier_and_flushes(monkeypatch, tmp_path: Path) -> None:
+def test_production_entrypoint_injects_notifier_and_flushes(
+    monkeypatch, tmp_path: Path
+) -> None:
     created: list[object] = []
     flushed: list[bool] = []
 
@@ -89,7 +96,9 @@ def test_production_entrypoint_injects_notifier_and_flushes(monkeypatch, tmp_pat
     assert paths.root == tmp_path / "runs" / "torus9" / "active" / "continuous"
 
 
-def test_production_entrypoint_flushes_when_runner_fails(monkeypatch, tmp_path: Path) -> None:
+def test_production_entrypoint_flushes_when_runner_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
     flushed: list[bool] = []
 
     class FakeRunner:
@@ -104,7 +113,9 @@ def test_production_entrypoint_flushes_when_runner_fails(monkeypatch, tmp_path: 
     monkeypatch.setattr(entrypoint, "flush_all", lambda: flushed.append(True))
 
     try:
-        entrypoint.run_continuous_from_config(_continuous_payload(), runs_root=tmp_path / "runs")
+        entrypoint.run_continuous_from_config(
+            _continuous_payload(), runs_root=tmp_path / "runs"
+        )
     except RuntimeError as exc:
         assert str(exc) == "training failure"
     else:
@@ -149,14 +160,18 @@ def test_production_experiment_entrypoint_wires_arena_runner(
     captured: list[object] = []
 
     class FakeRunner:
-        def __init__(self, _config, *, arena_runner, resolver, notifier, **_kwargs) -> None:
+        def __init__(
+            self, _config, *, arena_runner, resolver, notifier, **_kwargs
+        ) -> None:
             captured.extend((arena_runner, resolver, notifier))
 
         def run(self):
             return "done"
 
     monkeypatch.setattr(entrypoint, "_experiment_config", lambda _payload: config)
-    monkeypatch.setattr(entrypoint, "ArenaRunnerV2", lambda: arena_runner)
+    monkeypatch.setattr(
+        entrypoint, "ArenaRunnerV2", lambda **_kwargs: arena_runner
+    )
     monkeypatch.setattr(entrypoint, "TelegramNotifier", lambda _paths: object())
     monkeypatch.setattr(entrypoint, "ExperimentRunnerV2", FakeRunner)
     monkeypatch.setattr(entrypoint, "flush_all", lambda: None)

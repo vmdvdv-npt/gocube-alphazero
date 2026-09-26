@@ -1,18 +1,14 @@
-"""Single source of truth for the production orchestrator version.
+"""Single source of truth and production authorization facade for Orchestrator V2.
 
-The legacy V1 modules remain importable for bounded compatibility tests and
-historical artifact tooling, but their executable production entrypoints are
-disabled.  New production work must enter through the V2 production boundary.
+``AZ_ORCHESTRATOR_VERSION=V2`` remains a diagnostic compatibility marker only.
+It is deliberately insufficient to authorize Arena or training execution.
 """
-
 from __future__ import annotations
 
 import os
 
-
-ORCHESTRATOR_VERSION = "V2"
-ORCHESTRATOR_ENTRYPOINT = "gocube_golden.orchestrator_v2.production_entrypoint"
-ORCHESTRATOR_VERSION_ENV = "AZ_ORCHESTRATOR_VERSION"
+from .execution_permit import require_orchestrator_execution
+from .version_constants import ORCHESTRATOR_ENTRYPOINT, ORCHESTRATOR_VERSION, ORCHESTRATOR_VERSION_ENV
 
 LEGACY_V1_DISABLED_MESSAGE = (
     "Legacy Orchestrator V1 production entrypoint is disabled. "
@@ -21,24 +17,16 @@ LEGACY_V1_DISABLED_MESSAGE = (
 
 
 def mark_v2_process() -> None:
-    """Mark the current production process as an Orchestrator V2 process."""
-
+    """Set the legacy diagnostic marker without granting production authority."""
     os.environ[ORCHESTRATOR_VERSION_ENV] = ORCHESTRATOR_VERSION
 
 
 def require_v2_process(entrypoint: str) -> None:
-    """Reject production work invoked outside the V2 process boundary."""
-
-    if os.environ.get(ORCHESTRATOR_VERSION_ENV) != ORCHESTRATOR_VERSION:
-        raise RuntimeError(
-            f"{entrypoint}: production Arena execution requires "
-            f"{ORCHESTRATOR_ENTRYPOINT} (Orchestrator {ORCHESTRATOR_VERSION})."
-        )
+    """Reject production work invoked without a V2 authority/child permit."""
+    require_orchestrator_execution(entrypoint)
 
 
 def reject_legacy_v1_entrypoint(entrypoint: str) -> None:
-    """Fail closed when an executable legacy V1 entrypoint is invoked."""
-
     raise SystemExit(f"{entrypoint}: {LEGACY_V1_DISABLED_MESSAGE}")
 
 

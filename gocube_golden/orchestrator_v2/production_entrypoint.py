@@ -1,4 +1,4 @@
-"""Explicit production wiring for Orchestrator V2."""
+"""Single declarative production boundary for Orchestrator V2."""
 from __future__ import annotations
 
 import argparse
@@ -10,19 +10,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
 
-from ..run_storage import ACTIVE, RUNS_ROOT
-from ..telegram_notifier import TelegramError, TelegramNotifier, flush_all, telegram_test
-from .artifact_resolver import ArtifactResolver
-from .arena_runner import ArenaRunnerV2
-from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
-from .komi_calibration import KomiCalibrationConfig
-from .komi_calibration_production import ProductionKomiCalibrationRunnerV2
-from .experiment_plan import ExperimentConfig
-from .experiment_runner import ExperimentRunnerV2
-from .version import mark_v2_process
-from tools.arena_engine import ArenaExecutionConfig, DEFAULT_MASTER_SEED
 from ..process_supervision import atomic_write_text
 from ..provenance import canonical_json
+from ..run_storage import ACTIVE, RUNS_ROOT
+from ..telegram_notifier import TelegramError, TelegramNotifier, flush_all, telegram_test
+from .arena_runner import ArenaRunRequest, ArenaRunnerV2
+from .artifact_resolver import ArtifactResolver
+from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
+from .contracts import StartsetRef
+from .execution_permit import _production_authority
+from .experiment_plan import ExperimentConfig
+from .experiment_runner import ExperimentRunnerV2
+from .immutable_runtime import execution_commit_from_lineage, resolve_execution_commit
+from .komi_calibration import KomiCalibrationConfig
+from .komi_calibration_production import ProductionKomiCalibrationRunnerV2
+from .operator_messages import format_action_started
+from .run_spec import RunMode, RunSpecV2
+from .topology_binding import get_topology_binding
+from .version import mark_v2_process
+from tools.arena_engine import ArenaExecutionConfig, DEFAULT_MASTER_SEED
 
 
 def load_v2_config(path: str | Path) -> dict[str, object]:
@@ -51,27 +57,35 @@ def _require_file_backed_entrypoint() -> None:
     if not isinstance(main_file, str) or main_file in {"", "-", "<stdin>"}:
         raise RuntimeError(
             "Orchestrator V2 production runs require a file-backed entrypoint; "
-            "invoke production_entrypoint.py (or python -m "
-            "gocube_golden.orchestrator_v2.production_entrypoint), not stdin/c."
+            "invoke python -m gocube_golden.orchestrator_v2.production_entrypoint."
         )
     if not Path(main_file).is_file():
-        raise RuntimeError(
-            "Orchestrator V2 production entrypoint is not an importable file: "
-            f"{main_file!r}"
-        )
+        raise RuntimeError(f"Orchestrator V2 production entrypoint is not an importable file: {main_file!r}")
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _entrypoint_code_identity() -> str:
+    return resolve_execution_commit(_repo_root(), "HEAD")
+
+
+def _authority(*, mode: str, topology: str, run_id: str):
+    mark_v2_process()
+    return _production_authority(
+        mode=mode,
+        topology=topology,
+        run_id=run_id,
+        code_identity=_entrypoint_code_identity(),
+    )
 
 
 def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfig:
     raw = payload.get("continuous", payload)
     if not isinstance(raw, Mapping):
         raise ValueError("continuous config must be an object")
-    required = (
-        "parent_checkpoint",
-        "lineage_id",
-        "effective_config",
-        "arena_cadence",
-        "arena_config",
-    )
+    required = ("parent_checkpoint", "lineage_id", "effective_config", "arena_cadence", "arena_config")
     missing = [key for key in required if key not in raw]
     if missing:
         raise ValueError(f"continuous config is missing: {', '.join(missing)}")
@@ -79,24 +93,16 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
         parent_checkpoint=raw["parent_checkpoint"],  # type: ignore[arg-type]
         lineage_id=str(raw["lineage_id"]),
         effective_config=raw["effective_config"],  # type: ignore[arg-type]
-        generations=(
-            None if raw.get("generations") is None else int(raw["generations"])
-        ),
+        generations=None if raw.get("generations") is None else int(raw["generations"]),
         arena_cadence=int(raw["arena_cadence"]),
         arena_config=raw["arena_config"],  # type: ignore[arg-type]
         arena_master_seed=int(raw.get("arena_master_seed", DEFAULT_MASTER_SEED)),
         arena_startset=raw.get("arena_startset"),  # type: ignore[arg-type]
-        arena_profile=(
-            None if raw.get("arena_profile") is None else str(raw["arena_profile"])
-        ),
+        arena_profile=None if raw.get("arena_profile") is None else str(raw["arena_profile"]),
         arena_scientific_contract=raw.get("arena_scientific_contract"),  # type: ignore[arg-type]
         arena_execution_contract=raw.get("arena_execution_contract"),  # type: ignore[arg-type]
         arena_workload=dict(raw.get("arena_workload", {})),  # type: ignore[arg-type]
-        arena_reference_gap=(
-            None
-            if raw.get("arena_reference_gap") is None
-            else int(raw["arena_reference_gap"])
-        ),
+        arena_reference_gap=None if raw.get("arena_reference_gap") is None else int(raw["arena_reference_gap"]),
         allow_code_rollover=raw.get("allow_code_rollover", False),  # type: ignore[arg-type]
         self_play_concurrency_sweep=raw.get("self_play_concurrency_sweep"),  # type: ignore[arg-type]
     )
@@ -114,7 +120,6 @@ def _komi_calibration_config(payload: Mapping[str, object]) -> KomiCalibrationCo
 
 
 def _request_parent_soft_stop(parent: object) -> None:
-    """Request a safe boundary stop after the pinned parent is committed."""
     owner_root = Path(getattr(parent, "owner_root")).resolve()
     control = owner_root / "control" / "soft-stop.json"
     payload = {
@@ -126,15 +131,120 @@ def _request_parent_soft_stop(parent: object) -> None:
     atomic_write_text(control, canonical_json(payload) + "\n")
 
 
-def run_komi_calibration_from_config(
-    payload: Mapping[str, object],
-    *,
-    runs_root: str | Path | None = None,
-    allow_code_rollover: bool | None = None,
-    **runner_kwargs: Any,
-) -> object:
+def _arena_config(value: object) -> ArenaExecutionConfig:
+    if isinstance(value, ArenaExecutionConfig):
+        return value
+    if not isinstance(value, Mapping):
+        raise ValueError("arena_config must be an object")
+    return ArenaExecutionConfig(**dict(value))
+
+
+def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResolver) -> ArenaRunRequest:
+    candidate_raw = raw.get("candidate_checkpoint", raw.get("candidate"))
+    reference_raw = raw.get("reference_checkpoint", raw.get("reference"))
+    if candidate_raw is None or reference_raw is None:
+        raise ValueError("Arena run-spec requires candidate_checkpoint and reference_checkpoint")
+    candidate = resolver.checkpoint(candidate_raw)  # type: ignore[arg-type]
+    reference = resolver.checkpoint(reference_raw)  # type: ignore[arg-type]
+    if candidate.topology != reference.topology:
+        raise ValueError("Arena candidate/reference topologies differ")
+    binding = get_topology_binding(candidate.topology)
+    config = _arena_config(raw.get("arena_config", raw.get("config", {})))
+    seed = int(raw.get("master_seed", DEFAULT_MASTER_SEED))
+    profile = str(raw.get("profile") or binding.default_arena_profile(candidate.effective_config.config))
+    binding.validate_arena_profile(profile, candidate.effective_config.config)
+    startset_raw = raw.get("startset")
+    startset = (
+        binding.arena_startset(master_seed=seed, games=int(config.games))
+        if startset_raw is None
+        else StartsetRef.from_dict(startset_raw)  # type: ignore[arg-type]
+    )
+    return ArenaRunRequest(
+        candidate=candidate,
+        reference=reference,
+        master_seed=seed,
+        startset=startset,
+        config=config,
+        profile=profile,
+        workload=dict(raw.get("workload", {})),  # type: ignore[arg-type]
+        scientific_contract=raw.get("scientific_contract"),  # type: ignore[arg-type]
+        execution_contract=raw.get("execution_contract"),  # type: ignore[arg-type]
+        candidate_label=None if raw.get("candidate_label") is None else str(raw["candidate_label"]),
+        reference_label=None if raw.get("reference_label") is None else str(raw["reference_label"]),
+        comparison=None if raw.get("comparison") is None else str(raw["comparison"]),
+        execution_code_commit=execution_commit_from_lineage(candidate.owner_root),
+    )
+
+
+def run_arena_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, arena_runner: object | None = None) -> object:
     _require_file_backed_entrypoint()
-    mark_v2_process()
+    raw = payload.get("arena", payload.get("evaluation", payload))
+    if not isinstance(raw, Mapping):
+        raise ValueError("arena/evaluation config must be an object")
+    resolver = ArtifactResolver(runs_root)
+    request = _standalone_arena_request(raw, resolver)
+    runner = arena_runner or ArenaRunnerV2()
+    evaluation_id = runner._evaluation_id(request) if isinstance(runner, ArenaRunnerV2) else str(raw.get("evaluation_id", "evaluation"))
+    root = resolver.runs_root / request.candidate.topology / "evaluations" / evaluation_id
+    notifier = TelegramNotifier(_notification_paths(root))
+    if hasattr(runner, "notifier"):
+        setattr(runner, "notifier", notifier)
+    try:
+        with _authority(mode="arena", topology=request.candidate.topology, run_id=evaluation_id):
+            return runner.run(request)  # type: ignore[attr-defined]
+    finally:
+        flush_all()
+
+
+def run_calibration_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, arena_runner: object | None = None) -> list[object]:
+    _require_file_backed_entrypoint()
+    raw = payload.get("calibration", payload)
+    if not isinstance(raw, Mapping):
+        raise ValueError("calibration config must be an object")
+    arms = raw.get("arms")
+    if not isinstance(arms, list) or not arms:
+        raise ValueError("calibration run-spec requires a non-empty arms list")
+    calibration_id = str(raw.get("calibration_id", "calibration"))
+    results: list[object] = []
+    for index, arm in enumerate(arms):
+        if not isinstance(arm, Mapping):
+            raise ValueError("each calibration arm must be an object")
+        merged = dict(raw)
+        merged.pop("arms", None)
+        merged.update(arm)
+        merged.setdefault("comparison", f"{calibration_id}:arm:{index}")
+        resolver = ArtifactResolver(runs_root)
+        request = _standalone_arena_request(merged, resolver)
+        runner = arena_runner or ArenaRunnerV2()
+        evaluation_id = runner._evaluation_id(request) if isinstance(runner, ArenaRunnerV2) else f"{calibration_id}-arm-{index}"
+        root = resolver.runs_root / request.candidate.topology / "evaluations" / evaluation_id
+        notifier = TelegramNotifier(_notification_paths(root))
+        if hasattr(runner, "notifier"):
+            setattr(runner, "notifier", notifier)
+        try:
+            try:
+                notifier.send_now(
+                    f"calibration-arm:{evaluation_id}",
+                    format_action_started(
+                        "CALIBRATION ARM STARTED",
+                        calibration=calibration_id,
+                        arm=arm.get("id", index),
+                        topology=request.candidate.topology,
+                        profile=request.profile,
+                        games=request.config.games,
+                    ),
+                )
+            except BaseException:
+                pass
+            with _authority(mode="calibration", topology=request.candidate.topology, run_id=evaluation_id):
+                results.append(runner.run(request))  # type: ignore[attr-defined]
+        finally:
+            flush_all()
+    return results
+
+
+def run_komi_calibration_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, allow_code_rollover: bool | None = None, **runner_kwargs: Any) -> object:
+    _require_file_backed_entrypoint()
     config = _komi_calibration_config(payload)
     if allow_code_rollover is not None:
         if type(allow_code_rollover) is not bool:
@@ -142,36 +252,19 @@ def run_komi_calibration_from_config(
         config = replace(config, allow_code_rollover=allow_code_rollover)
     resolver = runner_kwargs.pop("resolver", None) or ArtifactResolver(runs_root)
     experiment_root = runner_kwargs.get("experiment_root")
-    root = (
-        Path(experiment_root).resolve()
-        if experiment_root is not None
-        else resolver.runs_root / "torus9" / "evaluations" / config.calibration_id
-    )
+    root = Path(experiment_root).resolve() if experiment_root is not None else resolver.runs_root / "torus9" / "evaluations" / config.calibration_id
     notifier = TelegramNotifier(_notification_paths(root))
-    arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2()
+    arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2(notifier=notifier)
     child_training = runner_kwargs.pop("child_training", None)
     calibration_config = config
     if child_training is None:
-        def child_training(
-            *,
-            parent,
-            config,
-            output_lineage,
-            first_generation,
-        ):
+        def child_training(*, parent, config, output_lineage, first_generation):
             del first_generation
-            production_arena = calibration_config.production_arena_config
-            if production_arena is None:
-                production_arena = ArenaExecutionConfig()
-            selected = float(
-                config.config.arena.get(
-                    "komi",
-                    config.config.self_play.get("komi", 0.5),
-                )
-            )
+            production_arena = calibration_config.production_arena_config or ArenaExecutionConfig()
+            selected = float(config.config.arena.get("komi", config.config.self_play.get("komi", 0.5)))
             profile = calibration_config.production_arena_profile
-            if profile == "torus9" and selected != 0.5:
-                profile = f"torus9-komi-calibration|{selected:g}"
+            if profile == "torus9":
+                profile = f"torus9|komi={selected:g}|simulations={config.config.arena.get('simulations', config.config.arena.get('mcts_simulations', 64))}"
             continuous = ContinuousTrainingConfig(
                 parent_checkpoint=parent.ref,
                 lineage_id=output_lineage.lineage_id,
@@ -184,39 +277,27 @@ def run_komi_calibration_from_config(
                 arena_workload={"model_gating": "off", "komi": selected},
                 allow_code_rollover=calibration_config.allow_code_rollover,
             )
-            result = ContinuousTrainingRunnerV2(
-                continuous,
-                resolver=resolver,
-                arena_runner=arena_runner,
-                notifier=notifier,
-            ).run()
-            return result.final_checkpoint
+            return ContinuousTrainingRunnerV2(continuous, resolver=resolver, arena_runner=arena_runner, notifier=notifier).run().final_checkpoint
     stop_parent = runner_kwargs.pop("stop_parent", None) or _request_parent_soft_stop
     try:
-        runner = ProductionKomiCalibrationRunnerV2(
-            config,
-            arena_runner=arena_runner,
-            resolver=resolver,
-            experiment_root=root,
-            child_training=child_training,
-            stop_parent=stop_parent,
-            notifier=notifier,
-            **runner_kwargs,
-        )
-        return runner.run()
+        with _authority(mode="komi-calibration", topology="torus9", run_id=config.calibration_id):
+            runner = ProductionKomiCalibrationRunnerV2(
+                config,
+                arena_runner=arena_runner,
+                resolver=resolver,
+                experiment_root=root,
+                child_training=child_training,
+                stop_parent=stop_parent,
+                notifier=notifier,
+                **runner_kwargs,
+            )
+            return runner.run()
     finally:
         flush_all()
 
 
-def run_continuous_from_config(
-    payload: Mapping[str, object],
-    *,
-    runs_root: str | Path | None = None,
-    allow_code_rollover: bool | None = None,
-    **runner_kwargs: Any,
-) -> object:
+def run_continuous_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, allow_code_rollover: bool | None = None, **runner_kwargs: Any) -> object:
     _require_file_backed_entrypoint()
-    mark_v2_process()
     config = _continuous_config(payload)
     if allow_code_rollover is not None:
         if type(allow_code_rollover) is not bool:
@@ -226,26 +307,15 @@ def run_continuous_from_config(
     root = resolver.runs_root / config.topology / ACTIVE / config.lineage_id
     notifier = TelegramNotifier(_notification_paths(root))
     try:
-        runner = ContinuousTrainingRunnerV2(
-            config,
-            resolver=resolver,
-            notifier=notifier,
-            **runner_kwargs,
-        )
-        return runner.run()
+        with _authority(mode="continuous", topology=config.topology, run_id=config.lineage_id):
+            runner = ContinuousTrainingRunnerV2(config, resolver=resolver, notifier=notifier, **runner_kwargs)
+            return runner.run()
     finally:
         flush_all()
 
 
-def run_experiment_from_config(
-    payload: Mapping[str, object],
-    *,
-    runs_root: str | Path | None = None,
-    allow_code_rollover: bool | None = None,
-    **runner_kwargs: Any,
-) -> object:
+def run_experiment_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, allow_code_rollover: bool | None = None, **runner_kwargs: Any) -> object:
     _require_file_backed_entrypoint()
-    mark_v2_process()
     config = _experiment_config(payload)
     if allow_code_rollover is not None:
         if type(allow_code_rollover) is not bool:
@@ -253,46 +323,45 @@ def run_experiment_from_config(
         config = replace(config, allow_code_rollover=allow_code_rollover)
     resolver = runner_kwargs.pop("resolver", None) or ArtifactResolver(runs_root)
     experiment_root = runner_kwargs.get("experiment_root")
-    root = (
-        Path(experiment_root).resolve()
-        if experiment_root is not None
-        else resolver.runs_root
-        / config.topology
-        / "experiments"
-        / config.experiment_id
-    )
+    root = Path(experiment_root).resolve() if experiment_root is not None else resolver.runs_root / config.topology / "experiments" / config.experiment_id
     notifier = TelegramNotifier(_notification_paths(root))
-    arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2()
+    arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2(notifier=notifier)
     try:
-        runner = ExperimentRunnerV2(
-            config,
-            arena_runner=arena_runner,
-            resolver=resolver,
-            notifier=notifier,
-            **runner_kwargs,
-        )
-        return runner.run()
+        with _authority(mode="experiment", topology=config.topology, run_id=config.experiment_id):
+            runner = ExperimentRunnerV2(config, arena_runner=arena_runner, resolver=resolver, notifier=notifier, **runner_kwargs)
+            return runner.run()
     finally:
         flush_all()
+
+
+def run_spec(payload: Mapping[str, object], *, runs_root: str | Path | None = None, **runner_kwargs: Any) -> object:
+    spec = RunSpecV2.from_dict(payload)
+    wrapped = {spec.mode.value: dict(spec.payload)}
+    if spec.mode is RunMode.CONTINUOUS:
+        return run_continuous_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
+    if spec.mode in {RunMode.ARENA, RunMode.EVALUATION}:
+        return run_arena_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
+    if spec.mode is RunMode.EXPERIMENT:
+        return run_experiment_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
+    if spec.mode is RunMode.CALIBRATION:
+        return run_calibration_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
+    raise AssertionError(spec.mode)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    telegram = subparsers.add_parser(
-        "telegram-test", help="send one explicit transport test"
-    )
+    telegram = subparsers.add_parser("telegram-test", help="send one explicit transport test")
     telegram.set_defaults(kind="telegram")
+    command = subparsers.add_parser("run", help="run one declarative Orchestrator V2 run-spec")
+    command.add_argument("config", type=Path)
+    command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
+    command.set_defaults(kind="run")
     for name in ("continuous", "experiment", "komi-calibration"):
-        command = subparsers.add_parser(name, help=f"run a V2 {name} JSON plan")
+        command = subparsers.add_parser(name, help=f"legacy-compatible V2 {name} JSON plan")
         command.add_argument("config", type=Path)
         command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
-        command.add_argument(
-            "--allow-code-rollover",
-            action="store_true",
-            default=None,
-            help="explicitly allow a clean application-code rollover when resuming",
-        )
+        command.add_argument("--allow-code-rollover", action="store_true", default=None)
         command.set_defaults(kind=name)
     args = parser.parse_args(argv)
     if args.kind == "telegram":
@@ -302,26 +371,15 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"Telegram test failed: {exc}") from None
         print("Telegram test message sent.")
         return 0
-
     payload = load_v2_config(args.config)
-    if args.kind == "continuous":
-        run_continuous_from_config(
-            payload,
-            runs_root=args.runs_root,
-            allow_code_rollover=args.allow_code_rollover,
-        )
+    if args.kind == "run":
+        run_spec(payload, runs_root=args.runs_root)
+    elif args.kind == "continuous":
+        run_continuous_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
     elif args.kind == "experiment":
-        run_experiment_from_config(
-            payload,
-            runs_root=args.runs_root,
-            allow_code_rollover=args.allow_code_rollover,
-        )
+        run_experiment_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
     else:
-        run_komi_calibration_from_config(
-            payload,
-            runs_root=args.runs_root,
-            allow_code_rollover=args.allow_code_rollover,
-        )
+        run_komi_calibration_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
     return 0
 
 
@@ -330,8 +388,6 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "load_v2_config",
-    "run_continuous_from_config",
-    "run_experiment_from_config",
-    "run_komi_calibration_from_config",
+    "load_v2_config", "run_arena_from_config", "run_calibration_from_config", "run_continuous_from_config",
+    "run_experiment_from_config", "run_komi_calibration_from_config", "run_spec",
 ]
