@@ -27,12 +27,16 @@ class DeliveryPolicy:
     max_message_chars: int = DEFAULT_MESSAGE_BUDGET
     sender_lock_timeout_seconds: float = 0.0
     max_attempts: int = 20
+    at_most_once_event_types: frozenset[str] = frozenset({"ARENA_STARTED"})
 
     def delay(self, attempts: int, retry_after: float | None = None) -> float:
         if retry_after is not None:
             return min(self.max_delay_seconds, max(0.0, float(retry_after)))
         exponent = max(0, int(attempts) - 1)
         return min(self.max_delay_seconds, self.base_delay_seconds * (2 ** min(exponent, 16)))
+
+    def is_at_most_once(self, event_type: str) -> bool:
+        return str(event_type) in self.at_most_once_event_types
 
 
 def _now_seconds() -> float:
@@ -266,7 +270,10 @@ class NotificationDispatcher:
         self.logger = logging.getLogger(__name__)
         self.structured = True
         _dispatchers.add(self)
-        if self.background and self.enabled and any(state.status != "BLOCKED_CONFIGURATION" for _event, state in self.store.pending_events()):
+        if self.background and self.enabled and any(
+            state.status not in {"BLOCKED_CONFIGURATION", "DELIVERY_UNCERTAIN"}
+            for _event, state in self.store.pending_events()
+        ):
             self._ensure_worker()
 
     def publish(self, event: OperatorEvent) -> OperatorEvent:
@@ -353,11 +360,25 @@ class NotificationDispatcher:
                 raise failure[0]
             receipt = result.get("receipt", {"ok": True})
         except TelegramTransportError as exc:
-            if exc.retryable and attempts < self.policy.max_attempts:
+            if (
+                exc.retryable
+                and attempts < self.policy.max_attempts
+                and not self.policy.is_at_most_once(event.event_type)
+            ):
                 next_at = self._now() + self.policy.delay(attempts, exc.retry_after)
                 next_state = DeliveryState(event_id=event.event_id, status="RETRY_WAIT", attempts=attempts, next_attempt_at=datetime.fromtimestamp(next_at, timezone.utc).isoformat(), last_error_code=exc.code, last_attempt_at=attempted.last_attempt_at)
             else:
-                next_state = DeliveryState(event_id=event.event_id, status="BLOCKED_CONFIGURATION", attempts=attempts, last_error_code=exc.code, last_attempt_at=attempted.last_attempt_at)
+                next_state = DeliveryState(
+                    event_id=event.event_id,
+                    status=(
+                        "DELIVERY_UNCERTAIN"
+                        if self.policy.is_at_most_once(event.event_type) and exc.retryable
+                        else "BLOCKED_CONFIGURATION"
+                    ),
+                    attempts=attempts,
+                    last_error_code=exc.code,
+                    last_attempt_at=attempted.last_attempt_at,
+                )
             try:
                 self.store.write_delivery(next_state)
             except OSError:
@@ -365,8 +386,41 @@ class NotificationDispatcher:
         except Exception as exc:
             next_at = self._now() + self.policy.delay(attempts)
             try:
-                status = "RETRY_WAIT" if attempts < self.policy.max_attempts else "BLOCKED_CONFIGURATION"
-                self.store.write_delivery(DeliveryState(event_id=event.event_id, status=status, attempts=attempts, next_attempt_at=None if status != "RETRY_WAIT" else datetime.fromtimestamp(next_at, timezone.utc).isoformat(), last_error_code=exc.__class__.__name__ if attempts < self.policy.max_attempts else "RETRY_EXHAUSTED", last_attempt_at=attempted.last_attempt_at))
+                retryable = (
+                    attempts < self.policy.max_attempts
+                    and not self.policy.is_at_most_once(event.event_type)
+                )
+                status = (
+                    "RETRY_WAIT"
+                    if retryable
+                    else (
+                        "DELIVERY_UNCERTAIN"
+                        if self.policy.is_at_most_once(event.event_type)
+                        else "BLOCKED_CONFIGURATION"
+                    )
+                )
+                self.store.write_delivery(
+                    DeliveryState(
+                        event_id=event.event_id,
+                        status=status,
+                        attempts=attempts,
+                        next_attempt_at=(
+                            None
+                            if status != "RETRY_WAIT"
+                            else datetime.fromtimestamp(next_at, timezone.utc).isoformat()
+                        ),
+                        last_error_code=(
+                            exc.__class__.__name__
+                            if retryable
+                            else (
+                                "DELIVERY_UNCERTAIN"
+                                if self.policy.is_at_most_once(event.event_type)
+                                else "RETRY_EXHAUSTED"
+                            )
+                        ),
+                        last_attempt_at=attempted.last_attempt_at,
+                    )
+                )
             except OSError:
                 self.store._diagnose({"kind": "delivery_state_unwritten", "event_id": event.event_id, "error_code": exc.__class__.__name__, "at": self._utc_clock()})
         else:
@@ -374,7 +428,24 @@ class NotificationDispatcher:
                 self.store.write_delivery(DeliveryState(event_id=event.event_id, status="DELIVERED", attempts=attempts, last_attempt_at=attempted.last_attempt_at, delivered_at=self._utc_clock(), receipt=_safe_receipt(receipt)))
             except OSError:
                 # Telegram may have accepted the message.  Keeping the state
-                # pending is intentional and gives at-least-once recovery.
+                # pending is intentional for retryable result notifications.
+                # Lifecycle starts are at-most-once because Telegram has no
+                # idempotency key and an ambiguous response could duplicate
+                # the operator-visible message.
+                if self.policy.is_at_most_once(event.event_type):
+                    try:
+                        self.store.write_delivery(
+                            DeliveryState(
+                                event_id=event.event_id,
+                                status="DELIVERY_UNCERTAIN",
+                                attempts=attempts,
+                                last_error_code="RECEIPT_PERSIST_FAILED",
+                                last_attempt_at=attempted.last_attempt_at,
+                                receipt=_safe_receipt(receipt),
+                            )
+                        )
+                    except OSError:
+                        pass
                 self.store._diagnose({"kind": "receipt_persist_failed", "event_id": event.event_id, "at": self._utc_clock()})
 
     def _drain(self, deadline: float) -> None:
@@ -385,7 +456,7 @@ class NotificationDispatcher:
             for event, state in list(self.store.pending_events()):
                 if self._now() >= deadline:
                     return
-                if state.status == "BLOCKED_CONFIGURATION" or not self._due(state):
+                if state.status in {"BLOCKED_CONFIGURATION", "DELIVERY_UNCERTAIN"} or not self._due(state):
                     continue
                 self._attempt(event, state, deadline)
 
@@ -394,7 +465,10 @@ class NotificationDispatcher:
             self._drain(self._now() + 0.5)
             self._wake.wait(timeout=0.5)
             self._wake.clear()
-            if not any(state.status != "BLOCKED_CONFIGURATION" for _event, state in self.store.pending_events()):
+            if not any(
+                state.status not in {"BLOCKED_CONFIGURATION", "DELIVERY_UNCERTAIN"}
+                for _event, state in self.store.pending_events()
+            ):
                 return
 
     def flush(self, timeout: float = 7.0) -> None:

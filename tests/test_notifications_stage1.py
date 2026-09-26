@@ -130,6 +130,51 @@ def test_retry_wait_survives_restart_and_does_not_create_second_event(tmp_path: 
     assert len(list(store.iter_events())) == 1
 
 
+def test_arena_started_ambiguous_delivery_is_not_retried(tmp_path: Path):
+    store = NotificationStore(tmp_path)
+    event = OperatorEvent.create(
+        "ARENA_STARTED",
+        topology="torus9",
+        owner_type="evaluation",
+        owner_id="evaluation-start",
+        action_id="evaluation-start",
+        payload={
+            "evaluation_id": "evaluation-start",
+            "candidate": "M137 5CH",
+            "reference": "M137 5CH",
+            "games": 1024,
+        },
+        producer_version="test",
+        execution_code_commit="commit-a",
+        identity={"evaluation_identity": "sha256:" + "c" * 64, "phase": "started"},
+    )
+    transport = FakeTransport(failures=1)
+    dispatcher = NotificationDispatcher(
+        store,
+        transport=transport,
+        background=False,
+        policy=DeliveryPolicy(base_delay_seconds=0),
+    )
+
+    stored = dispatcher.publish(event)
+    dispatcher.flush(1)
+
+    state = store.read_delivery(stored.event_id)
+    assert transport.calls == 1
+    assert state is not None
+    assert state.status == "DELIVERY_UNCERTAIN"
+    assert state.attempts == 1
+
+    resumed = NotificationDispatcher(
+        store,
+        transport=FakeTransport(),
+        background=False,
+        policy=DeliveryPolicy(base_delay_seconds=0),
+    )
+    resumed.flush(1)
+    assert resumed.store.read_delivery(stored.event_id).status == "DELIVERY_UNCERTAIN"
+
+
 def test_flush_budget_leaves_slow_transport_pending(tmp_path: Path):
     store = NotificationStore(tmp_path)
     transport = FakeTransport(block=True)
@@ -176,8 +221,15 @@ def test_arena_reclamation_keeps_new_notification_root(tmp_path: Path):
     (output / "notifications" / "events" / "event.json").write_text("{}", encoding="utf-8")
     (output / "notifications" / "delivery").mkdir()
     (output / "notifications" / "delivery" / "state.json").write_text("{}", encoding="utf-8")
+    (output / "runtime").mkdir()
+    (output / "runtime" / "execution-intent.json").write_text("{}", encoding="utf-8")
+    (output / "runtime" / "incident-evidence-20260926.json").write_text("{}", encoding="utf-8")
+    (output / "runtime" / "unrelated.json").write_text("{}", encoding="utf-8")
     CoreArenaRunner._clear_incomplete_evaluation(output)
     assert (output / "notifications" / "events" / "event.json").is_file()
+    assert (output / "runtime" / "execution-intent.json").is_file()
+    assert (output / "runtime" / "incident-evidence-20260926.json").is_file()
+    assert not (output / "runtime" / "unrelated.json").exists()
     assert (output / "notifications" / "delivery" / "state.json").is_file()
 
 
