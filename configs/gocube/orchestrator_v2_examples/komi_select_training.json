@@ -1,0 +1,47 @@
+{
+  "schema": "gocube-orchestrator-v2-run-spec-v1",
+  "mode": "workflow",
+  "workflow": {
+    "workflow_id": "komi-select-training-placeholder",
+    "topology": "torus9",
+    "steps": [
+      {
+        "step_id": "training",
+        "action": "continuous_training",
+        "dependencies": ["selection"],
+        "config": {
+          "parent_checkpoint": "PLACEHOLDER_PARENT_CHECKPOINT_REF",
+          "lineage_id": "PLACEHOLDER_LINEAGE",
+          "effective_config": {"$ref": "selection.outputs.selected_effective_config"},
+          "komi": {"$ref": "selection.outputs.selected"},
+          "generations": 10,
+          "arena_cadence": 2,
+          "arena_config": "PLACEHOLDER_ARENA_EXECUTION_CONFIG"
+        }
+      },
+      {
+        "step_id": "selection",
+        "action": "select",
+        "dependencies": ["calibration"],
+        "config": {
+          "source": {"$ref": "calibration.outputs"},
+          "score": "metrics.bias",
+          "value": "komi",
+          "direction": "minimize"
+        }
+      },
+      {
+        "step_id": "calibration",
+        "action": "calibration",
+        "config": {
+          "calibration_id": "PLACEHOLDER_CALIBRATION_ID",
+          "arms": [
+            {"id": "komi-1.5", "komi": 1.5, "candidate_checkpoint": "PLACEHOLDER_M137"},
+            {"id": "komi-2.5", "komi": 2.5, "candidate_checkpoint": "PLACEHOLDER_M137"}
+          ],
+          "reference_checkpoint": "PLACEHOLDER_M137"
+        }
+      }
+    ]
+  }
+}

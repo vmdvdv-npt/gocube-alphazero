@@ -1,0 +1,32 @@
+{
+  "schema": "gocube-orchestrator-v2-run-spec-v1",
+  "mode": "workflow",
+  "workflow": {
+    "workflow_id": "continuous-training-placeholder",
+    "topology": "torus9",
+    "steps": [
+      {
+        "step_id": "continuous",
+        "action": "continuous_training",
+        "config": {
+          "parent_checkpoint": "PLACEHOLDER_PARENT_CHECKPOINT_REF",
+          "lineage_id": "PLACEHOLDER_LINEAGE",
+          "effective_config": "PLACEHOLDER_EFFECTIVE_CONFIG",
+          "generations": 10,
+          "arena_cadence": 2,
+          "arena_config": {
+            "games": 64,
+            "workers": 16,
+            "games_per_worker": 4,
+            "inference_batch_rows": 64,
+            "inference_batch_wait_ms": 4.0,
+            "device": "cuda",
+            "strict_production": true,
+            "monitoring_acceptance": true,
+            "strict_performance": false
+          }
+        }
+      }
+    ]
+  }
+}

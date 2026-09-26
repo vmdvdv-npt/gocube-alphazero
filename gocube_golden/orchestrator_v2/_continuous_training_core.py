@@ -656,7 +656,9 @@ class ContinuousTrainingRunnerV2:
                         execution_mode=execution_mode,
                     ),
                 )
-            except BaseException as exc:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
                 if self._handle_sweep_failure(
                     state,
                     generation=next_generation,
@@ -1507,7 +1509,9 @@ class ContinuousTrainingRunnerV2:
         )
         try:
             result = self.arena_runner.run(request)
-        except BaseException as exc:
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
             self._notify_operator(
                 "CRITICAL",
                 f"Arena execution failed for M{current.generation}: {exc.__class__.__name__}.",
@@ -1728,7 +1732,7 @@ class ContinuousTrainingRunnerV2:
                 f"continuous:{self.config.lineage_id}:{key_suffix}",
                 f"{event} — {message}",
             )
-        except BaseException:
+        except Exception:
             # Telegram is fail-open observability; it cannot affect training.
             self.logger.warning("operator notification failed", exc_info=True)
 

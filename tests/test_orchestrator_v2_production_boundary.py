@@ -133,6 +133,10 @@ def test_topology_binding_supports_torus_and_cube_profiles_without_golden_whitel
             strict_production=True,
         )
     )
+    independent_profile = get_profile(
+        "cube-v2|size=4|simulations=256|cpuct=2.0|fpu=-0.25|watchdog=777"
+    )
+    assert cube_binding.validate_arena_profile(independent_profile.profile_id, cube) == independent_profile.profile_id
 
 
 def test_universal_run_spec_covers_all_production_modes() -> None:

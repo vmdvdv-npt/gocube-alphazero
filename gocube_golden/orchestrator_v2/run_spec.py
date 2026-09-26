@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import Mapping
 
 RUN_SPEC_SCHEMA = "gocube-orchestrator-v2-run-spec-v1"
@@ -43,6 +44,29 @@ def _validate_search_payload(value: object, label: str = "search") -> None:
             f"{label} contains unsupported fields: "
             + ", ".join(sorted(map(str, unknown)))
         )
+    fixed = {
+        "root_noise": False,
+        "temperature": 0.0,
+        "fast_search": False,
+        "resign": False,
+        "deterministic_tie_break": True,
+    }
+    for key, expected in fixed.items():
+        if key not in value:
+            continue
+        actual = value[key]
+        if key == "temperature":
+            try:
+                valid = math.isfinite(float(actual)) and float(actual) == 0.0
+            except (TypeError, ValueError):
+                valid = False
+        else:
+            valid = type(actual) is bool and actual is expected
+        if not valid:
+            raise ValueError(
+                f"{label}.{key} is not supported by the Arena engine; "
+                f"the only supported value is {expected!r}"
+            )
 
 
 def _validate_arena_config_payload(value: object, label: str = "arena_config") -> None:
@@ -59,6 +83,7 @@ def _validate_arena_config_payload(value: object, label: str = "arena_config") -
         "inference_batch_cap",
         "inference_wait",
         "inference_wait_ms",
+        "contexts",
         "device",
         "strict_production",
         "monitoring_acceptance",
@@ -67,19 +92,51 @@ def _validate_arena_config_payload(value: object, label: str = "arena_config") -
         "early_gate_enabled",
         "early_gate_min_forwards",
         "early_gate_min_wall_sec",
+        "strict_performance",
     }
     unknown = set(value) - execution - {
         "simulations", "mcts_simulations", "cpuct", "fpu", "watchdog",
         "technical_move_limit", "komi", "root_noise", "temperature",
-        "fast_search", "resign", "deterministic_tie_break", "search",
+        "fast_search", "resign", "deterministic_tie_break", "search", "evaluation",
     }
     if unknown:
         raise ValueError(
             f"{label} contains unsupported fields: "
             + ", ".join(sorted(map(str, unknown)))
         )
+    aliases = {
+        "inference_batch_cap": "inference_batch_rows",
+        "inference_wait": "inference_batch_wait_ms",
+        "inference_wait_ms": "inference_batch_wait_ms",
+        "contexts": "games_per_worker",
+        "mcts_simulations": "simulations",
+        "technical_move_limit": "watchdog",
+    }
+    for source, target in aliases.items():
+        if source in value and target in value:
+            raise ValueError(f"{label} specifies both {source} and {target}")
     if "search" in value:
         _validate_search_payload(value["search"], f"{label}.search")
+    if "search" in value and "evaluation" in value:
+        raise ValueError(f"{label} specifies both search and evaluation")
+    top_level_search = {
+        key: value[key]
+        for key in value
+        if key in {
+            "simulations", "mcts_simulations", "cpuct", "fpu", "watchdog",
+            "technical_move_limit", "komi", "root_noise", "temperature",
+            "fast_search", "resign", "deterministic_tie_break",
+        }
+    }
+    _validate_search_payload(top_level_search, f"{label}.search")
+    nested = value.get("search", value.get("evaluation"))
+    if nested is not None:
+        if not isinstance(nested, Mapping):
+            raise ValueError(f"{label}.search must be an object")
+        for key in nested:
+            if key in value and key not in {"search", "evaluation"}:
+                raise ValueError(f"{label}.search field {key!r} conflicts with its top-level value")
+        _validate_search_payload(nested, f"{label}.search")
 
 
 def _validate_supervision_payload(value: object, label: str = "supervision") -> None:

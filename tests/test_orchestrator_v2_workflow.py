@@ -12,7 +12,8 @@ from gocube_golden.orchestrator_v2.execution_permit import (
 )
 import gocube_golden.orchestrator_v2.execution_permit as execution_permit
 from gocube_golden.orchestrator_v2.run_spec import RunSpecV2
-from gocube_golden.orchestrator_v2.workflow import WorkflowRunner, WorkflowSpec
+from gocube_golden.orchestrator_v2.workflow import WorkflowError, WorkflowRunner, WorkflowSpec
+from gocube_golden.orchestrator_v2.production_entrypoint import _continuous_config
 from tools.arena_profiles import get_profile
 
 
@@ -37,6 +38,10 @@ def test_run_spec_validates_supervision_and_run_owned_search() -> None:
     with pytest.raises(ValueError, match="unsupported"):
         RunSpecV2.from_dict(
             {"mode": "arena", "arena": {"supervision": {"arena": {"typo": 1}}}}
+        )
+    with pytest.raises(ValueError, match="only supported value"):
+        RunSpecV2.from_dict(
+            {"mode": "arena", "arena": {"search": {"temperature": 1.0}}}
         )
 
 
@@ -110,7 +115,9 @@ def test_workflow_commits_selection_and_does_not_repeat_completed_steps(tmp_path
                     "step_id": "training",
                     "action": "continuous_training",
                     "dependencies": ["selection"],
-                    "config": {"komi": {"$ref": "selection.outputs.selected"}},
+                    "config": {
+                        "komi": {"$ref": "selection.outputs.selected"},
+                    },
                 },
             ],
         }
@@ -139,3 +146,196 @@ def test_workflow_commits_selection_and_does_not_repeat_completed_steps(tmp_path
     ).run()
     assert second["state"] == "COMPLETED"
     assert calls == [1.5]
+
+
+def test_workflow_runs_ready_graph_until_complete_and_resolves_list_indexes(tmp_path: Path) -> None:
+    spec = WorkflowSpec.from_dict(
+        {
+            "workflow_id": "unordered-list-refs",
+            "topology": "torus9",
+            "steps": [
+                {
+                    "step_id": "training",
+                    "action": "continuous_training",
+                    "dependencies": ["selection"],
+                    "config": {
+                        "komi": {"$ref": "selection.outputs.selected"},
+                        "selected_result": {"$ref": "calibration.outputs.1"},
+                    },
+                },
+                {
+                    "step_id": "selection",
+                    "action": "select",
+                    "dependencies": ["calibration"],
+                    "config": {
+                        "source": {"$ref": "calibration.outputs"},
+                        "score": "metrics.bias",
+                        "value": "komi",
+                    },
+                },
+                {
+                    "step_id": "calibration",
+                    "action": "calibration",
+                    "config": {},
+                },
+            ],
+        }
+    )
+    seen: list[object] = []
+    result = WorkflowRunner(
+        spec,
+        root=tmp_path / "unordered",
+        handlers={
+            "calibration": lambda **_: [
+                {"komi": 1.5, "validity": "VALID", "metrics": {"bias": 0.2}},
+                {"komi": 2.5, "validity": "VALID", "metrics": {"bias": 0.1}},
+            ],
+            "continuous_training": lambda *, config, **_: seen.append(config) or {"done": True},
+        },
+    ).run()
+
+    assert result["state"] == "COMPLETED"
+    assert seen == [
+        {
+            "komi": 2.5,
+            "selected_result": {
+                "komi": 2.5,
+                "validity": "VALID",
+                "metrics": {"bias": 0.1},
+            },
+        }
+    ]
+
+
+def test_workflow_stop_is_durable_and_blocks_later_steps(tmp_path: Path) -> None:
+    spec = WorkflowSpec.from_dict(
+        {
+            "workflow_id": "explicit-stop",
+            "topology": "torus9",
+            "steps": [
+                {"step_id": "stop", "action": "stop", "config": {"reason": "operator"}},
+                {"step_id": "later", "action": "calibration", "config": {}},
+            ],
+        }
+    )
+    calls: list[int] = []
+    first = WorkflowRunner(
+        spec,
+        root=tmp_path / "stop",
+        handlers={"calibration": lambda **_: calls.append(1)},
+    ).run()
+    second = WorkflowRunner(
+        spec,
+        root=tmp_path / "stop",
+        handlers={"calibration": lambda **_: calls.append(2)},
+    ).run()
+
+    assert first["state"] == "STOPPED"
+    assert second["state"] == "STOPPED"
+    assert calls == []
+    assert first["steps"]["later"]["status"] == "PENDING"
+
+
+def test_workflow_durable_supervisor_stop_is_not_retried_or_continued(tmp_path: Path) -> None:
+    spec = WorkflowSpec.from_dict(
+        {
+            "workflow_id": "supervisor-stop",
+            "topology": "torus9",
+            "steps": [
+                {
+                    "step_id": "arena",
+                    "action": "arena",
+                    "failure_policy": {
+                        "on_technical_failure": "retry",
+                        "max_retries": 3,
+                    },
+                    "config": {},
+                },
+                {"step_id": "later", "action": "calibration", "dependencies": ["arena"]},
+            ],
+        }
+    )
+    attempts: list[int] = []
+
+    def stopped(**_kwargs):
+        attempts.append(1)
+        raise RuntimeError("Arena has a durable supervisor stop: supervisor-stop.json")
+
+    result = WorkflowRunner(
+        spec,
+        root=tmp_path / "supervisor-stop",
+        handlers={"arena": stopped, "calibration": lambda **_: pytest.fail("must not continue")},
+    ).run()
+
+    assert result["state"] == "STOPPED"
+    assert result["steps"]["arena"]["attempts"] == 1
+    assert result["steps"]["later"]["status"] == "PENDING"
+    assert attempts == [1]
+
+
+def test_workflow_rejects_invalid_calibration_result_for_selection(tmp_path: Path) -> None:
+    spec = WorkflowSpec.from_dict(
+        {
+            "workflow_id": "invalid-selection",
+            "topology": "torus9",
+            "steps": [
+                {"step_id": "calibration", "action": "calibration", "config": {}},
+                {
+                    "step_id": "selection",
+                    "action": "select",
+                    "dependencies": ["calibration"],
+                    "config": {
+                        "source": {"$ref": "calibration.outputs"},
+                        "score": "metrics.bias",
+                        "value": "komi",
+                    },
+                },
+            ],
+        }
+    )
+    with pytest.raises(WorkflowError, match="validity"):
+        WorkflowRunner(
+            spec,
+            root=tmp_path / "invalid",
+            handlers={
+                "calibration": lambda **_: [
+                    {"komi": 1.5, "validity": "INVALID", "metrics": {"bias": 0.0}}
+                ]
+            },
+        ).run()
+
+
+def test_selected_komi_is_applied_to_real_effective_config() -> None:
+    config = _continuous_config(
+        {
+            "parent_checkpoint": {
+                "topology": "torus9",
+                "lineage_id": "parent",
+                "checkpoint_id": "M0",
+                "generation": 0,
+                "path": "checkpoints/M0.pt",
+                "sha256": "sha256:" + "1" * 64,
+            },
+            "lineage_id": "selected",
+            "effective_config": {
+                "topology": "torus9",
+                "compatibility": {"topology": "torus9", "rules": {"komi": 0.5}},
+                "self_play": {"komi": 0.5},
+                "arena": {"komi": 0.5},
+            },
+            "komi": 2.5,
+            "generations": 0,
+            "arena_cadence": 1,
+            "arena_config": {
+                "games": 2,
+                "workers": 1,
+                "games_per_worker": 1,
+                "inference_batch_rows": 1,
+                "device": "cpu",
+                "strict_production": False,
+            },
+        }
+    )
+    assert config.effective_config.self_play["komi"] == 2.5
+    assert config.effective_config.arena["komi"] == 2.5
+    assert config.effective_config.compatibility["rules"]["komi"] == 2.5

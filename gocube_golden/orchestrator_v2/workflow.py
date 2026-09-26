@@ -1,19 +1,20 @@
-"""Small durable DAG coordinator for Orchestrator V2.
+"""Durable, sequential DAG composition for Orchestrator V2.
 
-The workflow layer composes existing actions.  It deliberately does not know
-how Arena, calibration, experiments, or training work; action handlers own
-those domains and retain their existing durable state machines.  This module
-only persists step state, resolves simple output references, and implements a
-small deterministic selection step.
+This module owns only workflow order, dependencies, JSON state and references
+between action results. Arena, calibration, experiment and training remain
+owned by their existing action runners.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, is_dataclass, asdict
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
-import json
+import fcntl
 import inspect
+import json
+import math
 from pathlib import Path
 import re
 
@@ -27,8 +28,13 @@ WORKFLOW_ACTIONS = frozenset(
     {"arena", "calibration", "continuous_training", "experiment", "select", "stop"}
 )
 WORKFLOW_STATUSES = frozenset({"PENDING", "RUNNING", "COMPLETED", "FAILED", "SKIPPED"})
+WORKFLOW_STATES = frozenset({"RUNNING", "COMPLETED", "FAILED", "STOPPED"})
 _COMPONENT_RE = re.compile(r"^[^/\\]+$")
 _REF_RE = re.compile(r"^\$\{([^}]+)\}$")
+
+
+class WorkflowError(RuntimeError):
+    """A workflow cannot safely continue from its durable state."""
 
 
 def _component(value: object, label: str) -> str:
@@ -42,6 +48,127 @@ def _mapping(value: object, label: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{label} must be an object")
     return value
+
+
+def _validate_fixed_search_options(value: Mapping[str, object], label: str) -> None:
+    """Reject Arena options which the engine cannot vary."""
+    fixed: dict[str, object] = {
+        "root_noise": False,
+        "temperature": 0.0,
+        "fast_search": False,
+        "resign": False,
+        "deterministic_tie_break": True,
+    }
+    for key, expected in fixed.items():
+        if key not in value:
+            continue
+        actual = value[key]
+        if key == "temperature":
+            try:
+                valid = math.isfinite(float(actual)) and float(actual) == 0.0
+            except (TypeError, ValueError):
+                valid = False
+        else:
+            valid = type(actual) is bool and actual is expected
+        if not valid:
+            raise ValueError(
+                f"{label}.{key} is not supported by the Arena engine; "
+                f"the only supported value is {expected!r}"
+            )
+
+
+def _preflight_action_config(action: str, config: Mapping[str, object]) -> None:
+    """Validate cheap shared action fields before any action starts."""
+    if action not in {"arena", "calibration", "continuous_training", "experiment"}:
+        return
+    raw_arena = config.get("arena_config", config.get("config"))
+    if raw_arena is None:
+        return
+    # The checked-in examples deliberately use placeholder strings for
+    # artifact/config values.  Defer those shapes until reference
+    # substitution; the concrete entrypoint will validate them before any
+    # expensive action starts.
+    if isinstance(raw_arena, str) and raw_arena.startswith("PLACEHOLDER"):
+        return
+    raw_arena = _mapping(raw_arena, "workflow arena config")
+    allowed = {
+        "games", "workers", "games_per_worker", "inference_batch_rows",
+        "inference_batch_wait_ms", "inference_batch_cap", "inference_wait",
+        "inference_wait_ms", "contexts", "device", "strict_production",
+        "strict_performance", "monitoring_acceptance", "min_mean_inference_batch_rows",
+        "min_effective_cpu_cores", "early_gate_enabled", "early_gate_min_forwards",
+        "early_gate_min_wall_sec", "simulations", "mcts_simulations", "cpuct",
+        "fpu", "watchdog", "technical_move_limit", "komi", "root_noise",
+        "temperature", "fast_search", "resign", "deterministic_tie_break",
+        "search", "evaluation",
+    }
+    unknown = set(raw_arena) - allowed
+    if unknown:
+        raise ValueError(
+            "workflow arena config contains unsupported fields: "
+            + ", ".join(sorted(map(str, unknown)))
+        )
+    aliases = {
+        "inference_batch_cap": "inference_batch_rows",
+        "inference_wait": "inference_batch_wait_ms",
+        "inference_wait_ms": "inference_batch_wait_ms",
+        "contexts": "games_per_worker",
+        "mcts_simulations": "simulations",
+        "technical_move_limit": "watchdog",
+    }
+    for source, target in aliases.items():
+        if source in raw_arena and target in raw_arena:
+            raise ValueError(f"workflow arena config specifies both {source} and {target}")
+    if "search" in raw_arena and "evaluation" in raw_arena:
+        raise ValueError("workflow arena config specifies both search and evaluation")
+    nested = raw_arena.get("search", raw_arena.get("evaluation"))
+    if nested is not None:
+        nested_mapping = _mapping(nested, "workflow arena search")
+        search_allowed = {
+            "simulations", "mcts_simulations", "cpuct", "fpu", "watchdog",
+            "technical_move_limit", "komi", "root_noise", "temperature",
+            "fast_search", "resign", "deterministic_tie_break",
+        }
+        unknown = set(nested_mapping) - search_allowed
+        if unknown:
+            raise ValueError(
+                "workflow Arena search contains unsupported fields: "
+                + ", ".join(sorted(map(str, unknown)))
+            )
+        for key in nested_mapping:
+            if key in raw_arena and key not in {"search", "evaluation"}:
+                raise ValueError(
+                    f"workflow Arena search field {key!r} conflicts with its top-level value"
+                )
+        _validate_fixed_search_options(nested_mapping, "workflow Arena search")
+    _validate_fixed_search_options(raw_arena, "workflow Arena config")
+
+
+def _references(value: object) -> list[str]:
+    found: list[str] = []
+    if isinstance(value, Mapping):
+        if set(value) == {"$ref"} and isinstance(value.get("$ref"), str):
+            found.append(str(value["$ref"]))
+        else:
+            for item in value.values():
+                found.extend(_references(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.extend(_references(item))
+    elif isinstance(value, str):
+        match = _REF_RE.fullmatch(value)
+        if match:
+            found.append(match.group(1))
+    return found
+
+
+def _ref_step(reference: str) -> str:
+    parts = reference.split(".")
+    if parts and parts[0] == "steps":
+        parts = parts[1:]
+    if len(parts) < 2 or parts[1] != "outputs":
+        raise ValueError("workflow references must use step_id.outputs[.field]")
+    return parts[0]
 
 
 @dataclass(frozen=True)
@@ -60,6 +187,7 @@ class WorkflowStep:
         object.__setattr__(self, "action", action)
         if not isinstance(self.config, Mapping):
             raise ValueError("workflow step config must be an object")
+        _preflight_action_config(action, self.config)
         dependencies = tuple(_component(item, "workflow dependency") for item in self.dependencies)
         if len(set(dependencies)) != len(dependencies):
             raise ValueError(f"workflow step {self.step_id} has duplicate dependencies")
@@ -82,7 +210,10 @@ class WorkflowStep:
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "WorkflowStep":
         raw = _mapping(value, "workflow step")
-        allowed = {"step_id", "id", "action", "type", "config", "dependencies", "depends_on", "failure_policy", "policy"}
+        allowed = {
+            "step_id", "id", "action", "type", "config", "dependencies", "depends_on",
+            "failure_policy", "policy",
+        }
         unknown = set(raw) - allowed
         if unknown:
             raise ValueError(
@@ -135,12 +266,41 @@ class WorkflowSpec:
         for step in self.steps:
             missing = set(step.dependencies) - known
             if missing:
-                raise ValueError(f"workflow step {step.step_id} depends on unknown steps: {sorted(missing)}")
-        # Kahn's algorithm gives a compact fail-fast cycle check.
+                raise ValueError(
+                    f"workflow step {step.step_id} depends on unknown steps: {sorted(missing)}"
+                )
+        # A reference is also a dependency. Requiring it in the graph makes
+        # dynamic values validate before an action starts and prevents a step
+        # from accidentally consuming a stale result from an unrelated branch.
+        ancestors: dict[str, set[str]] = {step.step_id: set(step.dependencies) for step in self.steps}
+        changed = True
+        while changed:
+            changed = False
+            for step_id, deps in ancestors.items():
+                expanded = set(deps)
+                for dependency in deps:
+                    expanded.update(ancestors[dependency])
+                if expanded != deps:
+                    ancestors[step_id] = expanded
+                    changed = True
+        for step in self.steps:
+            for reference in _references(step.config):
+                source = _ref_step(reference)
+                if source not in known:
+                    raise ValueError(
+                        f"workflow step {step.step_id} references unknown step {source!r}"
+                    )
+                if source == step.step_id or source not in ancestors[step.step_id]:
+                    raise ValueError(
+                        f"workflow step {step.step_id} references {source!r} without declaring it as a dependency"
+                    )
         remaining = {step.step_id: set(step.dependencies) for step in self.steps}
         resolved: set[str] = set()
         while True:
-            ready = {key for key, deps in remaining.items() if key not in resolved and deps <= resolved}
+            ready = {
+                key for key, deps in remaining.items()
+                if key not in resolved and deps <= resolved
+            }
             if not ready:
                 break
             resolved.update(ready)
@@ -186,6 +346,8 @@ class WorkflowSpec:
 
 def _jsonable(value: object) -> object:
     if value is None or isinstance(value, (str, int, float, bool)):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise WorkflowError("workflow action output contains a non-finite number")
         return value
     if isinstance(value, Path):
         return str(value)
@@ -209,15 +371,14 @@ def _path_value(value: object, path: str) -> object:
             if part not in current:
                 raise WorkflowError(f"workflow output reference is missing field {part!r}")
             current = current[part]
-        elif isinstance(current, list) and part.isdigit():
-            current = current[int(part)]
+        elif isinstance(current, (list, tuple)) and part.isdigit():
+            index = int(part)
+            if index >= len(current):
+                raise WorkflowError(f"workflow output reference index {index} is out of range")
+            current = current[index]
         else:
             raise WorkflowError(f"workflow output reference cannot descend through {part!r}")
     return current
-
-
-class WorkflowError(RuntimeError):
-    pass
 
 
 class WorkflowRunner:
@@ -235,6 +396,25 @@ class WorkflowRunner:
         self.handlers = dict(handlers or {})
         self.spec_path = self.root / "spec.json"
         self.state_path = self.root / "state.json"
+        self.lock_path = self.root / "workflow.lock"
+
+    @contextmanager
+    def _exclusive_lock(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        handle = self.lock_path.open("a+", encoding="utf-8")
+        try:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise WorkflowError(
+                    f"workflow {self.spec.workflow_id!r} is already managed by another coordinator"
+                ) from exc
+            yield
+        finally:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
 
     def _initial_state(self) -> dict[str, object]:
         now = _now()
@@ -246,6 +426,7 @@ class WorkflowRunner:
             "state": "RUNNING",
             "created_at": now,
             "updated_at": now,
+            "events": [],
             "steps": {
                 step.step_id: {
                     "step_id": step.step_id,
@@ -261,7 +442,6 @@ class WorkflowRunner:
 
     def _load_or_create(self) -> dict[str, object]:
         if not self.state_path.is_file():
-            self.root.mkdir(parents=True, exist_ok=True)
             atomic_write_json(self.spec_path, self.spec.to_dict())
             state = self._initial_state()
             self._persist(state)
@@ -274,12 +454,13 @@ class WorkflowRunner:
             raise WorkflowError("workflow state schema mismatch")
         if state.get("spec_fingerprint") != self.spec.fingerprint:
             raise WorkflowError("workflow spec changed after durable execution started")
+        if state.get("workflow_id") != self.spec.workflow_id or state.get("topology") != self.spec.topology:
+            raise WorkflowError("workflow state identity does not match the supplied spec")
+        if state.get("state") not in WORKFLOW_STATES:
+            raise WorkflowError("workflow state has an invalid workflow status")
         steps = state.get("steps")
         if not isinstance(steps, Mapping):
             raise WorkflowError("workflow state steps are malformed")
-        # A process can die between RUNNING publication and the action's own
-        # commit.  The existing action handler receives resume=True and is
-        # responsible for reattaching to its SupervisorV2 identity.
         for step in self.spec.steps:
             record = steps.get(step.step_id)
             if not isinstance(record, Mapping):
@@ -315,9 +496,7 @@ class WorkflowRunner:
         if parts and parts[0] == "steps":
             parts = parts[1:]
         if len(parts) < 2 or parts[1] != "outputs":
-            raise WorkflowError(
-                "workflow references must use step_id.outputs[.field]"
-            )
+            raise WorkflowError("workflow references must use step_id.outputs[.field]")
         step_id = parts[0]
         if step_id not in outputs:
             raise WorkflowError(f"workflow output reference names incomplete step {step_id!r}")
@@ -335,9 +514,8 @@ class WorkflowRunner:
         if direction not in {"minimize", "maximize"}:
             raise WorkflowError("select direction must be minimize or maximize")
         if isinstance(source, Mapping):
-            items = list(source.items())
-            candidates = [(key, item) for key, item in items]
-        elif isinstance(source, list):
+            candidates = list(source.items())
+        elif isinstance(source, (list, tuple)):
             candidates = list(enumerate(source))
         else:
             raise WorkflowError("select source must resolve to an object or list")
@@ -345,127 +523,271 @@ class WorkflowRunner:
             raise WorkflowError("select source is empty")
         scored: list[tuple[float, str, object, object]] = []
         for key, item in candidates:
+            if isinstance(item, Mapping):
+                validity = item.get("validity")
+                if validity is not None and str(validity).upper() != "VALID":
+                    raise WorkflowError(
+                        f"select cannot use candidate {key!r}: result validity is {validity!r}"
+                    )
+                if item.get("valid") is False:
+                    raise WorkflowError(f"select cannot use candidate {key!r}: result is invalid")
             raw_score = item if isinstance(item, (int, float)) else _path_value(item, score_path)
             try:
                 score = float(raw_score)
             except (TypeError, ValueError) as exc:
                 raise WorkflowError(f"select score is not numeric for {key!r}") from exc
+            if not math.isfinite(score):
+                raise WorkflowError(f"select score is not finite for {key!r}")
             selected_value = key if value_path is None else _path_value(item, str(value_path))
             scored.append((score, str(key), selected_value, item))
-        scored.sort(key=lambda row: (row[0], row[1]), reverse=direction == "maximize")
+        scored.sort(key=lambda row: ((-row[0] if direction == "maximize" else row[0]), row[1]))
         score, key, selected, item = scored[0]
-        return {
+        result: dict[str, object] = {
             "selected": _jsonable(selected),
+            "selected_value": _jsonable(selected),
             "selected_key": key,
             "selected_score": score,
             "selected_item": _jsonable(item),
             "rule": f"{direction}:{score_path}",
         }
+        if isinstance(item, Mapping) and "effective_config" in item:
+            result["selected_effective_config"] = _jsonable(item["effective_config"])
+        return result
 
     def _ready(self, step: WorkflowStep, state: Mapping[str, object]) -> bool:
         steps = state["steps"]
         assert isinstance(steps, Mapping)
-        return all(str(steps[dependency].get("status")) in {"COMPLETED", "SKIPPED"} for dependency in step.dependencies)  # type: ignore[union-attr]
+        return all(
+            str(steps[dependency].get("status")) == "COMPLETED"  # type: ignore[union-attr]
+            for dependency in step.dependencies
+        )
+
+    def _blocked_dependencies(self, step: WorkflowStep, state: Mapping[str, object]) -> tuple[str, ...]:
+        steps = state["steps"]
+        assert isinstance(steps, Mapping)
+        return tuple(
+            dependency
+            for dependency in step.dependencies
+            if str(steps[dependency].get("status")) in {"FAILED", "SKIPPED"}  # type: ignore[union-attr]
+        )
 
     def _all_outputs(self, state: Mapping[str, object]) -> dict[str, object]:
         steps = state["steps"]
         assert isinstance(steps, Mapping)
         return {
-            str(step_id): dict(record.get("outputs", {}))
+            str(step_id): record["outputs"]
             for step_id, record in steps.items()
-            if isinstance(record, Mapping) and isinstance(record.get("outputs", {}), Mapping)
+            if isinstance(record, Mapping) and "outputs" in record
         }
 
+    @staticmethod
+    def _retryable(exc: Exception) -> bool:
+        if isinstance(exc, WorkflowError):
+            return False
+        return not isinstance(exc, (ValueError, TypeError, KeyError, FileNotFoundError))
+
+    @staticmethod
+    def _is_durable_stop(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "supervisor-stop.json" in text or "durable supervisor stop" in text
+
     def run(self) -> Mapping[str, object]:
-        state = self._load_or_create()
-        steps_state = state["steps"]
-        assert isinstance(steps_state, dict)
-        for step in self.spec.steps:
-            record = steps_state[step.step_id]
-            assert isinstance(record, dict)
-            if record.get("status") == "COMPLETED" or record.get("status") == "SKIPPED":
-                continue
-            if record.get("status") == "FAILED":
-                raise WorkflowError(f"workflow step {step.step_id} is durably failed")
-            if not self._ready(step, state):
-                continue
-            outputs = self._all_outputs(state)
-            resolved_config = self._resolve(step.config, outputs)
-            if not isinstance(resolved_config, Mapping):
-                raise WorkflowError(f"workflow step {step.step_id} config must resolve to an object")
-            record["status"] = "RUNNING"
-            record["attempts"] = int(record.get("attempts", 0)) + 1
-            started_at = _now()
-            record["started_at"] = started_at
-            timestamps = record.setdefault("timestamps", {})
-            if isinstance(timestamps, dict):
-                timestamps["started_at"] = started_at
-            self._persist(state)
-            try:
-                if step.action == "select":
-                    result = self._select(resolved_config, outputs)
-                elif step.action == "stop":
-                    result = {"stopped": True, "reason": resolved_config.get("reason", "workflow stop")}
-                else:
-                    handler = self.handlers.get(step.action)
-                    if handler is None:
-                        raise WorkflowError(f"no handler registered for workflow action {step.action!r}")
-                    parameters = inspect.signature(handler).parameters
-                    accepts_keywords = (
-                        "config" in parameters
-                        or any(item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values())
-                    )
-                    if accepts_keywords:
-                        result = handler(
-                            config=dict(resolved_config),
-                            step=step,
-                            state=state,
-                            resume=record["attempts"] > 1,
+        with self._exclusive_lock():
+            state = self._load_or_create()
+            if state.get("state") in {"STOPPED", "COMPLETED"}:
+                return state
+            if state.get("state") == "FAILED":
+                raise WorkflowError(str(state.get("failure", "workflow is durably failed")))
+            state["state"] = "RUNNING"
+
+            while True:
+                steps_state = state["steps"]
+                assert isinstance(steps_state, dict)
+                progressed = False
+                for step in self.spec.steps:
+                    record = steps_state[step.step_id]
+                    assert isinstance(record, dict)
+                    status = str(record.get("status"))
+                    if status in {"COMPLETED", "SKIPPED"}:
+                        continue
+                    if status == "FAILED":
+                        state["state"] = "FAILED"
+                        state["failure"] = f"workflow step {step.step_id} is durably failed"
+                        self._persist(state)
+                        raise WorkflowError(str(state["failure"]))
+                    blocked = self._blocked_dependencies(step, state)
+                    if blocked:
+                        record["status"] = "SKIPPED"
+                        record["skip_reason"] = (
+                            "dependency did not produce a usable result: " + ", ".join(blocked)
                         )
-                    else:
-                        # Small injected handlers in tests and integrations may
-                        # use the simpler ``handler(config)`` form.
-                        result = handler(dict(resolved_config))
-                record["outputs"] = _jsonable(result)
-                record["status"] = "COMPLETED"
-                completed_at = _now()
-                record["completed_at"] = completed_at
-                timestamps = record.setdefault("timestamps", {})
-                if isinstance(timestamps, dict):
-                    timestamps["completed_at"] = completed_at
-                record.pop("error", None)
-                self._persist(state)
-            except BaseException as exc:
-                record["error"] = {"type": type(exc).__name__, "message": str(exc)}
-                error_at = _now()
-                timestamps = record.setdefault("timestamps", {})
-                if isinstance(timestamps, dict):
-                    timestamps["error_at"] = error_at
-                behavior = str(step.failure_policy.get("on_technical_failure", "stop"))
-                max_retries = int(step.failure_policy.get("max_retries", 0))
-                if behavior == "retry" and int(record["attempts"]) <= max_retries:
-                    record["status"] = "PENDING"
-                elif behavior == "continue":
-                    record["status"] = "SKIPPED"
-                else:
-                    record["status"] = "FAILED"
-                    state["state"] = "FAILED"
+                        self._persist(state)
+                        progressed = True
+                        continue
+                    if not self._ready(step, state):
+                        continue
+
+                    outputs = self._all_outputs(state)
+                    resolved_config = self._resolve(step.config, outputs)
+                    if not isinstance(resolved_config, Mapping):
+                        raise WorkflowError(
+                            f"workflow step {step.step_id} config must resolve to an object"
+                        )
+                    record["status"] = "RUNNING"
+                    record["attempts"] = int(record.get("attempts", 0)) + 1
+                    record["resolved_config"] = _jsonable(resolved_config)
+                    started_at = _now()
+                    record["started_at"] = started_at
+                    timestamps = record.setdefault("timestamps", {})
+                    if isinstance(timestamps, dict):
+                        timestamps["started_at"] = started_at
+                    events = state.setdefault("events", [])
+                    if isinstance(events, list):
+                        events.append(
+                            {
+                                "at": started_at,
+                                "step_id": step.step_id,
+                                "action": step.action,
+                                "attempt": record["attempts"],
+                                "status": "RUNNING",
+                                "config": _jsonable(resolved_config),
+                            }
+                        )
                     self._persist(state)
-                    raise WorkflowError(f"workflow step {step.step_id} failed: {exc}") from exc
-                self._persist(state)
-                if record["status"] == "PENDING":
-                    return self.run()
-        incomplete = [
-            step.step_id
-            for step in self.spec.steps
-            if str(steps_state[step.step_id].get("status")) not in {"COMPLETED", "SKIPPED"}
-        ]
-        if incomplete:
-            raise WorkflowError(f"workflow has unresolved steps: {', '.join(incomplete)}")
-        state["state"] = "COMPLETED"
-        state["completed_at"] = state.get("completed_at", _now())
-        self._persist(state)
-        return state
+                    try:
+                        if step.action == "select":
+                            result = self._select(resolved_config, outputs)
+                        elif step.action == "stop":
+                            result = {
+                                "stopped": True,
+                                "reason": resolved_config.get("reason", "workflow stop"),
+                            }
+                        else:
+                            handler = self.handlers.get(step.action)
+                            if handler is None:
+                                raise WorkflowError(
+                                    f"no handler registered for workflow action {step.action!r}"
+                                )
+                            parameters = inspect.signature(handler).parameters
+                            accepts_keywords = (
+                                "config" in parameters
+                                or any(
+                                    item.kind is inspect.Parameter.VAR_KEYWORD
+                                    for item in parameters.values()
+                                )
+                            )
+                            if accepts_keywords:
+                                result = handler(
+                                    config=dict(resolved_config),
+                                    step=step,
+                                    state=state,
+                                    resume=record["attempts"] > 1,
+                                )
+                            else:
+                                result = handler(dict(resolved_config))
+                        record["outputs"] = _jsonable(result)
+                        record["status"] = "COMPLETED"
+                        completed_at = _now()
+                        record["completed_at"] = completed_at
+                        timestamps = record.setdefault("timestamps", {})
+                        if isinstance(timestamps, dict):
+                            timestamps["completed_at"] = completed_at
+                        record.pop("error", None)
+                        events = state.setdefault("events", [])
+                        if isinstance(events, list):
+                            events.append(
+                                {
+                                    "at": completed_at,
+                                    "step_id": step.step_id,
+                                    "action": step.action,
+                                    "attempt": record["attempts"],
+                                    "status": "COMPLETED",
+                                    "result": _jsonable(result),
+                                }
+                            )
+                        self._persist(state)
+                        progressed = True
+                        if step.action == "stop":
+                            state["state"] = "STOPPED"
+                            state["stop_reason"] = str(result.get("reason", "workflow stop"))  # type: ignore[union-attr]
+                            state["stopped_at"] = _now()
+                            self._persist(state)
+                            return state
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
+                    except Exception as exc:
+                        record["error"] = {"type": type(exc).__name__, "message": str(exc)}
+                        error_at = _now()
+                        timestamps = record.setdefault("timestamps", {})
+                        if isinstance(timestamps, dict):
+                            timestamps["error_at"] = error_at
+                        events = state.setdefault("events", [])
+                        if isinstance(events, list):
+                            events.append(
+                                {
+                                    "at": error_at,
+                                    "step_id": step.step_id,
+                                    "action": step.action,
+                                    "attempt": record["attempts"],
+                                    "status": "ERROR",
+                                    "reason": str(exc),
+                                }
+                            )
+                        if self._is_durable_stop(exc):
+                            record["status"] = "FAILED"
+                            record["stop_reason"] = str(exc)
+                            state["state"] = "STOPPED"
+                            state["stop_reason"] = str(exc)
+                            state["stopped_at"] = error_at
+                            self._persist(state)
+                            return state
+                        behavior = str(step.failure_policy.get("on_technical_failure", "stop"))
+                        max_retries = int(step.failure_policy.get("max_retries", 0))
+                        can_retry = (
+                            behavior == "retry"
+                            and self._retryable(exc)
+                            and not self._is_durable_stop(exc)
+                            and int(record["attempts"]) <= max_retries
+                        )
+                        if can_retry:
+                            record["status"] = "PENDING"
+                        elif behavior == "continue" and self._retryable(exc):
+                            record["status"] = "SKIPPED"
+                        else:
+                            record["status"] = "FAILED"
+                            state["state"] = "FAILED"
+                            state["failure"] = f"workflow step {step.step_id} failed: {exc}"
+                            self._persist(state)
+                            raise WorkflowError(str(state["failure"])) from exc
+                        self._persist(state)
+                        progressed = True
+
+                steps_state = state["steps"]
+                assert isinstance(steps_state, Mapping)
+                unresolved = [
+                    step.step_id
+                    for step in self.spec.steps
+                    if str(steps_state[step.step_id].get("status"))
+                    not in {"COMPLETED", "SKIPPED"}
+                ]
+                if not unresolved:
+                    if any(
+                        str(steps_state[step.step_id].get("status")) == "SKIPPED"
+                        and step.action in {"select", "continuous_training", "experiment"}
+                        for step in self.spec.steps
+                    ):
+                        state["state"] = "FAILED"
+                        state["failure"] = "workflow skipped a required decision or action"
+                        self._persist(state)
+                        raise WorkflowError(str(state["failure"]))
+                    state["state"] = "COMPLETED"
+                    state["completed_at"] = state.get("completed_at", _now())
+                    self._persist(state)
+                    return state
+                if not progressed:
+                    raise WorkflowError(
+                        "workflow has unresolved steps: " + ", ".join(unresolved)
+                    )
 
 
 def _now() -> str:

@@ -69,9 +69,13 @@ class ArenaExecutionConfig:
     inference_batch_wait_ms: float = DEFAULT_INFERENCE_BATCH_WAIT_MS
     device: str = "cuda"
     strict_production: bool = True
+    # Scientific/correctness production checks remain active independently of
+    # this switch.  Enable this only when a caller explicitly wants the
+    # observed performance band to be a hard admission gate.
+    strict_performance: bool = False
     # Explicit wiring/monitoring acceptance may use a smaller game count while
-    # retaining the strict CUDA, worker, lane, technical, and performance
-    # checks. Normal production workloads keep the historical 64-game gate.
+    # retaining the strict CUDA, worker, and technical checks. Performance
+    # observations become hard gates only with strict_performance=True.
     monitoring_acceptance: bool = False
     min_mean_inference_batch_rows: float = DEFAULT_NON_STANDARD_MIN_MEAN_INFERENCE_BATCH_ROWS
     min_effective_cpu_cores: float = MIN_EFFECTIVE_CPU_CORES
@@ -86,6 +90,8 @@ class ArenaExecutionConfig:
             raise ValueError("Arena workers/games_per_worker must be positive")
         if self.inference_batch_rows <= 0 or self.inference_batch_wait_ms < 0.0:
             raise ValueError("Arena inference batching settings are invalid")
+        if type(self.strict_production) is not bool or type(self.strict_performance) is not bool:
+            raise ValueError("Arena strict production/performance settings must be boolean")
         if self.inference_batch_rows < self.games_per_worker:
             raise ValueError("inference_batch_rows must cover at least one worker request")
         if self.early_gate_min_forwards <= 0 or self.early_gate_min_wall_sec < 0.0:
@@ -1349,19 +1355,19 @@ def run_arena(
                 )
                 for worker_id in range(config.workers)
             )
-            failures: list[str] = []
+            performance_diagnostics: list[str] = []
             if peak_active_contexts < expected_active:
-                failures.append("active_contexts")
+                performance_diagnostics.append("active_contexts")
             if not observed_lanes:
-                failures.append("lane_occupancy")
+                performance_diagnostics.append("lane_occupancy")
             recent_policy = classify_arena_performance(statistics.mean(recent), config)
-            failures.extend(str(value) for value in recent_policy["hard_failures"])
-            if failures:
+            performance_diagnostics.extend(str(value) for value in recent_policy["warnings"])
+            if config.strict_performance and performance_diagnostics:
                 _write_json(
                     output_dir / "performance-degraded.json",
                     {
                         "status": "CRITICAL",
-                        "reason": failures,
+                        "reason": performance_diagnostics,
                         "observed_peak_active_contexts": peak_active_contexts,
                         "expected_active_contexts": expected_active,
                         "observed_unique_lane_ids_per_worker": {
@@ -1379,7 +1385,17 @@ def run_arena(
                 )
                 raise RuntimeError(
                     "Arena execution gate failed: "
-                    + ", ".join(failures)
+                    + ", ".join(performance_diagnostics)
+                )
+            if performance_diagnostics:
+                _write_json(
+                    output_dir / "performance-warning.json",
+                    {
+                        "status": "DIAGNOSTIC",
+                        "reason": sorted(set(performance_diagnostics)),
+                        "forwards_observed": len(batch_rows),
+                        "wall_time_sec": elapsed,
+                    },
                 )
 
         broker_started_at = time.perf_counter()
@@ -1864,9 +1880,9 @@ def run_arena(
         "technical_games": int(summary["technical_games"]),
     }
 
-    performance_failures: list[str] = []
+    performance_diagnostics: list[str] = []
     if len(set(worker_pids)) != config.workers:
-        performance_failures.append("worker_pid_count")
+        performance_diagnostics.append("worker_pid_count")
     lane_contract_observed = all(
         set(expected_lane_ids_by_worker[worker_id]).issubset(
             activity_lane_ids_by_worker[worker_id]
@@ -1874,16 +1890,28 @@ def run_arena(
         for worker_id in range(config.workers)
     )
     if not lane_contract_observed:
-        performance_failures.append("lane_occupancy")
+        performance_diagnostics.append("lane_occupancy")
     if peak_active_contexts < min(config.games, configured_context_capacity):
-        performance_failures.append("active_contexts")
+        performance_diagnostics.append("active_contexts")
     if any(telemetry["worker_cuda_initialized_after_run"]):
-        performance_failures.append("cuda_in_worker")
+        performance_diagnostics.append("cuda_in_worker")
     mean_batch_policy = classify_arena_performance(mean_batch, config)
-    performance_failures.extend(str(value) for value in mean_batch_policy["hard_failures"])
+    performance_diagnostics.extend(str(value) for value in mean_batch_policy["hard_failures"])
     performance_warnings = [str(value) for value in mean_batch_policy["warnings"]]
     if int(summary["technical_games"]) != 0:
-        performance_failures.append("technical_games")
+        performance_diagnostics.append("technical_games")
+    correctness_failures = [
+        value for value in performance_diagnostics
+        if value in {"worker_pid_count", "cuda_in_worker", "technical_games"}
+    ]
+    if config.strict_performance:
+        performance_failures = sorted(set(performance_diagnostics))
+    else:
+        performance_failures = sorted(set(correctness_failures))
+        performance_warnings.extend(
+            value for value in performance_diagnostics
+            if value not in correctness_failures
+        )
     telemetry["effective_cpu_cores_target"] = config.min_effective_cpu_cores
     telemetry["effective_cpu_cores_target_met"] = (
         effective_cpu_cores >= config.min_effective_cpu_cores
@@ -1895,7 +1923,8 @@ def run_arena(
         else (str(mean_batch_policy["status"]) if performance_warnings else "HEALTHY")
     )
     telemetry["performance_failures"] = performance_failures
-    telemetry["performance_warnings"] = performance_warnings
+    telemetry["performance_warnings"] = sorted(set(performance_warnings))
+    telemetry["performance_diagnostics"] = sorted(set(performance_diagnostics))
     telemetry["performance_gate"] = {
         "mean_inference_batch_rows": mean_batch_policy["mean_inference_batch_rows"],
         "severe_warning_threshold": mean_batch_policy["severe_warning_threshold"],
@@ -1920,6 +1949,7 @@ def run_arena(
                 "inference_batch_wait_ms": config.inference_batch_wait_ms,
                 "device": str(device),
                 "strict_production": config.strict_production,
+                "strict_performance": config.strict_performance,
             },
             "telemetry": telemetry,
         }
@@ -1949,13 +1979,13 @@ def run_arena(
                 "summary": str(output_dir / "summary.json"),
             },
         )
-    elif performance_warnings:
+    elif performance_warnings or performance_diagnostics:
         _write_json(
             output_dir / "performance-warning.json",
             {
                 "status": str(mean_batch_policy["status"]),
                 "run_id": run_id,
-                "reasons": performance_warnings,
+                "reasons": sorted(set(performance_warnings + performance_diagnostics)),
                 "observed": {
                     "mean_inference_batch_rows": telemetry[
                         "mean_inference_batch_rows"

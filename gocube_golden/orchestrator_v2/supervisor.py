@@ -801,7 +801,10 @@ class SupervisorV2:
         )
         try:
             write_active_child(self.active_child_path, active.to_dict(self.root))
-        except BaseException as exc:
+        except (KeyboardInterrupt, SystemExit):
+            self._terminate_group(active, reason="active-child publication interrupted", process=process)
+            raise
+        except Exception as exc:
             self._terminate_group(active, reason="active-child publication failed", process=process)
             raise SupervisorIntegrityError("could not publish active-child identity") from exc
         return process, active

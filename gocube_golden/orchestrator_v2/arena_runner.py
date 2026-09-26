@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from typing import Mapping
 
 from . import _arena_runner_core as _core
 from .contracts import EvaluationIdentity
@@ -20,13 +21,29 @@ evaluation_dir = _core.evaluation_dir
 
 
 def _common_wld_result(result: ArenaRunResult) -> ArenaRunResult:
-    if "W/L/D" in result.summary:
-        return result
     summary = dict(result.summary)
-    values = (summary.get("candidate_wins"), summary.get("reference_wins"), summary.get("draws"))
-    if not all(type(value) is int and value >= 0 for value in values):
-        return result
-    summary["W/L/D"] = [int(values[0]), int(values[1]), int(values[2])]
+    values = summary.get("W/L/D")
+    if not (isinstance(values, (list, tuple)) and len(values) == 3):
+        values = (
+            summary.get("candidate_wins"),
+            summary.get("reference_wins"),
+            summary.get("draws"),
+        )
+        if not all(type(value) is int and value >= 0 for value in values):
+            return result
+        summary["W/L/D"] = [int(values[0]), int(values[1]), int(values[2])]
+    else:
+        values = tuple(int(value) for value in values)
+    valid_games = int(summary.get("valid_games", summary.get("games_valid", sum(values))))
+    metrics = summary.get("metrics")
+    metrics = dict(metrics) if isinstance(metrics, Mapping) else {}
+    metrics.setdefault("candidate_wins", int(values[0]))
+    metrics.setdefault("reference_wins", int(values[1]))
+    metrics.setdefault("draws", int(values[2]))
+    metrics.setdefault("valid_games", valid_games)
+    if valid_games > 0:
+        metrics.setdefault("candidate_win_rate", int(values[0]) / valid_games)
+    summary["metrics"] = metrics
     return replace(result, summary=summary)
 
 
@@ -126,7 +143,7 @@ class ArenaRunner(_core.ArenaRunner):
         )
         try:
             getattr(self.notifier, "send_now")(f"arena-start:{evaluation_id}", text)
-        except BaseException:
+        except Exception:
             pass
 
     def run(self, request: ArenaRunRequest) -> ArenaRunResult:

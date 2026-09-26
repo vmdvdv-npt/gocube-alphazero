@@ -143,7 +143,18 @@ def _normalized_validity(summary: Mapping[str, object]) -> str:
         return "INVALID"
     if not isinstance(performance_failures, list):
         return "INVALID"
-    if performance_status.upper() == "CRITICAL" or performance_failures:
+    # These are observations of throughput, not scientific validity.  Older
+    # completed summaries may have recorded them as failures; reclassify them
+    # at the boundary so a policy correction does not force a rerun of games.
+    diagnostic_only = {
+        "mean_inference_batch_rows",
+        "lane_occupancy",
+        "active_contexts",
+    }
+    blocking_failures = [
+        value for value in performance_failures if str(value) not in diagnostic_only
+    ]
+    if blocking_failures:
         return "CRITICAL"
     return "VALID"
 

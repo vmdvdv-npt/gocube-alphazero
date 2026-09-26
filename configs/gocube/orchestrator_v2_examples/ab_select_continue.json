@@ -1,0 +1,68 @@
+{
+  "schema": "gocube-orchestrator-v2-run-spec-v1",
+  "mode": "workflow",
+  "workflow": {
+    "workflow_id": "ab-select-continue-placeholder",
+    "topology": "torus9",
+    "steps": [
+      {
+        "step_id": "continue",
+        "action": "continuous_training",
+        "dependencies": ["selection"],
+        "config": {
+          "parent_checkpoint": {"$ref": "selection.outputs.selected"},
+          "lineage_id": "PLACEHOLDER_CONTINUATION_LINEAGE",
+          "effective_config": {"$ref": "selection.outputs.selected_item.effective_config"},
+          "generations": 10,
+          "arena_cadence": 2,
+          "arena_config": "PLACEHOLDER_ARENA_EXECUTION_CONFIG"
+        }
+      },
+      {
+        "step_id": "selection",
+        "action": "select",
+        "dependencies": ["arena"],
+        "config": {
+          "source": {"arena": {"$ref": "arena.outputs"}},
+          "score": "metrics.candidate_win_rate",
+          "value": "candidate_checkpoint",
+          "direction": "maximize"
+        }
+      },
+      {
+        "step_id": "arena",
+        "action": "arena",
+        "dependencies": ["arm_a", "arm_b"],
+        "config": {
+          "candidate_checkpoint": {"$ref": "arm_a.outputs.checkpoint"},
+          "reference_checkpoint": {"$ref": "arm_b.outputs.checkpoint"},
+          "arena_config": "PLACEHOLDER_ARENA_EXECUTION_CONFIG"
+        }
+      },
+      {
+        "step_id": "arm_b",
+        "action": "continuous_training",
+        "config": {
+          "parent_checkpoint": "PLACEHOLDER_ARM_B_PARENT_CHECKPOINT",
+          "lineage_id": "PLACEHOLDER_ARM_B_LINEAGE",
+          "effective_config": "PLACEHOLDER_ARM_B_EFFECTIVE_CONFIG",
+          "generations": 10,
+          "arena_cadence": 2,
+          "arena_config": "PLACEHOLDER_ARENA_EXECUTION_CONFIG"
+        }
+      },
+      {
+        "step_id": "arm_a",
+        "action": "continuous_training",
+        "config": {
+          "parent_checkpoint": "PLACEHOLDER_ARM_A_PARENT_CHECKPOINT",
+          "lineage_id": "PLACEHOLDER_ARM_A_LINEAGE",
+          "effective_config": "PLACEHOLDER_ARM_A_EFFECTIVE_CONFIG",
+          "generations": 10,
+          "arena_cadence": 2,
+          "arena_config": "PLACEHOLDER_ARENA_EXECUTION_CONFIG"
+        }
+      }
+    ]
+  }
+}

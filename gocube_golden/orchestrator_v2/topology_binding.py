@@ -98,11 +98,27 @@ class TopologyBinding:
                 # lineage compatibility; it is not an Arena whitelist.
                 return profile
             raise ValueError("Arena profile is not compatible with topology=torus9")
-        expected = self.default_arena_profile(config)
-        if profile != expected:
-            raise ValueError(f"Arena profile {profile!r} is not compatible with {self.topology}; expected {expected!r}")
         if getattr(resolved, "size", None) != self.cube_size:
-            raise ValueError("Cube Arena profile size does not match topology")
+            raise ValueError(
+                "Cube Arena profile size does not match topology; profile is not compatible"
+            )
+        # Arena search/execution is owned by this evaluation, not by the
+        # checkpoint's training profile.  The Cube profile parser and the
+        # Arena engine still enforce the concrete model/rules contracts; this
+        # boundary only checks the compatibility facts available before model
+        # loading (size, channels and declared architecture).
+        compatibility = config.compatibility
+        declared_size = compatibility.get("size", compatibility.get("cube_size"))
+        if declared_size is not None and int(declared_size) != int(self.cube_size):
+            raise ValueError("Cube Arena profile size conflicts with effective-config topology")
+        declared_channels = compatibility.get("input_channels")
+        if declared_channels is not None and int(declared_channels) != int(resolved.observation_shape[0]):
+            raise ValueError("Cube Arena input-channel contract is incompatible")
+        declared_architecture = compatibility.get("architecture_id", compatibility.get("architecture"))
+        if declared_architecture is not None:
+            from ..cube_network_v2 import ARCHITECTURE_ID
+            if str(declared_architecture) != ARCHITECTURE_ID:
+                raise ValueError("Cube Arena architecture contract is incompatible")
         return profile
 
     def arena_startset(self, *, master_seed: int, games: int) -> StartsetRef:
