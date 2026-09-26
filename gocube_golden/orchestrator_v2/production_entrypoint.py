@@ -14,24 +14,39 @@ from typing import Any, Mapping
 from ..process_supervision import atomic_write_text
 from ..provenance import canonical_json
 from ..run_storage import ACTIVE, RUNS_ROOT
-from ..telegram_notifier import TelegramError, TelegramNotifier, flush_all, telegram_test
+from ..telegram_notifier import TelegramError, telegram_test
+from ..notifications import coerce_event_sink, create_telegram_dispatcher, flush_all, migrate_legacy_storage, operator_event
 from .arena_runner import ArenaRunRequest, ArenaRunnerV2
 from .artifact_resolver import ArtifactResolver
 from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
 from .contracts import StartsetRef
+from .generation_runner import OutputLineage
 from .execution_permit import _production_authority
 from .experiment_plan import ExperimentConfig
-from .experiment_runner import ExperimentRunnerV2
+from ..scenarios.calibration import CalibrationArm, CalibrationRunner
+from ..scenarios.experiment.runner import ExperimentRunnerV2
 from .immutable_runtime import execution_commit_from_lineage, resolve_execution_commit
 from .komi_calibration import KomiCalibrationConfig
-from .komi_calibration_production import ProductionKomiCalibrationRunnerV2
-from .operator_messages import format_action_started
+from ..scenarios.komi.runner import ProductionKomiCalibrationRunnerV2
 from .run_spec import RunMode, RunSpecV2, supervision_policy_for
 from .supervisor import SupervisorPolicy
 from .topology_binding import get_topology_binding
 from .version import mark_v2_process
 from .workflow import WorkflowRunner, WorkflowSpec
+from .torus9_production import Torus9ProductionLineage
+from ..performance_tuning import (
+    Mode as TuningMode,
+    PerformanceTuningRunner,
+    Plan as TuningPlan,
+    ProductionTrainOneExecutor,
+    scientific_contract_fingerprint,
+)
 from tools.arena_engine import ArenaExecutionConfig, DEFAULT_MASTER_SEED
+
+
+def TelegramNotifier(paths: object) -> object:
+    """Compatibility composition name; returns the sole structured service."""
+    return create_telegram_dispatcher(Path(getattr(paths, "root")))
 
 
 def load_v2_config(path: str | Path) -> dict[str, object]:
@@ -108,6 +123,12 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
             )
         except (TypeError, ValueError) as exc:
             raise ValueError(f"continuous.komi cannot be applied to effective_config: {exc}") from exc
+    selected_profile = raw.get("selected_profile", raw.get("execution_profile"))
+    if isinstance(selected_profile, str):
+        try:
+            selected_profile = json.loads(Path(selected_profile).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"cannot load selected_profile: {selected_profile}") from exc
     return ContinuousTrainingConfig(
         parent_checkpoint=raw["parent_checkpoint"],  # type: ignore[arg-type]
         lineage_id=str(raw["lineage_id"]),
@@ -125,6 +146,7 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
         allow_code_rollover=raw.get("allow_code_rollover", False),  # type: ignore[arg-type]
         self_play_concurrency_sweep=raw.get("self_play_concurrency_sweep"),  # type: ignore[arg-type]
         supervision=dict(raw.get("supervision", {})),  # type: ignore[arg-type]
+        execution_profile=selected_profile,  # type: ignore[arg-type]
     )
 
 
@@ -415,6 +437,8 @@ def run_arena_from_config(payload: Mapping[str, object], *, runs_root: str | Pat
     notifier = TelegramNotifier(_notification_paths(root))
     if hasattr(runner, "notifier"):
         setattr(runner, "notifier", notifier)
+    if hasattr(runner, "event_sink"):
+        setattr(runner, "event_sink", notifier)
     try:
         with _authority(mode="arena", topology=request.candidate.topology, run_id=evaluation_id):
             return runner.run(request)  # type: ignore[attr-defined]
@@ -502,10 +526,14 @@ def run_calibration_from_config(payload: Mapping[str, object], *, runs_root: str
     if not isinstance(arms, list) or not arms:
         raise ValueError("calibration run-spec requires a non-empty arms list")
     calibration_id = str(raw.get("calibration_id", "calibration"))
-    results: list[object] = []
+    scenario_arms: list[CalibrationArm] = []
     for index, arm in enumerate(arms):
         if not isinstance(arm, Mapping):
             raise ValueError("each calibration arm must be an object")
+        scenario_arms.append(CalibrationArm(str(arm.get("id", index)), dict(arm)))
+
+    def execute_arm(scenario_arm: CalibrationArm, index: int) -> dict[str, object]:
+        arm = scenario_arm.request
         merged = dict(raw)
         merged.pop("arms", None)
         merged.update(arm)
@@ -520,34 +548,40 @@ def run_calibration_from_config(payload: Mapping[str, object], *, runs_root: str
         notifier = TelegramNotifier(_notification_paths(root))
         if hasattr(runner, "notifier"):
             setattr(runner, "notifier", notifier)
+        if hasattr(runner, "event_sink"):
+            setattr(runner, "event_sink", notifier)
         try:
             try:
-                notifier.send_now(
-                    f"calibration-arm:{evaluation_id}",
-                    format_action_started(
-                        "CALIBRATION ARM STARTED",
-                        calibration=calibration_id,
-                        arm=arm.get("id", index),
+                coerce_event_sink(notifier).publish(
+                    operator_event(
+                        "CALIBRATION_STARTED",
                         topology=request.candidate.topology,
-                        profile=request.profile,
-                        games=request.config.games,
-                    ),
+                        owner_type="experiment",
+                        owner_id=calibration_id,
+                        action_id=f"{calibration_id}:arm:{evaluation_id}",
+                        payload={
+                            "calibration_id": calibration_id,
+                            "arm": arm.get("id", index),
+                            "profile": request.profile,
+                            "games": request.config.games,
+                        },
+                        correlation_id=calibration_id,
+                    )
                 )
             except Exception:
                 pass
             with _authority(mode="calibration", topology=request.candidate.topology, run_id=evaluation_id):
                 result = runner.run(request)  # type: ignore[attr-defined]
-                results.append(
-                    _calibration_result_record(
-                        result,
-                        request=request,
-                        arm=arm,
-                        arm_index=index,
-                    )
+                return _calibration_result_record(
+                    result,
+                    request=request,
+                    arm=arm,
+                    arm_index=index,
                 )
         finally:
             flush_all()
-    return results
+
+    return CalibrationRunner(scenario_arms, execute_arm).run()
 
 
 def run_komi_calibration_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, allow_code_rollover: bool | None = None, **runner_kwargs: Any) -> object:
@@ -626,6 +660,133 @@ def run_continuous_from_config(payload: Mapping[str, object], *, runs_root: str 
     try:
         with _authority(mode="continuous", topology=config.topology, run_id=config.lineage_id):
             runner = ContinuousTrainingRunnerV2(config, resolver=resolver, notifier=notifier, **runner_kwargs)
+            return runner.run()
+    finally:
+        flush_all()
+
+
+def run_performance_tuning_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, **runner_kwargs: Any) -> object:
+    """Run the explicit, budgeted performance-tuning mode.
+
+    The plan prepares one normal production lineage through the existing
+    lineage factory.  ``dry_run`` validates and prints the plan without
+    creating the lineage, starting a child, or publishing an event.
+    """
+
+    _require_file_backed_entrypoint()
+    raw = payload.get("performance_tuning", payload)
+    if not isinstance(raw, Mapping):
+        raise ValueError("performance_tuning config must be an object")
+    required = ("tuning_id", "parent_checkpoint", "effective_config", "baseline", "modes", "measurement_budget")
+    missing = [key for key in required if key not in raw]
+    if missing:
+        raise ValueError("performance_tuning config is missing: " + ", ".join(missing))
+    resolver = runner_kwargs.pop("resolver", None) or ArtifactResolver(runs_root)
+    parent = resolver.checkpoint(raw["parent_checkpoint"])  # type: ignore[arg-type]
+    from ._continuous_training_core import _effective_config as normalize_effective_config
+
+    effective_config = normalize_effective_config(raw["effective_config"])  # type: ignore[arg-type]
+    topology = str(raw.get("topology", effective_config.topology))
+    if topology != effective_config.topology or topology != parent.topology:
+        raise ValueError("performance_tuning topology does not match the parent and effective config")
+    baseline = TuningMode.from_dict(raw["baseline"])  # type: ignore[arg-type]
+    raw_modes = raw["modes"]
+    if not isinstance(raw_modes, list):
+        raise ValueError("performance_tuning.modes must be a list")
+    modes = tuple(TuningMode.from_dict(item, label=f"modes[{index}]") for index, item in enumerate(raw_modes))
+    workers = raw.get("workers", effective_config.execution.get("workers"))
+    if type(workers) is not int or workers <= 0:
+        raise ValueError("performance_tuning workers must be a positive integer")
+    lineage_id = str(raw.get("lineage_id", raw.get("owner_id", f"tuning-{raw['tuning_id']}")))
+    owner_id = str(raw.get("owner_id", lineage_id))
+    predicted_root = resolver.runs_root / topology / ACTIVE / lineage_id
+    raw_contract = raw.get("measurement_contract", {})
+    if not isinstance(raw_contract, Mapping):
+        raise ValueError("performance_tuning.measurement_contract must be an object")
+    measurement_contract = dict(raw_contract)
+    measurement_contract.setdefault("expected_games", effective_config.self_play.get("games_per_iteration", effective_config.self_play.get("games")))
+    plan = TuningPlan(
+        tuning_id=str(raw["tuning_id"]),
+        topology=topology,
+        parent_checkpoint=parent.ref,
+        baseline=baseline,
+        modes=modes,
+        workers=workers,
+        scientific_config_fingerprint=scientific_contract_fingerprint(effective_config),
+        measurement_budget=raw["measurement_budget"],
+        measurement_contract=measurement_contract,
+        owner_id=owner_id,
+        owner_root=predicted_root,
+        execution_code_commit=None if raw.get("execution_code_commit") is None else str(raw["execution_code_commit"]),
+        device_characteristics=dict(raw.get("device_characteristics", {})),  # type: ignore[arg-type]
+        finish_behavior=str(raw.get("finish_behavior", "export_profile")),
+    )
+    dry_run = raw.get("dry_run", False)
+    if type(dry_run) is not bool:
+        raise ValueError("performance_tuning.dry_run must be a boolean")
+    if dry_run:
+        return PerformanceTuningRunner(plan, execute_generation=lambda **_kwargs: None).dry_run()
+    if plan.finish_behavior == "continue_training":
+        raise ValueError("standalone performance_tuning currently supports finish_behavior=export_profile only")
+    lineage_factory = runner_kwargs.pop("lineage_factory", None) or Torus9ProductionLineage(resolver.runs_root)
+    prepare_args = {
+        "topology": topology,
+        "lineage_id": lineage_id,
+        "parent": parent,
+        "effective_config": effective_config,
+        "experiment_id": f"performance-tuning-{plan.tuning_id}",
+        "arm_id": "performance-tuning",
+        "allow_code_rollover": bool(raw.get("allow_code_rollover", False)),
+    }
+    root, resolved_config = lineage_factory.prepare(**prepare_args)
+    manifest_path = Path(root) / "manifest.json"
+    try:
+        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("performance tuning owner manifest cannot be read") from exc
+    if not isinstance(manifest_payload, Mapping):
+        raise RuntimeError("performance tuning owner manifest is malformed")
+    execution_commit = manifest_payload.get("execution_code_commit", manifest_payload.get("git_commit"))
+    if not isinstance(execution_commit, str) or not execution_commit:
+        raise RuntimeError("performance tuning owner manifest has no execution code commit")
+    if plan.execution_code_commit is not None and plan.execution_code_commit != execution_commit:
+        raise ValueError("performance_tuning execution_code_commit does not match owner lineage")
+    if plan.execution_code_commit is None:
+        plan = replace(plan, execution_code_commit=execution_commit)
+    output_lineage = OutputLineage(topology, lineage_id, root)
+    train_one = runner_kwargs.pop("train_one", None) or ProductionTrainOne(
+        resolver=resolver,
+        supervisor_policy=supervision_policy_for(raw, "generation"),
+    )
+    executor = runner_kwargs.pop("execute_generation", None) or ProductionTrainOneExecutor(
+        train_one=train_one,
+        config=resolved_config,
+        output_lineage=output_lineage,
+        workers=workers,
+        resolver=resolver,
+    )
+
+    def read_metrics(_result: object, generation: int) -> Mapping[str, object]:
+        summary_path = root / f"iter-{generation:02d}-summary.json"
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return {}
+        return summary if isinstance(summary, Mapping) else {}
+
+    event_sink = runner_kwargs.pop("event_sink", None)
+    if event_sink is None:
+        notifier = TelegramNotifier(_notification_paths(root))
+        event_sink = notifier
+    try:
+        with _authority(mode="performance-tuning", topology=topology, run_id=plan.tuning_id):
+            runner = PerformanceTuningRunner(
+                plan,
+                execute_generation=executor,
+                owner_root=root,
+                metrics_reader=read_metrics,
+                event_sink=event_sink,
+            )
             return runner.run()
     finally:
         flush_all()
@@ -809,6 +970,8 @@ def run_spec(payload: Mapping[str, object], *, runs_root: str | Path | None = No
     wrapped = {spec.mode.value: dict(spec.payload)}
     if spec.mode is RunMode.CONTINUOUS:
         return run_continuous_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
+    if spec.mode is RunMode.PERFORMANCE_TUNING:
+        return run_performance_tuning_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
     if spec.mode in {RunMode.ARENA, RunMode.EVALUATION}:
         return run_arena_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
     if spec.mode is RunMode.EXPERIMENT:
@@ -820,16 +983,33 @@ def run_spec(payload: Mapping[str, object], *, runs_root: str | Path | None = No
     raise AssertionError(spec.mode)
 
 
+def drain_notifications(root: str | Path, *, timeout: float = 7.0) -> dict[str, int]:
+    """Retry one owner root without starting training, Arena, or a workflow."""
+    dispatcher = create_telegram_dispatcher(Path(root).resolve())
+    legacy = migrate_legacy_storage(Path(root).resolve(), dispatcher.store)
+    requeued = dispatcher.requeue_blocked()
+    dispatcher.flush(timeout)
+    states = [dispatcher.store.read_delivery(event.event_id) for event in dispatcher.store.iter_events()]
+    pending = sum(1 for state in states if state is not None and state.status != "DELIVERED")
+    delivered = sum(1 for state in states if state is not None and state.status == "DELIVERED")
+    dispatcher.close(timeout=max(0.0, timeout - 0.01))
+    return {"requeued": requeued, "pending": pending, "delivered": delivered, "legacy_migrated": legacy["migrated"], "legacy_unknown": legacy["unknown"]}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     telegram = subparsers.add_parser("telegram-test", help="send one explicit transport test")
     telegram.set_defaults(kind="telegram")
+    drain = subparsers.add_parser("notifications-drain", help="retry one saved notification root")
+    drain.add_argument("root", type=Path)
+    drain.add_argument("--timeout", type=float, default=7.0)
+    drain.set_defaults(kind="drain")
     command = subparsers.add_parser("run", help="run one declarative Orchestrator V2 run-spec")
     command.add_argument("config", type=Path)
     command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     command.set_defaults(kind="run")
-    for name in ("continuous", "experiment", "komi-calibration", "workflow"):
+    for name in ("continuous", "performance-tuning", "experiment", "komi-calibration", "workflow"):
         command = subparsers.add_parser(name, help=f"legacy-compatible V2 {name} JSON plan")
         command.add_argument("config", type=Path)
         command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
@@ -843,6 +1023,9 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"Telegram test failed: {exc}") from None
         print("Telegram test message sent.")
         return 0
+    if args.kind == "drain":
+        print(json.dumps(drain_notifications(args.root, timeout=args.timeout), sort_keys=True))
+        return 0
     payload = load_v2_config(args.config)
     result: object
     if args.kind == "run":
@@ -851,6 +1034,8 @@ def main(argv: list[str] | None = None) -> int:
         result = run_continuous_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
     elif args.kind == "experiment":
         result = run_experiment_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)
+    elif args.kind == "performance-tuning":
+        result = run_performance_tuning_from_config(payload, runs_root=args.runs_root)
     elif args.kind == "workflow":
         result = run_workflow_from_config(payload, runs_root=args.runs_root)
     else:
@@ -867,6 +1052,6 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "load_v2_config", "run_arena_from_config", "run_calibration_from_config", "run_continuous_from_config",
-    "run_experiment_from_config", "run_komi_calibration_from_config", "run_workflow_from_config", "run_spec",
+    "load_v2_config", "run_arena_from_config", "run_calibration_from_config", "run_continuous_from_config", "run_performance_tuning_from_config",
+    "run_experiment_from_config", "run_komi_calibration_from_config", "run_workflow_from_config", "run_spec", "drain_notifications",
 ]

@@ -12,7 +12,9 @@ from .artifact_resolver import ArtifactResolver, ResolvedCheckpointNode, Resolve
 from .contracts import StartsetRef
 from .experiment_runner import LineageFactory, TrainOne
 from .generation_runner import OutputLineage
-from .operator_messages import format_action_started, format_training_started
+from .operator_messages import format_training_started
+from ..notifications import EventType, OperatorEvent, coerce_event_sink, operator_event
+from ..performance_tuning import SelectedProfile, execution_overrides_for, scientific_contract_fingerprint
 from .production_generation import ProductionTrainOne
 from .production_lineage import ProductionLineage
 from .topology_binding import get_topology_binding
@@ -23,10 +25,6 @@ CONCURRENCY_SWEEP_SCHEMA = _core.CONCURRENCY_SWEEP_SCHEMA
 SelfPlayConcurrencyMode = _core.SelfPlayConcurrencyMode
 SelfPlayConcurrencySweep = _core.SelfPlayConcurrencySweep
 ContinuousTrainingResult = _core.ContinuousTrainingResult
-
-
-def _is_real_telegram(notifier: object | None) -> bool:
-    return notifier is not None and notifier.__class__.__module__ == "gocube_golden.telegram_notifier"
 
 
 @dataclass(frozen=True)
@@ -47,6 +45,7 @@ class ContinuousTrainingConfig:
     allow_code_rollover: bool = False
     self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None
     supervision: Mapping[str, object] = field(default_factory=dict)
+    execution_profile: SelectedProfile | Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         parent = self.parent_checkpoint if isinstance(self.parent_checkpoint, CheckpointRef) else CheckpointRef.from_dict(self.parent_checkpoint)
@@ -62,6 +61,20 @@ class ContinuousTrainingConfig:
         object.__setattr__(self, "effective_config", config)
         object.__setattr__(self, "arena_config", arena_config)
         object.__setattr__(self, "self_play_concurrency_sweep", _core._concurrency_sweep(self.self_play_concurrency_sweep, config, parent.generation))
+        profile = self.execution_profile
+        if profile is not None and not isinstance(profile, SelectedProfile):
+            profile = SelectedProfile.from_dict(profile)
+        if profile is not None:
+            workers = config.execution.get("workers")
+            if type(workers) is not int or workers <= 0:
+                raise ValueError("effective execution workers must be a positive integer")
+            profile.validate_applicability(
+                topology=config.topology,
+                scientific_config_fingerprint=scientific_contract_fingerprint(config),
+                workers=workers,
+            )
+            execution_overrides_for(profile.mode, workers=workers, scientific_config=config)
+        object.__setattr__(self, "execution_profile", profile)
         if config.topology != parent.topology:
             raise ValueError("effective_config topology does not match parent checkpoint")
         if self.generations is not None and (type(self.generations) is not int or self.generations < 0):
@@ -133,12 +146,14 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         allow_code_rollover: bool | None = None,
         self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None,
         supervision: Mapping[str, object] | None = None,
+        execution_profile: SelectedProfile | Mapping[str, object] | None = None,
         resolver: ArtifactResolver | None = None,
         arena_runner=None,
         lineage_factory: LineageFactory | None = None,
         train_one: TrainOne | None = None,
         reporter: Callable[..., None] | None = None,
         notifier: object | None = None,
+        event_sink: object | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         if config is None:
@@ -164,6 +179,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
                 allow_code_rollover=False if allow_code_rollover is None else allow_code_rollover,
                 self_play_concurrency_sweep=self_play_concurrency_sweep,
                 supervision={} if supervision is None else supervision,
+                execution_profile=execution_profile,
             )
         else:
             direct_override = (parent_checkpoint, parent, lineage_id, effective_config, arena_cadence, arena_config)
@@ -177,16 +193,17 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         from .run_spec import supervision_policy_for
 
         policy_payload = {"supervision": config.supervision}
+        selected_event_sink = coerce_event_sink(event_sink if event_sink is not None else notifier)
         selected_train_one = train_one or ProductionTrainOne(
             resolver=selected_resolver,
             supervisor_policy=supervision_policy_for(policy_payload, "generation"),
         )
         selected_arena_runner = arena_runner or ArenaRunnerV2(
-            notifier=notifier,
+            event_sink=selected_event_sink,
             supervisor_policy=supervision_policy_for(policy_payload, "arena"),
         )
-        if notifier is not None and hasattr(selected_arena_runner, "notifier"):
-            setattr(selected_arena_runner, "notifier", notifier)
+        if hasattr(selected_arena_runner, "event_sink"):
+            setattr(selected_arena_runner, "event_sink", selected_event_sink)
         super().__init__(
             config=config,  # type: ignore[arg-type]
             resolver=selected_resolver,
@@ -195,6 +212,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             train_one=selected_train_one,
             reporter=reporter,
             notifier=notifier,
+            event_sink=selected_event_sink,
             logger=logger,
         )
 
@@ -221,25 +239,52 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         acknowledge_stopped_execution: bool = False,
     ) -> ResolvedCheckpointNode:
         generation = parent.generation + 1
-        if _is_real_telegram(self._notifier):
-            self._notify_operator(
-                "GENERATION_STARTED",
-                format_action_started(
-                    "GENERATION STARTED",
+        if getattr(self._event_sink, "structured", False):
+            self._event_sink.publish(
+                operator_event(
+                    "GENERATION_STARTED",
                     topology=self.config.topology,
-                    lineage=self.config.lineage_id,
-                    generation=f"M{generation}",
-                    execution_mode=None if execution_mode is None else execution_mode.label,
-                ),
-                key_suffix=f"generation-start:{generation}",
+                    owner_type="lineage",
+                    owner_id=self.config.lineage_id,
+                    action_id=f"{self.config.lineage_id}:generation:{generation}",
+                    payload={
+                        "lineage_id": self.config.lineage_id,
+                        "generation": generation,
+                        "execution_mode": None if execution_mode is None else execution_mode.label,
+                    },
+                    evidence_refs=[{"ref": str(self.state_path), "kind": "lineage-state"}],
+                )
             )
-        return super()._call_train_one(
+        child = super()._call_train_one(
             parent=parent,
             config=config,
             output_lineage=output_lineage,
             execution_mode=execution_mode,
             acknowledge_stopped_execution=acknowledge_stopped_execution,
         )
+        if getattr(self._event_sink, "structured", False):
+            self._event_sink.publish(
+                OperatorEvent.create(
+                    EventType.GENERATION_COMMITTED,
+                    topology=self.config.topology,
+                    owner_type="lineage",
+                    owner_id=self.config.lineage_id,
+                    action_id=f"{self.config.lineage_id}:generation:{child.generation}",
+                    payload={
+                        "lineage_id": self.config.lineage_id,
+                        "generation": child.generation,
+                        "checkpoint": child.ref.to_dict(),
+                    },
+                    evidence_refs=[
+                        {"ref": str(child.owner_root / f"generation-{child.generation}.complete.json"), "kind": "generation-commit"},
+                        {"ref": str(child.owner_root / child.ref.path), "kind": "checkpoint", "sha256": child.ref.sha256},
+                    ],
+                    producer_version="orchestrator-v2",
+                    execution_code_commit=getattr(child, "execution_code_commit", None),
+                    identity={"lineage_id": self.config.lineage_id, "generation": child.generation, "checkpoint": child.ref.to_dict()},
+                )
+            )
+        return child
 
     def _report_start(self, parent: ResolvedCheckpointNode, config: ResolvedEffectiveConfig) -> None:
         effective = config.config

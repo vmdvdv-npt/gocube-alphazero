@@ -1,5 +1,12 @@
 """Versioned contracts and runtime resolution for Orchestrator V2."""
 
+from ..notifications import (  # noqa: F401
+    EventSink,
+    NullEventSink,
+    OperatorEvent,
+    RecordingEventSink,
+)
+
 from .contracts import *  # noqa: F401,F403
 from .artifact_resolver import (  # noqa: F401
     NODE_DIRECTORY,
@@ -64,56 +71,19 @@ from .arena_runner import (  # noqa: F401
     ArenaRunnerV2,
     torus9_startset_ref,
 )
-from .experiment_runner import (  # noqa: F401
-    EXPERIMENT_RUNNER_SCHEMA,
-    EXPERIMENT_STATE_SCHEMA,
-    EXPERIMENT_WINNER_RULE,
-    ExperimentArmConfig,
-    ExperimentConfig,
-    ExperimentRunResult,
-    ExperimentRunner,
-    ExperimentRunnerError,
-    ExperimentRunnerV2,
-    ExperimentStage2Config,
-    LineageFactory,
-    Stage2Config,
-    TrainOne,
-    WinnerDecision,
-    WinnerRule,
-    WinnerRuleName,
-)
-from .continuous_training import (  # noqa: F401
-    CONCURRENCY_SWEEP_SCHEMA,
-    CONTINUOUS_TRAINING_SCHEMA,
-    ContinuousTrainingConfig,
-    ContinuousTrainingResult,
-    ContinuousTrainingRunnerV2,
-    SelfPlayConcurrencyMode,
-    SelfPlayConcurrencySweep,
-)
-from .komi_calibration import (  # noqa: F401
-    CALIBRATION_EXTENSION,
-    CALIBRATION_FAILED,
-    CALIBRATION_KOMI_1_5,
-    CALIBRATION_KOMI_2_5,
-    CHILD_LINEAGE_CREATED,
-    COMPLETE_HANDOFF,
-    KOMI_CALIBRATION_CANDIDATES,
-    KOMI_CALIBRATION_SCHEMA,
-    KOMI_CALIBRATION_STATE_SCHEMA,
-    KOMI_CALIBRATION_TYPE,
-    KOMI_SELECTED,
-    M137_PINNED,
-    STOPPING_PARENT,
-    TRAINING_RESUMED,
-    WAITING_FOR_M137,
-    KomiCalibrationArenaContract,
-    KomiCalibrationConfig,
-    KomiCalibrationError,
-    KomiCalibrationResult,
-    KomiCalibrationRunnerV2,
-    effective_config_with_komi,
-    frozen_calibration_startset_ref,
+from ..performance_tuning import (  # noqa: F401,E402
+    Decision,
+    DecisionType,
+    FailureCategory,
+    MeasurementBudget,
+    Mode,
+    Observation,
+    PerformanceTuningRunner,
+    Plan,
+    SelectedProfile,
+    assess_observation,
+    choose_next,
+    select_profile,
 )
 from .workflow import (  # noqa: F401
     WORKFLOW_SCHEMA,
@@ -123,3 +93,72 @@ from .workflow import (  # noqa: F401
     WorkflowSpec,
     WorkflowStep,
 )
+
+
+def __getattr__(name: str):
+    """Load scenario facades lazily to keep scenario imports acyclic."""
+    experiment_names = {
+        "EXPERIMENT_RUNNER_SCHEMA",
+        "EXPERIMENT_STATE_SCHEMA",
+        "EXPERIMENT_WINNER_RULE",
+        "ExperimentArmConfig",
+        "ExperimentConfig",
+        "ExperimentRunResult",
+        "ExperimentRunner",
+        "ExperimentRunnerError",
+        "ExperimentRunnerV2",
+        "ExperimentStage2Config",
+        "LineageFactory",
+        "Stage2Config",
+        "TrainOne",
+        "WinnerDecision",
+        "WinnerRule",
+        "WinnerRuleName",
+    }
+    komi_names = {
+        "CALIBRATION_EXTENSION",
+        "CALIBRATION_FAILED",
+        "CALIBRATION_KOMI_1_5",
+        "CALIBRATION_KOMI_2_5",
+        "CHILD_LINEAGE_CREATED",
+        "COMPLETE_HANDOFF",
+        "KOMI_CALIBRATION_ALLOWED_CANDIDATES",
+        "KOMI_CALIBRATION_AMBIGUITY_THRESHOLD",
+        "KOMI_CALIBRATION_CANDIDATES",
+        "KOMI_CALIBRATION_EXTENSION_GAMES",
+        "KOMI_CALIBRATION_INITIAL_GAMES",
+        "KOMI_CALIBRATION_SCHEMA",
+        "KOMI_CALIBRATION_STATE_SCHEMA",
+        "KOMI_CALIBRATION_TYPE",
+        "KOMI_SELECTED",
+        "M137_PINNED",
+        "STOPPING_PARENT",
+        "TRAINING_RESUMED",
+        "WAITING_FOR_M137",
+        "KomiCalibrationArenaContract",
+        "KomiCalibrationConfig",
+        "KomiCalibrationError",
+        "KomiCalibrationResult",
+        "KomiCalibrationRunnerV2",
+        "effective_config_with_komi",
+        "frozen_calibration_startset_ref",
+    }
+    continuous_names = {
+        "CONCURRENCY_SWEEP_SCHEMA",
+        "CONTINUOUS_TRAINING_SCHEMA",
+        "ContinuousTrainingConfig",
+        "ContinuousTrainingResult",
+        "ContinuousTrainingRunnerV2",
+        "SelfPlayConcurrencyMode",
+        "SelfPlayConcurrencySweep",
+    }
+    if name in experiment_names:
+        from . import experiment_runner
+        return getattr(experiment_runner, name)
+    if name in komi_names:
+        from . import komi_calibration
+        return getattr(komi_calibration, name)
+    if name in continuous_names:
+        from . import continuous_training
+        return getattr(continuous_training, name)
+    raise AttributeError(name)
