@@ -384,13 +384,23 @@ class ArenaRunner:
             supervised_runtime / "supervisor-stop.json"
         ).is_file()
         if output.exists():
-            existing = load_reusable_evaluation(
-                output,
-                identity.to_dict(),
-                fingerprint,
-                allow_legacy_synthetic=self.engine is not production_arena,
-                allow_completed_non_valid=True,
-            )
+            try:
+                existing = load_reusable_evaluation(
+                    output,
+                    identity.to_dict(),
+                    fingerprint,
+                    allow_legacy_synthetic=self.engine is not production_arena,
+                    allow_completed_non_valid=True,
+                )
+            except RuntimeError:
+                # A directory left by a coordinator crash before the
+                # identity marker was atomically published is incomplete
+                # output, not a reusable evaluation. It is safe to reclaim
+                # only this marker-less case; malformed or mismatching
+                # persisted identities remain fail-closed and are re-raised.
+                if (output / "evaluation-identity.json").is_file():
+                    raise
+                existing = None
             if existing is not None:
                 return ArenaRunResult(
                     evaluation_id=run_id,

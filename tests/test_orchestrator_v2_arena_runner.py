@@ -152,6 +152,33 @@ def test_runner_reuses_only_matching_complete_result(tmp_path: Path, monkeypatch
     assert second.validity == "VALID"
 
 
+def test_runner_reclaims_markerless_stale_directory(tmp_path: Path, monkeypatch) -> None:
+    calls: list[int] = []
+
+    def engine(**kwargs: object) -> dict[str, object]:
+        calls.append(1)
+        return _fake_engine(**kwargs)
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    runner = ArenaRunner(engine=engine)
+    request = _request(tmp_path)
+    stale = tmp_path / "evaluations" / runner._evaluation_id(request)
+    stale.mkdir(parents=True)
+    (stale / "runtime").mkdir()
+    (stale / "runtime" / "telegram-notifications.jsonl").write_text(
+        "stale\n", encoding="utf-8"
+    )
+
+    result = runner.run(request)
+
+    assert calls == [1]
+    assert result.validity == "VALID"
+    assert (result.output_dir / "evaluation-identity.json").is_file()
+
+
 def test_runner_can_store_same_lineage_result_under_generation_directory(
     tmp_path: Path, monkeypatch
 ) -> None:
