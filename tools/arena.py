@@ -192,6 +192,7 @@ def _publish_evaluation_metadata(
     reference_ref: Mapping[str, object],
     evaluation_identity: Mapping[str, object] | None,
     evaluation_fingerprint: str | None,
+    execution_code_commit: str | None = None,
 ) -> str | None:
     """Commit the complete Arena result and its single provenance record."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -229,6 +230,8 @@ def _publish_evaluation_metadata(
             "master_seed": master_seed,
             "training_mutated": False,
         }
+    if execution_code_commit is not None:
+        provenance["execution_code_commit"] = str(execution_code_commit)
 
     _write_provenance(output_dir, provenance)
     manifest_path = output_dir / "manifest.json"
@@ -244,6 +247,8 @@ def _publish_evaluation_metadata(
         }
         updated_manifest["provenance"] = str(output_dir / "provenance.json")
         updated_manifest["validity"] = validity
+        if execution_code_commit is not None:
+            updated_manifest["execution_code_commit"] = str(execution_code_commit)
         _write_json(manifest_path, updated_manifest)
 
     if evaluation_identity is not None and evaluation_fingerprint is not None and run_id is not None:
@@ -281,6 +286,7 @@ def run_arena(
     allowed_evaluation_root: Path | None = None,
     workload: Mapping[str, object] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    execution_code_commit: str | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
     _require_v2_process("tools.arena.run_arena")
@@ -397,6 +403,7 @@ def run_arena(
             reference_ref=reference_ref,
             evaluation_identity=evaluation_identity,
             evaluation_fingerprint=evaluation_fingerprint,
+            execution_code_commit=execution_code_commit,
         )
         result["evaluation_id"] = published_evaluation_id
         result["candidate_reference"] = candidate_ref

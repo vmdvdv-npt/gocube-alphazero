@@ -128,6 +128,7 @@ def run_arena_worker(request_path: str | Path, result_path: str | Path) -> None:
             allowed_evaluation_root=None if request.get("allowed_evaluation_root") is None else Path(str(request["allowed_evaluation_root"])),
             workload=workload,
             progress_callback=progress_callback,
+            execution_code_commit=execution_commit,
         )
     finally:
         stop_heartbeat.set()
