@@ -77,6 +77,7 @@ def run_arena_worker(request_path: str | Path, result_path: str | Path) -> None:
     stop_heartbeat = threading.Event()
     started_at = time.time()
     progress_state = {"completed_games": 0, "total_games": int(raw_config.get("games", 0))}
+    last_progress_publish_at = 0.0
 
     def publish(*, progress: bool = False) -> None:
         now = time.time()
@@ -100,10 +101,16 @@ def run_arena_worker(request_path: str | Path, result_path: str | Path) -> None:
             stop_heartbeat.wait(1.0)
 
     def progress_callback(completed: int, total: int) -> None:
+        nonlocal last_progress_publish_at
         progress_state["completed_games"] = int(completed)
         progress_state["total_games"] = int(total)
-        progress_state["progress_at"] = time.time()
-        publish(progress=True)
+        now = time.time()
+        progress_state["progress_at"] = now
+        # Move-level progress keeps the supervisor from restarting a healthy
+        # long game while bounding heartbeat file writes to about one per sec.
+        if now - last_progress_publish_at >= 1.0 or int(completed) >= int(total):
+            publish(progress=True)
+            last_progress_publish_at = now
 
     publish()
     heartbeat = threading.Thread(target=heartbeat_loop, name="arena-heartbeat", daemon=True)
