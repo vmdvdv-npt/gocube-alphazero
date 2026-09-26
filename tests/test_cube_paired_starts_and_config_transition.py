@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import torch
 
 from gocube_golden.cube_arena_startset_v1 import (
     build_cube_arena_startset,
@@ -153,6 +154,13 @@ def test_explicit_cube_config_transition_preserves_adam_and_replay_parent(
     parent_sha_before = file_sha256(parent_path)
     parent_replay_before = replay_path.read_bytes()
     parent_model_hash = str(generation.engine_result.checkpoint_metadata["model_hash"])
+    source_moments = {
+        name: {
+            moment: source_state.optimizer.state[parameter][moment].detach().clone()
+            for moment in ("exp_avg", "exp_avg_sq")
+        }
+        for name, parameter in source_state.model.named_parameters()
+    }
 
     target_config = _config(
         learning_rate=0.002,
@@ -192,6 +200,10 @@ def test_explicit_cube_config_transition_preserves_adam_and_replay_parent(
     assert cube_graphnet_v2_model_hash(state.model) == parent_model_hash
     assert state.optimizer.param_groups[0]["lr"] == target_config.learning_rate
     assert state.optimizer_updates == source_state.optimizer_updates
+    for name, parameter in state.model.named_parameters():
+        restored = state.optimizer.state[parameter]
+        assert torch.equal(restored["exp_avg"], source_moments[name]["exp_avg"])
+        assert torch.equal(restored["exp_avg_sq"], source_moments[name]["exp_avg_sq"])
     assert len(state.rolling_replay.rows) == 1
 
     child = run_cube_training_generation(

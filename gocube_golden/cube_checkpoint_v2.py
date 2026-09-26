@@ -272,6 +272,22 @@ def _validate_adam_state(optimizer: torch.optim.Adam, *, updates: int) -> None:
 
     if updates < 0:
         raise ValueError("Cube checkpoint optimizer update counter is invalid")
+
+    trainable_parameters = tuple(
+        parameter
+        for parameter_group in optimizer.param_groups
+        for parameter in parameter_group["params"]
+        if parameter.requires_grad
+    )
+    if updates > 0:
+        missing = sum(
+            parameter not in optimizer.state for parameter in trainable_parameters
+        )
+        if missing:
+            raise ValueError(
+                "Cube checkpoint Adam state is missing for trainable parameter(s)"
+            )
+
     populated = [bool(value) for value in optimizer.state.values()]
     if updates > 0 and not populated:
         raise ValueError("Cube checkpoint Adam state is missing")
@@ -284,9 +300,21 @@ def _validate_adam_state(optimizer: torch.optim.Adam, *, updates: int) -> None:
         if not required.issubset(state):
             raise ValueError("Cube checkpoint Adam moments are incomplete")
         step = state["step"]
-        step_value = float(step.detach().cpu()) if torch.is_tensor(step) else float(step)
+        try:
+            if torch.is_tensor(step):
+                if step.numel() != 1:
+                    raise ValueError
+                step_value = float(step.detach().cpu().item())
+            else:
+                step_value = float(step)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise ValueError("Cube checkpoint Adam step is invalid") from exc
         if not math.isfinite(step_value) or step_value < 0:
             raise ValueError("Cube checkpoint Adam step is invalid")
+        if step_value != float(updates):
+            raise ValueError(
+                "Cube checkpoint Adam step does not match optimizer update counter"
+            )
         for name in ("exp_avg", "exp_avg_sq"):
             value = state[name]
             if not torch.is_tensor(value) or tuple(value.shape) != tuple(parameter.shape):
