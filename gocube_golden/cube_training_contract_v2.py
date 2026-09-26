@@ -125,6 +125,31 @@ class CubeTrainingConfig:
             "weight_decay": 0.0,
         }
 
+    @classmethod
+    def from_identity_payload(cls, value: Mapping[str, object]) -> "CubeTrainingConfig":
+        if not isinstance(value, Mapping):
+            raise ValueError("Cube checkpoint concrete_training_config is missing")
+        required = (
+            "learning_rate",
+            "batch_size",
+            "optimizer_steps",
+            "replay_generations",
+        )
+        if any(key not in value for key in required):
+            raise ValueError("Cube checkpoint concrete_training_config is incomplete")
+        if type(value["batch_size"]) is not int or type(value["optimizer_steps"]) is not int or type(value["replay_generations"]) is not int:
+            raise ValueError("Cube checkpoint concrete_training_config integer field is invalid")
+        if value.get("replay_cap") is not None and type(value["replay_cap"]) is not int:
+            raise ValueError("Cube checkpoint concrete_training_config replay_cap is invalid")
+        return cls(
+            learning_rate=value["learning_rate"],  # type: ignore[arg-type]
+            batch_size=value["batch_size"],  # type: ignore[arg-type]
+            optimizer_steps=value["optimizer_steps"],  # type: ignore[arg-type]
+            replay_generations=value["replay_generations"],  # type: ignore[arg-type]
+            replay_cap=value.get("replay_cap"),  # type: ignore[arg-type]
+            weight_decay=value.get("weight_decay", 0.0),  # type: ignore[arg-type]
+        )
+
     @property
     def fingerprint(self) -> str:
         return _fingerprint(self.identity_payload())

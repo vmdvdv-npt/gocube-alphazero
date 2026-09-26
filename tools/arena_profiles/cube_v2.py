@@ -8,6 +8,11 @@ from typing import Any, Mapping, Sequence
 import torch
 
 from gocube_golden.cube_arena_contract_v2 import CubeArenaSearchConfig
+from gocube_golden.cube_arena_startset_v1 import (
+    GENERATOR_VERSION,
+    STARTSET_SCHEMA,
+    build_cube_arena_startset,
+)
 from gocube_golden.cube_checkpoint_v2 import CHECKPOINT_SCHEMA, file_sha256
 from gocube_golden.cube_family import cube_family_topology, initial_cube_state
 from gocube_golden.cube_game_contract_v2 import (
@@ -107,6 +112,7 @@ class CubeV2ArenaProfile:
         self.worker_process_prefix = f"arena-cube{self.size}-worker"
         self.observation_shape = (CHANNEL_COUNT, topology.point_count)
         self.policy_size = topology.action_count
+        self._last_startset = None
 
     @classmethod
     def from_profile_id(cls, value: str) -> "CubeV2ArenaProfile":
@@ -244,13 +250,24 @@ class CubeV2ArenaProfile:
         workers: int,
         workload: Mapping[str, object] | None = None,
     ) -> tuple[list[dict[str, object]], int]:
-        del workload
         if candidate.architecture_config != reference.architecture_config:
             raise ValueError("Cube Arena checkpoints are scientifically incompatible")
+        if type(games) is not int or games <= 0 or games % 2:
+            raise ValueError("Cube Arena games must be a positive even number")
         pairs = games // 2
+        startset = build_cube_arena_startset(
+            size=self.size,
+            master_seed=int(master_seed),
+            pairs=pairs,
+        )
+        workload = workload or {}
+        expected_startset_fingerprint = workload.get("startset_fingerprint")
+        if expected_startset_fingerprint is not None and str(expected_startset_fingerprint) != startset.fingerprint:
+            raise ValueError("Cube Arena workload startset fingerprint mismatch")
+        self._last_startset = startset
         tasks: list[dict[str, object]] = []
-        for pair_index in range(pairs):
-            pair_id = f"{comparison}--empty-{pair_index:04d}"
+        for pair_index, start in enumerate(startset.starts):
+            pair_id = f"{comparison}--{start.start_id}"
             pair_seed = derive_seed(master_seed, pair_id, "cube-arena-pair")
             for suffix, candidate_black in (("g1", True), ("g2", False)):
                 game_id = f"{pair_id}--{suffix}"
@@ -260,7 +277,12 @@ class CubeV2ArenaProfile:
                         "comparison": comparison,
                         "pair_id": pair_id,
                         "game_id": game_id,
-                        "start_id": "canonical-empty-board",
+                        "start_id": start.start_id,
+                        "start_kind": start.start_kind,
+                        "opening_actions": list(start.opening_actions),
+                        "opening_ply": start.opening_ply,
+                        "start_fingerprint": start.start_fingerprint,
+                        "startset_fingerprint": startset.fingerprint,
                         "candidate_black": candidate_black,
                         "candidate_hash": candidate.model_hash,
                         "reference_hash": reference.model_hash,
@@ -353,6 +375,9 @@ class CubeV2ArenaProfile:
             for row in records
         )
         valid = candidate_wins + reference_wins + draws
+        by_pair: dict[str, list[Mapping[str, object]]] = {}
+        for row in records:
+            by_pair.setdefault(str(row.get("pair_id")), []).append(row)
         return {
             "candidate_label": candidate_label,
             "reference_label": reference_label,
@@ -366,6 +391,37 @@ class CubeV2ArenaProfile:
             "technical_games": technical,
             "technical_only_games": technical,
             "invalid_games": invalid,
+            "unique_start_count": len({str(row.get("start_id")) for row in records}),
+            "empty_control_pairs": len({
+                str(row.get("pair_id")) for row in records
+                if row.get("start_kind") == "empty_control"
+            }),
+            "diverse_pairs": len({
+                str(row.get("pair_id")) for row in records
+                if row.get("start_kind") == "diverse"
+            }),
+            "valid_paired_starts": sum(
+                len(group) == 2
+                and all(
+                    row.get("mapped_result") in {"A_WIN", "B_WIN", "DRAW"}
+                    for row in group
+                )
+                for group in by_pair.values()
+            ),
+            "empty_control_results": {
+                "candidate_wins": sum(
+                    row.get("mapped_result") == "A_WIN" and row.get("start_kind") == "empty_control"
+                    for row in records
+                ),
+                "reference_wins": sum(
+                    row.get("mapped_result") == "B_WIN" and row.get("start_kind") == "empty_control"
+                    for row in records
+                ),
+                "draws": sum(
+                    row.get("mapped_result") == "DRAW" and row.get("start_kind") == "empty_control"
+                    for row in records
+                ),
+            },
             "completion_status": "COMPLETE",
         }
 
@@ -376,7 +432,15 @@ class CubeV2ArenaProfile:
             "contract": "cube-v2-arena-stage7",
             "topology": f"cube{self.size}",
             "size": self.size,
-            "opening": "canonical-empty-board",
+            "opening": GENERATOR_VERSION,
+            "startset_schema": STARTSET_SCHEMA,
+            "startset_fingerprint": (
+                None if self._last_startset is None else self._last_startset.fingerprint
+            ),
+            "topology_fingerprint": self.topology.fingerprint,
+            "game_fingerprint": self.expected_game_fingerprint,
+            "observation_fingerprint": self.expected_observation_fingerprint,
+            "empty_board_control_pair": True,
             "paired_starts_color_swap": True,
             "search": self.search_config.identity_payload(),
             "search_fingerprint": self.search_config.fingerprint,

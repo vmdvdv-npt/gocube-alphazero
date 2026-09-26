@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from ..artifact_graph import EffectiveConfig
-from ..provenance import sha256_fingerprint
 from .contracts import ArtifactRef, StartsetRef
 
 SUPPORTED_TOPOLOGIES = ("torus9", "cube2", "cube3", "cube4", "cube5", "cube6", "cube7")
@@ -111,21 +110,21 @@ class TopologyBinding:
         if self.topology == "torus9":
             from .arena_runner import torus9_startset_ref
             return torus9_startset_ref(master_seed=master_seed, games=games)
-        descriptor = {
-            "schema": "golden-evaluation-startset-v2",
-            "generator": "cube-canonical-empty-paired-v2",
-            "topology": self.topology,
-            "size": int(self.cube_size),
-            "semantics": "canonical-empty-board;paired-color-swap",
-            "master_seed": int(master_seed),
-            "pairs": int(games) // 2,
-            "paired_colors": True,
-        }
-        fingerprint = sha256_fingerprint(descriptor)
-        identity = f"{self.topology}-canonical-empty-paired-v2"
+        from ..cube_arena_startset_v1 import build_cube_arena_startset
+
+        startset = build_cube_arena_startset(
+            size=int(self.cube_size),
+            master_seed=int(master_seed),
+            pairs=int(games) // 2,
+        )
+        fingerprint = startset.fingerprint
+        identity = f"{self.topology}-evaluation-starts-v1"
         return StartsetRef(
             id=identity,
-            artifact=ArtifactRef(f"startsets/{identity}.json", fingerprint),
+            artifact=ArtifactRef(
+                f"startsets/{identity}-{fingerprint.removeprefix('sha256:')[:16]}.json",
+                fingerprint,
+            ),
             fingerprint=fingerprint,
         )
 

@@ -266,7 +266,7 @@ def test_cube_continuous_defaults_are_profile_and_startset_aware():
         arena_config=_arena_config(),
     )
     assert config.arena_profile.startswith("cube-v2|size=4|")
-    assert config.arena_startset.id == "cube4-canonical-empty-paired-v2"
+    assert config.arena_startset.id == "cube4-evaluation-starts-v1"
     assert config.arena_startset.fingerprint.startswith("sha256:")
 
     with pytest.raises(ValueError, match="not compatible"):
@@ -303,7 +303,7 @@ def test_arena_identity_comes_from_selected_cube_profile(tmp_path: Path):
     )
     identity = ArenaRunner._identity(request)
     assert identity.scientific_contract["topology"] == "cube4"
-    assert identity.scientific_contract["opening"] == "canonical-empty-board"
+    assert identity.scientific_contract["opening"] == "cube-evaluation-starts-v1"
     assert identity.scientific_contract["model_gating"] is False
 
 

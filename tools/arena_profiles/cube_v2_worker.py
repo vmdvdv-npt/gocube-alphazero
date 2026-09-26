@@ -9,10 +9,12 @@ from typing import Any, Mapping
 
 import torch
 
-from gocube_golden.cube_family import initial_cube_state
+from gocube_golden.cube_arena_startset_v1 import (
+    opening_fingerprint,
+    reconstruct_cube_arena_start,
+)
 from gocube_golden.cube_observation_v2 import (
     build_cube_observation,
-    initial_cube_observation_context,
 )
 from gocube_golden.cube_search import CubeSearchAdapter, CubeSearchPosition
 from gocube_golden.provenance import derive_seed
@@ -30,6 +32,7 @@ class _CubeGame:
     task: Mapping[str, object]
     position: CubeSearchPosition
     trace: list[dict[str, object]]
+    start_trace: list[dict[str, object]]
     ply: int
     started_at: float
     formal_result: str | None = None
@@ -54,6 +57,10 @@ def _finish_record(game: _CubeGame) -> dict[str, object]:
         "pair_id": str(task["pair_id"]),
         "game_id": str(task["game_id"]),
         "start_id": str(task["start_id"]),
+        "start_kind": str(task["start_kind"]),
+        "start_fingerprint": str(task["start_fingerprint"]),
+        "opening_ply": int(task["opening_ply"]),
+        "start_trace": list(game.start_trace),
         "worker_id": int(task["worker_id"]),
         "worker_pid": os.getpid(),
         "candidate_black": candidate_black,
@@ -104,15 +111,39 @@ def run_cube_v2_worker(
     search_adapter = CubeSearchAdapter()
 
     def make_game(task: Mapping[str, object]) -> _CubeGame:
-        state = initial_cube_state(size=size)
+        raw_actions = task.get("opening_actions")
+        if not isinstance(raw_actions, (list, tuple)):
+            raise ValueError("Cube Arena task opening_actions is missing")
+        opening_actions = tuple(int(action) for action in raw_actions)
+        position = reconstruct_cube_arena_start(size=size, opening_actions=opening_actions)
+        opening_ply = int(task.get("opening_ply", -1))
+        if opening_ply != len(opening_actions):
+            raise ValueError("Cube Arena task opening_ply does not match opening_actions")
+        actual_fingerprint = opening_fingerprint(
+            size=size, opening_actions=opening_actions, position=position
+        )
+        if actual_fingerprint != str(task.get("start_fingerprint")):
+            raise ValueError("Cube Arena task opening fingerprint mismatch")
+        start_trace = []
+        replayed = reconstruct_cube_arena_start(size=size, opening_actions=())
+        for ply, action in enumerate(opening_actions, start=1):
+            start_trace.append(
+                {
+                    "ply": ply,
+                    "side_to_move": replayed.game_state.side_to_move.name,
+                    "action": int(action),
+                    "legal": True,
+                }
+            )
+            replayed = search_adapter.apply_action(replayed, int(action))
+        if replayed.state_key != position.state_key:
+            raise ValueError("Cube Arena opening replay is not reproducible")
         return _CubeGame(
             task=task,
-            position=CubeSearchPosition(
-                state,
-                initial_cube_observation_context(state),
-            ),
+            position=position,
             trace=[],
-            ply=0,
+            start_trace=start_trace,
+            ply=opening_ply,
             started_at=time.perf_counter(),
         )
 

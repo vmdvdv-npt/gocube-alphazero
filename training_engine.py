@@ -79,6 +79,7 @@ class TrainingState:
     parent_checkpoint_identity: Mapping[str, object] | None = None
     completed_games: int = 0
     adapter_state: Any = None
+    config_transition: Any = None
 
     @property
     def replay_state(self) -> Any:
@@ -619,6 +620,10 @@ class TrainingEngine:
                 "rolling_replay_artifact_sha256": artifact_hash_cache["rolling_replay"],
                 "rolling_replay_size_bytes": rolling_tmp.stat().st_size,
             }
+            if metadata.get("training_config_transition") is not None:
+                provenance["training_config_transition"] = metadata[
+                    "training_config_transition"
+                ]
             checkpoint_summary = dict(saved_metadata)
             checkpoint_summary.update({
                 "path": str(checkpoint_final),
