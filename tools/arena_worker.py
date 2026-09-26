@@ -295,7 +295,6 @@ def run_cooperative_arena_worker(
         records: list[dict[str, object]] = []
         lane_wall_time_seconds = 0.0
         queue_blocked_seconds = 0.0
-        first_move_published = False
         used_lane_ids: set[int] = set()
         lane_start_counts = {lane_id: 0 for lane_id in range(lane_capacity)}
 
@@ -385,7 +384,6 @@ def run_cooperative_arena_worker(
         ) -> bool:
             """Return True when this processing completed the game."""
 
-            nonlocal first_move_published
             runtime = active[lane_id]
             if isinstance(step, SearchEvaluationRequest):
                 role = callbacks.model_role(runtime.game)
@@ -407,9 +405,11 @@ def run_cooperative_arena_worker(
             runtime.session = None
             runtime.pending_evaluator = None
             runtime.generation += 1
-            if not first_move_published:
-                publish_activity("move_completed", lane_id, runtime.game)
-                first_move_published = True
+            # Every completed move is a real execution-progress event.  The
+            # child-side progress writer coalesces these events before writing
+            # JSON, so publishing here does not create per-simulation I/O and
+            # prevents a long first wave of games from looking stalled.
+            publish_activity("move_completed", lane_id, runtime.game)
             if finished:
                 finish_lane(lane_id)
                 return True

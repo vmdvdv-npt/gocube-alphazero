@@ -286,6 +286,7 @@ def run_arena(
     allowed_evaluation_root: Path | None = None,
     workload: Mapping[str, object] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    activity_callback: Callable[[Mapping[str, object]], None] | None = None,
     execution_code_commit: str | None = None,
 ) -> dict[str, object]:
     """Resolve checkpoint paths/references and invoke the universal Arena."""
@@ -354,6 +355,7 @@ def run_arena(
         ),
         workload=workload,
         progress_callback=progress_callback,
+        activity_callback=activity_callback,
     )
     if candidate_identity is not None or reference_identity is not None or evaluation_identity is not None:
         candidate_ref = _reference_payload(

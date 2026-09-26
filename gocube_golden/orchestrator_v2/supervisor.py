@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
+import json
 from typing import Any
 
 from ..process_supervision import (
@@ -358,6 +359,10 @@ class SupervisorV2:
     def result_path(self) -> Path:
         return self.root / "runtime" / "supervisor-result.json"
 
+    @property
+    def attempts_path(self) -> Path:
+        return self.root / "runtime" / "supervisor-attempts.jsonl"
+
     def plan(self) -> RecoveryPlan:
         """Decide whether to start, reattach, or stop without launching."""
         try:
@@ -478,6 +483,7 @@ class SupervisorV2:
                     reattached=ever_reattached,
                 )
             except TechnicalFailure as exc:
+                self._record_attempt_event(attempt, active, str(exc))
                 if active is not None:
                     try:
                         self._terminate_group(active, reason=str(exc), process=process)
@@ -659,6 +665,36 @@ class SupervisorV2:
             reason="externally confirmed execution reconciled",
         )
 
+    def reclaim_dead_child(self) -> ProcessResult:
+        """Retire a dead child while preserving the next attempt number.
+
+        This is the recovery path for a coordinator crash: the old process
+        group must be proven gone, but the durable execution intent remains so
+        the replacement supervisor starts attempt ``N + 1`` and mints a new
+        execution permit for the same scientific evaluation.
+        """
+        active = self._read_active_child()
+        if active is None:
+            return ProcessResult(
+                status=SupervisorStatus.SUCCESS,
+                returncode=0,
+                attempts=0,
+                reason="no dead active child requires reclamation",
+            )
+        if process_group_exists(active.process_group):
+            raise SupervisorIntegrityError(
+                "cannot reclaim a live active child process group"
+            )
+        self._write_intent(active.attempt + 1)
+        self._clear_active_child_if_unchanged(active)
+        self.result_path.unlink(missing_ok=True)
+        return ProcessResult(
+            status=SupervisorStatus.SUCCESS,
+            returncode=0,
+            attempts=active.attempt + 1,
+            reason="dead child reclaimed for a new bounded attempt",
+        )
+
     def heartbeat_status(self, child: ActiveChild, *, now: float | None = None) -> HeartbeatStatus:
         """Return generic liveness/progress freshness for a child."""
         current = self.clock() if now is None else float(now)
@@ -753,6 +789,28 @@ class SupervisorV2:
                 "updated_at": self.clock(),
             },
         )
+
+    def _record_attempt_event(
+        self,
+        attempt: int,
+        active: ActiveChild | None,
+        reason: str,
+    ) -> None:
+        """Persist every technical failure, including retryable timeouts."""
+        self.attempts_path.parent.mkdir(parents=True, exist_ok=True)
+        payload: dict[str, object] = {
+            "schema": "gocube-orchestrator-v2-supervisor-attempt-v1",
+            "execution_id": self.execution_id,
+            "attempt": int(attempt),
+            "reason": reason,
+            "recorded_at": self.clock(),
+        }
+        if active is not None:
+            payload.update({"pid": active.pid, "process_group": active.process_group})
+        with self.attempts_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def _start(
         self,

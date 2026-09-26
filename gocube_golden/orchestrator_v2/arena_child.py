@@ -75,18 +75,33 @@ def run_arena_worker(request_path: str | Path, result_path: str | Path) -> None:
     output_path = Path(str(request["output_dir"])).resolve()
     _clear_incomplete_output(output_path)
     stop_heartbeat = threading.Event()
+    progress_lock = threading.Lock()
     started_at = time.time()
-    progress_state = {"completed_games": 0, "total_games": int(raw_config.get("games", 0))}
+    progress_state = {
+        "attempt": int(request.get("attempt", 1)),
+        "completed_games": 0,
+        "started_games": 0,
+        "move_events": 0,
+        "total_games": int(raw_config.get("games", 0)),
+        "last_move_at": None,
+        "inference_batches": 0,
+        "inference_rows": 0,
+        "active_contexts": 0,
+        "progress_at": started_at,
+    }
     last_progress_publish_at = 0.0
 
     def publish(*, progress: bool = False) -> None:
         now = time.time()
+        with progress_lock:
+            snapshot = dict(progress_state)
+        progress_at = float(snapshot.get("progress_at", started_at))
         payload = {
             "schema": "gocube-orchestrator-v2-arena-heartbeat-v1",
             "liveness_at": now,
-            "progress_at": now if progress else progress_state.get("progress_at", started_at),
-            "progress_token": f"games:{progress_state['completed_games']}/{progress_state['total_games']}",
-            "progress": dict(progress_state),
+            "progress_at": now if progress else progress_at,
+            "progress_token": f"moves:{snapshot['move_events']};games:{snapshot['completed_games']}/{snapshot['total_games']}",
+            "progress": snapshot,
         }
         atomic_write_json(liveness_path, payload)
         if progress_path != liveness_path:
@@ -102,15 +117,30 @@ def run_arena_worker(request_path: str | Path, result_path: str | Path) -> None:
 
     def progress_callback(completed: int, total: int) -> None:
         nonlocal last_progress_publish_at
-        progress_state["completed_games"] = int(completed)
-        progress_state["total_games"] = int(total)
         now = time.time()
-        progress_state["progress_at"] = now
+        with progress_lock:
+            progress_state["completed_games"] = int(completed)
+            progress_state["total_games"] = int(total)
+            progress_state["progress_at"] = now
         # Move-level progress keeps the supervisor from restarting a healthy
         # long game while bounding heartbeat file writes to about one per sec.
         if now - last_progress_publish_at >= 1.0 or int(completed) >= int(total):
             publish(progress=True)
             last_progress_publish_at = now
+
+    def activity_callback(activity: Mapping[str, object]) -> None:
+        with progress_lock:
+            for key in (
+                "started_games",
+                "move_events",
+                "inference_batches",
+                "inference_rows",
+                "active_contexts",
+            ):
+                if key in activity:
+                    progress_state[key] = int(activity[key])
+            if activity.get("last_move_at") is not None:
+                progress_state["last_move_at"] = float(activity["last_move_at"])
 
     publish()
     heartbeat = threading.Thread(target=heartbeat_loop, name="arena-heartbeat", daemon=True)
@@ -135,6 +165,7 @@ def run_arena_worker(request_path: str | Path, result_path: str | Path) -> None:
             allowed_evaluation_root=None if request.get("allowed_evaluation_root") is None else Path(str(request["allowed_evaluation_root"])),
             workload=workload,
             progress_callback=progress_callback,
+            activity_callback=activity_callback,
             execution_code_commit=execution_commit,
         )
     finally:

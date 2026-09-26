@@ -38,7 +38,7 @@ from .immutable_runtime import (
 )
 from .version import require_v2_process
 from .supervisor import SupervisorAction, SupervisorPolicy, SupervisorV2
-from ..process_supervision import process_group_exists
+from ..process_supervision import atomic_write_json, process_group_exists
 
 from tools.arena import (
     ARENA_RESULT_PROVENANCE_SCHEMA,
@@ -234,6 +234,11 @@ class ArenaRunner:
             # Supervisor calls this once for every actual spawn, so a retry
             # receives a fresh PID-bound, signed capability even when the
             # original attempt outlived the historical 24-hour TTL.
+            # Keep the durable child request aligned with the attempt that
+            # SupervisorV2 is actually starting; this makes progress records
+            # and incident evidence unambiguous across retries/reattaches.
+            payload["attempt"] = int(child_request.attempt)
+            atomic_write_json(request_path, payload)
             env = runtime.environment(os.environ)
             env["AZ_ORCHESTRATOR_VERSION"] = "V2"
             with _child_execution_permit(
@@ -346,7 +351,11 @@ class ArenaRunner:
         return "INVALID"
 
     @staticmethod
-    def _reclaim_stale_supervision(output: Path, run_id: str) -> bool:
+    def _reclaim_stale_supervision(
+        output: Path,
+        run_id: str,
+        policy: SupervisorPolicy | None = None,
+    ) -> bool:
         """Clear a dead child marker before retrying incomplete Arena output.
 
         A coordinator can disappear after the child has already exited.  In
@@ -360,6 +369,7 @@ class ArenaRunner:
             execution_id=f"{run_id}:arena",
             liveness_path=output / "runtime" / "arena-liveness.json",
             progress_path=output / "runtime" / "arena-progress.json",
+            policy=policy,
         )
         if supervisor.stop_path.is_file():
             return False
@@ -369,10 +379,9 @@ class ArenaRunner:
             return False
 
         # Revalidate and clear only the supervisor-owned identity records.
-        # The caller will then reclaim the incomplete evaluation directory
-        # through the existing markerless/incomplete-output path.
-        supervisor.reconcile_completed_execution()
-        supervisor.result_path.unlink(missing_ok=True)
+        # Keep execution-intent.json so the replacement supervisor starts the
+        # next bounded attempt instead of silently resetting to attempt 1.
+        supervisor.reclaim_dead_child()
         return True
 
     @staticmethod
@@ -456,7 +465,11 @@ class ArenaRunner:
             if plan.action is SupervisorAction.STOP:
                 raise RuntimeError(f"Arena supervision cannot be reclaimed: {plan.reason}")
         if output.exists() and active_supervision:
-            active_supervision = not self._reclaim_stale_supervision(output, run_id)
+            active_supervision = not self._reclaim_stale_supervision(
+                output,
+                run_id,
+                self.supervisor_policy,
+            )
         if output.exists():
             try:
                 existing = load_reusable_evaluation(
