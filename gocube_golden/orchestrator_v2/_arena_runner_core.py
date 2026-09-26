@@ -412,7 +412,14 @@ class ArenaRunner:
         # it is deliberately outside the engine's disposable products.
         retained = {
             "notifications": None,
-            "runtime": {"telegram-outbox", "telegram-notifications.jsonl"},
+            "runtime": {
+                "execution-intent.json",
+                "incident-evidence-20260926.json",
+                "recovery-evidence-20260926.json",
+                "supervisor-attempts.jsonl",
+                "telegram-outbox",
+                "telegram-notifications.jsonl",
+            },
             "logs": {"telegram-notifier-errors.jsonl"},
         }
 
@@ -422,12 +429,22 @@ class ArenaRunner:
             else:
                 path.unlink(missing_ok=True)
 
+        def retained_runtime_file(name: str) -> bool:
+            return (
+                name in retained["runtime"]
+                or name.startswith("incident-evidence-")
+                or name.startswith("recovery-evidence-")
+            )
+
         for path in output.iterdir():
             if path.name == "notifications" and path.is_dir() and not path.is_symlink():
                 continue
             if path.name in retained and retained[path.name] is not None and path.is_dir() and not path.is_symlink():
                 for child in path.iterdir():
-                    if child.name not in retained[path.name]:
+                    if path.name == "runtime":
+                        if not retained_runtime_file(child.name):
+                            remove(child)
+                    elif child.name not in retained[path.name]:
                         remove(child)
             else:
                 remove(path)

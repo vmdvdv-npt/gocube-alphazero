@@ -16,7 +16,9 @@ from ..process_supervision import atomic_write_json, atomic_write_text
 from .events import OperatorEvent, utc_now
 
 
-DELIVERY_STATUSES = frozenset({"PENDING", "RETRY_WAIT", "DELIVERED", "BLOCKED_CONFIGURATION"})
+DELIVERY_STATUSES = frozenset(
+    {"PENDING", "RETRY_WAIT", "DELIVERED", "BLOCKED_CONFIGURATION", "DELIVERY_UNCERTAIN"}
+)
 
 
 def _safe_hash(value: str) -> str:
