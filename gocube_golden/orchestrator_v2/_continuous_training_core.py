@@ -1532,12 +1532,16 @@ class ContinuousTrainingRunnerV2:
             wld=list(result.wld),
             execution_code_commit=result.execution_code_commit,
         )
-        self._notify_operator(
-            "ARENA_COMPLETED",
-            f"Arena completed for M{current.generation} vs M{reference.generation}: "
-            f"{result.validity} W/L/D={result.wld[0]}/{result.wld[1]}/{result.wld[2]}.",
-            key_suffix=f"arena:{current.generation}:{result.evaluation_id}",
-        )
+        if not (
+            isinstance(self.arena_runner, ArenaRunnerV2)
+            and self.arena_runner.notifier is self._notifier
+        ):
+            self._notify_operator(
+                "ARENA_COMPLETED",
+                f"Arena completed for M{current.generation} vs M{reference.generation}: "
+                f"{result.validity} W/L/D={result.wld[0]}/{result.wld[1]}/{result.wld[2]}.",
+                key_suffix=f"arena:{current.generation}:{result.evaluation_id}",
+            )
         return result
 
     def _write_lineage_arena_projection(

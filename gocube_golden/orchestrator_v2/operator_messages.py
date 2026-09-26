@@ -83,4 +83,21 @@ def format_action_started(title: str, **fields: object) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["format_action_started", "format_arena_started", "format_training_started"]
+def format_arena_completed(*, topology: str, evaluation_id: str, candidate: str,
+                           reference: str, validity: str, wld: tuple[int, int, int],
+                           summary: object, execution_code_commit: str | None) -> str:
+    data = dict(summary or {})
+    telemetry = data.get("telemetry", {})
+    lines = ["ARENA COMPLETED — GoCube AlphaZero", ""]
+    for label, value in (("Topology", topology), ("Evaluation", evaluation_id),
+                         ("Candidate", candidate), ("Reference", reference),
+                         ("Validity", validity), ("W/L/D", "/".join(map(str, wld)))):
+        _line(lines, label, value)
+    _line(lines, "Valid games", _pick(data, "valid_games", "games_valid"))
+    _line(lines, "Technical games", _pick(telemetry, "technical_games"))
+    _line(lines, "Performance", _pick(telemetry, "performance_status"))
+    _line(lines, "Execution commit", execution_code_commit)
+    return "\n".join(lines)
+
+
+__all__ = ["format_action_started", "format_arena_started", "format_arena_completed", "format_training_started"]

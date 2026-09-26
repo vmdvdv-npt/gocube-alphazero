@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import uuid
 import time
 
 
@@ -39,13 +40,17 @@ def _fsync_dir(path: Path) -> None:
 
 def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    with temporary.open("w", encoding="utf-8") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
-    _fsync_dir(path.parent)
+    # Heartbeat and progress can publish concurrently within one process.
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("x", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _fsync_dir(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def atomic_write_json(path: Path, payload: Mapping[str, object] | Sequence[object]) -> None:

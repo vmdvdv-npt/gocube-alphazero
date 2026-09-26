@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,9 @@ import time
 from typing import Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+import weakref
+
+from .process_supervision import atomic_write_json
 
 TOKEN_ENV = "GOCUBE_TELEGRAM_BOT_TOKEN"
 CHAT_ID_ENV = "GOCUBE_TELEGRAM_CHAT_ID"
@@ -279,7 +283,12 @@ def stop_requested_notification(
     )
 
 
+_instances: weakref.WeakSet = weakref.WeakSet()
+
+
 class TelegramNotifier:
+    retry_interval_seconds = 30.0
+
     def __init__(self, paths: object) -> None:
         self.paths = paths
         self.config = load_config()
@@ -287,69 +296,129 @@ class TelegramNotifier:
         self.errors = Path(getattr(paths, "logs")) / "telegram-notifier-errors.jsonl"
         self.queue: queue.Queue[tuple[str, str]] = queue.Queue()
         self.thread: threading.Thread | None = None
+        self.outbox = Path(getattr(paths, "runtime")) / "telegram-outbox"
+        self._delivery_lock = threading.RLock()
+        self._worker_lock = threading.Lock()
+        _instances.add(self)
+        if self.config is not None and any(self.outbox.glob("*.json")):
+            self._ensure_worker()
 
     def _seen(self, key: str) -> bool:
         try:
-            return any(
-                json.loads(line).get("key") == key
-                for line in self.delivered.read_text(encoding="utf-8").splitlines()
-            )
-        except (OSError, json.JSONDecodeError):
+            lines = self.delivered.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
             return False
-
-    def _deliver(self, key: str, text: str) -> None:
-        if self.config is None or self._seen(key):
-            return
-        try:
-            _send(*self.config, text)
-        except BaseException as exc:  # Fail-open: observability never controls training.
+        for line in lines:
             try:
-                self.errors.parent.mkdir(parents=True, exist_ok=True)
-                with self.errors.open("a", encoding="utf-8") as handle:
-                    error = str(exc) if isinstance(exc, TelegramError) else "delivery failed"
-                    handle.write(
-                        json.dumps(
-                            {
-                                "at": _now(),
-                                "key": key,
-                                "error": error,
-                                "type": exc.__class__.__name__,
-                            }
-                        )
-                        + "\n"
-                    )
-            except OSError:
-                pass
-            return
-        self.delivered.parent.mkdir(parents=True, exist_ok=True)
-        with self.delivered.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"at": _now(), "key": key}) + "\n")
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and record.get("key") == key:
+                return True
+        return False
+
+    def _pending_path(self, key: str) -> Path:
+        return self.outbox / (hashlib.sha256(key.encode()).hexdigest() + ".json")
+
+    def _record_error(self, key: str, exc: Exception) -> None:
+        try:
+            self.errors.parent.mkdir(parents=True, exist_ok=True)
+            with self.errors.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({
+                    "at": _now(), "key": key,
+                    "error": str(exc) if isinstance(exc, TelegramError) else "delivery failed",
+                    "type": exc.__class__.__name__,
+                }) + "\n")
+        except OSError:
+            pass
+
+    def _persist(self, key: str, text: str) -> bool:
+        if self.config is None:
+            return False
+        with self._delivery_lock:
+            if self._seen(key):
+                return False
+            try:
+                atomic_write_json(self._pending_path(key), {"key": key, "text": text})
+            except OSError as exc:
+                self._record_error(key, exc)
+                # Disk trouble must not prevent an immediate delivery attempt.
+            return True
+
+    def _deliver(self, key: str, text: str) -> bool:
+        with self._delivery_lock:
+            if self.config is None:
+                return False
+            try:
+                if not self._seen(key):
+                    _send(*self.config, text)
+                    self.delivered.parent.mkdir(parents=True, exist_ok=True)
+                    with self.delivered.open("a", encoding="utf-8") as handle:
+                        handle.write(json.dumps({"at": _now(), "key": key}) + "\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                self._pending_path(key).unlink(missing_ok=True)
+                return True
+            except Exception as exc:
+                self._record_error(key, exc)
+                return False
+
+    def _retry_pending(self) -> None:
+        for path in sorted(self.outbox.glob("*.json")):
+            payload = _json(path)
+            key, text = payload.get("key"), payload.get("text")
+            if isinstance(key, str) and isinstance(text, str):
+                self._deliver(key, text)
 
     def _worker(self) -> None:
+        next_retry = time.monotonic()
         while True:
-            key, text = self.queue.get()
             try:
-                self._deliver(key, text)
-            finally:
-                self.queue.task_done()
+                key, text = self.queue.get(timeout=max(0.0, next_retry - time.monotonic()))
+            except queue.Empty:
+                pass
+            else:
+                try:
+                    self._deliver(key, text)
+                finally:
+                    self.queue.task_done()
+            if time.monotonic() >= next_retry:
+                self._retry_pending()
+                next_retry = time.monotonic() + self.retry_interval_seconds
+            with self._worker_lock:
+                if self.queue.empty() and not any(self.outbox.glob("*.json")):
+                    self.thread = None
+                    return
+
+    def _ensure_worker(self) -> None:
+        with self._worker_lock:
+            if self.thread is None or not self.thread.is_alive():
+                self.thread = threading.Thread(
+                    target=self._worker, name="gocube-telegram", daemon=True,
+                )
+                self.thread.start()
 
     def enqueue(self, key: str, text: str) -> None:
-        if self.config is None or self._seen(key):
-            return
-        if self.thread is None or not self.thread.is_alive():
-            self.thread = threading.Thread(
-                target=self._worker,
-                name="gocube-telegram",
-                daemon=True,
-            )
-            self.thread.start()
-        self.queue.put((key, text))
+        if self._persist(key, text):
+            self.queue.put((key, text))
+            self._ensure_worker()
 
     def send_now(self, key: str, text: str) -> None:
-        self._deliver(key, text)
+        if self._persist(key, text) and not self._deliver(key, text):
+            self._ensure_worker()
 
     def flush(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
+        # A standalone command may exit before the periodic retry is due.
+        # Give persisted failures one final bounded opportunity to send.
+        if self.config is not None:
+            for path in self.outbox.glob("*.json"):
+                payload = _json(path)
+                key, text = payload.get("key"), payload.get("text")
+                if isinstance(key, str) and isinstance(text, str):
+                    self.queue.put((key, text))
+            if self.queue.unfinished_tasks:
+                self._ensure_worker()
         while self.queue.unfinished_tasks and time.monotonic() < deadline:
             time.sleep(0.02)
 
@@ -397,6 +466,6 @@ def install() -> None:
 
 
 def flush_all(timeout: float = 7.0) -> None:
-    values = list(_notifiers.values())
+    values = list(_instances)
     for notifier in values:
         notifier.flush(max(0.1, timeout / max(1, len(values))))

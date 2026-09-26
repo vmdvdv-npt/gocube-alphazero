@@ -174,15 +174,21 @@ def test_runner_reclaims_markerless_stale_directory(tmp_path: Path, monkeypatch)
     stale = tmp_path / "evaluations" / runner._evaluation_id(request)
     stale.mkdir(parents=True)
     (stale / "runtime").mkdir()
-    (stale / "runtime" / "telegram-notifications.jsonl").write_text(
-        "stale\n", encoding="utf-8"
-    )
+    receipt = stale / "runtime" / "telegram-notifications.jsonl"
+    receipt.write_text('{"key":"arena-start:test"}\n', encoding="utf-8")
+    pending = stale / "runtime" / "telegram-outbox" / "pending.json"
+    atomic_write_json(pending, {"key": "start", "text": "Arena started"})
+    stale_result = stale / "runtime" / "supervisor-result.json"
+    stale_result.write_text('{"status":"FAILURE"}')
 
     result = runner.run(request)
 
     assert calls == [1]
     assert result.validity == "VALID"
     assert (result.output_dir / "evaluation-identity.json").is_file()
+    assert json.loads(receipt.read_text())["key"] == "arena-start:test"
+    assert json.loads(pending.read_text())["text"] == "Arena started"
+    assert not stale_result.exists()
 
 
 def test_runner_reclaims_dead_active_child_and_old_supervisor_result(
@@ -398,3 +404,149 @@ def test_identity_changes_for_seed_startset_and_full_arena_contract(tmp_path: Pa
     changed = dict(request.execution_contract or {})
     changed["inference_batch_wait_ms"] = 2.0
     assert ArenaRunner._identity(replace(request, execution_contract=changed)).fingerprint != base
+
+
+def test_completed_arena_notifies_and_reuse_recovers_missing_delivery(tmp_path, monkeypatch):
+    from gocube_golden import telegram_notifier as tg
+
+    monkeypatch.setattr(tg, "load_config", lambda: ("test-token", "test-chat"))
+    monkeypatch.setattr(tg.TelegramNotifier, "_ensure_worker", lambda self: None, raising=False)
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    paths = SimpleNamespace(runtime=tmp_path / "notifications", logs=tmp_path / "logs")
+    notifier = tg.TelegramNotifier(paths)
+    calls = []
+    def engine(**kwargs):
+        calls.append(1)
+        return _fake_engine(**kwargs)
+    def unavailable(*args):
+        raise tg.TelegramError("HTTP 503")
+    monkeypatch.setattr(tg, "_send", unavailable)
+    request = _request(tmp_path)
+    result = ArenaRunner(engine=engine, notifier=notifier).run(request)
+    assert result.wld == (8, 8, 0)
+    assert list((paths.runtime / "telegram-outbox").glob("*.json"))
+    sent = []
+    monkeypatch.setattr(tg, "_send", lambda _token, _chat, text: sent.append(text))
+    # A new coordinator must recover notification of an already completed run.
+    resumed = ArenaRunner(engine=engine, notifier=tg.TelegramNotifier(paths))
+    resumed.run(request)
+    resumed.run(request)
+    assert calls == [1]
+    assert len(sent) == 1
+    for expected in ("ARENA COMPLETED", "Candidate: M95", "Reference: M90", "W/L/D: 8/8/0", "Validity: VALID"):
+        assert expected in sent[0]
+
+
+def test_arena_does_not_report_completion_on_engine_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    sent = []
+    def engine(**kwargs):
+        raise RuntimeError("worker failed")
+    runner = ArenaRunner(engine=engine, notifier=SimpleNamespace(send_now=lambda *args: sent.append(args)))
+    with pytest.raises(RuntimeError, match="worker failed"):
+        runner.run(_request(tmp_path))
+    assert len(sent) == 1
+    assert "ARENA FAILED" in sent[0][1]
+    assert "ARENA COMPLETED" not in sent[0][1]
+
+
+def test_production_arena_path_emits_completion(tmp_path, monkeypatch):
+    from gocube_golden.orchestrator_v2.execution_permit import _test_authority
+
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    sent = []
+    runner = ArenaRunner(notifier=SimpleNamespace(send_now=lambda *args: sent.append(args)))
+    def production_summary(*, request, output, engine_kwargs):
+        return _fake_engine(**engine_kwargs), SimpleNamespace(commit="executed-commit")
+    monkeypatch.setattr(runner, "_production_summary", production_summary)
+    request = replace(_request(tmp_path), execution_code_commit="test-commit")
+    with _test_authority():
+        result = runner.run(request)
+    assert result.execution_code_commit == "executed-commit"
+    assert len(sent) == 1
+    assert "ARENA COMPLETED" in sent[0][1]
+    assert "Execution commit: executed-commit" in sent[0][1]
+
+
+def test_reused_result_preserves_actual_execution_commit(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    runner = ArenaRunner(engine=_fake_engine)
+    request = _request(tmp_path)
+    first = runner.run(request)
+    (first.output_dir / "provenance.json").write_text(json.dumps({
+        "candidate": request.candidate.ref.to_dict(),
+        "reference": request.reference.ref.to_dict(),
+        "profile": "torus9", "master_seed": request.master_seed,
+        "execution_code_commit": "original-execution-commit",
+    }))
+    reused = runner.run(replace(request, execution_code_commit="new-requested-commit"))
+    assert reused.execution_code_commit == "original-execution-commit"
+
+
+@pytest.mark.parametrize("blocked", ["live", "stopped", "malformed", "foreign", "foreign-intent"])
+def test_stale_recovery_preserves_untrusted_or_active_supervision(tmp_path, monkeypatch, blocked):
+    from gocube_golden.orchestrator_v2 import _arena_runner_core as core
+    from gocube_golden.orchestrator_v2 import supervisor as supervision
+
+    root = tmp_path / "evaluation"
+    runtime = root / "runtime"
+    runtime.mkdir(parents=True)
+    active = {
+        "schema": ACTIVE_CHILD_SCHEMA,
+        "execution_id": "evaluation:arena",
+        "attempt": 3,
+        "pid": 10_000_000,
+        "process_group": 10_000_000,
+        "started_at": 1.0,
+        "liveness_path": "runtime/arena-liveness.json",
+        "progress_path": "runtime/arena-progress.json",
+    }
+    if blocked == "malformed":
+        active = {"schema": "broken"}
+    if blocked == "foreign":
+        active["execution_id"] = "another-evaluation:arena"
+    atomic_write_json(runtime / "active-child.json", active)
+    atomic_write_json(runtime / "supervisor-result.json", {"status": "FAILURE"})
+    if blocked == "stopped":
+        atomic_write_json(runtime / "supervisor-stop.json", {"reason": "operator stop"})
+    if blocked == "foreign-intent":
+        atomic_write_json(runtime / "execution-intent.json", {
+            "schema": "gocube-orchestrator-v2-execution-intent-v1",
+            "execution_id": "another-evaluation:arena", "attempt": 3,
+        })
+    before = {path.name: path.read_bytes() for path in runtime.iterdir()}
+    monkeypatch.setattr(core, "process_group_exists", lambda _group: blocked == "live")
+    monkeypatch.setattr(supervision, "process_group_exists", lambda _group: blocked == "live")
+    monkeypatch.setattr(supervision, "process_group_owned_by", lambda *_args: True)
+    assert not core.ArenaRunner._reclaim_stale_supervision(root, "evaluation")
+    assert {path.name: path.read_bytes() for path in runtime.iterdir()} == before
+
+
+@pytest.mark.parametrize("intent", ["not-json", '{"schema":"wrong"}', '{"schema":"gocube-orchestrator-v2-execution-intent-v1","execution_id":"foreign:arena","attempt":1}'])
+def test_incomplete_output_preserves_invalid_intent_without_child(tmp_path, monkeypatch, intent):
+    monkeypatch.setattr(
+        "gocube_golden.orchestrator_v2.arena_runner.evaluation_dir",
+        lambda _topology, run_id: tmp_path / "evaluations" / run_id,
+    )
+    runner = ArenaRunner(engine=lambda **kwargs: pytest.fail("must not launch"))
+    request = _request(tmp_path)
+    output = tmp_path / "evaluations" / runner._evaluation_id(request)
+    runtime = output / "runtime"
+    runtime.mkdir(parents=True)
+    intent_path = runtime / "execution-intent.json"
+    intent_path.write_text(intent)
+    with pytest.raises(RuntimeError, match="intent is malformed"):
+        runner.run(request)
+    assert intent_path.read_text() == intent
