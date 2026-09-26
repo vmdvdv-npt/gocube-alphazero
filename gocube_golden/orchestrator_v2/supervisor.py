@@ -324,6 +324,7 @@ class SupervisorV2:
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
         policy: SupervisorPolicy | None = None,
+        completion_check: Callable[[], bool] | None = None,
         clock: Callable[[], float] = time.time,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -340,6 +341,7 @@ class SupervisorV2:
         self.cwd = Path(cwd).resolve() if cwd is not None else None
         self.env = dict(env) if env is not None else None
         self.policy = policy or SupervisorPolicy()
+        self.completion_check = completion_check
         self.clock = clock
         self.sleeper = sleeper
 
@@ -898,6 +900,14 @@ class SupervisorV2:
                         returncode=returncode,
                     )
             if process is None and not process_group_exists(active.process_group):
+                if self.completion_check is not None:
+                    try:
+                        if self.completion_check():
+                            return 0
+                    except Exception:
+                        # A completion marker is advisory only; a malformed
+                        # marker must remain a technical failure.
+                        pass
                 returncode = self._reattached_returncode(active.pid)
                 if returncode == 0:
                     return 0

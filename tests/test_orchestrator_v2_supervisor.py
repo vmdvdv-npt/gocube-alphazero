@@ -437,6 +437,50 @@ def test_reattach_works_with_only_opaque_execution_identity(tmp_path: Path) -> N
             pass
 
 
+def test_reattached_child_can_report_success_after_controller_loss(tmp_path: Path) -> None:
+    marker = tmp_path / "completed.json"
+    first = _supervisor(
+        tmp_path,
+        execution_id="durable-completion",
+        command=[
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import time; "
+                f"Path({str(marker)!r}).write_text('complete'); time.sleep(0.2)"
+            ),
+        ],
+        policy=SupervisorPolicy(
+            heartbeat_grace_seconds=1.0,
+            max_retries=0,
+            poll_interval_seconds=0.005,
+            termination_grace_seconds=0.1,
+        ),
+    )
+    process, active = first._start(1)
+    second = SupervisorV2(
+        tmp_path,
+        execution_id="durable-completion",
+        liveness_path=active.liveness_path,
+        progress_path=active.progress_path,
+        command=None,
+        completion_check=marker.is_file,
+        policy=first.policy,
+    )
+
+    try:
+        assert second.plan().action is SupervisorAction.REATTACH
+        result = second.run_once()
+        assert result.success
+        assert result.reattached
+        assert result.attempts == 1
+        assert not second.active_child_path.exists()
+    finally:
+        if process_group_exists(active.process_group):
+            os.killpg(active.process_group, signal.SIGKILL)
+        process.wait(timeout=5)
+
+
 def test_dead_child_recovery_preserves_next_attempt_and_same_execution(tmp_path: Path) -> None:
     first = _supervisor(
         tmp_path,
