@@ -66,11 +66,19 @@ def write_evaluation_identity(
     run_id: str,
     identity: Mapping[str, object],
     fingerprint: str,
+    *,
+    allow_existing_directory: bool = False,
 ) -> None:
-    """Create the durable identity marker before Arena execution starts."""
+    """Create the durable identity marker before Arena execution starts.
+
+    Recovery may retain notification files in an otherwise cleared directory;
+    this never permits replacing an existing evaluation identity.
+    """
     if evaluation_fingerprint(identity) != fingerprint:
         raise ValueError("Evaluation identity fingerprint is internally inconsistent")
-    output.mkdir(parents=True, exist_ok=False)
+    output.mkdir(parents=True, exist_ok=allow_existing_directory)
+    if (output / EVALUATION_IDENTITY_FILENAME).exists():
+        raise FileExistsError(f"Arena identity already exists: {output}")
     _write_json(
         output / EVALUATION_IDENTITY_FILENAME,
         {

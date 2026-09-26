@@ -37,7 +37,7 @@ from .immutable_runtime import (
     execution_commit_from_lineage,
 )
 from .version import require_v2_process
-from .supervisor import SupervisorPolicy, SupervisorV2
+from .supervisor import SupervisorAction, SupervisorPolicy, SupervisorV2
 from ..process_supervision import process_group_exists
 
 from tools.arena import (
@@ -375,6 +375,29 @@ class ArenaRunner:
         supervisor.result_path.unlink(missing_ok=True)
         return True
 
+    @staticmethod
+    def _clear_incomplete_evaluation(output: Path) -> None:
+        # Standalone entrypoints attach their notifier before Arena creates its
+        # identity. Recovery must not erase pending messages or sent receipts.
+        retained = {
+            "runtime": {"telegram-outbox", "telegram-notifications.jsonl"},
+            "logs": {"telegram-notifier-errors.jsonl"},
+        }
+
+        def remove(path: Path) -> None:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink(missing_ok=True)
+
+        for path in output.iterdir():
+            if path.name in retained and path.is_dir() and not path.is_symlink():
+                for child in path.iterdir():
+                    if child.name not in retained[path.name]:
+                        remove(child)
+            else:
+                remove(path)
+
     def run(self, request: ArenaRunRequest) -> ArenaRunResult:
         """Run exactly one evaluation for the supplied explicit refs."""
         if self.engine is production_arena:
@@ -407,6 +430,7 @@ class ArenaRunner:
         else:
             output = evaluation_dir(request.candidate.topology, run_id).resolve()
 
+        reclaimed_output = False
         supervised_runtime = output / "runtime"
         active_supervision = (
             supervised_runtime / "active-child.json"
@@ -414,6 +438,18 @@ class ArenaRunner:
         stopped_supervision = (
             supervised_runtime / "supervisor-stop.json"
         ).is_file()
+        if output.exists() and not active_supervision and (supervised_runtime / "execution-intent.json").is_file():
+            # A crash may leave only the intent. Do not erase an unreadable or
+            # foreign ownership record while reclaiming incomplete products.
+            plan = SupervisorV2(
+                output,
+                execution_id=f"{run_id}:arena",
+                liveness_path=supervised_runtime / "arena-liveness.json",
+                progress_path=supervised_runtime / "arena-progress.json",
+                policy=self.supervisor_policy,
+            ).plan()
+            if plan.action is SupervisorAction.STOP:
+                raise RuntimeError(f"Arena supervision cannot be reclaimed: {plan.reason}")
         if output.exists() and active_supervision:
             active_supervision = not self._reclaim_stale_supervision(output, run_id)
         if output.exists():
@@ -435,6 +471,14 @@ class ArenaRunner:
                     raise
                 existing = None
             if existing is not None:
+                # Reuse reports the code that produced the stored result, not
+                # the coordinator's newly requested execution revision.
+                provenance_path = output / "provenance.json"
+                provenance = (
+                    json.loads(provenance_path.read_text(encoding="utf-8"))
+                    if provenance_path.is_file() else {}
+                )
+                stored_commit = provenance.get("execution_code_commit")
                 return ArenaRunResult(
                     evaluation_id=run_id,
                     evaluation_fingerprint=fingerprint,
@@ -442,7 +486,7 @@ class ArenaRunner:
                     identity=identity,
                     summary=existing,
                     validity=self._boundary_validity(existing),
-                    execution_code_commit=request.execution_code_commit,
+                    execution_code_commit=stored_commit if isinstance(stored_commit, str) else None,
                 )
             if stopped_supervision:
                 raise RuntimeError(
@@ -453,10 +497,14 @@ class ArenaRunner:
                 # The identity marker is already checked above; only
                 # incomplete Arena output is removable. Checkpoints are in
                 # lineage storage and are never children of this evaluation.
-                shutil.rmtree(output)
+                self._clear_incomplete_evaluation(output)
+                reclaimed_output = True
 
         if not active_supervision:
-            write_evaluation_identity(output, run_id, identity.to_dict(), fingerprint)
+            write_evaluation_identity(
+                output, run_id, identity.to_dict(), fingerprint,
+                allow_existing_directory=reclaimed_output,
+            )
         engine_kwargs: dict[str, object] = {
             "candidate_path": request.candidate.path,
             "reference_path": request.reference.path,

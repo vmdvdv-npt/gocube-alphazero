@@ -152,3 +152,57 @@ def test_dedupe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     notifier.send_now("arena:47:37", "first")
     notifier.send_now("arena:47:37", "duplicate")
     assert sent == ["first"]
+
+
+@pytest.fixture(autouse=True)
+def no_background_transport(monkeypatch):
+    # Drive retries explicitly; never leave a daemon using restored real HTTP.
+    monkeypatch.setattr(tg.TelegramNotifier, "_ensure_worker", lambda self: None)
+
+
+def test_failed_delivery_survives_restart(tmp_path, monkeypatch):
+    p = paths(tmp_path)
+    monkeypatch.setattr(tg, "load_config", lambda: ("token", "42"))
+    def unavailable(*args):
+        raise tg.TelegramError("HTTP 503")
+    monkeypatch.setattr(tg, "_send", unavailable)
+    first = tg.TelegramNotifier(p)
+    first.send_now("arena-complete:test", "W/L/D: 8/8/0")
+    assert len(list(first.outbox.glob("*.json"))) == 1
+    sent = []
+    monkeypatch.setattr(tg, "_send", lambda *args: sent.append(args[-1]))
+    second = tg.TelegramNotifier(p)
+    second._retry_pending()
+    second._retry_pending()
+    assert sent == ["W/L/D: 8/8/0"]
+    assert not list(second.outbox.glob("*.json"))
+
+
+def test_delivery_receipt_disk_error_is_fail_open(tmp_path, monkeypatch):
+    p = paths(tmp_path)
+    monkeypatch.setattr(tg, "load_config", lambda: ("token", "42"))
+    monkeypatch.setattr(tg, "_send", lambda *args: None)
+    notifier = tg.TelegramNotifier(p)
+    notifier.delivered.mkdir()  # Simulate an unwritable receipt destination.
+    notifier.send_now("result", "done")
+    assert list(notifier.outbox.glob("*.json"))
+    assert notifier.errors.is_file()
+
+
+def test_corrupt_receipt_line_does_not_hide_later_deliveries(tmp_path, monkeypatch):
+    p = paths(tmp_path)
+    monkeypatch.setattr(tg, "load_config", lambda: ("token", "42"))
+    sent = []
+    monkeypatch.setattr(tg, "_send", lambda *args: sent.append(args[-1]))
+    notifier = tg.TelegramNotifier(p)
+    notifier.delivered.write_text('broken\n{"key":"result"}\n')
+    notifier.send_now("result", "duplicate")
+    assert not sent
+
+
+def test_flush_all_includes_directly_constructed_notifiers(tmp_path, monkeypatch):
+    notifier = tg.TelegramNotifier(paths(tmp_path))
+    calls = []
+    monkeypatch.setattr(notifier, "flush", lambda timeout: calls.append(timeout))
+    tg.flush_all()
+    assert len(calls) == 1

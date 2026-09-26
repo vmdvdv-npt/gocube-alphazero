@@ -1,6 +1,7 @@
 """Topology-neutral public ArenaRunner V2 facade."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import asdict, replace
 from typing import Mapping
 
@@ -8,7 +9,7 @@ from . import _arena_runner_core as _core
 from .contracts import EvaluationIdentity
 from .execution_permit import _child_execution_permit
 from .immutable_runtime import execution_commit_from_lineage
-from .operator_messages import format_arena_started
+from .operator_messages import format_action_started, format_arena_started, format_arena_completed
 from .version import require_v2_process
 from .supervisor import SupervisorPolicy
 from tools.arena_profiles import get_profile
@@ -146,6 +147,26 @@ class ArenaRunner(_core.ArenaRunner):
         except Exception:
             pass
 
+    def _notify_completed(self, request: ArenaRunRequest, result: ArenaRunResult) -> None:
+        if self.notifier is None:
+            return
+        try:
+            self.notifier.send_now(
+                f"arena-complete:{result.evaluation_id}",
+                format_arena_completed(
+                    topology=request.candidate.topology,
+                    evaluation_id=result.evaluation_id,
+                    candidate=request.candidate_label or request.candidate.checkpoint_id,
+                    reference=request.reference_label or request.reference.checkpoint_id,
+                    validity=result.validity,
+                    wld=result.wld,
+                    summary=result.summary,
+                    execution_code_commit=result.execution_code_commit,
+                ),
+            )
+        except Exception:
+            pass  # Notification failures cannot invalidate completed Arena work.
+
     def run(self, request: ArenaRunRequest) -> ArenaRunResult:
         def execute() -> ArenaRunResult:
             if evaluation_dir is _core.evaluation_dir:
@@ -157,19 +178,40 @@ class ArenaRunner(_core.ArenaRunner):
             finally:
                 _core.evaluation_dir = original
 
-        if self.engine is not _core.production_arena:
-            return execute()
-        require_v2_process("gocube_golden.orchestrator_v2.ArenaRunnerV2")
-        evaluation_id = self._evaluation_id(request)
-        code_identity = request.execution_code_commit or execution_commit_from_lineage(request.candidate.owner_root)
-        self._notify_start(request, evaluation_id)
-        with _child_execution_permit(
-            action_type="arena",
-            topology=request.candidate.topology,
-            run_id=evaluation_id,
-            code_identity=code_identity,
-        ):
-            return execute()
+        permit = nullcontext()
+        if self.engine is _core.production_arena:
+            require_v2_process("gocube_golden.orchestrator_v2.ArenaRunnerV2")
+            evaluation_id = self._evaluation_id(request)
+            code_identity = request.execution_code_commit or execution_commit_from_lineage(request.candidate.owner_root)
+            self._notify_start(request, evaluation_id)
+            permit = _child_execution_permit(
+                action_type="arena",
+                topology=request.candidate.topology,
+                run_id=evaluation_id,
+                code_identity=code_identity,
+            )
+        try:
+            with permit:
+                result = execute()
+        except Exception as exc:
+            if self.notifier is not None:
+                try:
+                    self.notifier.send_now(
+                        f"arena-failed:{self._evaluation_id(request)}",
+                        format_action_started(
+                            "ARENA FAILED",
+                            topology=request.candidate.topology,
+                            evaluation=self._evaluation_id(request),
+                            candidate=request.candidate_label or request.candidate.checkpoint_id,
+                            reference=request.reference_label or request.reference.checkpoint_id,
+                            error=exc.__class__.__name__,
+                        ),
+                    )
+                except Exception:
+                    pass
+            raise
+        self._notify_completed(request, result)
+        return result
 
 
 ArenaRunnerV2 = ArenaRunner
