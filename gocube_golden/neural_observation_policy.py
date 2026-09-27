@@ -32,9 +32,10 @@ def assert_no_komi_neural_observation_channels(
     ]
     if forbidden:
         raise ValueError(
-            f"{context} violates project-wide policy {NO_KOMI_NEURAL_OBSERVATION_POLICY_ID}: "
-            "komi and komi-derived values are forbidden as neural observation channels; "
-            f"offending channels: {forbidden}. Komi belongs only to referee/rules/scoring."
+            f"{context} violates project-wide policy {NO_KOMI_NEURAL_OBSERVATION_POLICY_ID}, "
+            "which forbids komi as a neural observation channel and also forbids komi-derived "
+            f"neural features; offending channels: {forbidden}. "
+            "Komi belongs only to referee/rules/scoring."
         )
     return normalized
 
