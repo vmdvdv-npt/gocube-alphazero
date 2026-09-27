@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import subprocess
 import threading
 import time
 import traceback
@@ -553,6 +554,75 @@ def write_decision(root, action, expected, *, allow_inconclusive=False, reason=N
         atomic_write_json(root / 'decision.json', {'action': action, 'report_sha': expected, 'at': utc(), 'allow_inconclusive': allow_inconclusive, 'reason': reason})
 
 
+def recover_code_rollover(root, *, expected_error, execution_commit=None):
+    """Recover one failed phase after a verified code-only checkout rollover.
+
+    The failed process must have stopped before starting a new self-play batch.
+    We require an approved orchestration-only diff, intact checkpoint/replay
+    identities and the original scientific pin before making the durable state
+    runnable again.  The recovery implementation itself may be the code that
+    follows the stopped process, so an identical full tree is too strict.
+    """
+    root = Path(root).resolve()
+    config = read(root / 'config.json')
+    state = read(root / 'state.json')
+    if state.get('status') != 'FAILED' or state.get('error') != expected_error:
+        raise ValueError('Only the recorded code-rollover failure is recoverable')
+    pin_path = root / 'runtime' / 'execution-pin.json'
+    pin = read(pin_path)
+    if pin.get('config_hash') != config.get('fingerprint'):
+        raise ValueError('Execution pin/config identity mismatch')
+    if pin.get('source_commit') != config.get('code', {}).get('git_commit_sha'):
+        raise ValueError('Execution pin/source identity mismatch')
+    if pin.get('checkpoint_sha') != state.get('checkpoint_sha'):
+        raise ValueError('Execution pin/checkpoint identity mismatch')
+    checkpoint = Path(state['checkpoint']).resolve()
+    if not checkpoint.is_file() or file_sha256(checkpoint) != state['checkpoint_sha']:
+        raise ValueError('Failed-phase checkpoint integrity check failed')
+    for shard in state.get('shards', []):
+        path = Path(shard['path']).resolve()
+        if not path.is_file() or file_sha256(path) != shard['sha']:
+            raise ValueError(f"Failed-phase replay integrity check failed: {path}")
+    current = str(execution_commit or capture_code_identity().git_commit_sha)
+    previous = str(pin.get('execution_commit', ''))
+    if not previous or not current:
+        raise ValueError('Execution rollover commit identity is missing')
+    if previous != current:
+        comparison = subprocess.run(
+            ['git', 'diff', '--name-only', previous, current],
+            cwd=REPO,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=True,
+        )
+        allowed = {
+            'gocube_golden/orchestrator_v2/adaptation.py',
+            'tests/test_adaptation_v2_migration.py',
+        }
+        changed = {line.strip() for line in comparison.stdout.splitlines() if line.strip()}
+        if not changed or not changed.issubset(allowed):
+            raise ValueError('Execution rollover includes unapproved files; fresh review is required')
+        pin['migrated_from_execution_commit'] = previous
+        pin['execution_commit'] = current
+        pin['migrated_at'] = utc()
+        pin['migration_reason'] = 'verified orchestration-only checkout rollover after code guard stop'
+        atomic_write_json(pin_path, pin)
+    state['status'] = 'READY'
+    state['error'] = None
+    state['recovered_at'] = utc()
+    state['recovery'] = {
+        'kind': 'verified-code-rollover',
+        'from_execution_commit': previous,
+        'to_execution_commit': current,
+        'failure': expected_error,
+        'checkpoint_sha': state['checkpoint_sha'],
+        'replay_preserved': True,
+    }
+    atomic_write_json(root / 'state.json', state)
+    return state
+
+
 def retry_phase(root, destination, scale):
     """Explicit full rollback into a new run; retain the failed run as evidence."""
     state = read(root / 'state.json')
@@ -629,6 +699,14 @@ def run_workflow_phase(config, *, runs_root):
     if not 1 <= target <= 4:
         raise ValueError('Invalid target stage')
     with exclusive(root):
+        if config.get('recover_failed'):
+            recover_code_rollover(
+                root,
+                expected_error=str(config.get(
+                    'recovery_expected_error',
+                    'ValueError: Code changed before spawning self-play workers',
+                )),
+            )
         workflow = Workflow(root)
         try:
             publish_checkpoints(root)
