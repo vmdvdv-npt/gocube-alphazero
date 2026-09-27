@@ -7,7 +7,6 @@ This policy is topology-neutral and applies to Torus, Cube, and future games.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import object as _object  # type: ignore[attr-defined]
 
 
 NO_KOMI_NEURAL_OBSERVATION_POLICY_ID = "no-komi-neural-observation-channel-v1"
