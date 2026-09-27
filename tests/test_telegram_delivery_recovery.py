@@ -10,7 +10,7 @@ def test_background_retry_delivers_without_another_training_event(tmp_path, monk
     def transport(*args):
         attempts.append(args[-1])
         if len(attempts) == 1:
-            raise tg.TelegramError("HTTP 503")
+            raise tg.TelegramError("HTTP 429", safe_to_retry=True)
         sent.set()
     monkeypatch.setattr(tg, "load_config", lambda: ("fake-token", "fake-chat"))
     monkeypatch.setattr(tg, "_send", transport)
@@ -39,3 +39,19 @@ def test_async_enqueue_is_flushed_for_direct_instance(tmp_path, monkeypatch):
         assert not worker.is_alive()
     assert sent == ["arena result"]
     assert not list(notifier.outbox.glob("*.json"))
+
+
+def test_legacy_ambiguous_delivery_is_not_retried_by_second_instance(tmp_path, monkeypatch):
+    calls = []
+    def send(*args):
+        calls.append(args[-1])
+        raise tg.TelegramError('lost response')
+    monkeypatch.setattr(tg, 'load_config', lambda: ('fake-token', 'fake-chat'))
+    monkeypatch.setattr(tg, '_send', send)
+    paths = SimpleNamespace(runtime=tmp_path / 'runtime', logs=tmp_path / 'logs')
+    first = tg.TelegramNotifier(paths)
+    first.send_now('result', 'done')
+    second = tg.TelegramNotifier(paths)
+    second.send_now('result', 'done')
+    second.flush(.1)
+    assert calls == ['done']

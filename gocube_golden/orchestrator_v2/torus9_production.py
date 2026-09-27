@@ -322,6 +322,8 @@ class Torus9ProductionGenerationPath:
     def run_generation(
         self, resolved_input: ResolvedGenerationInput
     ) -> GenerationExecutionResult:
+        from .execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/orchestrator_v2/torus9_production.py', action="training", topology='torus9')
         if resolved_input.output_lineage.topology != "torus9":
             raise ValueError("Torus9 production path requires topology=torus9")
         produced = self._driver(resolved_input)

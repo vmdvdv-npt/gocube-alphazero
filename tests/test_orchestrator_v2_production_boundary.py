@@ -191,3 +191,83 @@ def test_operator_start_messages_are_multiline_and_resolved() -> None:
     assert "MCTS: 256 sims" in arena
     assert "Workers: 8" in arena
     assert ";" not in arena
+
+
+@pytest.mark.parametrize('strict', [True, False])
+def test_engine_rejects_direct_python_before_any_side_effect(monkeypatch, tmp_path, strict):
+    from tools.arena_engine import run_arena as engine
+    monkeypatch.delenv(PERMIT_ENV, raising=False)
+    monkeypatch.delenv(PERMIT_KEY_ENV, raising=False)
+    monkeypatch.setenv('AZ_ORCHESTRATOR_VERSION', 'V2')
+    output = tmp_path / 'arena'
+    with pytest.raises(RuntimeError, match='execution permit'):
+        engine(profile=None, candidate_path=tmp_path / 'missing.pt', output_dir=output,
+               config=ArenaExecutionConfig(strict_production=strict))
+    assert not output.exists()
+
+
+def test_engine_rejects_in_process_authority_without_child_permit(monkeypatch, tmp_path):
+    from tools.arena_engine import run_arena as engine
+    monkeypatch.delenv(PERMIT_ENV, raising=False)
+    monkeypatch.delenv(PERMIT_KEY_ENV, raising=False)
+    with _production_authority(mode='arena', topology='torus9', run_id='eval-1', code_identity='abc'):
+        with pytest.raises(RuntimeError, match='execution permit'):
+            engine(profile=None, candidate_path=tmp_path / 'missing.pt', output_dir=tmp_path / 'arena', run_id='eval-1')
+
+
+@pytest.mark.parametrize('action,run_id,accepted', [('arena', 'eval-1', True), ('selfplay', 'eval-1', False), ('arena', 'other', False)])
+def test_engine_accepts_only_matching_supervised_child(tmp_path, action, run_id, accepted):
+    import subprocess
+    import sys
+    script = tmp_path / 'child.py'
+    script.write_text('''from pathlib import Path
+from tools.arena_engine import run_arena
+class Profile:
+    def validate_execution_config(self, config):
+        raise ValueError("REACHED_AUTHORIZED_ENGINE")
+try:
+    run_arena(profile=Profile(), candidate_path=Path("missing.pt"), output_dir=Path("unused"), run_id="eval-1")
+except Exception as exc:
+    print(str(exc))
+''')
+    with _production_authority(mode='arena', topology='torus9', run_id=run_id, code_identity='abc'):
+        with _child_execution_permit(action_type=action, topology='torus9', run_id=run_id, code_identity='abc'):
+            env = dict(os.environ, PYTHONPATH=os.getcwd())
+            result = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert ('REACHED_AUTHORIZED_ENGINE' in result.stdout) == accepted
+    if not accepted:
+        assert 'mismatch' in result.stdout
+
+
+def test_adaptation_routes_arena_through_production_entrypoint(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from gocube_golden.orchestrator_v2 import adaptation, production_entrypoint
+    workflow = object.__new__(adaptation.Workflow)
+    workflow.root = tmp_path / 'runs' / 'torus9' / 'active' / 'adaptation'
+    workflow.config = dict(adaptation.DEFAULTS, code={'git_commit_sha': 'execution-commit'})
+    workflow.execution_commit = 'execution-commit'
+    monkeypatch.setattr('gocube_golden.orchestrator_v2.adaptation_artifacts.publish_checkpoints', lambda root: None)
+    workflow.state = {'stage': 1, 'arena_attempt': 0, 'checkpoint_sha': 'candidate-sha',
+                      'validation_history': [{'metrics': {}}], 'baseline_validation': {}}
+    monkeypatch.setattr(workflow, 'verify_checkpoint', lambda: None)
+    monkeypatch.setattr(workflow, 'mark_progress', lambda *args: None)
+    monkeypatch.setattr(workflow, 'persist', lambda: None)
+    monkeypatch.setattr(workflow, 'finish', lambda *args: None)
+    monkeypatch.setattr(adaptation, 'arena_statistics', lambda path: {'gate': 'PASS'})
+    with pytest.raises(RuntimeError, match='direct engine fallback is forbidden'):
+        workflow.evaluate_phase()
+    refs = workflow.root / 'metadata' / 'arena-checkpoint-refs.json'
+    refs.parent.mkdir(parents=True)
+    refs.write_text(json.dumps({'candidates': {'candidate-sha': {'sha256': 'candidate-sha'}},
+                                'reference': {'sha256': adaptation.BOOTSTRAP_SHA}}))
+    calls = []
+    def launch(payload, **kwargs):
+        calls.append((payload, kwargs))
+        return SimpleNamespace(output_dir=tmp_path / 'canonical-evaluation')
+    monkeypatch.setattr(production_entrypoint, 'run_arena_from_config', launch)
+    workflow.evaluate_phase()
+    assert len(calls) == 1
+    assert calls[0][0]['arena_config']['games'] == 256
+    assert calls[0][1]['runs_root'] == tmp_path / 'runs'
+    assert workflow.state['arena_output'] == str(tmp_path / 'canonical-evaluation')

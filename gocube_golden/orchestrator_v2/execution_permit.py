@@ -261,6 +261,27 @@ def require_orchestrator_execution(entrypoint: str) -> None:
     require_child_execution_permit(entrypoint)
 
 
+def require_engine_execution(entrypoint: str, *, action: str, topology: str | None = None) -> None:
+    """Authorize computation, not merely a process carrying a V2 marker.
+
+    Generation children own both self-play and training. Arena permissions
+    never authorize either. Only the existing V2 entrypoint owns live authority.
+    """
+    if action not in {"training", "selfplay"}:
+        raise ValueError("unsupported engine action")
+    authority = active_authority()
+    if authority is not None:
+        if authority.mode not in {"continuous", "experiment", "workflow",
+                                  "performance-tuning", "komi-calibration", "test"}:
+            raise RuntimeError(f"{entrypoint}: Orchestrator V2 authority does not authorize {action}")
+        if topology is not None and authority.topology != topology:
+            raise RuntimeError(f"{entrypoint}: Orchestrator V2 topology mismatch")
+        return
+    permit = require_child_execution_permit(entrypoint, topology=topology)
+    if permit.get("action_type") not in {"generation", action}:
+        raise RuntimeError(f"{entrypoint}: Orchestrator V2 permit does not authorize {action}")
+
+
 def _test_authority(
     *, topology: str = "torus9", run_id: str = "test", code_identity: str = "test"
 ):
@@ -283,4 +304,5 @@ __all__ = [
     "active_authority",
     "require_child_execution_permit",
     "require_orchestrator_execution",
+    "require_engine_execution",
 ]

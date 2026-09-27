@@ -71,6 +71,8 @@ def run_cooperative_selfplay(
 ) -> CooperativeSelfPlayResult:
     """Run any cooperative scientific adapter through the one shared engine."""
 
+    from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+    require_engine_execution('gocube_golden/selfplay_engine.py:run_cooperative_selfplay', action='selfplay', topology=None)
     if not isinstance(adapter, CooperativeSelfPlayAdapter):
         raise TypeError("adapter does not implement the cooperative self-play contract")
     raw_telemetry: MutableMapping[str, object] = telemetry if telemetry is not None else {}

@@ -835,6 +835,8 @@ class SelfPlayEngine:
         active_games_per_worker: int | None = None,
         total_active_contexts: int | None = None,
     ) -> tuple[object, ...]:
+        from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+        require_engine_execution('selfplay_engine.py:run', action='selfplay', topology=None)
         ids = tuple(sorted(str(game_id) for game_id in game_ids))
         if len(set(ids)) != len(ids):
             raise ValueError("self-play game IDs must be unique")

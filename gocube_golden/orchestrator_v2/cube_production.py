@@ -284,6 +284,8 @@ class CubeProductionGenerationPath:
         self.size = size
 
     def run_generation(self, resolved: ResolvedGenerationInput) -> GenerationExecutionResult:
+        from .execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/orchestrator_v2/cube_production.py', action="training", topology=None)
         topology = f"cube{self.size}"
         if resolved.output_lineage.topology != topology:
             raise ValueError("Cube production bridge topology mismatch")

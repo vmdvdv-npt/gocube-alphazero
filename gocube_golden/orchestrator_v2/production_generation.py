@@ -26,7 +26,6 @@ from .generation_runner import GenerationRunner, OutputLineage, ResolvedGenerati
 from .immutable_runtime import ImmutableRuntimeManager, execution_commit_from_lineage, validate_runtime_head
 from .supervisor import SupervisorPolicy, SupervisorV2
 from .topology_binding import get_topology_binding, production_path_for
-from .version import require_v2_process
 from ..performance_tuning.contracts import (
     scientific_contract_fingerprint as scientific_contract_fingerprint_for,
     validate_execution_overrides,
@@ -124,7 +123,8 @@ class ProductionTrainOne:
         self.runtime_manager = ImmutableRuntimeManager(self.repo_root)
 
     def __call__(self, *, parent: ResolvedCheckpointNode, config: ResolvedEffectiveConfig, output_lineage: OutputLineage, execution_overrides: Mapping[str, object] | None = None, acknowledge_stopped_execution: bool = False, action_id: str | None = None, scientific_contract_fingerprint: str | None = None) -> ResolvedCheckpointNode:
-        require_v2_process("gocube_golden.orchestrator_v2.ProductionTrainOne")
+        from .execution_permit import require_engine_execution
+        require_engine_execution("gocube_golden.orchestrator_v2.ProductionTrainOne", action="training")
         get_topology_binding(output_lineage.topology)
         if parent.ref.topology != output_lineage.topology or config.config.topology != output_lineage.topology:
             raise ValueError("production train_one topology identities disagree")

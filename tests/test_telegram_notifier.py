@@ -164,7 +164,7 @@ def test_failed_delivery_survives_restart(tmp_path, monkeypatch):
     p = paths(tmp_path)
     monkeypatch.setattr(tg, "load_config", lambda: ("token", "42"))
     def unavailable(*args):
-        raise tg.TelegramError("HTTP 503")
+        raise tg.TelegramError("HTTP 429", safe_to_retry=True)
     monkeypatch.setattr(tg, "_send", unavailable)
     first = tg.TelegramNotifier(p)
     first.send_now("arena-complete:test", "W/L/D: 8/8/0")
@@ -185,7 +185,8 @@ def test_delivery_receipt_disk_error_is_fail_open(tmp_path, monkeypatch):
     notifier = tg.TelegramNotifier(p)
     notifier.delivered.mkdir()  # Simulate an unwritable receipt destination.
     notifier.send_now("result", "done")
-    assert list(notifier.outbox.glob("*.json"))
+    assert not list(notifier.outbox.glob("*.json"))
+    assert list((notifier.outbox.parent / "telegram-send-claims").glob("*.json"))
     assert notifier.errors.is_file()
 
 

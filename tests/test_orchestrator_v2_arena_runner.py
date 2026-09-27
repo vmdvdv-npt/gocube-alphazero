@@ -422,7 +422,7 @@ def test_completed_arena_notifies_and_reuse_recovers_missing_delivery(tmp_path, 
         calls.append(1)
         return _fake_engine(**kwargs)
     def unavailable(*args):
-        raise tg.TelegramError("HTTP 503")
+        raise tg.TelegramError("HTTP 429", safe_to_retry=True)
     monkeypatch.setattr(tg, "_send", unavailable)
     request = _request(tmp_path)
     result = ArenaRunner(engine=engine, notifier=notifier).run(request)

@@ -23,7 +23,9 @@ ENV_FILE = Path.home() / ".config" / "gocube-alphazero" / "telegram.env"
 
 
 class TelegramError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, safe_to_retry: bool = False):
+        super().__init__(message)
+        self.safe_to_retry = safe_to_retry
 
 
 def _now() -> str:
@@ -62,31 +64,11 @@ def load_config(
 
 
 def _send(token: str, chat_id: str, text: str) -> None:
-    body = json.dumps({"chat_id": chat_id, "text": text}, ensure_ascii=False).encode()
-    last = "delivery failed"
-    for attempt in range(2):
-        req = Request(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urlopen(req, timeout=3.0) as response:  # noqa: S310
-                payload = json.loads(response.read().decode("utf-8"))
-                if 200 <= int(response.status) < 300 and payload.get("ok") is True:
-                    return
-                last = f"HTTP {response.status}"
-        except HTTPError as exc:
-            last = f"HTTP {exc.code}"
-            if exc.code == 429 and attempt == 0:
-                time.sleep(0.5)
-        except (URLError, TimeoutError, OSError) as exc:
-            # Never stringify URL-bearing exceptions: the URL contains the token.
-            last = exc.__class__.__name__
-        if attempt == 0:
-            time.sleep(0.2)
-    raise TelegramError(last)
+    from .notifications.telegram import TelegramTransport, TelegramTransportError
+    try:
+        TelegramTransport(token, chat_id, opener=urlopen).send(text)
+    except TelegramTransportError as exc:
+        raise TelegramError(exc.code, safe_to_retry=exc.code == "HTTP_429") from None
 
 
 def telegram_test() -> None:
@@ -349,22 +331,39 @@ class TelegramNotifier:
             return True
 
     def _deliver(self, key: str, text: str) -> bool:
+        from .notifications.store import _atomic_create_json
+        claim = self.outbox.parent / "telegram-send-claims" / (hashlib.sha256(key.encode()).hexdigest() + ".json")
         with self._delivery_lock:
             if self.config is None:
                 return False
-            try:
-                if not self._seen(key):
-                    _send(*self.config, text)
-                    self.delivered.parent.mkdir(parents=True, exist_ok=True)
-                    with self.delivered.open("a", encoding="utf-8") as handle:
-                        handle.write(json.dumps({"at": _now(), "key": key}) + "\n")
-                        handle.flush()
-                        os.fsync(handle.fileno())
+            if self._seen(key):
                 self._pending_path(key).unlink(missing_ok=True)
                 return True
-            except Exception as exc:
+            try:
+                _atomic_create_json(claim, {"key": key, "status": "DELIVERY_UNCERTAIN", "at": _now()})
+            except FileExistsError:
+                # An earlier process may already have sent this message.
+                self._pending_path(key).unlink(missing_ok=True)
+                return True
+            except OSError as exc:
                 self._record_error(key, exc)
                 return False
+            try:
+                _send(*self.config, text)
+                self.delivered.parent.mkdir(parents=True, exist_ok=True)
+                with self.delivered.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps({"at": _now(), "key": key}) + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                atomic_write_json(claim, {"key": key, "status": "DELIVERED", "at": _now()})
+            except Exception as exc:
+                self._record_error(key, exc)
+                if isinstance(exc, TelegramError) and exc.safe_to_retry:
+                    claim.unlink(missing_ok=True)
+                    return False
+                # Ambiguous outcomes are durable and never automatically resent.
+            self._pending_path(key).unlink(missing_ok=True)
+            return True
 
     def _retry_pending(self) -> None:
         for path in sorted(self.outbox.glob("*.json")):

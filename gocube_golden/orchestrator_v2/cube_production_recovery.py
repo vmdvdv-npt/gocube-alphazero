@@ -17,6 +17,8 @@ class CubeProductionGenerationPath(_CubeProductionGenerationPath):
     def run_generation(
         self, resolved: ResolvedGenerationInput
     ) -> GenerationExecutionResult:
+        from .execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/orchestrator_v2/cube_production_recovery.py', action="training", topology=None)
         reconcile_uncommitted_generation(
             root=resolved.output_lineage.root,
             lineage_id=resolved.output_lineage.lineage_id,

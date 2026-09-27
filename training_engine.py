@@ -288,6 +288,8 @@ class TrainingEngine:
         progress_callback: Callable[..., None] | None = None,
         prepare_commit: Callable[[CommitPreparation], None] | None = None,
     ) -> TrainingIterationResult:
+        from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+        require_engine_execution('training_engine.py:run_iteration', action='training', topology=None)
         selected_adapter = adapter or self.adapter
         if selected_adapter is None:
             raise ValueError("TrainingEngine requires an adapter")
