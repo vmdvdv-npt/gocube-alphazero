@@ -1010,6 +1010,11 @@ def run_workflow_from_config(
         )
         return _workflow_training_result(result)
 
+    def adaptation_action(*, config, **_):
+        from .adaptation import run_workflow_phase
+        return run_workflow_phase(config, runs_root=runs_root or RUNS_ROOT)
+
+    handlers.setdefault("adaptation_phase", adaptation_action)
     # These adapters intentionally call the already-existing entrypoints.  A
     # workflow is not a second implementation of Arena/training/calibration.
     handlers.setdefault("arena", arena_action)

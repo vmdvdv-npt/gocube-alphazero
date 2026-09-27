@@ -1491,6 +1491,8 @@ class Torus9TrainingAdapter:
         rows: Sequence[Mapping[str, object]],
         seed: int,
     ) -> Mapping[str, object]:
+        from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/torus9_training.py:train', action='training', topology='torus9')
         self.validate_state(state)
         trainer = state.adapter_state
         count = int(self.training_profile["batch_size"]) * int(self.training_profile["optimizer_steps_per_iteration"])  # type: ignore[index]
@@ -2036,6 +2038,8 @@ def run_torus9_training_iteration(
     **kwargs: object,
 ) -> TrainingIterationResult:
     """The single current Torus9 production training front door."""
+    from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+    require_engine_execution('gocube_golden/torus9_training.py:run_torus9_training_iteration', action='training', topology='torus9')
     selected = adapter or Torus9TrainingAdapter()
     return TrainingEngine(selected).run_iteration(
         state=state,

@@ -971,6 +971,8 @@ class _Torus9TrainingCore:
         return [int(index) for index in torch.randint(size, (count,), generator=generator).tolist()]
 
     def train_fixed_budget(self, samples: Sequence[Mapping[str, object]], *, seed: int) -> dict[str, object]:
+        from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/torus9_monolith.py:train_fixed_budget', action='training', topology='torus9')
         self.assert_optimizer_continuity()
         count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
         indices = self._sample_indices(len(samples), seed=seed, count=count)
@@ -1075,6 +1077,8 @@ class Torus9OwnershipTrainer(_Torus9TrainingCore):
         self.ownership_loss_enabled = bool(ownership_loss_enabled)
 
     def train_fixed_budget(self, samples: Sequence[Mapping[str, object]], *, seed: int) -> dict[str, object]:
+        from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/torus9_monolith.py:train_fixed_budget', action='training', topology='torus9')
         self.assert_optimizer_continuity()
         count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
         indices = self._sample_indices(len(samples), seed=seed, count=count)
@@ -1209,6 +1213,8 @@ class Torus9OwnershipScoreTrainer(Torus9OwnershipTrainer):
         timing: MutableMapping[str, object] | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> dict[str, object]:
+        from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/torus9_monolith.py:train_fixed_budget', action='training', topology='torus9')
         self.assert_optimizer_continuity()
         count = self.optimizer_steps_per_iteration * TORUS9_BATCH_SIZE
         indices = self._sample_indices(len(samples), seed=seed, count=count)

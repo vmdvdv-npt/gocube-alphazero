@@ -54,6 +54,52 @@ _AUTHORIZED_INTERNAL_TESTS: dict[tuple[str, str], tuple[str, str]] = {
     ): ("torus9", "child"),
 }
 
+# Scientific/engine regression tests run under explicit test-only V2 authority.
+# Rejection tests are deliberately not included.
+_AUTHORIZED_INTERNAL_TESTS.update({
+    ("test_torus9_adaptation.py", "test_decision_bound_to_report_and_no_duplicate"): ("torus9", "review-regression"),
+    ('test_selfplay_engine.py', 'test_malformed_inference_batch_fails_entire_engine'): ("torus9", "engine-regression"),
+    ('test_selfplay_engine.py', 'test_multiple_search_lanes_per_process_route_responses_without_pid_duplication'): ("torus9", "engine-regression"),
+    ('test_selfplay_engine.py', 'test_process_workers_central_batching_and_ordering'): ("torus9", "engine-regression"),
+    ('test_selfplay_engine.py', 'test_worker_exception_fails_closed_instead_of_returning_partial_games'): ("torus9", "engine-regression"),
+    ('test_selfplay_engine.py', 'test_worker_process_death_is_detected_fail_closed'): ("torus9", "engine-regression"),
+    ('test_selfplay_engine_process_cleanup.py', 'test_failure_path_leaves_no_selfplay_worker_processes'): ("torus9", "engine-regression"),
+    ('test_selfplay_engine_shared_memory.py', 'test_shared_memory_cooperative_scheduler_batches_and_replenishes'): ("torus9", "engine-regression"),
+    ('test_selfplay_engine_shared_memory.py', 'test_total_active_contexts_caps_contexts_without_reducing_worker_pool'): ("torus9", "engine-regression"),
+    ('test_torus9_adaptation.py', 'test_cuda_full_unfreeze_bias'): ("torus9", "engine-regression"),
+    ('test_torus9_adaptation.py', 'test_freeze_and_deterministic_resume'): ("torus9", "engine-regression"),
+    ('test_torus9_adaptation.py', 'test_phase_clocks_and_lr_on_load'): ("torus9", "engine-regression"),
+    ('test_torus9_adaptation.py', 'test_real_trained_artifact_arena_load'): ("torus9", "engine-regression"),
+    ('test_torus9_adaptation.py', 'test_retry_rolls_back_entire_phase'): ("torus9", "engine-regression"),
+    ('test_torus9_adaptation.py', 'test_stage_report_pause_and_notification_retry'): ("torus9", "engine-regression"),
+    ('test_training_engine_stage3.py', 'test_commit_preparation_runs_before_final_marker_fence'): ("torus9", "engine-regression"),
+    ('test_training_engine_stage3.py', 'test_generic_engine_commits_all_artifacts_and_state'): ("torus9", "engine-regression"),
+    ('test_training_engine_stage3.py', 'test_generic_engine_failure_does_not_publish_or_commit'): ("torus9", "engine-regression"),
+    ('test_training_engine_validation_contract.py', 'test_direct_samples_do_not_use_record_construction_capability'): ("torus9", "engine-regression"),
+    ('test_training_engine_validation_contract.py', 'test_direct_samples_keep_pre_validation'): ("torus9", "engine-regression"),
+    ('test_training_engine_validation_contract.py', 'test_record_built_samples_are_not_revalidated_by_engine'): ("torus9", "engine-regression"),
+    ('test_training_engine_validation_contract.py', 'test_record_construction_capability_moves_validation_to_replay_boundary'): ("torus9", "engine-regression"),
+})
+
+
+_AUTHORIZED_INTERNAL_TESTS.update({
+    ('test_cube_stage5_shared_engines.py', 'test_common_cooperative_runner_accepts_structural_adapter_contract'): ('cube4', "cube-regression"),
+    ('test_cube_stage6_training.py', 'test_cube2_to_cube7_one_step_finite_and_changes_parameters'): ('cube-param', "cube-regression"),
+    ('test_cube_stage6_training.py', 'test_stage5_cube4_record_to_common_training_engine_checkpoint'): ('cube4', "cube-regression"),
+    ('test_cube_stage6_training.py', 'test_replay_window_cap_provenance_and_deterministic_sampling'): ('cube2', "cube-regression"),
+    ('test_cube_stage6_training.py', 'test_checkpoint_save_load_restores_model_optimizer_and_sampling'): ('cube4', "cube-regression"),
+    ('test_cube_stage6_training.py', 'test_resume_step2_matches_uninterrupted_cpu_path'): ('cube2', "cube-regression"),
+    ('test_cube_stage6_training.py', 'test_checkpoint_compatibility_fails_closed'): ('cube2', "cube-regression"),
+})
+
+_AUTHORIZED_INTERNAL_TESTS.update({
+    ('test_replay_write_identity.py', 'test_training_engine_does_not_rehash_rolling_tmp_after_single_pass_write'): ("torus9", "replay-regression"),
+    ('test_torus9_replay_composition_identity.py', 'test_engine_hashes_fresh_artifact_during_its_single_write'): ("torus9", "replay-regression"),
+    ('test_torus9_replay_composition_identity.py', 'test_engine_uses_adapter_identity_without_full_replay_fingerprint'): ("torus9", "replay-regression"),
+    ('test_torus9_replay_target_build.py', 'test_torus9_records_use_one_authoritative_semantic_validation_per_row'): ("torus9", "replay-regression"),
+    ('test_torus9_selfplay_engine_boundary.py', 'test_current_profile_fingerprint_drift_fails_closed'): ("torus9", "replay-regression"),
+    ('test_torus9_selfplay_engine_boundary.py', 'test_empty_batch_still_crosses_the_selfplay_engine_boundary'): ("torus9", "replay-regression"),
+})
 
 @pytest.fixture(autouse=True)
 def _legacy_orchestrator_v2_internal_authority(request: pytest.FixtureRequest):
@@ -70,6 +116,8 @@ def _legacy_orchestrator_v2_internal_authority(request: pytest.FixtureRequest):
     from gocube_golden.orchestrator_v2.execution_permit import _test_authority
 
     topology, run_id = identity
+    if topology == "cube-param":
+        topology = f"cube{request.node.callspec.params['size']}"
 
     if filename == "test_orchestrator_v2_production_generation.py":
         # Those unit tests predate immutable-runtime enforcement and replace the

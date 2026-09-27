@@ -1,13 +1,11 @@
-"""Bounded real CUDA self-play -> targets -> update -> reload -> arena acceptance."""
+"""Bounded real CUDA self-play -> targets -> update -> reload acceptance."""
 from pathlib import Path
 import argparse
 import json
 import torch
 from gocube_golden.torus9_adaptation import AdaptationTrainer, selfplay, game_targets, validate_game
-from gocube_golden.orchestrator_v2.adaptation import BOOTSTRAP, arena_statistics
+from gocube_golden.orchestrator_v2.adaptation import BOOTSTRAP
 from gocube_golden.process_supervision import atomic_write_json
-from tools.arena_engine import ArenaExecutionConfig, run_arena
-from tools.arena_profiles import get_profile
 
 
 def main():
@@ -35,16 +33,9 @@ def main():
     resumed = AdaptationTrainer(BOOTSTRAP, device='cuda')
     resumed.restore(cp, replay_ids=['smoke'], config_hash='smoke-only')
     assert all(torch.equal(p, q) for p, q in zip(trainer.model.parameters(), resumed.model.parameters()))
-    run_arena(profile=get_profile("torus9|komi=1.5|simulations=8|watchdog=1000|5ch"),
-        candidate_path=cp, reference_path=BOOTSTRAP, output_dir=out / 'arena',
-        master_seed=2026092792,
-        config=ArenaExecutionConfig(games=4, workers=2, games_per_worker=2,
-            inference_batch_rows=4, strict_production=False, early_gate_enabled=False),
-        progress_callback=lambda d, n: print('arena', d, n, flush=True))
-    stats = arena_statistics(out / 'arena')
-    report = {'status': 'PASS', 'scope': 'execution smoke, not strength evaluation',
+    report = {'status': 'PASS', 'scope': 'selfplay/training/reload only; arena requires Orchestrator V2',
         'games': 4, 'positions': sum(len(g['score']) for g in games),
-        'train': loss['losses'], 'arena': stats}
+        'train': loss['losses']}
     atomic_write_json(out / 'acceptance.json', report)
     print(json.dumps(report, indent=2), flush=True)
 

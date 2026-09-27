@@ -369,6 +369,8 @@ def run_torus9_selfplay_games(
     execution_reference_interactive: bool | None = None,
     progress_callback: Any | None = None,
 ) -> tuple[_t9.Torus9SelfPlayGameRecord, ...]:
+    from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+    require_engine_execution('gocube_golden/torus9_selfplay.py:run_torus9_selfplay_games', action='selfplay', topology='torus9')
     if workers <= 0 or len(set(game_ids)) != len(game_ids):
         raise ValueError("Torus9 self-play workers/game IDs are invalid")
     code = code_identity or capture_code_identity()

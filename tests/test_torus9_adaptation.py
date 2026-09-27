@@ -145,7 +145,7 @@ def test_stage_report_pause_and_notification_retry(tmp_path, monkeypatch):
         def send(self, text):
             self.calls += 1
             if self.calls == 1:
-                raise TelegramTransportError('temporary-test', retryable=True, retry_after=0)
+                raise TelegramTransportError('HTTP_429', retryable=True, retry_after=0)
             return {'message_id': 7}
     store = NotificationStore(tmp_path)
     # Use the dispatcher with a fake network: no actual test messages.

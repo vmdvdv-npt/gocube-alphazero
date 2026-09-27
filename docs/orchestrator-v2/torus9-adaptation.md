@@ -1,27 +1,59 @@
 # M137-5CH komi=1.5: human-gated adaptation
 
 Entry point: `python -m gocube_golden.orchestrator_v2.adaptation`.
-This is a separate workflow in orchestrator v2. It uses the existing cooperative
-SelfPlayEngine, Arena engine, atomic persistence and Telegram notification store.
+This workflow uses the existing cooperative SelfPlayEngine and delegates arenas
+to production_entrypoint.run_arena_from_config / ArenaRunnerV2. It must never
+call the Arena engine directly or mint its own execution permits.
 It does not modify the canonical bootstrap or start the ordinary continuous loop.
 
 ## Production run
 
-Use the repository venv and the exact code commit recorded in the run config.
+The standalone adaptation launcher is not authorized to compute. The existing
+Orchestrator V2 workflow now owns a bounded `adaptation_phase` action:
 
-```bash
-.venv/bin/python -m gocube_golden.orchestrator_v2.adaptation init --root runs/torus9/active/torus9-m137-5ch-komi15-adaptation-20260927-v1
-.venv/bin/python -m gocube_golden.orchestrator_v2.adaptation run --root runs/torus9/active/torus9-m137-5ch-komi15-adaptation-20260927-v1
+```json
+{
+  "mode": "workflow",
+  "workflow_id": "torus9-adaptation-partial-reviewed",
+  "topology": "torus9",
+  "steps": [{
+    "step_id": "partial",
+    "action": "adaptation_phase",
+    "config": {
+      "root": "/absolute/runs/torus9/active/ADAPTATION_RUN",
+      "target_stage": 2,
+      "review": {
+        "report_sha": "sha256:REVIEWED_REPORT_SHA",
+        "allow_inconclusive": true,
+        "reason": "Explicit operator decision to continue despite inconclusive evaluation"
+      }
+    }
+  }]
+}
 ```
 
-Launch `run` under a user systemd service with `KillMode=control-group` so workers
+Run this plan with `python -m gocube_golden.orchestrator_v2.production_entrypoint
+run PLAN.json` under the existing user service. The action restores the existing
+checkpoint/replay, executes only the selected phase, evaluates through ArenaRunnerV2,
+and returns at NEEDS_REVIEW. `allow_inconclusive` requires a reason and the exact
+reviewed report hash; it never changes the recorded gate and cannot admit FAIL.
+An ordinary PASS needs no exception.
+
+A reviewed code rollover uses `runtime/execution-pin.json`, bound to the original
+scientific config hash and source commit. Do not rewrite config.json or checkpoint
+metadata to change the execution revision: this preserves Adam/replay restore
+identities. `adaptation_artifacts.publish_checkpoints` registers real ancestry
+and adaptation replay ledgers in the existing graph before evaluation.
+
+Launch the production entrypoint under a user systemd service with `KillMode=control-group` so workers
 cannot survive a supervisor stop. A single run lock prevents concurrent owners.
 Restarting a RUNNING process restores the last committed checkpoint and shards;
 an incomplete self-play chunk of up to 128 games is regenerated with the same
 seeds. A FAILED run requires investigation and an explicit retry, not an automatic
 training restart. A NEEDS_REVIEW run remains paused after restart.
 
-The process stays alive while awaiting review so Telegram delivery can retry.
+The bounded workflow action returns after its review report. Delivery state is durable;
+uncertain delivery is not automatically repeated.
 The machine/Windows host must remain awake. The process does not depend on an
 active Codex chat. `heartbeat.json` is updated every 15 seconds, `state.json` is
 the durable source of truth, and `reports/stage-*/report.md` is the review entry.
@@ -31,8 +63,11 @@ The progress ETA is for the current operation, not a promise for the whole pilot
 
 ```bash
 .venv/bin/python -m gocube_golden.orchestrator_v2.adaptation status --root RUN_ROOT
-.venv/bin/python -m gocube_golden.orchestrator_v2.adaptation decide --root RUN_ROOT --action continue --expected-report-sha sha256:EXACT_HASH_FROM_STATE
 ```
+
+Standalone `decide --action continue/expand` is blocked too: it must not wake
+an old runner still loaded in memory. Such decisions require V2 authority after
+the registered adaptation_phase action. `stop` and read-only status/report inspection remain usable.
 
 `continue` requires PASS and a remaining adaptation phase. `expand` runs another,
 larger arena with new seeds, up to two expansions; all attempts remain available.
@@ -72,20 +107,58 @@ It only prepares the new run; launch it under its own service after review.
   coefficient halves in stabilization. No old-policy/WDL distillation is applied.
 - NaN, invalid targets, clock mismatch, technical arena games, large update
   spikes and repeated validation regression fail closed. No automatic model promotion.
-- Telegram transport is existing durable infrastructure. At-least-once delivery
-  can duplicate a message after ambiguous network failures; event IDs are stable.
-  Configuration errors/exhausted retries remain inspectable in notification state.
+- Telegram reserves each send durably before HTTP. Slow sends retain their
+  reservation after flush times out and persist a late receipt. Ambiguous sends
+  are DELIVERY_UNCERTAIN and are not automatically repeated, including after a
+  restart. Only an explicit HTTP 429 rejection permits a delayed retry.
+  This favors avoiding duplicates over guaranteed delivery after a lost response.
 
 ## Acceptance evidence
 
 `tests/test_torus9_adaptation.py` checks Adam migration/freeze/phase transitions,
 reproducible reload, komi targets, replay contract validation, review token checks,
-notification retry/deduplication and phase rollback. The real CUDA smoke tool is:
-
-```bash
-.venv/bin/python -m tools.torus9_adaptation_smoke --output artifacts/UNIQUE_SMOKE_DIR
-```
-
-The smoke uses four games and eight simulations to verify execution, not strength.
+notification retry/deduplication and phase rollback. The historical CUDA smoke
+tool also obeys the engine boundary and cannot execute standalone. Unit tests
+explicitly use test-only authority; production commands have no bypass flag.
+The bounded smoke workload uses four games and eight simulations.
 Production data never imports smoke games or weights. Training tests which require
 the canonical local bootstrap skip when it is unavailable in CI.
+
+## Mandatory Arena boundary
+
+`tools.arena_engine.run_arena` requires a signed, parent-PID-bound V2 child
+permit for action `arena` and the matching evaluation run ID before any model,
+output directory, GPU or worker is initialized. This also applies to smoke runs.
+A V2 environment marker or in-process authority does not authorize the engine.
+Only the existing production entrypoint / ArenaRunnerV2 / arena_child route
+owns arena lifecycle notifications, supervision and canonical evaluation outputs.
+The adaptation smoke command now verifies self-play, training and reload only.
+
+Adaptation requires `metadata/arena-checkpoint-refs.json` with a `reference`
+CheckpointRef and `candidates` mapping checkpoint SHA to CheckpointRef. These
+must resolve through the existing V2 artifact graph, including owner manifest,
+checkpoint node, effective config and provenance; this file alone does not
+register a checkpoint. Missing registration fails closed. Do not create fake
+genesis nodes for trained checkpoints or a second runner to bypass registration.
+
+The already running legacy arena may finish on its loaded code. At NEEDS_REVIEW,
+before approving another phase or expanded arena, stop its paused service,
+register its real checkpoint ancestry/replay in V2, and restart on the reviewed
+code revision with an explicit code-pin migration. Never change the live code
+pin or restart an active arena just to install this boundary. No migration or
+subsequent training is implied by installing the source change.
+
+## All computation belongs to V2
+
+The common SelfPlayEngine.run and TrainingEngine.run_iteration, the Torus
+trainer methods, Cube training adapter, and adaptation trainer enforce the same
+V2 capability boundary. Generation children may perform self-play and training;
+an arena permit cannot authorize either. Topology-specific calls also check the
+topology. CLI wrappers, direct Python calls, CPU and smoke workloads obey the
+same checks. Pure target builders, checkpoint inspection and inference for the
+interactive game are not training or self-play launches.
+
+Only existing production entrypoint/runtime modules may mint execution authority;
+a repository test rejects new issuers in engines, tools or additional launchers.
+These are application execution guards, not a security sandbox against someone
+who can edit Python source or run a historical checkout.

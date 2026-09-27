@@ -202,7 +202,10 @@ class NotificationStore:
             return existing
         state = DeliveryState(event_id=event_id)
         try:
-            atomic_write_json(self.delivery_path(event_id), state.to_dict())
+            _atomic_create_json(self.delivery_path(event_id), state.to_dict())
+        except FileExistsError:
+            # A concurrent publisher/sender won; never replace its receipt.
+            return self.read_delivery(event_id) or DeliveryState(event_id=event_id, status="DELIVERY_UNCERTAIN")
         except OSError as exc:
             self._diagnose({"kind": "delivery_state_persist_failed", "event_id": event_id, "at": self._now(), "error_code": exc.__class__.__name__})
             raise
@@ -211,12 +214,14 @@ class NotificationStore:
     def read_delivery(self, event_id: str) -> DeliveryState | None:
         path = self.delivery_path(event_id)
         if not path.is_file():
+            if any(path.parent.glob(path.name + ".corrupt.*")):
+                return DeliveryState(event_id=event_id, status="DELIVERY_UNCERTAIN", last_error_code="CORRUPT_RECEIPT")
             return None
         try:
             return DeliveryState.from_dict(_read_object(path))
         except (OSError, UnicodeError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             self._quarantine(path, exc.__class__.__name__)
-            return None
+            return DeliveryState(event_id=event_id, status="DELIVERY_UNCERTAIN", last_error_code="CORRUPT_RECEIPT")
 
     def write_delivery(self, state: DeliveryState) -> DeliveryState:
         try:

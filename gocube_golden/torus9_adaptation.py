@@ -96,6 +96,8 @@ class AdaptationSelfPlayAdapter(Torus9SelfPlayAdapter):
 
 def selfplay(model, *, checkpoint, run_id, ids, seed, device='cuda', workers=16,
              simulations=200, progress=None):
+    from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+    require_engine_execution('gocube_golden/torus9_adaptation.py:selfplay', action='selfplay', topology='torus9')
     adapter = AdaptationSelfPlayAdapter(model, run_id=run_id, checkpoint=checkpoint,
                                         seed=seed, device=device, simulations=simulations)
     return run_cooperative_selfplay(
@@ -256,6 +258,8 @@ class AdaptationTrainer:
         return losses, metrics
 
     def step(self, games):
+        from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/torus9_adaptation.py:step', action='training', topology='torus9')
         self.validate_clocks()
         u = self.update + 1
         self.model.train()

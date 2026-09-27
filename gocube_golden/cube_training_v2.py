@@ -306,6 +306,8 @@ class CubeTrainingAdapter:
             raise ValueError("Cube replay cap exceeded")
 
     def train(self, state: TrainingState, rows: Sequence[Mapping[str, object]], seed: int) -> Mapping[str, object]:
+        from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+        require_engine_execution('gocube_golden/cube_training_v2.py:train', action='training', topology=f"cube{getattr(self, 'size', '')}")
         self.validate_state(state)
         if not rows:
             raise ValueError("Cube training requires non-empty replay")
@@ -781,6 +783,8 @@ def run_cube_training_generation(
     code_identity: object = None,
     device: str | None = None,
 ) -> CubeTrainingGenerationResult:
+    from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+    require_engine_execution('gocube_golden/cube_training_v2.py:run_cube_training_generation', action='training', topology=f"cube{getattr(adapter, 'size', '')}")
     result = TrainingEngine(adapter).run_iteration(
         state=state,
         generation=generation,

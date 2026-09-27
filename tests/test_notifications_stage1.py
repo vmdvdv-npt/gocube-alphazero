@@ -89,7 +89,8 @@ def test_same_id_with_different_result_is_diagnosed_without_overwrite(tmp_path: 
 
 
 class FakeTransport:
-    def __init__(self, failures=0, block=False):
+    def __init__(self, failures=0, block=False, error="HTTP_503"):
+        self.error = error
         self.failures = failures
         self.block = block
         self.calls = 0
@@ -99,7 +100,7 @@ class FakeTransport:
         if self.block:
             time.sleep(0.2)
         if self.calls <= self.failures:
-            raise TelegramTransportError("HTTP_503", retryable=True)
+            raise TelegramTransportError(self.error, retryable=True)
         return {"ok": True, "message_id": self.calls}
 
 
@@ -118,7 +119,7 @@ def test_receipt_prevents_resume_http_and_retry_does_not_recompute(tmp_path: Pat
 
 def test_retry_wait_survives_restart_and_does_not_create_second_event(tmp_path: Path):
     store = NotificationStore(tmp_path)
-    failing = FakeTransport(failures=1)
+    failing = FakeTransport(failures=1, error="HTTP_429")
     first = NotificationDispatcher(store, transport=failing, background=False, policy=DeliveryPolicy(base_delay_seconds=0))
     event = first.publish(arena_event())
     first.flush(1)
@@ -252,3 +253,129 @@ def test_legacy_pending_and_receipt_are_read_without_mass_resend(tmp_path: Path)
     assert states.count("PENDING") == 1
     assert (tmp_path / "notifications" / "legacy-migration.json").is_file()
     assert (outbox / "a.json").is_file()
+
+
+def test_slow_send_is_not_repeated_by_flush_or_new_dispatcher(tmp_path):
+    import threading
+    started, release = threading.Event(), threading.Event()
+    class SlowTransport:
+        calls = 0
+        def send(self, text):
+            self.calls += 1
+            started.set()
+            assert release.wait(5)
+            return {'ok': True, 'message_id': 123}
+    transport = SlowTransport()
+    store = NotificationStore(tmp_path)
+    first = NotificationDispatcher(store, transport=transport, background=False)
+    event = first.publish(arena_event())
+    first.flush(.02)
+    assert started.wait(1)
+    assert store.read_delivery(event.event_id).status == 'DELIVERY_UNCERTAIN'
+    second = NotificationDispatcher(NotificationStore(tmp_path), transport=transport, background=False)
+    second.publish(event)
+    second.flush(.02)
+    assert transport.calls == 1
+    release.set()
+    for _ in range(100):
+        if store.read_delivery(event.event_id).status == 'DELIVERED':
+            break
+        time.sleep(.01)
+    assert store.read_delivery(event.event_id).receipt['message_id'] == 123
+    second.flush(1)
+    assert transport.calls == 1
+
+
+def test_retry_after_is_respected(tmp_path):
+    from datetime import datetime, timezone
+    from gocube_golden.notifications.store import DeliveryState
+    clock = [1000.0]
+    store = NotificationStore(tmp_path)
+    transport = FakeTransport()
+    dispatcher = NotificationDispatcher(store, transport=transport, background=False, now=lambda: clock[0])
+    event = dispatcher.publish(arena_event())
+    store.write_delivery(DeliveryState(event_id=event.event_id, status='RETRY_WAIT',
+        next_attempt_at=datetime.fromtimestamp(1060, timezone.utc).isoformat()))
+    dispatcher.flush(1)
+    assert transport.calls == 0
+    clock[0] = 1061
+    dispatcher.flush(1)
+    assert transport.calls == 1
+
+
+def test_ambiguous_result_and_corrupt_receipt_are_never_retried(tmp_path):
+    store = NotificationStore(tmp_path)
+    transport = FakeTransport(failures=1)
+    dispatcher = NotificationDispatcher(store, transport=transport, background=False)
+    event = dispatcher.publish(arena_event())
+    dispatcher.flush(1)
+    dispatcher.flush(1)
+    assert transport.calls == 1
+    assert store.read_delivery(event.event_id).status == 'DELIVERY_UNCERTAIN'
+    store.delivery_path(event.event_id).write_text('{broken')
+    dispatcher.publish(event)
+    dispatcher.flush(1)
+    dispatcher.flush(1)
+    assert transport.calls == 1
+
+
+def test_delivery_initialization_cannot_overwrite_concurrent_receipt(tmp_path, monkeypatch):
+    from gocube_golden.notifications.store import DeliveryState
+    store = NotificationStore(tmp_path)
+    event = store.publish(arena_event())
+    store.write_delivery(DeliveryState(event_id=event.event_id, status='DELIVERED'))
+    read = store.read_delivery
+    calls = []
+    def stale_read(event_id):
+        calls.append(event_id)
+        return None if len(calls) == 1 else read(event_id)
+    monkeypatch.setattr(store, 'read_delivery', stale_read)
+    assert store.ensure_delivery(event.event_id).status == 'DELIVERED'
+    assert read(event.event_id).status == 'DELIVERED'
+
+
+def test_crash_after_http_begins_does_not_resend_on_restart(tmp_path):
+    import subprocess
+    import sys
+    import os
+    script = tmp_path / 'crash.py'
+    script.write_text('''import os, sys
+from pathlib import Path
+from gocube_golden.notifications.dispatcher import NotificationDispatcher
+from gocube_golden.notifications.store import NotificationStore
+class Transport:
+    def send(self, text):
+        Path(sys.argv[1], 'http-started').write_text('yes')
+        os._exit(17)
+d = NotificationDispatcher(NotificationStore(sys.argv[1]), transport=Transport(), background=False)
+d.flush(5)
+''')
+    store = NotificationStore(tmp_path)
+    store.publish(arena_event())
+    result = subprocess.run([sys.executable, str(script), str(tmp_path)], env=dict(os.environ, PYTHONPATH=str(Path.cwd())), timeout=20)
+    assert result.returncode == 17
+    assert (tmp_path / 'http-started').exists()
+    transport = FakeTransport()
+    resumed = NotificationDispatcher(store, transport=transport, background=False)
+    resumed.flush(1)
+    assert transport.calls == 0
+
+
+def test_late_rate_limit_restarts_background_delivery(tmp_path):
+    import threading
+    sent = threading.Event()
+    class Transport:
+        calls = 0
+        def send(self, text):
+            self.calls += 1
+            if self.calls == 1:
+                time.sleep(.7)
+                raise TelegramTransportError('HTTP_429', retryable=True, retry_after=.01)
+            sent.set()
+            return {'ok': True}
+    transport = Transport()
+    dispatcher = NotificationDispatcher(NotificationStore(tmp_path), transport=transport)
+    dispatcher.publish(arena_event())
+    assert sent.wait(5)
+    dispatcher.close()
+    assert transport.calls == 2

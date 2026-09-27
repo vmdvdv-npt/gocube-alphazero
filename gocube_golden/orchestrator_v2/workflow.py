@@ -29,7 +29,7 @@ from ..provenance import sha256_fingerprint
 WORKFLOW_SCHEMA = "gocube-orchestrator-v2-workflow-v1"
 WORKFLOW_STATE_SCHEMA = "gocube-orchestrator-v2-workflow-state-v1"
 WORKFLOW_ACTIONS = frozenset(
-    {"arena", "calibration", "continuous_training", "experiment", "select", "stop"}
+    {"arena", "calibration", "continuous_training", "experiment", "adaptation_phase", "select", "stop"}
 )
 WORKFLOW_STATUSES = frozenset({"PENDING", "RUNNING", "COMPLETED", "FAILED", "SKIPPED"})
 WORKFLOW_STATES = frozenset({"RUNNING", "COMPLETED", "FAILED", "STOPPED"})

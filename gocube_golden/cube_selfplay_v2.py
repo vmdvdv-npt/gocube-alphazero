@@ -718,6 +718,8 @@ def run_cube_selfplay_games(
     execution_activity: MutableMapping[str, object] | None = None,
     progress_callback: Any | None = None,
 ) -> tuple[CubeSelfPlayGameRecord, ...]:
+    from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
+    require_engine_execution('gocube_golden/cube_selfplay_v2.py:run_cube_selfplay_games', action='selfplay', topology=f"cube{size if size is not None else getattr(model, 'size', '')}")
     adapter = CubeSelfPlayAdapter(
         model,
         size=size,

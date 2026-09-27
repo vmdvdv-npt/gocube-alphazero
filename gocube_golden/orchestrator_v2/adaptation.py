@@ -120,7 +120,12 @@ class Workflow:
         fp = check.pop('fingerprint')
         if sha256_fingerprint(check) != fp:
             raise ValueError('Run config was modified')
-        if capture_code_identity().git_commit_sha != self.config['code']['git_commit_sha']:
+        execution = root / 'runtime' / 'execution-pin.json'
+        pin = read(execution) if execution.exists() else None
+        if pin and (pin['config_hash'] != fp or pin['source_commit'] != self.config['code']['git_commit_sha']):
+            raise ValueError('Execution migration does not match scientific configuration')
+        self.execution_commit = pin['execution_commit'] if pin else self.config['code']['git_commit_sha']
+        if capture_code_identity().git_commit_sha != self.execution_commit:
             raise ValueError('Run is pinned to another code commit; use its checkout')
         self.state = read(root / 'state.json')
         if self.state['config_hash'] != fp:
@@ -157,7 +162,7 @@ class Workflow:
     def notify(self, kind, action, payload, report=None):
         event = operator_event(kind, topology='torus9', owner_type='workflow',
             owner_id=self.root.name, action_id=action, payload=payload,
-            execution_code_commit=self.config['code']['git_commit_sha'],
+            execution_code_commit=self.execution_commit,
             evidence_refs=[] if report is None else [{'ref': str(report)}])
         self.notifications.publish(event)
         self.notifications.flush(timeout=7)
@@ -202,7 +207,7 @@ class Workflow:
 
     def collect_batch(self, generation, number):
         cfg = self.config
-        if capture_code_identity().git_commit_sha != cfg['code']['git_commit_sha']:
+        if capture_code_identity().git_commit_sha != self.execution_commit:
             raise ValueError('Code changed before spawning self-play workers')
         offset = sum(s['games'] for s in self.state['shards'])
         batch_path = self.root / 'replay' / f'g{generation:02d}-{offset:06d}.pt'
@@ -329,34 +334,38 @@ class Workflow:
         self.evaluate_phase()
 
     def evaluate_phase(self):
-        from tools.arena_engine import ArenaExecutionConfig, run_arena
-        from tools.arena_profiles import get_profile
+        from .production_entrypoint import run_arena_from_config
         cfg, stage = self.config, self.state['stage']
         attempt = self.state['arena_attempt']
         count = cfg['arena_games'][stage] * (2 ** attempt)
-        out = self.root / 'arena' / f'stage-{stage + 1:02d}-attempt-{attempt}'
-        # Complete arena outputs can be reused only when bound to the same candidate.
-        identity = {'candidate': self.state['checkpoint_sha'], 'reference': BOOTSTRAP_SHA,
-                    'games': count, 'config': cfg['fingerprint']}
-        marker = out / 'adaptation-complete.json'
-        if marker.exists():
-            if read(marker) != identity:
-                raise ValueError('Arena identity drift')
-        else:
-            if out.exists():
-                # Never overwrite evidence from an interrupted arena.
-                out.rename(out.with_name(out.name + '-interrupted-' + str(time.time_ns())))
-            self.mark_progress('arena', 0, count)
-            run_arena(profile=get_profile(f"torus9|komi=1.5|simulations={cfg['arena_simulations']}|watchdog=1000|5ch"),
-                candidate_path=self.verify_checkpoint(), reference_path=BOOTSTRAP,
-                output_dir=out, master_seed=cfg['seed'] + 100000 + stage * 10000 + attempt,
-                config=ArenaExecutionConfig(games=count, workers=cfg['workers'],
-                    games_per_worker=12 if not cfg.get('smoke') else 2,
-                    inference_batch_rows=192 if not cfg.get('smoke') else 4,
-                    device=cfg['device'], strict_production=not cfg.get('smoke'),
-                    early_gate_enabled=not cfg.get('smoke')),
-                progress_callback=lambda d, n: self.mark_progress('arena', d, n))
-            atomic_write_json(marker, identity)
+        self.verify_checkpoint()
+        # Registration is required; raw paths must never bypass the V2 graph.
+        from .adaptation_artifacts import publish_checkpoints
+        publish_checkpoints(self.root)
+        refs_path = self.root / 'metadata' / 'arena-checkpoint-refs.json'
+        if not refs_path.is_file():
+            raise RuntimeError('Arena requires registered V2 checkpoint references: '
+                               + str(refs_path) + '; direct engine fallback is forbidden')
+        refs = read(refs_path)
+        candidate = refs['candidates'][self.state['checkpoint_sha']]
+        reference = refs['reference']
+        if candidate['sha256'] != self.state['checkpoint_sha'] or reference['sha256'] != BOOTSTRAP_SHA:
+            raise ValueError('Arena checkpoint reference identity drift')
+        self.mark_progress('arena', 0, count)
+        result = run_arena_from_config({
+            'candidate_checkpoint': candidate, 'reference_checkpoint': reference,
+            'execution_code_commit': self.execution_commit,
+            'profile': f"torus9|komi=1.5|simulations={cfg['arena_simulations']}|watchdog=1000|5ch",
+            'master_seed': cfg['seed'] + 100000 + stage * 10000 + attempt,
+            'arena_config': {'games': count, 'workers': cfg['workers'],
+                'games_per_worker': 12 if not cfg.get('smoke') else 2,
+                'inference_batch_rows': 192 if not cfg.get('smoke') else 4,
+                'device': cfg['device'], 'strict_production': not cfg.get('smoke'),
+                'early_gate_enabled': not cfg.get('smoke')},
+        }, runs_root=self.root.parents[2])
+        out = Path(result.output_dir)
+        self.state['arena_output'] = str(out)
+        self.persist()
         stats = arena_statistics(out)
         self.finish({'gate': stats['gate'], 'arena': stats,
             'validation': self.state['validation_history'][-1]['metrics'],
@@ -433,7 +442,8 @@ class Workflow:
         report = read(self.state['report'])
         action = decision['action']
         if action == 'continue':
-            if report['gate'] != 'PASS' or self.state['stage'] >= 4:
+            admitted = report['gate'] == 'PASS' or (report['gate'] == 'INCONCLUSIVE' and decision.get('allow_inconclusive') is True and bool(decision.get('reason')))
+            if not admitted or self.state['stage'] >= 4:
                 raise ValueError('Continuation requires PASS and a next adaptation stage')
             self.state['champion'] = self.state['checkpoint']
             self.state['champion_sha'] = self.state['checkpoint_sha']
@@ -458,7 +468,9 @@ class Workflow:
         path.rename(self.root / f'decision-{time.time_ns()}.json')
         return True
 
-    def run(self):
+    def run(self, *, return_at_review=False):
+        from .execution_permit import require_engine_execution
+        require_engine_execution('adaptation.Workflow.run', action='training', topology='torus9')
         if not self.config.get('smoke') and load_config() is None:
             raise RuntimeError('Telegram configuration required before production launch')
         if not torch.cuda.is_available() and self.config['device'] == 'cuda':
@@ -477,6 +489,8 @@ class Workflow:
                     # Also reconciles a crash between durable report commit and enqueue.
                     self.publish_review()
                     if not self.consume_decision():
+                        if return_at_review:
+                            return {'status': 'NEEDS_REVIEW', 'stage': self.state['stage'], 'update': self.state['update'], 'report': self.state['report']}
                         self.notifications.flush(timeout=2)
                         self.stop.wait(30)
                     continue
@@ -506,7 +520,7 @@ class Workflow:
                 'Действие': 'Вызвать Codex для разбора; не менять LR и не возобновлять вслепую',
                 'Отчёт': str(self.root / 'failure.txt')})
             # Keep only delivery alive after a scientific failure. Training is not retried.
-            if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            if not return_at_review and not isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 while not self.stop.wait(30):
                     self.notifications.flush(timeout=2)
             raise
@@ -516,14 +530,19 @@ class Workflow:
             self.notifications.close(timeout=7)
 
 
-def write_decision(root, action, expected):
+def write_decision(root, action, expected, *, allow_inconclusive=False, reason=None):
+    if action in {'continue', 'expand'}:
+        # Do not wake a still-loaded legacy runner through its old standalone CLI.
+        from .execution_permit import require_orchestrator_execution
+        require_orchestrator_execution('adaptation.write_decision')
     state = read(root / 'state.json')
     if state['status'] != 'NEEDS_REVIEW' or state['report_sha'] != expected:
         raise ValueError('Review state or report hash changed')
     report = read(state['report'])
     if file_sha256(state['report']) != expected:
         raise ValueError('Report integrity failure')
-    if action == 'continue' and (report['gate'] != 'PASS' or state['stage'] >= 4):
+    admitted = report['gate'] == 'PASS' or (report['gate'] == 'INCONCLUSIVE' and allow_inconclusive is True and bool(reason))
+    if action == 'continue' and (not admitted or state['stage'] >= 4):
         raise ValueError('Next phase requires PASS; final pilot needs separate training decision')
     if action == 'expand' and (state['stage'] == 0 or state['arena_attempt'] >= 2):
         raise ValueError('Expansion unavailable')
@@ -531,7 +550,7 @@ def write_decision(root, action, expected):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if (root / 'decision.json').exists():
             raise ValueError('Decision already pending')
-        atomic_write_json(root / 'decision.json', {'action': action, 'report_sha': expected, 'at': utc()})
+        atomic_write_json(root / 'decision.json', {'action': action, 'report_sha': expected, 'at': utc(), 'allow_inconclusive': allow_inconclusive, 'reason': reason})
 
 
 def retry_phase(root, destination, scale):
@@ -596,6 +615,43 @@ def main():
                 raise KeyboardInterrupt('Supervisor stop requested')
             signal.signal(signal.SIGTERM, terminate)
             workflow.run()
+
+
+def run_workflow_phase(config, *, runs_root):
+    """One bounded adaptation phase, owned by the existing V2 WorkflowRunner."""
+    from .execution_permit import require_engine_execution
+    from .adaptation_artifacts import publish_checkpoints
+    require_engine_execution('adaptation.run_workflow_phase', action='training', topology='torus9')
+    root = Path(config['root']).resolve()
+    if root.parent != (Path(runs_root).resolve() / 'torus9' / 'active'):
+        raise ValueError('Adaptation root must be owned by the configured runs root')
+    target = int(config['target_stage'])
+    if not 1 <= target <= 4:
+        raise ValueError('Invalid target stage')
+    with exclusive(root):
+        workflow = Workflow(root)
+        try:
+            publish_checkpoints(root)
+            stage = workflow.state['stage']
+            if stage not in (target - 1, target) or workflow.state['status'] in ('FAILED', 'STOPPED'):
+                raise ValueError('Adaptation phase cannot resume this state')
+            if stage == target - 1:
+                review = config['review']
+                if not (root / 'decision.json').exists():
+                    write_decision(root, 'continue', review['report_sha'],
+                        allow_inconclusive=review.get('allow_inconclusive', False), reason=review.get('reason'))
+                else:
+                    saved = read(root / 'decision.json')
+                    if saved['action'] != 'continue' or saved['report_sha'] != review['report_sha']:
+                        raise ValueError('Conflicting pending review decision')
+                workflow.consume_decision()
+            workflow.notify('GENERATION_STARTED', f'adaptation-stage-{target}-start', {
+                'Этап': STAGES[target], 'Updates': f"{workflow.state['update']} → {ENDS[target]}",
+                'Решение': config.get('review', {}).get('reason', ''),
+                'Дальше': 'По окончании этапа арена через V2, отчёт и обязательная пауза'})
+            return workflow.run(return_at_review=True)
+        finally:
+            workflow.notifications.close(timeout=7)
 
 
 if __name__ == '__main__':

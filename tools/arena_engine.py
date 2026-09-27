@@ -688,7 +688,12 @@ def run_arena(
     activity_callback: Callable[[Mapping[str, object]], None] | None = None,
     workload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Run the single production Arena engine with one game-specific profile."""
+    """Run only as a supervised Orchestrator V2 child, including smoke runs."""
+    from gocube_golden.orchestrator_v2.execution_permit import require_child_execution_permit
+
+    require_child_execution_permit("tools.arena_engine.run_arena", action_type="arena", run_id=run_id)
+    if not run_id:
+        raise RuntimeError("Arena requires the evaluation run_id assigned by Orchestrator V2")
     process_started_at = time.perf_counter()
     startup_phases: dict[str, dict[str, float]] = {}
     diagnostic_output_dir: Path | None = None
