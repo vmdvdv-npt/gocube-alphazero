@@ -351,7 +351,13 @@ class Torus9ArenaProfile:
                 payload = torch.load(identity.path, map_location=device)
             if not isinstance(payload, Mapping) or not isinstance(payload.get("model_state_dict"), Mapping):
                 raise ValueError("Torus9 5CH checkpoint payload is malformed")
-            model = Torus9M137FiveChannelGraphNet().to(device)
+            if identity.architecture_config.get("training_contract") is not None:
+                from gocube_golden.torus9_adaptation import AdaptationModel, FINGERPRINT
+                if identity.architecture_config["training_contract"] != FINGERPRINT:
+                    raise ValueError("Unknown Torus9 5CH training contract")
+                model = AdaptationModel().to(device)
+            else:
+                model = Torus9M137FiveChannelGraphNet().to(device)
             model.load_state_dict(payload["model_state_dict"], strict=True)
             if model_hash(model) != identity.model_hash:
                 raise RuntimeError("Parent inference broker loaded the wrong Torus9 5CH checkpoint")
