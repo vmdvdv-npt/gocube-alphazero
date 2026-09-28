@@ -126,8 +126,12 @@ def run_cube_arena(
 ) -> CubeArenaResult:
     """Run one diagnostic Cube Arena comparison without gating training."""
 
-    from .orchestrator_v2.execution_permit import require_child_execution_permit
-    require_child_execution_permit("gocube_golden.cube_arena_v2.run_cube_arena", action_type="arena", topology=f"cube{size}")
+    topology = f"cube{size}"
+    from .orchestrator_v2.execution_permit import require_arena_execution
+    arena_run_id = require_arena_execution(
+        "gocube_golden.cube_arena_v2.run_cube_arena",
+        topology=topology,
+    )
 
     size = validate_cube_size(size)
     search_config.validate()
@@ -184,6 +188,7 @@ def run_cube_arena(
             or reference_ref.get("label")
             or reference_path.stem
         ),
+        run_id=arena_run_id,
         comparison=(
             f"{candidate_ref.get('lineage_id', 'candidate')}--"
             f"{candidate_ref.get('checkpoint_id') or candidate_path.stem}-vs-"

@@ -3,7 +3,7 @@
   "contract_id": "gocube-cube-selfplay-v2",
   "contract_version": 1,
   "fingerprint_algorithm": "sha256-canonical-json-v1",
-  "contract_fingerprint": "sha256:7b851dd6b5cc22c842c94974c348ab6fea3f3e5436e795ba5e0f2e89c9388220",
+  "contract_fingerprint": "sha256:091cdc0507b0274a0ab3f7b235bc1450f77cee6b98bf3c5c0109965692788c9b",
   "semantics": {
     "id": "gocube-common-selfplay-semantics-v1",
     "fingerprint": "sha256:8b6d2d127639d8229efdf615e61a7b479af09b98487c721de1d3beac950d9c08"
@@ -49,7 +49,7 @@
   },
   "required_observation": {
     "schema_id": "gocube-cube-observation-v2",
-    "schema_fingerprint": "sha256:c56c878e1acc9847647666426c370a4cda56473b3c4311f310bae225d9ae12e8",
+    "schema_fingerprint": "sha256:0a4e8579af9a86e54b30c3f233ccf7b03c8364414693f23204d895a185ea8d5f",
     "channels": 30,
     "history_depth": 4,
     "shape": "[30,P]"

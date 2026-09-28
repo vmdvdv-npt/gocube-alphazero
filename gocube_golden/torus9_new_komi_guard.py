@@ -1,7 +1,7 @@
 """Fail-closed observation policy for the Torus9 ``new_komi`` training line.
 
-Actual rules komi belongs to the referee/game contract.  It must never be
-encoded as a neural-network observation channel again.  The historical M137
+Actual rules komi belongs to the referee/game contract. It must never be
+encoded as a neural-network observation channel again. The historical M137
 6-channel model is permitted only as a read-only conversion source.
 """
 from __future__ import annotations
@@ -9,6 +9,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .neural_observation_policy import (
+    NO_KOMI_NEURAL_OBSERVATION_POLICY_ID,
+    assert_no_komi_neural_observation_channels,
+)
 from .torus9_m137_5ch import (
     M137_FIVE_CHANNEL_ARCHITECTURE_ID,
     M137_FIVE_CHANNEL_CHANNELS,
@@ -18,13 +22,6 @@ from .torus9_m137_5ch import (
 NO_KOMI_OBSERVATION_POLICY_ID = "torus9-no-komi-observation-channel-v1"
 
 
-def _normalized_channels(channels: Sequence[object]) -> tuple[str, ...]:
-    return tuple(
-        str(channel).strip().lower().replace("-", "_").replace(" ", "_")
-        for channel in channels
-    )
-
-
 def assert_new_komi_training_observation_contract(
     *,
     architecture_id: object,
@@ -32,18 +29,19 @@ def assert_new_komi_training_observation_contract(
     observation_channels: Sequence[object],
 ) -> dict[str, object]:
     """Reject any trainable Torus9 contract that can feed komi to the network."""
-    channels = _normalized_channels(observation_channels)
-    if "komi" in channels:
-        raise ValueError(
-            "Torus9 training forbids komi as a neural observation channel; "
-            "komi belongs only to the referee/rules contract"
-        )
+    channels = assert_no_komi_neural_observation_channels(
+        observation_channels,
+        context="Torus9 new_komi training observation",
+    )
     if int(input_channels) != 5 or len(channels) != 5:
         raise ValueError(
             "Torus9 new_komi training requires exactly 5 neural observation channels; "
             "legacy 6-channel networks are conversion-source only"
         )
-    expected_channels = _normalized_channels(M137_FIVE_CHANNEL_CHANNELS)
+    expected_channels = assert_no_komi_neural_observation_channels(
+        M137_FIVE_CHANNEL_CHANNELS,
+        context="canonical Torus9 5CH observation",
+    )
     if channels != expected_channels:
         raise ValueError(
             "Torus9 new_komi training observation channels differ from the canonical 5CH contract"
@@ -55,6 +53,7 @@ def assert_new_komi_training_observation_contract(
         )
     return {
         "policy_id": NO_KOMI_OBSERVATION_POLICY_ID,
+        "global_policy_id": NO_KOMI_NEURAL_OBSERVATION_POLICY_ID,
         "architecture_id": M137_FIVE_CHANNEL_ARCHITECTURE_ID,
         "input_channels": 5,
         "observation_channels": list(M137_FIVE_CHANNEL_CHANNELS),

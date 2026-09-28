@@ -25,8 +25,12 @@ from .cube_family import (
     cube_family_topology,
 )
 from .cube_game_contract_v2 import SUPPORTED_SIZES, validate_cube_size
+from .neural_observation_policy import (
+    assert_no_komi_neural_observation_channels,
+    assert_no_komi_neural_observation_schema,
+)
 from .rules import LegalActionContext, prepare_legal_actions
-from .state import BLACK, EMPTY, WHITE, GoldenState, Stone, opponent
+from .state import BLACK, EMPTY, GoldenState, Stone, opponent
 
 SCHEMA_VERSION = 2
 SCHEMA_ID = "gocube-cube-observation-v2"
@@ -43,7 +47,7 @@ CHANNELS = (
     "side_to_move_is_black",
     "previous_action_was_pass",
     "legal_point_mask",
-    "komi_stm_normalized",
+    "reserved_rules_independent_zero",
     "previous_move_point",
     "own_liberties_1",
     "own_liberties_2",
@@ -69,11 +73,10 @@ CHANNELS = (
     "cross_face_neighbor_count_scaled",
     "face_size_scaled",
 )
+assert_no_komi_neural_observation_channels(CHANNELS, context=SCHEMA_ID)
 CHANNEL_COUNT = len(CHANNELS)
 CHANNEL_INDEX = {name: index for index, name in enumerate(CHANNELS)}
 
-# Derived from Stage-2 CubeFamilyTopology across cube2..cube7. The schema
-# validator independently recomputes them to catch geometry drift.
 CORNER_DISTANCE_FAMILY_SCALE = 6.0
 SEAM_DISTANCE_FAMILY_SCALE = 3.0
 
@@ -103,10 +106,8 @@ def _schema_payload() -> dict[str, object]:
             "liberty_planes": "current-side-to-move-relative",
             "history_planes": "current-side-to-move-relative",
             "side_to_move_is_black": {"BLACK": 1.0, "WHITE": 0.0},
-            "komi": "WHITE:+komi;BLACK:-komi",
         },
         "normalization": {
-            "komi_stm_normalized": "komi_stm/(P+abs(komi))",
             "corner_distance_family_scale": CORNER_DISTANCE_FAMILY_SCALE,
             "seam_distance_family_scale": SEAM_DISTANCE_FAMILY_SCALE,
             "corner_distance_topology_relative": (
@@ -117,6 +118,11 @@ def _schema_payload() -> dict[str, object]:
             ),
             "cross_face_neighbor_count_scaled": "num_cross_face_neighbors/2.0",
             "face_size_scaled": "n/7.0",
+        },
+        "reserved_channels": {
+            "reserved_rules_independent_zero": (
+                "constant-zero; reserved for shape compatibility and forbidden from carrying rule parameters"
+            ),
         },
         "history": {
             "depth": HISTORY_DEPTH,
@@ -148,22 +154,15 @@ def cube_observation_schema() -> dict[str, object]:
 
 
 def _family_distance_scales() -> tuple[float, float]:
-    corner = max(
-        point.corner_distance
-        for size in SUPPORTED_SIZES
-        for point in cube_family_topology(size).points
-    )
-    seam = max(
-        point.seam_distance
-        for size in SUPPORTED_SIZES
-        for point in cube_family_topology(size).points
-    )
+    corner = max(point.corner_distance for size in SUPPORTED_SIZES for point in cube_family_topology(size).points)
+    seam = max(point.seam_distance for size in SUPPORTED_SIZES for point in cube_family_topology(size).points)
     return float(corner), float(seam)
 
 
 def validate_cube_observation_schema(schema: Mapping[str, object]) -> Mapping[str, object]:
     if not isinstance(schema, Mapping):
         raise ValueError("Cube observation schema must be a mapping")
+    assert_no_komi_neural_observation_schema(schema, context="Cube observation schema")
     candidate = copy.deepcopy(dict(schema))
     supplied_fingerprint = candidate.pop("schema_fingerprint", None)
     if candidate != _SCHEMA_PAYLOAD:
@@ -175,9 +174,7 @@ def validate_cube_observation_schema(schema: Mapping[str, object]) -> Mapping[st
     actual_scales = _family_distance_scales()
     expected_scales = (CORNER_DISTANCE_FAMILY_SCALE, SEAM_DISTANCE_FAMILY_SCALE)
     if actual_scales != expected_scales:
-        raise ValueError(
-            f"Cube family distance scale drift: expected {expected_scales}, got {actual_scales}"
-        )
+        raise ValueError(f"Cube family distance scale drift: expected {expected_scales}, got {actual_scales}")
     return schema
 
 
@@ -210,9 +207,7 @@ def concrete_observation_identity(topology: CubeFamilyTopology) -> dict[str, obj
     return result
 
 
-def validate_concrete_observation_identity(
-    identity: Mapping[str, object], topology: CubeFamilyTopology
-) -> Mapping[str, object]:
+def validate_concrete_observation_identity(identity: Mapping[str, object], topology: CubeFamilyTopology) -> Mapping[str, object]:
     if not isinstance(identity, Mapping):
         raise ValueError("Concrete Cube observation identity must be a mapping")
     expected = concrete_observation_identity(topology)
@@ -248,39 +243,21 @@ class CubeObservationContext:
         topology = cube_family_topology(size)
         identity = concrete_observation_identity(topology)
         expected_identity = (
-            identity["topology_id"],
-            identity["game_graph_fingerprint"],
-            identity["geometry_fingerprint"],
-            identity["schema_id"],
-            identity["schema_fingerprint"],
-            identity["concrete_observation_fingerprint"],
+            identity["topology_id"], identity["game_graph_fingerprint"], identity["geometry_fingerprint"],
+            identity["schema_id"], identity["schema_fingerprint"], identity["concrete_observation_fingerprint"],
         )
         actual_identity = (
-            self.topology_id,
-            self.topology_fingerprint,
-            self.geometry_fingerprint,
-            self.observation_schema_id,
-            self.observation_schema_fingerprint,
-            self.concrete_observation_fingerprint,
+            self.topology_id, self.topology_fingerprint, self.geometry_fingerprint,
+            self.observation_schema_id, self.observation_schema_fingerprint, self.concrete_observation_fingerprint,
         )
         if actual_identity != expected_identity:
             raise ValueError("Cube observation context identity mismatch")
-        object.__setattr__(
-            self, "current_board", _normalize_board(self.current_board, topology.point_count)
-        )
+        object.__setattr__(self, "current_board", _normalize_board(self.current_board, topology.point_count))
         if len(self.previous_boards) != HISTORY_DEPTH:
             raise ValueError(f"Cube observation context requires exactly {HISTORY_DEPTH} history boards")
-        object.__setattr__(
-            self,
-            "previous_boards",
-            tuple(_normalize_board(board, topology.point_count) for board in self.previous_boards),
-        )
+        object.__setattr__(self, "previous_boards", tuple(_normalize_board(board, topology.point_count) for board in self.previous_boards))
         action = self.previous_action
-        if action is not None and (
-            isinstance(action, bool)
-            or not isinstance(action, int)
-            or not 0 <= action <= topology.pass_action
-        ):
+        if action is not None and (isinstance(action, bool) or not isinstance(action, int) or not 0 <= action <= topology.pass_action):
             raise ValueError("Cube observation context previous action is outside canonical action space")
 
     @property
@@ -288,12 +265,7 @@ class CubeObservationContext:
         return cube_family_topology(self.size)
 
 
-def make_cube_observation_context(
-    state: GoldenState,
-    *,
-    previous_boards: Sequence[Sequence[Stone | int]] = (),
-    previous_action: int | None = None,
-) -> CubeObservationContext:
+def make_cube_observation_context(state: GoldenState, *, previous_boards: Sequence[Sequence[Stone | int]] = (), previous_action: int | None = None) -> CubeObservationContext:
     topology = _require_cube_state(state)
     if len(previous_boards) > HISTORY_DEPTH:
         raise ValueError("Cube observation context accepts at most four previous boards")
@@ -302,15 +274,11 @@ def make_cube_observation_context(
     normalized.extend(empty for _ in range(HISTORY_DEPTH - len(normalized)))
     identity = concrete_observation_identity(topology)
     return CubeObservationContext(
-        size=topology.size,
-        topology_id=topology.topology_id,
-        topology_fingerprint=topology.fingerprint,
-        geometry_fingerprint=topology.geometry_fingerprint,
-        observation_schema_id=SCHEMA_ID,
+        size=topology.size, topology_id=topology.topology_id, topology_fingerprint=topology.fingerprint,
+        geometry_fingerprint=topology.geometry_fingerprint, observation_schema_id=SCHEMA_ID,
         observation_schema_fingerprint=SCHEMA_FINGERPRINT,
         concrete_observation_fingerprint=str(identity["concrete_observation_fingerprint"]),
-        current_board=tuple(int(stone) for stone in state.stones),
-        previous_boards=tuple(normalized),
+        current_board=tuple(int(stone) for stone in state.stones), previous_boards=tuple(normalized),
         previous_action=previous_action,
     )
 
@@ -326,20 +294,14 @@ def initial_cube_observation_context(state: GoldenState) -> CubeObservationConte
 
 def _context_identity(context: CubeObservationContext, topology: CubeFamilyTopology) -> dict[str, object]:
     return {
-        "schema_id": context.observation_schema_id,
-        "schema_fingerprint": context.observation_schema_fingerprint,
-        "size": context.size,
-        "point_count": topology.point_count,
-        "topology_id": context.topology_id,
-        "game_graph_fingerprint": context.topology_fingerprint,
-        "geometry_fingerprint": context.geometry_fingerprint,
+        "schema_id": context.observation_schema_id, "schema_fingerprint": context.observation_schema_fingerprint,
+        "size": context.size, "point_count": topology.point_count, "topology_id": context.topology_id,
+        "game_graph_fingerprint": context.topology_fingerprint, "geometry_fingerprint": context.geometry_fingerprint,
         "concrete_observation_fingerprint": context.concrete_observation_fingerprint,
     }
 
 
-def _assert_context_matches_state(
-    state: GoldenState, context: CubeObservationContext
-) -> CubeFamilyTopology:
+def _assert_context_matches_state(state: GoldenState, context: CubeObservationContext) -> CubeFamilyTopology:
     topology = _require_cube_state(state)
     if context.size != topology.size:
         raise ValueError("Cube observation context size does not match state")
@@ -350,20 +312,12 @@ def _assert_context_matches_state(
     return topology
 
 
-def advance_cube_observation_context(
-    context: CubeObservationContext,
-    real_action: int,
-    resulting_state: GoldenState,
-) -> CubeObservationContext:
+def advance_cube_observation_context(context: CubeObservationContext, real_action: int, resulting_state: GoldenState) -> CubeObservationContext:
     topology = _require_cube_state(resulting_state)
     if context.size != topology.size:
         raise ValueError("Cube observation transition crosses topology sizes")
     validate_concrete_observation_identity(_context_identity(context, topology), topology)
-    if (
-        isinstance(real_action, bool)
-        or not isinstance(real_action, int)
-        or not 0 <= real_action <= topology.pass_action
-    ):
+    if isinstance(real_action, bool) or not isinstance(real_action, int) or not 0 <= real_action <= topology.pass_action:
         raise ValueError("Real Cube action must use canonical point/PASS indexing")
     resulting_board = tuple(int(stone) for stone in resulting_state.stones)
     if real_action == topology.pass_action:
@@ -377,11 +331,8 @@ def advance_cube_observation_context(
             raise ValueError("Resulting Cube state does not contain the mover at the real action")
     identity = concrete_observation_identity(topology)
     return CubeObservationContext(
-        size=topology.size,
-        topology_id=topology.topology_id,
-        topology_fingerprint=topology.fingerprint,
-        geometry_fingerprint=topology.geometry_fingerprint,
-        observation_schema_id=SCHEMA_ID,
+        size=topology.size, topology_id=topology.topology_id, topology_fingerprint=topology.fingerprint,
+        geometry_fingerprint=topology.geometry_fingerprint, observation_schema_id=SCHEMA_ID,
         observation_schema_fingerprint=SCHEMA_FINGERPRINT,
         concrete_observation_fingerprint=str(identity["concrete_observation_fingerprint"]),
         current_board=resulting_board,
@@ -392,12 +343,9 @@ def advance_cube_observation_context(
 
 def serialize_cube_observation_context(context: CubeObservationContext) -> dict[str, object]:
     return {
-        "context_schema_version": CONTEXT_SCHEMA_VERSION,
-        "size": context.size,
-        "topology_id": context.topology_id,
-        "topology_fingerprint": context.topology_fingerprint,
-        "geometry_fingerprint": context.geometry_fingerprint,
-        "observation_schema_id": context.observation_schema_id,
+        "context_schema_version": CONTEXT_SCHEMA_VERSION, "size": context.size,
+        "topology_id": context.topology_id, "topology_fingerprint": context.topology_fingerprint,
+        "geometry_fingerprint": context.geometry_fingerprint, "observation_schema_id": context.observation_schema_id,
         "observation_schema_fingerprint": context.observation_schema_fingerprint,
         "concrete_observation_fingerprint": context.concrete_observation_fingerprint,
         "current_board": list(context.current_board),
@@ -416,39 +364,29 @@ def deserialize_cube_observation_context(payload: Mapping[str, object]) -> CubeO
     if not isinstance(boards, list) or not isinstance(current, list):
         raise ValueError("Serialized Cube observation context board payload is invalid")
     return CubeObservationContext(
-        size=size,
-        topology_id=payload.get("topology_id"),  # type: ignore[arg-type]
-        topology_fingerprint=payload.get("topology_fingerprint"),  # type: ignore[arg-type]
-        geometry_fingerprint=payload.get("geometry_fingerprint"),  # type: ignore[arg-type]
-        observation_schema_id=payload.get("observation_schema_id"),  # type: ignore[arg-type]
-        observation_schema_fingerprint=payload.get("observation_schema_fingerprint"),  # type: ignore[arg-type]
-        concrete_observation_fingerprint=payload.get("concrete_observation_fingerprint"),  # type: ignore[arg-type]
+        size=size, topology_id=payload.get("topology_id"), topology_fingerprint=payload.get("topology_fingerprint"),
+        geometry_fingerprint=payload.get("geometry_fingerprint"), observation_schema_id=payload.get("observation_schema_id"),
+        observation_schema_fingerprint=payload.get("observation_schema_fingerprint"),
+        concrete_observation_fingerprint=payload.get("concrete_observation_fingerprint"),
         current_board=_normalize_board(current, topology.point_count),
         previous_boards=tuple(_normalize_board(board, topology.point_count) for board in boards),
-        previous_action=payload.get("previous_action"),  # type: ignore[arg-type]
-    )
+        previous_action=payload.get("previous_action"),
+    )  # type: ignore[arg-type]
 
 
-def rotate_cube_observation_context(
-    context: CubeObservationContext, rotation: CubeRotation
-) -> CubeObservationContext:
+def rotate_cube_observation_context(context: CubeObservationContext, rotation: CubeRotation) -> CubeObservationContext:
     topology = context.topology
     if len(rotation.point_permutation) != topology.point_count:
         raise ValueError("Cube observation context rotation/topology mismatch")
     action = context.previous_action
     rotated_action = None if action is None else rotation.action(action)
     return CubeObservationContext(
-        size=context.size,
-        topology_id=context.topology_id,
-        topology_fingerprint=context.topology_fingerprint,
-        geometry_fingerprint=context.geometry_fingerprint,
-        observation_schema_id=context.observation_schema_id,
+        size=context.size, topology_id=context.topology_id, topology_fingerprint=context.topology_fingerprint,
+        geometry_fingerprint=context.geometry_fingerprint, observation_schema_id=context.observation_schema_id,
         observation_schema_fingerprint=context.observation_schema_fingerprint,
         concrete_observation_fingerprint=context.concrete_observation_fingerprint,
         current_board=tuple(rotation.permute_points(context.current_board)),
-        previous_boards=tuple(
-            tuple(rotation.permute_points(board)) for board in context.previous_boards
-        ),
+        previous_boards=tuple(tuple(rotation.permute_points(board)) for board in context.previous_boards),
         previous_action=rotated_action,
     )
 
@@ -484,9 +422,7 @@ def _validate_destination(destination: torch.Tensor, topology: CubeFamilyTopolog
     if not isinstance(destination, torch.Tensor):
         raise ValueError("Cube observation destination must be a torch.Tensor")
     if tuple(destination.shape) != (CHANNEL_COUNT, topology.point_count):
-        raise ValueError(
-            f"Cube observation destination must have shape [{CHANNEL_COUNT},{topology.point_count}]"
-        )
+        raise ValueError(f"Cube observation destination must have shape [{CHANNEL_COUNT},{topology.point_count}]")
     if destination.dtype != torch.float32:
         raise ValueError("Cube observation destination must have dtype float32")
     if destination.device.type != "cpu":
@@ -495,13 +431,7 @@ def _validate_destination(destination: torch.Tensor, topology: CubeFamilyTopolog
         raise ValueError("Cube observation destination must use contiguous [channels,points] layout")
 
 
-def _write_stones(
-    destination: torch.Tensor,
-    channel_own: int,
-    channel_opponent: int,
-    board: Sequence[int],
-    side_to_move: Stone,
-) -> None:
+def _write_stones(destination: torch.Tensor, channel_own: int, channel_opponent: int, board: Sequence[int], side_to_move: Stone) -> None:
     own = int(side_to_move)
     other = int(opponent(side_to_move))
     for point, stone in enumerate(board):
@@ -535,11 +465,7 @@ def _write_liberties(destination: torch.Tensor, state: GoldenState) -> None:
         if count <= 0:
             raise ValueError("Cube observation encountered a stone group with zero liberties")
         bucket = 0 if count == 1 else 1 if count == 2 else 2
-        base = (
-            CHANNEL_INDEX["own_liberties_1"]
-            if color == own
-            else CHANNEL_INDEX["opponent_liberties_1"]
-        )
+        base = CHANNEL_INDEX["own_liberties_1"] if color == own else CHANNEL_INDEX["opponent_liberties_1"]
         channel = base + bucket
         for member in group:
             destination[channel, member] = 1.0
@@ -563,16 +489,8 @@ def write_cube_observation(
 
     destination.zero_()
     current_board = tuple(int(stone) for stone in state.stones)
-    _write_stones(
-        destination,
-        CHANNEL_INDEX["own_stones"],
-        CHANNEL_INDEX["opponent_stones"],
-        current_board,
-        state.side_to_move,
-    )
-    destination[CHANNEL_INDEX["side_to_move_is_black"]].fill_(
-        1.0 if state.side_to_move == BLACK else 0.0
-    )
+    _write_stones(destination, CHANNEL_INDEX["own_stones"], CHANNEL_INDEX["opponent_stones"], current_board, state.side_to_move)
+    destination[CHANNEL_INDEX["side_to_move_is_black"]].fill_(1.0 if state.side_to_move == BLACK else 0.0)
 
     previous_action = history_context.previous_action
     if previous_action is not None:
@@ -581,26 +499,20 @@ def write_cube_observation(
         else:
             destination[CHANNEL_INDEX["previous_move_point"], previous_action] = 1.0
 
-    if legal_context is None:
-        legality = prepare_legal_actions(state)
-    else:
-        # Search already paid for the exact legality calculation at this leaf.
-        # Keep the assertion here so a prepared context can never silently be
-        # reused for another rules state.
+    legality = prepare_legal_actions(state) if legal_context is None else legal_context
+    if legal_context is not None:
         legal_context.assert_compatible(state)
-        legality = legal_context
     if len(legality.action_mask) != topology.action_count:
         raise ValueError("Cube legal-action context has the wrong action-mask shape")
     destination[CHANNEL_INDEX["legal_point_mask"]].copy_(
         torch.as_tensor(legality.action_mask[: topology.point_count], dtype=torch.float32)
     )
 
-    komi_stm = state.komi if state.side_to_move == WHITE else -state.komi
-    komi_normalized = komi_stm / (topology.point_count + abs(state.komi))
-    destination[CHANNEL_INDEX["komi_stm_normalized"]].fill_(float(komi_normalized))
+    # This reserved plane is intentionally constant zero. Rule parameters must
+    # never enter the neural observation tensor.
+    destination[CHANNEL_INDEX["reserved_rules_independent_zero"]].zero_()
 
     _write_liberties(destination, state)
-
     for history_index, board in enumerate(history_context.previous_boards, start=1):
         _write_stones(
             destination,
@@ -609,10 +521,7 @@ def write_cube_observation(
             board,
             state.side_to_move,
         )
-
-    destination[CHANNEL_INDEX["is_face_interior"] : CHANNEL_COUNT].copy_(
-        _static_geometry_planes(topology)
-    )
+    destination[CHANNEL_INDEX["is_face_interior"] : CHANNEL_COUNT].copy_(_static_geometry_planes(topology))
     if not bool(torch.isfinite(destination).all()):
         raise ValueError("Cube observation contains NaN or Inf")
     return destination
@@ -626,41 +535,16 @@ def build_cube_observation(
 ) -> torch.Tensor:
     topology = _assert_context_matches_state(state, history_context)
     destination = torch.empty((CHANNEL_COUNT, topology.point_count), dtype=torch.float32)
-    return write_cube_observation(
-        destination,
-        state,
-        history_context,
-        schema,
-        legal_context=legal_context,
-    )
+    return write_cube_observation(destination, state, history_context, schema, legal_context=legal_context)
 
 
 __all__ = [
-    "CHANNELS",
-    "CHANNEL_COUNT",
-    "CHANNEL_INDEX",
-    "CONTEXT_SCHEMA_VERSION",
-    "CORNER_DISTANCE_FAMILY_SCALE",
-    "CubeObservationContext",
-    "DTYPE",
-    "HISTORY_DEPTH",
-    "LAYOUT",
-    "SCHEMA_FINGERPRINT",
-    "SCHEMA_ID",
-    "SCHEMA_PATH",
-    "SCHEMA_VERSION",
-    "SEAM_DISTANCE_FAMILY_SCALE",
-    "advance_cube_observation_context",
-    "build_cube_observation",
-    "concrete_observation_identity",
-    "cube_observation_schema",
-    "deserialize_cube_observation_context",
-    "initial_cube_observation_context",
-    "load_cube_observation_schema",
-    "make_cube_observation_context",
-    "rotate_cube_observation_context",
-    "serialize_cube_observation_context",
-    "validate_concrete_observation_identity",
-    "validate_cube_observation_schema",
-    "write_cube_observation",
+    "CHANNELS", "CHANNEL_COUNT", "CHANNEL_INDEX", "CONTEXT_SCHEMA_VERSION",
+    "CORNER_DISTANCE_FAMILY_SCALE", "CubeObservationContext", "DTYPE", "HISTORY_DEPTH", "LAYOUT",
+    "SCHEMA_FINGERPRINT", "SCHEMA_ID", "SCHEMA_PATH", "SCHEMA_VERSION", "SEAM_DISTANCE_FAMILY_SCALE",
+    "advance_cube_observation_context", "build_cube_observation", "concrete_observation_identity",
+    "cube_observation_schema", "deserialize_cube_observation_context", "initial_cube_observation_context",
+    "load_cube_observation_schema", "make_cube_observation_context", "rotate_cube_observation_context",
+    "serialize_cube_observation_context", "validate_concrete_observation_identity",
+    "validate_cube_observation_schema", "write_cube_observation",
 ]

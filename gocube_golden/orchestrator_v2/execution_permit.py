@@ -261,6 +261,19 @@ def require_orchestrator_execution(entrypoint: str) -> None:
     require_child_execution_permit(entrypoint)
 
 
+def require_arena_execution(entrypoint: str, *, topology: str | None = None) -> str:
+    """Require a supervised Arena child permit and return its run id."""
+    permit = require_child_execution_permit(
+        entrypoint,
+        action_type="arena",
+        topology=topology,
+    )
+    run_id = str(permit.get("run_id") or "").strip()
+    if not run_id:
+        raise RuntimeError(f"{entrypoint}: Orchestrator V2 Arena run_id is missing")
+    return run_id
+
+
 def require_engine_execution(entrypoint: str, *, action: str, topology: str | None = None) -> None:
     """Authorize computation, not merely a process carrying a V2 marker.
 
@@ -304,5 +317,6 @@ __all__ = [
     "active_authority",
     "require_child_execution_permit",
     "require_orchestrator_execution",
+    "require_arena_execution",
     "require_engine_execution",
 ]

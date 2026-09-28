@@ -101,11 +101,39 @@ _AUTHORIZED_INTERNAL_TESTS.update({
     ('test_torus9_selfplay_engine_boundary.py', 'test_empty_batch_still_crosses_the_selfplay_engine_boundary'): ("torus9", "replay-regression"),
 })
 
+# Stage-7 Cube regressions also intentionally exercise production internals.
+# Keep them authorized only inside pytest; production callers still need the
+# live Orchestrator V2 authority or a supervised child permit.
+_AUTHORIZED_INTERNAL_TESTS.update({
+    ('test_cube_paired_starts_and_config_transition.py', 'test_cube_arena_worker_smoke_uses_nonempty_opening_history'): ('cube2', "cube-stage7-regression"),
+    ('test_cube_paired_starts_and_config_transition.py', 'test_explicit_cube_config_transition_preserves_adam_and_replay_parent'): ('cube2', "cube-stage7-regression"),
+    ('test_cube_stage7_arena_generation.py', 'test_cube2_to_cube7_common_arena_cpu_smoke'): ('cube-param', "cube-stage7-regression"),
+    ('test_cube_stage7_arena_generation.py', 'test_cube_arena_is_deterministic_and_color_paired'): ('cube2', "cube-stage7-regression"),
+    ('test_cube_stage7_arena_generation.py', 'test_cube4_one_generation_resume_and_duplicate_boundary'): ('cube4', "cube-stage7-regression"),
+    ('test_cube_stage7_arena_generation.py', 'test_arena_failure_preserves_committed_training'): ('cube2', "cube-stage7-regression"),
+    ('test_cube_stage7_arena_generation.py', 'test_training_failure_publishes_no_checkpoint_or_fake_arena'): ('cube2', "cube-stage7-regression"),
+    ('test_shared_arena_stage7_followup.py', 'test_cube_four_games_use_four_real_lanes_and_central_batching'): ('cube2', "cube-stage7-regression"),
+})
+
+# These exact legacy tests execute Arena in-process. Give them a real signed
+# Arena child permit in addition to the test-only authority. The PID shim only
+# models the missing process hop inside pytest; production PID binding remains
+# unchanged and boundary/rejection tests are deliberately absent from this set.
+_ARENA_CHILD_PERMIT_TESTS = {
+    ('test_cube_paired_starts_and_config_transition.py', 'test_cube_arena_worker_smoke_uses_nonempty_opening_history'),
+    ('test_cube_stage7_arena_generation.py', 'test_cube2_to_cube7_common_arena_cpu_smoke'),
+    ('test_cube_stage7_arena_generation.py', 'test_cube_arena_is_deterministic_and_color_paired'),
+    ('test_cube_stage7_arena_generation.py', 'test_cube4_one_generation_resume_and_duplicate_boundary'),
+    ('test_shared_arena_stage7_followup.py', 'test_cube_four_games_use_four_real_lanes_and_central_batching'),
+}
+
+
 @pytest.fixture(autouse=True)
 def _legacy_orchestrator_v2_internal_authority(request: pytest.FixtureRequest):
     filename = Path(str(request.fspath)).name
     test_name = request.node.name.split("[", 1)[0]
-    identity = _AUTHORIZED_INTERNAL_TESTS.get((filename, test_name))
+    test_identity = (filename, test_name)
+    identity = _AUTHORIZED_INTERNAL_TESTS.get(test_identity)
     if identity is None:
         yield
         return
@@ -113,7 +141,11 @@ def _legacy_orchestrator_v2_internal_authority(request: pytest.FixtureRequest):
     # Import lazily so lightweight suites that share this conftest (notably the
     # pinned KataGo differential job) do not import gocube_golden and therefore
     # do not acquire the heavyweight torch runtime dependency.
-    from gocube_golden.orchestrator_v2.execution_permit import _test_authority
+    from gocube_golden.orchestrator_v2 import execution_permit
+    from gocube_golden.orchestrator_v2.execution_permit import (
+        _child_execution_permit,
+        _test_authority,
+    )
 
     topology, run_id = identity
     if topology == "cube-param":
@@ -161,4 +193,16 @@ def _legacy_orchestrator_v2_internal_authority(request: pytest.FixtureRequest):
         run_id=run_id,
         code_identity="test-commit",
     ):
-        yield
+        if test_identity not in _ARENA_CHILD_PERMIT_TESTS:
+            yield
+            return
+
+        monkeypatch = request.getfixturevalue("monkeypatch")
+        monkeypatch.setattr(execution_permit.os, "getppid", execution_permit.os.getpid)
+        with _child_execution_permit(
+            action_type="arena",
+            topology=topology,
+            run_id=run_id,
+            code_identity="test-commit",
+        ):
+            yield

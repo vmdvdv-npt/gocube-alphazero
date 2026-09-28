@@ -48,7 +48,7 @@ EXPECTED_CHANNELS = (
     "side_to_move_is_black",
     "previous_action_was_pass",
     "legal_point_mask",
-    "komi_stm_normalized",
+    "reserved_rules_independent_zero",
     "previous_move_point",
     "own_liberties_1",
     "own_liberties_2",
@@ -74,14 +74,14 @@ EXPECTED_CHANNELS = (
     "cross_face_neighbor_count_scaled",
     "face_size_scaled",
 )
-EXPECTED_SCHEMA_FINGERPRINT = "sha256:c56c878e1acc9847647666426c370a4cda56473b3c4311f310bae225d9ae12e8"
+EXPECTED_SCHEMA_FINGERPRINT = "sha256:0a4e8579af9a86e54b30c3f233ccf7b03c8364414693f23204d895a185ea8d5f"
 EXPECTED_CONCRETE_FINGERPRINTS = {
-    2: "sha256:f1f0b3c74938b1ee041c84e5aed67530a536839499407d9be0d6ddf920c08a0d",
-    3: "sha256:7925c153c7348ba6cfc75b7e884f8b55338d6799358af3e1ae35b58a7b4359ed",
-    4: "sha256:943511e083779d8ccd9b1cf309263e5e8149f76eee782692afbb5400939cceaf",
-    5: "sha256:99d196c950ae7c6690bb66f217a96338848b8b1228232cdf359e017133b0760c",
-    6: "sha256:e0626d1adf09233ec79a2d0d71fcede0ab7fe8a0177ddfd9bc47bf75c59e3fe5",
-    7: "sha256:d1ba372b4c8d35f33d4d638df9adc5ca693757dcce5ed814ea244a1798d1d0eb",
+    2: "sha256:d3e371e5b701ac45b43a32fb2f7006f50586fd7364e5f098f5ef73123fcd7d61",
+    3: "sha256:b13b4a262ca8c4239c024316a9896bd0b3f574d165aa9537c35a2d19759a2b68",
+    4: "sha256:a18ecd4a690d9a8b30d5e4990d2e1df24c6cbe777fdee969a98169da6b9cb545",
+    5: "sha256:667301c53d107f4b0c6bd63d6b956d2595c883d8068b844ebe08f95a60a9930c",
+    6: "sha256:d7b47b5a2c845c48580588e7bbdbcc315334130fbcdd4f20cbc2305ad4f8fec8",
+    7: "sha256:0762e5e1cfff8d39d31a12db0a7cb0fd336b924471467489ffc8186fcec89ad6",
 }
 
 
@@ -202,6 +202,8 @@ def test_machine_schema_exactly_matches_writer_contract():
     assert loaded["schema_fingerprint"] == SCHEMA_FINGERPRINT == EXPECTED_SCHEMA_FINGERPRINT
     assert loaded["normalization"]["corner_distance_family_scale"] == CORNER_DISTANCE_FAMILY_SCALE == 6.0
     assert loaded["normalization"]["seam_distance_family_scale"] == SEAM_DISTANCE_FAMILY_SCALE == 3.0
+    assert "komi" not in " ".join(loaded["channel_order"]).lower()
+    assert loaded["reserved_channels"]["reserved_rules_independent_zero"].startswith("constant-zero")
 
 
 @pytest.mark.parametrize("n", range(2, 8))
@@ -220,11 +222,7 @@ def test_empty_observation_shape_dtype_finite_geometry_and_concrete_identity(n):
     assert not bool(observation[CHANNEL_INDEX["previous_action_was_pass"]].any())
     assert not bool(observation[CHANNEL_INDEX["previous_move_point"]].any())
     assert bool(torch.all(observation[CHANNEL_INDEX["legal_point_mask"]] == 1.0))
-    expected_komi = -0.5 / (topology.point_count + 0.5)
-    assert torch.allclose(
-        observation[CHANNEL_INDEX["komi_stm_normalized"]],
-        torch.full((topology.point_count,), expected_komi, dtype=torch.float32),
-    )
+    assert not bool(observation[CHANNEL_INDEX["reserved_rules_independent_zero"]].any())
     for index in range(1, 5):
         assert not bool(observation[CHANNEL_INDEX[f"history_{index}_own"]].any())
         assert not bool(observation[CHANNEL_INDEX[f"history_{index}_opponent"]].any())
@@ -245,23 +243,13 @@ def test_empty_observation_shape_dtype_finite_geometry_and_concrete_identity(n):
             FACE_CORNER: "is_face_corner",
         }[point.geometry_class]
         assert observation[CHANNEL_INDEX[expected_class], p].item() == 1.0
-        assert observation[CHANNEL_INDEX["corner_distance_family_scaled"], p].item() == pytest.approx(
-            point.corner_distance / 6.0
-        )
-        assert observation[CHANNEL_INDEX["seam_distance_family_scaled"], p].item() == pytest.approx(
-            point.seam_distance / 3.0
-        )
+        assert observation[CHANNEL_INDEX["corner_distance_family_scaled"], p].item() == pytest.approx(point.corner_distance / 6.0)
+        assert observation[CHANNEL_INDEX["seam_distance_family_scaled"], p].item() == pytest.approx(point.seam_distance / 3.0)
         corner_relative = 0.0 if max_corner == 0 else point.corner_distance / max_corner
         seam_relative = 0.0 if max_seam == 0 else point.seam_distance / max_seam
-        assert observation[CHANNEL_INDEX["corner_distance_topology_relative"], p].item() == pytest.approx(
-            corner_relative
-        )
-        assert observation[CHANNEL_INDEX["seam_distance_topology_relative"], p].item() == pytest.approx(
-            seam_relative
-        )
-        assert observation[CHANNEL_INDEX["cross_face_neighbor_count_scaled"], p].item() == pytest.approx(
-            point.num_cross_face_neighbors / 2.0
-        )
+        assert observation[CHANNEL_INDEX["corner_distance_topology_relative"], p].item() == pytest.approx(corner_relative)
+        assert observation[CHANNEL_INDEX["seam_distance_topology_relative"], p].item() == pytest.approx(seam_relative)
+        assert observation[CHANNEL_INDEX["cross_face_neighbor_count_scaled"], p].item() == pytest.approx(point.num_cross_face_neighbors / 2.0)
         assert observation[CHANNEL_INDEX["face_size_scaled"], p].item() == pytest.approx(n / 7.0)
 
     identity = concrete_observation_identity(topology)
@@ -277,7 +265,7 @@ def test_cube2_relative_distance_zero_normalization_has_no_nan_or_inf():
 
 
 @pytest.mark.parametrize("n", range(2, 8))
-def test_current_player_perspective_previous_point_pass_history_and_komi(n):
+def test_current_player_perspective_previous_point_pass_history_and_rules_independent_reserved_plane(n):
     state = initial_cube_state(size=n, komi=1.5)
     context = initial_cube_observation_context(state)
     first = _first_legal_point(state)
@@ -291,10 +279,7 @@ def test_current_player_perspective_previous_point_pass_history_and_komi(n):
     assert point_observation[CHANNEL_INDEX["previous_move_point"]].sum().item() == 1.0
     assert not bool(point_observation[CHANNEL_INDEX["previous_action_was_pass"]].any())
     assert bool(torch.all(point_observation[CHANNEL_INDEX["side_to_move_is_black"]] == 0.0))
-    expected_white_komi = 1.5 / (state.topology.point_count + 1.5)
-    assert point_observation[CHANNEL_INDEX["komi_stm_normalized"], 0].item() == pytest.approx(
-        expected_white_komi
-    )
+    assert not bool(point_observation[CHANNEL_INDEX["reserved_rules_independent_zero"]].any())
 
     state, context = _advance(state, context, PASS)
     pass_observation = build_cube_observation(state, context)
@@ -303,10 +288,13 @@ def test_current_player_perspective_previous_point_pass_history_and_komi(n):
     assert not bool(pass_observation[CHANNEL_INDEX["previous_move_point"]].any())
     assert pass_observation[CHANNEL_INDEX["history_1_own"], first].item() == 1.0
     assert context.previous_boards[0] == context.current_board
-    expected_black_komi = -1.5 / (state.topology.point_count + 1.5)
-    assert pass_observation[CHANNEL_INDEX["komi_stm_normalized"], 0].item() == pytest.approx(
-        expected_black_komi
-    )
+    assert not bool(pass_observation[CHANNEL_INDEX["reserved_rules_independent_zero"]].any())
+
+    same_state_other_rules = initial_cube_state(size=n, komi=4.5)
+    same_context_other_rules = initial_cube_observation_context(same_state_other_rules)
+    low = build_cube_observation(initial_cube_state(size=n, komi=0.5), initial_cube_observation_context(initial_cube_state(size=n, komi=0.5)))
+    high = build_cube_observation(same_state_other_rules, same_context_other_rules)
+    assert torch.equal(low, high)
 
 
 @pytest.mark.parametrize("n", range(2, 8))
@@ -324,32 +312,20 @@ def test_four_step_real_history_is_bounded_and_uses_current_player_perspective(n
     other = int(WHITE if state.side_to_move == BLACK else BLACK)
     for history_index, board in enumerate(context.previous_boards, start=1):
         for point, stone in enumerate(board):
-            assert observation[CHANNEL_INDEX[f"history_{history_index}_own"], point].item() == float(
-                stone == own
-            )
-            assert observation[CHANNEL_INDEX[f"history_{history_index}_opponent"], point].item() == float(
-                stone == other
-            )
+            assert observation[CHANNEL_INDEX[f"history_{history_index}_own"], point].item() == float(stone == own)
+            assert observation[CHANNEL_INDEX[f"history_{history_index}_opponent"], point].item() == float(stone == other)
 
 
 @pytest.mark.parametrize("n", range(2, 8))
 @pytest.mark.parametrize("liberty_count,channel_suffix", ((1, "1"), (2, "2"), (4, "3_plus")))
 def test_own_and_opponent_liberty_buckets_are_group_features(n, liberty_count, channel_suffix):
-    own_state, own_point = _single_stone_liberty_state(
-        n, stone_color=BLACK, side_to_move=BLACK, liberty_count=liberty_count
-    )
+    own_state, own_point = _single_stone_liberty_state(n, stone_color=BLACK, side_to_move=BLACK, liberty_count=liberty_count)
     own_observation = build_cube_observation(own_state, make_cube_observation_context(own_state))
     assert own_observation[CHANNEL_INDEX[f"own_liberties_{channel_suffix}"], own_point].item() == 1.0
 
-    opponent_state, opponent_point = _single_stone_liberty_state(
-        n, stone_color=WHITE, side_to_move=BLACK, liberty_count=liberty_count
-    )
-    opponent_observation = build_cube_observation(
-        opponent_state, make_cube_observation_context(opponent_state)
-    )
-    assert opponent_observation[
-        CHANNEL_INDEX[f"opponent_liberties_{channel_suffix}"], opponent_point
-    ].item() == 1.0
+    opponent_state, opponent_point = _single_stone_liberty_state(n, stone_color=WHITE, side_to_move=BLACK, liberty_count=liberty_count)
+    opponent_observation = build_cube_observation(opponent_state, make_cube_observation_context(opponent_state))
+    assert opponent_observation[CHANNEL_INDEX[f"opponent_liberties_{channel_suffix}"], opponent_point].item() == 1.0
 
 
 @pytest.mark.parametrize("n", range(2, 8))
@@ -383,9 +359,7 @@ def test_capture_updates_legal_mask_and_captured_point_can_become_legal_again(n)
     reusable_context = make_cube_observation_context(reusable)
     transition = apply_action(reusable, reuse_action)
     assert white_group <= set(transition.captured)
-    after_context = advance_cube_observation_context(
-        reusable_context, reuse_action, transition.after
-    )
+    after_context = advance_cube_observation_context(reusable_context, reuse_action, transition.after)
     after = build_cube_observation(transition.after, after_context)
     assert after[CHANNEL_INDEX["legal_point_mask"], reuse_victim].item() == 1.0
 
@@ -399,9 +373,7 @@ def test_state_and_observation_context_round_trip_reproduces_exact_tensor(n):
     expected = build_cube_observation(state, context)
 
     restored_state = deserialize_cube_state(serialize_cube_state(state))
-    restored_context = deserialize_cube_observation_context(
-        serialize_cube_observation_context(context)
-    )
+    restored_context = deserialize_cube_observation_context(serialize_cube_observation_context(context))
     actual = build_cube_observation(restored_state, restored_context)
     assert torch.equal(actual, expected)
     assert restored_context.previous_boards == context.previous_boards
@@ -412,6 +384,7 @@ def test_schema_and_concrete_identity_fail_closed_for_historical_and_mismatched_
     for mutation in (
         lambda value: value.__setitem__("schema_id", "gocube-cube4-golden-observation-v1"),
         lambda value: value.__setitem__("channel_count", 15),
+        lambda value: value["channel_order"].__setitem__(5, "komi_stm_normalized"),
     ):
         schema = copy.deepcopy(cube_observation_schema())
         mutation(schema)
@@ -471,20 +444,10 @@ def test_allocating_and_preallocated_writer_are_identical_and_layout_fails_close
     assert torch.equal(destination, built)
 
     with pytest.raises(ValueError, match="shape"):
-        write_cube_observation(
-            torch.empty((CHANNEL_COUNT - 1, state.topology.point_count), dtype=torch.float32),
-            state,
-            context,
-        )
+        write_cube_observation(torch.empty((CHANNEL_COUNT - 1, state.topology.point_count), dtype=torch.float32), state, context)
     with pytest.raises(ValueError, match="dtype"):
-        write_cube_observation(
-            torch.empty((CHANNEL_COUNT, state.topology.point_count), dtype=torch.float64),
-            state,
-            context,
-        )
-    non_contiguous = torch.empty(
-        (state.topology.point_count, CHANNEL_COUNT), dtype=torch.float32
-    ).t()
+        write_cube_observation(torch.empty((CHANNEL_COUNT, state.topology.point_count), dtype=torch.float64), state, context)
+    non_contiguous = torch.empty((state.topology.point_count, CHANNEL_COUNT), dtype=torch.float32).t()
     assert not non_contiguous.is_contiguous()
     with pytest.raises(ValueError, match="contiguous"):
         write_cube_observation(non_contiguous, state, context)
