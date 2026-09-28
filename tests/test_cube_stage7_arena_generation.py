@@ -440,6 +440,15 @@ def test_training_failure_publishes_no_checkpoint_or_fake_arena(tmp_path: Path):
 def test_stage7_common_layers_remain_topology_neutral():
     import ast
 
+    def is_topology_specific_import(name: str) -> bool:
+        parts = name.lower().split(".")
+        if parts and parts[0] == "gocube_golden":
+            parts = parts[1:]
+        return any(
+            part.startswith("cube") or part.startswith("torus")
+            for part in parts
+        )
+
     root = Path(__file__).resolve().parents[1]
     for relative in (
         "gocube_golden/selfplay_engine.py",
@@ -454,10 +463,7 @@ def test_stage7_common_layers_remain_topology_neutral():
                 imported.extend(alias.name for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported.append(node.module)
-        assert not any(
-            "cube" in name.lower() or "torus" in name.lower()
-            for name in imported
-        )
+        assert not any(is_topology_specific_import(name) for name in imported)
 
     orchestrator = root / "gocube_golden" / "orchestrator_v2"
     for path in orchestrator.rglob("*.py"):
