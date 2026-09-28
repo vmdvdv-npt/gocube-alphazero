@@ -232,34 +232,15 @@ def require_child_execution_permit(
     now: float | None = None,
     parent_pid: int | None = None,
 ) -> Mapping[str, object]:
-    authority = active_authority()
-    if authority is not None and action_type == "arena":
-        if topology is not None and str(topology) != authority.topology:
-            raise RuntimeError(f"{entrypoint}: Orchestrator V2 execution permit topology mismatch")
-        if run_id is not None and str(run_id) != authority.run_id:
-            raise RuntimeError(f"{entrypoint}: Orchestrator V2 execution permit run_id mismatch")
-        if code_identity is not None and str(code_identity) != authority.code_identity:
-            raise RuntimeError(f"{entrypoint}: Orchestrator V2 execution permit code_identity mismatch")
-        payload: Mapping[str, object] = {
-            "schema": PERMIT_SCHEMA,
-            "launch_id": authority.launch_id,
-            "action_type": "arena",
-            "attempt": 1 if attempt is None else attempt,
-            "topology": authority.topology,
-            "run_id": authority.run_id,
-            "orchestrator_version": ORCHESTRATOR_VERSION,
-            "code_identity": authority.code_identity,
-        }
-    else:
-        try:
-            payload = _load_child_permit(environ=environ, now=now, parent_pid=parent_pid)
-        except RuntimeError as exc:
-            raise RuntimeError(
-                f"{entrypoint}: production execution requires "
-                "gocube_golden.orchestrator_v2.production_entrypoint (Orchestrator V2). "
-                "Direct production execution is forbidden; submit this action through that entrypoint. "
-                f"Permit rejected: {exc}"
-            ) from exc
+    try:
+        payload = _load_child_permit(environ=environ, now=now, parent_pid=parent_pid)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"{entrypoint}: production execution requires "
+            "gocube_golden.orchestrator_v2.production_entrypoint (Orchestrator V2). "
+            "Direct production execution is forbidden; submit this action through that entrypoint. "
+            f"Permit rejected: {exc}"
+        ) from exc
     expected = {
         "action_type": action_type,
         "topology": topology,
@@ -281,7 +262,7 @@ def require_orchestrator_execution(entrypoint: str) -> None:
 
 
 def require_arena_execution(entrypoint: str, *, topology: str | None = None) -> str:
-    """Authorize Arena execution and return its Orchestrator-owned run id."""
+    """Require a supervised Arena child permit and return its run id."""
     permit = require_child_execution_permit(
         entrypoint,
         action_type="arena",
