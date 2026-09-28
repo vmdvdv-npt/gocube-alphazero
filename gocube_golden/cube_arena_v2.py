@@ -126,8 +126,8 @@ def run_cube_arena(
 ) -> CubeArenaResult:
     """Run one diagnostic Cube Arena comparison without gating training."""
 
-    from .orchestrator_v2.execution_permit import require_child_execution_permit
-    require_child_execution_permit("gocube_golden.cube_arena_v2.run_cube_arena", action_type="arena", topology=f"cube{size}")
+    from .orchestrator_v2.execution_permit import require_orchestrator_execution
+    require_orchestrator_execution("gocube_golden.cube_arena_v2.run_cube_arena")
 
     size = validate_cube_size(size)
     search_config.validate()
