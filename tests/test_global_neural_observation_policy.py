@@ -16,10 +16,14 @@ from gocube_golden.torus9_m137_5ch import M137_FIVE_CHANNEL_CHANNELS
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_READ_ONLY_CHANNEL_DECLARATIONS = {
+    ("gocube_golden/neural.py", "OBSERVATION_CHANNELS"),
     ("gocube_golden/torus9_monolith.py", "TORUS9_OBSERVATION_CHANNELS"),
 }
-LEGACY_READ_ONLY_OBSERVATION_BUILDERS = {
+ALLOWED_RULE_VALIDATION_OBSERVATION_BUILDERS = {
     "gocube_golden/torus9_monolith.py",
+    # The adaptation writer reads state.komi only to fail closed on referee drift;
+    # the tensor itself is produced by the 5-channel komi-free builder.
+    "gocube_golden/torus9_adaptation.py",
 }
 
 
@@ -82,11 +86,11 @@ def test_repository_channel_declarations_cannot_reintroduce_komi_without_explici
     assert not violations, "Forbidden komi neural-channel declarations:\n" + "\n".join(violations)
 
 
-def test_observation_builders_cannot_read_state_komi_outside_legacy_read_only_source():
+def test_observation_builders_cannot_read_state_komi_outside_explicit_rule_validation_sources():
     violations: list[str] = []
     for path in sorted((ROOT / "gocube_golden").rglob("*.py")):
         rel = path.relative_to(ROOT).as_posix()
-        if rel in LEGACY_READ_ONLY_OBSERVATION_BUILDERS:
+        if rel in ALLOWED_RULE_VALIDATION_OBSERVATION_BUILDERS:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
         for node in ast.walk(tree):
