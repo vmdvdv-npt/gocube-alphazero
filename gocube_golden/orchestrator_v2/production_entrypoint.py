@@ -914,6 +914,7 @@ def _launch_durable_workflow_controller(
     config_path: Path,
     *,
     runs_root: Path,
+    runtime: object | None = None,
 ) -> dict[str, object]:
     """Start a detached controller which owns the workflow until completion."""
     payload = load_v2_config(config_path)
@@ -946,12 +947,13 @@ def _launch_durable_workflow_controller(
     with log_path.open("ab") as log:
         process = subprocess.Popen(
             command,
-            cwd=_repo_root(),
+            cwd=_repo_root() if runtime is None else runtime.path,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
             close_fds=True,
+            **({} if runtime is None else {"env": runtime.environment(os.environ)}),
         )
     return {
         "state": "STARTED",
@@ -961,6 +963,59 @@ def _launch_durable_workflow_controller(
         "controller_root": str(root),
         "log": str(log_path),
     }
+
+
+def _require_committed_job_code() -> None:
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", "gocube_golden", "tools"],
+        cwd=_repo_root(), check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    if dirty:
+        raise ValueError("Operator jobs require committed implementation code; commit/review code changes before launching")
+
+
+def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path | None = None,
+                        check_only: bool = False) -> dict[str, object]:
+    """Accept parameters only; compile and delegate to the standard V2 controller."""
+    from .operator_job import compile_job, parse_job
+    from .immutable_runtime import ImmutableRuntimeManager
+    from ..notifications.telegram import load_config
+
+    normalized = parse_job(payload)
+    root = Path(runs_root or RUNS_ROOT).resolve()
+    resolved = compile_job(payload, runs_root=root)
+    configured = load_config() is not None
+    if check_only:
+        return {"state": "VALIDATED", "telegram_configured": configured,
+                "parameters": normalized, "resolved": resolved}
+    if not configured:
+        raise ValueError("Telegram is not configured. Configure the standard telegram.env before launching; "
+                         "operator jobs cannot disable lifecycle notifications.")
+    _require_file_backed_entrypoint()
+    _require_committed_job_code()
+    plan_root = root / normalized["topology"] / "orchestration" / "jobs" / normalized["run_id"]
+    # Serialize registration so simultaneous invocations cannot mix two plans.
+    import fcntl
+    plan_root.mkdir(parents=True, exist_ok=True)
+    with (plan_root / ".registration.lock").open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        # Existing run identities cannot be repurposed by editing the small file.
+        for name, value in (("parameters.json", normalized), ("resolved.json", resolved)):
+            path = plan_root / name
+            text = canonical_json(value) + "\n"
+            if path.exists() and path.read_text(encoding="utf-8") != text:
+                raise ValueError(f"Operator job {normalized['run_id']!r} already has different parameters; use a new run_id")
+        commit = _entrypoint_code_identity()
+        pin_path = plan_root / "execution-commit.json"
+        if pin_path.exists():
+            commit = str(load_v2_config(pin_path)["commit"])
+        runtime = ImmutableRuntimeManager(_repo_root()).ensure(commit)
+        for name, value in (("parameters.json", normalized), ("resolved.json", resolved),
+                            ("execution-commit.json", {"commit": commit})):
+            path = plan_root / name
+            if not path.exists():
+                atomic_write_text(path, canonical_json(value) + "\n")
+        return _launch_durable_workflow_controller(plan_root / "resolved.json", runs_root=root, runtime=runtime)
 
 
 def run_workflow_from_config(
@@ -1082,6 +1137,11 @@ def main(argv: list[str] | None = None) -> int:
     command.add_argument("config", type=Path)
     command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     command.set_defaults(kind="run")
+    job = subparsers.add_parser("job", help="launch a strict, simple operator parameter file")
+    job.add_argument("config", type=Path)
+    job.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
+    job.add_argument("--check", action="store_true", help="validate and show the resolved plan without writes or computation")
+    job.set_defaults(kind="job")
     for name in ("continuous", "performance-tuning", "experiment", "komi-calibration", "workflow"):
         command = subparsers.add_parser(name, help=f"legacy-compatible V2 {name} JSON plan")
         command.add_argument("config", type=Path)
@@ -1103,7 +1163,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     payload = load_v2_config(args.config)
     result: object
-    if args.kind == "run":
+    if args.kind == "job":
+        result = launch_operator_job(payload, runs_root=args.runs_root, check_only=args.check)
+    elif args.kind == "run":
         result = run_spec(payload, runs_root=args.runs_root)
     elif args.kind == "continuous":
         result = run_continuous_from_config(payload, runs_root=args.runs_root, allow_code_rollover=args.allow_code_rollover)

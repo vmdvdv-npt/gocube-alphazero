@@ -1379,7 +1379,7 @@ class ContinuousTrainingRunnerV2:
         except TypeError:
             self.reporter(message)
 
-    def _notify_operator(self, event: str, message: str, *, key_suffix: str) -> None:
+    def _notify_operator(self, event: str, message: str, *, key_suffix: str, payload: Mapping[str, object] | None = None) -> None:
         """Send one injected operator event without making Telegram a dependency.
 
         The production entrypoint owns construction of the notifier.  Keeping
@@ -1397,7 +1397,7 @@ class ContinuousTrainingRunnerV2:
                     owner_id=self.config.lineage_id,
                     action_id=f"{self.config.lineage_id}:{key_suffix}",
                     message=message,
-                    payload={"lineage_id": self.config.lineage_id},
+                    payload={"lineage_id": self.config.lineage_id, **dict(payload or {})},
                     correlation_id=self.config.lineage_id,
                 )
             )

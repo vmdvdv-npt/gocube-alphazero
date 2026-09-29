@@ -72,7 +72,22 @@ def format_event(event: OperatorEvent, *, max_chars: int = DEFAULT_MESSAGE_BUDGE
     If the bounded message budget is exceeded, the durable event and its
     evidence remain complete; only the chat presentation is shortened.
     """
-    if event.event_type in {"ARENA_STARTED", "ARENA_COMPLETED", "ARENA_FAILED"}:
+    if event.event_type == "TRAINING_STARTED" and isinstance(event.payload.get("training"), Mapping):
+        from types import SimpleNamespace
+        from ..orchestrator_v2.operator_messages import format_training_started
+        payload = event.payload
+        arena = dict(payload.get("arena", {}))
+        config = SimpleNamespace(**{k: payload.get(k, {}) for k in (
+            "self_play", "training", "replay", "execution", "arena", "compatibility")})
+        text = format_training_started(
+            topology=event.topology, lineage_id=event.owner_id,
+            parent_label=_ref(payload.get("parent")) or "unknown",
+            network=payload.get("network"), effective_config=config,
+            arena_cadence=int(arena["every_iterations"]),
+            arena_config=SimpleNamespace(games=arena.get("games")))
+        budget = payload.get("stop_after_iterations")
+        text += "\nStop: " + (f"after {budget} iterations" if budget is not None else "operator request")
+    elif event.event_type in {"ARENA_STARTED", "ARENA_COMPLETED", "ARENA_FAILED"}:
         text = _format_arena(event)
     else:
         title = event.event_type.replace("_", " ")

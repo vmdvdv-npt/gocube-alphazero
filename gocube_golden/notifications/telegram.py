@@ -41,8 +41,9 @@ def _env_file(path: Path) -> dict[str, str]:
 def load_config(*, environ: Mapping[str, str] | None = None, env_file: Path | None = None) -> tuple[str, str] | None:
     env = os.environ if environ is None else environ
     file_values = _env_file(ENV_FILE if env_file is None else env_file)
-    token = str(env.get(TOKEN_ENV, "") or file_values.get(TOKEN_ENV, "")).strip()
-    chat_id = str(env.get(CHAT_ID_ENV, "") or file_values.get(CHAT_ID_ENV, "")).strip()
+    # Empty service overrides must not silently disable a configured transport.
+    token = str(env.get(TOKEN_ENV, "")).strip() or str(file_values.get(TOKEN_ENV, "")).strip()
+    chat_id = str(env.get(CHAT_ID_ENV, "")).strip() or str(file_values.get(CHAT_ID_ENV, "")).strip()
     return (token, chat_id) if token and chat_id else None
 
 

@@ -26,8 +26,10 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     games = _pick(self_play, "games_per_iteration", "games")
     selfplay_sims = _pick(self_play, "mcts_simulations", "simulations")
     contexts = _pick(execution, "total_active_contexts", "active_contexts", "contexts")
+    if contexts is None and _pick(execution, "workers") is not None and _pick(execution, "active_games_per_worker") is not None:
+        contexts = int(execution["workers"]) * int(execution["active_games_per_worker"])
     lr = _pick(training, "learning_rate", "lr")
-    steps = _pick(training, "optimizer_steps", "steps")
+    steps = _pick(training, "optimizer_steps_per_iteration", "optimizer_steps", "steps")
     batch = _pick(training, "batch_size", "batch")
     replay_generations = _pick(replay, "generations", "window")
     replay_cap = _pick(replay, "cap", "positions_cap", "max_positions")
@@ -51,7 +53,8 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     _line(lines, "Batch", batch)
     lines.extend(["", "Replay:"])
     if replay_generations is not None or replay_cap is not None:
-        lines.append(f"replay={replay_generations} generations / {replay_cap} positions")
+        cap_text = "no position cap" if replay_cap is None else f"{replay_cap} positions"
+        lines.append(f"replay={replay_generations} generations / {cap_text}")
     lines.extend(["", "Arena:"])
     lines.append(f"Arena cadence=every {arena_cadence} generations")
     _line(lines, "Games", getattr(arena_config, "games", None))
