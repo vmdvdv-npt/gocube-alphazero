@@ -8,7 +8,12 @@ import pytest
 from gocube_golden.artifact_graph import CheckpointRef, EffectiveConfig
 from gocube_golden.orchestrator_v2 import operator_job as job
 from gocube_golden.orchestrator_v2 import production_entrypoint as entry
-from gocube_golden.orchestrator_v2.execution_permit import PERMIT_ENV
+from gocube_golden.orchestrator_v2.execution_permit import (
+    PERMIT_ENV,
+    PERMIT_KEY_ENV,
+    _child_execution_permit,
+    _production_authority,
+)
 from gocube_golden.orchestrator_v2.workflow import WorkflowRunner, WorkflowSpec
 
 
@@ -193,8 +198,22 @@ def test_controller_uses_pinned_working_directory_and_environment(tmp_path, monk
     calls = []
     monkeypatch.setattr(entry.subprocess, "Popen", lambda cmd, **kw: calls.append((cmd, kw)) or SimpleNamespace(pid=1234))
     monkeypatch.setattr(entry.os, "getpgid", lambda pid: pid)
-    result = entry._launch_durable_workflow_controller(plan, runs_root=tmp_path / "runs", runtime=runtime)
+    monkeypatch.setattr(entry, "_wait_for_controller_ready", lambda *a, **kw: None)
+    with _production_authority(mode="workflow", topology="torus9", run_id="pin-test", code_identity="commit-one"):
+        with _child_execution_permit(
+            action_type="workflow-controller",
+            topology="torus9",
+            run_id="pin-test",
+            code_identity="commit-one",
+        ):
+            result = entry._launch_durable_workflow_controller(
+                plan, runs_root=tmp_path / "runs", runtime=runtime
+            )
     assert result["state"] == "STARTED"
     assert calls[0][1]["cwd"] == runtime.path
     assert calls[0][1]["env"]["AZ_ORCHESTRATOR_RUNTIME_COMMIT"] == "commit-one"
     assert calls[0][1]["env"]["PYTHONPATH"].split(":")[0] == str(runtime.path)
+    assert PERMIT_ENV in calls[0][1]["env"]
+    assert PERMIT_KEY_ENV in calls[0][1]["env"]
+    assert len(calls[0][1]["pass_fds"]) == 1
+    assert "--startup-ready-fd" in calls[0][0]

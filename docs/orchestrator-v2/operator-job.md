@@ -95,7 +95,12 @@ global gradient norm clipping learner-а. Если поле не указано,
 Повтор той же команды использует сохранённое состояние; завершённые шаги
 не выполняются повторно. Одновременное исполнение защищает штатная lease V2.
 Изменение параметров требует нового `run_id`. Это не команда перезапуска уже
-работающего контроллера.
+работающего контроллера. После запуска detached controller сначала валидирует
+подписанный PID-bound child-permit в pinned runtime и посылает оператору короткий
+versioned `READY` через anonymous pipe. `job` сообщает `STARTED` только после
+этого handshake; bounded timeout и остановка process group не оставляют
+неподтверждённый controller при ошибке запуска. После `READY` controller
+продолжает работу независимо от завершения launcher-процесса.
 
 Telegram берётся из стандартного `~/.config/gocube-alphazero/telegram.env`
 или переменных `GOCUBE_TELEGRAM_BOT_TOKEN` / `GOCUBE_TELEGRAM_CHAT_ID`.
