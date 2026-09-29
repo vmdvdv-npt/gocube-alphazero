@@ -1,0 +1,16 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "torus9-five-iterations-example",
+  "parent": "torus9-m137-5ch-komi15-adaptation-20260927-v1/update-2400",
+  "training": {
+    "iterations": 5,
+    "learning_rate": 0.00005,
+    "games_per_iteration": 384,
+    "mcts_simulations": 200,
+    "updates_per_iteration": 160,
+    "batch_size": 64,
+    "replay_generations": 6
+  },
+  "arena": {"every_iterations": 5, "games": 192, "mcts_simulations": 128},
+  "ab_tests": []
+}

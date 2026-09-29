@@ -308,7 +308,18 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             "arena_cadence": self.config.arena_cadence,
         }
         self._report("started", message, **details)
-        self._notify_operator("START", message, key_suffix=f"start:{self._launch_id}")
+        serialized = effective.to_dict()
+        self._notify_operator("START", message, key_suffix=f"start:{self._launch_id}", payload={
+            "parent": parent.ref.to_dict(),
+            "network": network,
+            "self_play": serialized["self_play"],
+            "training": serialized["training"],
+            "replay": serialized["replay"],
+            "execution": serialized["execution"],
+            "arena": {**serialized["arena"], "games": self.config.arena_config.games,
+                      "every_iterations": self.config.arena_cadence},
+            "stop_after_iterations": self.config.generations,
+        })
 
 
 __all__ = [
