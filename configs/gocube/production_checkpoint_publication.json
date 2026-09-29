@@ -4,6 +4,16 @@
   "entries": [
     {
       "topology": "torus9",
+      "lineage_id": "torus9-m138-5ch-lr5e5-block5-20260929-v1",
+      "checkpoint_ranges": [
+        [
+          203,
+          203
+        ]
+      ]
+    },
+    {
+      "topology": "torus9",
       "lineage_id": "torus9-golden-v3-production-20260917-m17",
       "checkpoint_ranges": [[47, 47]]
     },

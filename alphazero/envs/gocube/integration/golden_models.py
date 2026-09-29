@@ -209,6 +209,9 @@ class GoldenCheckpointLoader:
         path = Path(descriptor.path)
         metadata_path = Path(descriptor.metadata_path or f"{path.with_suffix('')}.metadata.json")
         sidecar = _read_sidecar(metadata_path)
+        checkpoint_format = (descriptor.serving_contract_data or {}).get("checkpoint_format")
+        if checkpoint_format == "golden_torus9_5ch_pt":
+            return self._load_five_channel_uncached(descriptor, path, sidecar)
         if descriptor.profile_id is not None and _metadata_value(sidecar, "profile_id", "training_profile_id") != descriptor.profile_id:
             raise CheckpointMetadataInvalid("Golden checkpoint profile differs from catalog descriptor")
 
@@ -266,6 +269,81 @@ class GoldenCheckpointLoader:
             network=network,
             evaluator=evaluator,
             metadata=dict(sidecar),
+            device=self.device,
+        )
+
+    def _load_five_channel_uncached(
+        self,
+        descriptor: CheckpointDescriptor,
+        path: Path,
+        sidecar: Mapping[str, object],
+    ) -> GoldenPlayableModel:
+        """Load the training-ready Torus9 M137-derived 5CH serving artifact."""
+
+        architecture = sidecar.get("architecture_config")
+        if not isinstance(architecture, Mapping):
+            raise CheckpointMetadataInvalid("5CH checkpoint architecture metadata is malformed")
+        if sidecar.get("architecture_id") != descriptor.architecture_id:
+            raise CheckpointMetadataInvalid("5CH checkpoint architecture differs from catalog descriptor")
+        if sidecar.get("observation_shape") != [5, 81] or sidecar.get("komi") != descriptor.komi:
+            raise CheckpointMetadataInvalid("5CH checkpoint observation/komi contract differs from catalog descriptor")
+
+        payload = _load_payload(path)
+        _compare_embedded_metadata(sidecar, payload)
+        if "artifact_sha256" in sidecar:
+            expected_artifact = _validate_hash(sidecar["artifact_sha256"], "artifact_sha256")
+            if _file_sha256(path) != expected_artifact:
+                raise CheckpointMetadataInvalid("5CH checkpoint artifact hash mismatch")
+
+        state_dict = payload.get("model_state_dict")
+        if not isinstance(state_dict, Mapping):
+            raise CheckpointLoadFailed("5CH checkpoint is missing model_state_dict")
+
+        try:
+            from gocube_golden.neural import model_hash
+            from gocube_golden.torus9_m137_5ch import (
+                Torus9M137FiveChannelEvaluator,
+                Torus9M137FiveChannelGraphNet,
+            )
+
+            training_contract = architecture.get("training_contract")
+            if not isinstance(training_contract, str):
+                raise CheckpointMetadataInvalid("5CH checkpoint is missing training_contract")
+            network = Torus9M137FiveChannelGraphNet(
+                training_ready=sidecar.get("training_ready") is True,
+                training_contract=training_contract,
+            )
+            if dict(network.architecture_config) != dict(architecture):
+                raise CheckpointMetadataInvalid("5CH checkpoint architecture does not match the runtime network")
+            network.load_state_dict(state_dict, strict=True)
+            actual_model_hash = model_hash(network)
+            if actual_model_hash != sidecar.get("model_hash"):
+                raise CheckpointMetadataInvalid("5CH checkpoint model hash mismatch")
+            evaluator = Torus9M137FiveChannelEvaluator(network, device=self.device)
+        except (CheckpointMetadataInvalid, CheckpointLoadFailed):
+            raise
+        except Exception as exc:
+            raise CheckpointLoadFailed(
+                f"Failed to load 5CH checkpoint {descriptor.checkpoint_id}: {exc}"
+            ) from exc
+
+        metadata = dict(sidecar)
+        contract = descriptor.serving_contract_data or {}
+        for key in (
+            "topology_fingerprint",
+            "rules_fingerprint",
+            "observation_fingerprint",
+            "target_fingerprint",
+        ):
+            if key in contract:
+                metadata[key] = contract[key]
+        evaluator.checkpoint_path = str(path)
+        evaluator.checkpoint_metadata = metadata
+        return GoldenPlayableModel(
+            descriptor=descriptor,
+            network=network,
+            evaluator=evaluator,
+            metadata=metadata,
             device=self.device,
         )
 
