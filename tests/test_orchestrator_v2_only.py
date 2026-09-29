@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from gocube_golden.orchestrator_v2 import ArenaRunner
+from gocube_golden.orchestrator_v2.production_entrypoint import run_spec
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,3 +64,13 @@ def test_standalone_arena_cli_requires_production_entrypoint() -> None:
     assert result.returncode != 0
     assert "requires" in result.stderr
     assert "orchestrator_v2.production_entrypoint" in result.stderr
+
+
+@pytest.mark.parametrize("mode", ["arena", "evaluation"])
+def test_standalone_v2_arena_run_spec_is_disabled(mode: str) -> None:
+    with pytest.raises(RuntimeError, match="Standalone Arena run-specs are disabled"):
+        run_spec({
+            "schema": "gocube-orchestrator-v2-run-spec-v1",
+            "mode": mode,
+            mode: {},
+        })

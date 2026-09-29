@@ -24,7 +24,7 @@ from .artifact_resolver import ArtifactResolver
 from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
 from .contracts import StartsetRef
 from .generation_runner import OutputLineage
-from .execution_permit import _production_authority
+from .execution_permit import _production_authority, active_authority
 from .experiment_plan import ExperimentConfig
 from ..scenarios.calibration import CalibrationArm, CalibrationRunner
 from ..scenarios.experiment.runner import ExperimentRunnerV2
@@ -100,6 +100,28 @@ def _authority(*, mode: str, topology: str, run_id: str):
         run_id=run_id,
         code_identity=_entrypoint_code_identity(),
     )
+
+
+_ARENA_CONTROLLER_MODES = frozenset({
+    "workflow",
+    "continuous",
+    "experiment",
+    "calibration",
+    "komi-calibration",
+    "performance-tuning",
+    "test",
+})
+
+
+def _require_controller_owned_arena() -> None:
+    """Reject standalone Arena launches before they can create a run root."""
+    authority = active_authority()
+    if authority is None or authority.mode not in _ARENA_CONTROLLER_MODES:
+        raise RuntimeError(
+            "Standalone Arena run-specs are disabled; launch Arena through "
+            "the Orchestrator V2 workflow/operator controller so lifecycle "
+            "notifications are registered and delivered."
+        )
 
 
 def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfig:
@@ -427,6 +449,7 @@ def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResol
 
 def run_arena_from_config(payload: Mapping[str, object], *, runs_root: str | Path | None = None, arena_runner: object | None = None) -> object:
     _require_file_backed_entrypoint()
+    _require_controller_owned_arena()
     raw = payload.get("arena", payload.get("evaluation", payload))
     if not isinstance(raw, Mapping):
         raise ValueError("arena/evaluation config must be an object")

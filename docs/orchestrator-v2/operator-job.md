@@ -17,6 +17,13 @@ python -m gocube_golden.orchestrator_v2.production_entrypoint job job.json
 не отправляет сообщения и не выполняет обучение. Для нестандартного расположения
 артефактов обе команды принимают `--runs-root /absolute/path/to/runs`.
 
+Standalone Arena/evaluation run-specs через `production_entrypoint run` отключены.
+Arena является дочерним действием V2 workflow/controller: это гарантирует, что
+владелец запуска регистрирует стандартные lifecycle-уведомления и дожидается их
+доставки. Для операторского Torus9 5CH запуска используйте `job`; для уже
+существующего workflow — штатный `workflow` controller. Внутренние Arena-действия
+workflow/experiment/calibration сохраняются.
+
 ```json
 {
   "schema": "gocube-operator-job-v1",
