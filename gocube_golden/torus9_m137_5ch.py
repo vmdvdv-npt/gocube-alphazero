@@ -50,10 +50,12 @@ class Torus9M137FiveChannelGraphNet(Torus9CurrentGraphNet):
 
     architecture_id = M137_FIVE_CHANNEL_ARCHITECTURE_ID
 
-    def __init__(self) -> None:
+    def __init__(self, *, training_ready: bool = False, training_contract: str | None = None) -> None:
         super().__init__(hidden=TORUS9_CURRENT_HIDDEN, blocks=TORUS9_CURRENT_BLOCKS)
         self.architecture_id = M137_FIVE_CHANNEL_ARCHITECTURE_ID
         self.input_projection = torch.nn.Linear(5, TORUS9_CURRENT_HIDDEN)
+        self._training_ready = bool(training_ready)
+        self._training_contract = training_contract
 
     @property
     def architecture_config(self) -> dict[str, object]:
@@ -63,7 +65,9 @@ class Torus9M137FiveChannelGraphNet(Torus9CurrentGraphNet):
         config["source_architecture_id"] = TORUS9_CURRENT_ARCHITECTURE_ID
         config["source_checkpoint"] = "M137"
         config["conversion"] = "linear-input-komi-fold-v1"
-        config["training_ready"] = False
+        if self._training_contract is not None:
+            config["training_contract"] = self._training_contract
+        config["training_ready"] = self._training_ready
         return config
 
     def encode(self, observation: torch.Tensor) -> torch.Tensor:

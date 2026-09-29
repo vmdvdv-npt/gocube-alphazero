@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -153,7 +154,130 @@ class CheckpointCatalog:
             return None
 
     @classmethod
-    def _validate_golden_metadata(cls, metadata: object) -> dict[str, object] | None:
+    def _validate_m137_five_channel_metadata(
+        cls,
+        metadata: object,
+        *,
+        fallback_iteration: int | None,
+    ) -> dict[str, object] | None:
+        """Return the serving identity for a training-ready 5CH Torus9 model."""
+
+        if not isinstance(metadata, dict):
+            return None
+        architecture = metadata.get("architecture_config")
+        if not isinstance(architecture, dict):
+            return None
+        try:
+            from gocube_golden.state import rules_fingerprint_for
+            from gocube_golden.topology import TORUS_9X9
+            from gocube_golden.torus9 import TORUS9_TOPOLOGY_FINGERPRINT, TORUS9_TOPOLOGY_ID
+            from gocube_golden.torus9_m137_5ch import (
+                M137_FIVE_CHANNEL_ARCHITECTURE_ID,
+                M137_FIVE_CHANNEL_CHANNELS,
+            )
+        except (ImportError, KeyError, TypeError, ValueError):
+            return None
+
+        if (
+            metadata.get("architecture_id") != M137_FIVE_CHANNEL_ARCHITECTURE_ID
+            or architecture.get("architecture_id") != M137_FIVE_CHANNEL_ARCHITECTURE_ID
+            or architecture.get("input_channels") != 5
+            or architecture.get("hidden") != 80
+            or architecture.get("blocks") != 8
+            or architecture.get("point_count") != 81
+            or architecture.get("topology_id") != TORUS9_TOPOLOGY_ID
+            or architecture.get("topology_fingerprint") != TORUS9_TOPOLOGY_FINGERPRINT
+            or architecture.get("heads")
+            != {
+                "policy": [82],
+                "value": [3],
+                "ownership": [81, 3],
+                "score": [1],
+            }
+            or metadata.get("observation_shape") != [5, 81]
+            or metadata.get("training_ready") is not True
+            or tuple(architecture.get("channels", M137_FIVE_CHANNEL_CHANNELS))
+            != tuple(M137_FIVE_CHANNEL_CHANNELS)
+        ):
+            return None
+
+        komi = metadata.get("komi")
+        if isinstance(komi, bool) or not isinstance(komi, (int, float)) or float(komi) != 1.5:
+            return None
+        model_hash = metadata.get("model_hash")
+        target_fingerprint = metadata.get("target_fingerprint")
+        if (
+            not isinstance(model_hash, str)
+            or not _SHA256_RE.fullmatch(model_hash)
+            or not isinstance(target_fingerprint, str)
+            or not _SHA256_RE.fullmatch(target_fingerprint)
+        ):
+            return None
+        if fallback_iteration is None or fallback_iteration < 0:
+            return None
+
+        rules_fingerprint = rules_fingerprint_for(TORUS_9X9, float(komi))
+        # The five-channel lineage predates the current six-channel Golden
+        # profile. Keep its identity explicit in the serving contract instead
+        # of pretending it is a current-profile checkpoint.
+        observation_fingerprint = "sha256:" + hashlib.sha256(
+            json.dumps(
+                {
+                    "schema": "gocube-torus9-m137-5ch-observation-v1",
+                    "channels": list(M137_FIVE_CHANNEL_CHANNELS),
+                    "shape": [5, 81],
+                    "action_count": 82,
+                    "pass_index": 81,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        return {
+            "run_name": "",
+            "iteration": fallback_iteration,
+            "topology": "torus",
+            "size": 9,
+            "profile_id": None,
+            "profile_fingerprint": None,
+            "architecture_id": str(metadata["architecture_id"]),
+            "rules_fingerprint": rules_fingerprint,
+            "observation_fingerprint": observation_fingerprint,
+            "target_fingerprint": target_fingerprint,
+            "komi": float(komi),
+            "serving_contract": {
+                "checkpoint_format": "golden_torus9_5ch_pt",
+                "checkpoint_schema_version": 1,
+                "topology": "torus",
+                "size": 9,
+                "rule_set": "chinese",
+                "terminal_adjudicator": GOLDEN_TERMINAL_ADJUDICATOR,
+                "architecture_id": str(metadata["architecture_id"]),
+                "architecture_config": architecture,
+                "topology_id": TORUS9_TOPOLOGY_ID,
+                "topology_fingerprint": TORUS9_TOPOLOGY_FINGERPRINT,
+                "board_size": [9, 9],
+                "point_id_order_identity": "row-major-yx:point_id=y*width+x",
+                "komi": float(komi),
+                "observation_schema_id": "gocube-torus9-m137-5ch-observation-v1",
+                "observation_schema_version": 1,
+                "observation_fingerprint": observation_fingerprint,
+                "observation_shape": [5, 81],
+                "target_fingerprint": target_fingerprint,
+                "rules_profile_id": "graph-area-v1",
+                "rules_fingerprint": rules_fingerprint,
+                "network_heads_and_shapes": architecture["heads"],
+                "auxiliary_heads": True,
+            },
+        }
+
+    @classmethod
+    def _validate_golden_metadata(
+        cls,
+        metadata: object,
+        *,
+        fallback_iteration: int | None = None,
+    ) -> dict[str, object] | None:
         """Return normalized current served identity, or None for unsupported data."""
 
         if not isinstance(metadata, dict):
@@ -163,6 +287,11 @@ class CheckpointCatalog:
             "profile_fingerprint", metadata.get("training_profile_fingerprint")
         )
         model_hash = metadata.get("model_hash")
+        if profile_id != "gocube-torus9-golden-v3":
+            return cls._validate_m137_five_channel_metadata(
+                metadata,
+                fallback_iteration=fallback_iteration,
+            )
         if (
             not isinstance(profile_id, str)
             or not isinstance(profile_fingerprint, str)
@@ -171,9 +300,6 @@ class CheckpointCatalog:
             or not _SHA256_RE.fullmatch(model_hash)
         ):
             return None
-        if profile_id != "gocube-torus9-golden-v3":
-            return None
-
         try:
             from gocube_golden.torus9_contract import (
                 TORUS9_ACTION_COUNT,
@@ -319,15 +445,20 @@ class CheckpointCatalog:
                     continue
             except OSError:
                 continue
+            filename_match = _GOLDEN_CHECKPOINT_RE.fullmatch(os.path.basename(path))
+            if filename_match is None:
+                continue
             metadata_path = os.path.splitext(path)[0] + ".metadata.json"
-            identity = self._validate_golden_metadata(self._golden_metadata(metadata_path))
+            identity = self._validate_golden_metadata(
+                self._golden_metadata(metadata_path),
+                fallback_iteration=int(filename_match.group(1)),
+            )
             if identity is None:
                 continue
             lineage_id, lineage_status = self._lineage_identity_for_checkpoint(path)
             if lineage_id is not None:
                 identity["run_name"] = lineage_id
-            filename_match = _GOLDEN_CHECKPOINT_RE.fullmatch(os.path.basename(path))
-            if filename_match is None or identity["iteration"] != int(filename_match.group(1)):
+            if identity["iteration"] != int(filename_match.group(1)):
                 continue
             published, publication_reason = self.publication_decision(
                 topology=str(identity["topology"]),
@@ -352,8 +483,16 @@ class CheckpointCatalog:
                     terminal_adjudicator=GOLDEN_TERMINAL_ADJUDICATOR,
                     path=os.path.abspath(path),
                     lineage_status=lineage_status,
-                    profile_id=str(identity["profile_id"]),
-                    profile_fingerprint=str(identity["profile_fingerprint"]),
+                    profile_id=(
+                        str(identity["profile_id"])
+                        if identity.get("profile_id") is not None
+                        else None
+                    ),
+                    profile_fingerprint=(
+                        str(identity["profile_fingerprint"])
+                        if identity.get("profile_fingerprint") is not None
+                        else None
+                    ),
                     architecture_id=str(identity["architecture_id"]),
                     rules_fingerprint=str(identity["rules_fingerprint"]),
                     observation_fingerprint=str(identity["observation_fingerprint"]),
