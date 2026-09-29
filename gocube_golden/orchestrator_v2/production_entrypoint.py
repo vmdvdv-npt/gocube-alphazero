@@ -663,7 +663,12 @@ def run_continuous_from_config(payload: Mapping[str, object], *, runs_root: str 
     try:
         with _authority(mode="continuous", topology=config.topology, run_id=config.lineage_id):
             runner = ContinuousTrainingRunnerV2(config, resolver=resolver, notifier=notifier, **runner_kwargs)
-            return runner.run()
+            result = runner.run()
+            effective = getattr(config.effective_config, "config", config.effective_config)
+            if effective.extensions.get("training_driver") == "torus9-five-channel-ordinary-training-v1":
+                from ..torus9_five_channel_training import write_block_report
+                write_block_report(result)
+            return result
     finally:
         flush_all()
 

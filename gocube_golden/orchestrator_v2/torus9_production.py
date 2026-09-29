@@ -17,12 +17,13 @@ from .generation_runner import GenerationExecutionResult, ResolvedGenerationInpu
 from .version import ORCHESTRATOR_ENTRYPOINT, ORCHESTRATOR_VERSION
 
 
-def _default_driver(resolved_input: ResolvedGenerationInput) -> Mapping[str, object]:
+def _default_driver(resolved_input: ResolvedGenerationInput) -> GenerationExecutionResult:
     # Keep the scientific driver lazy: importing the V2 contracts remains
     # cheap for resolver/tests and does not import torch until execution.
-    from tools.torus9_run_driver import run_generation_v2
+    from ..torus9_five_channel_training import run_generation, validate_config
 
-    return run_generation_v2(resolved_input)
+    validate_config(resolved_input.effective_config.config)
+    return run_generation(resolved_input)
 
 
 def _relative_artifact(root: Path, value: object, label: str) -> tuple[str, Path]:
