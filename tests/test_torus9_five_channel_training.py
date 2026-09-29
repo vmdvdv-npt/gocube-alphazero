@@ -76,6 +76,23 @@ def test_transition_preserves_moments_and_all_clocks_with_deterministic_resume(p
         ordinary.OrdinaryTrainer(saved,learning_rate=5e-5,seed=92)
 
 
+def test_gradient_clip_is_forwarded_to_torch(parent, monkeypatch):
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91, gradient_clip=8.0)
+    games = [game('train', 'train', model_hash(trainer.model))]
+    calls = []
+    original = torch.nn.utils.clip_grad_norm_
+
+    def capture(parameters, max_norm, *args, **kwargs):
+        calls.append(max_norm)
+        return original(parameters, max_norm, *args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.utils, 'clip_grad_norm_', capture)
+    with _test_authority():
+        metrics = trainer.step(games)
+    assert calls == [8.0]
+    assert metrics['gradient_clip'] == 8.0
+
+
 def test_legacy_rejected_before_driver_or_workers():
     config=EffectiveConfig(topology='torus9',compatibility={'input_channels':6})
     resolved=SimpleNamespace(effective_config=SimpleNamespace(config=config))

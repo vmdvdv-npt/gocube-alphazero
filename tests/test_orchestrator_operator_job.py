@@ -41,10 +41,22 @@ def test_strict_parameters_and_normalization_are_stable():
     assert normalized["ab_tests"][0]["arena"] == {"games": 192, "mcts_simulations": 128}
 
 
+def test_gradient_clip_is_normalized_and_compiled_into_effective_config(parent):
+    raw = parameters()
+    raw["training"]["gradient_clip"] = 8.0
+    normalized = job.parse_job(raw)
+    assert normalized["training"]["gradient_clip"] == 8.0
+    compiled = job.compile_job(raw, runs_root=".")
+    config = compiled["workflow"]["steps"][0]["config"]["effective_config"]
+    assert config["training"]["gradient_clip"] == 8.0
+    assert config["training"]["optimizer"] == "Adam"
+
+
 @pytest.mark.parametrize("patch", [
     {"notifications": False}, {"command": "arbitrary executable"},
     {"parent": "../../checkpoint"}, {"training": {"learning_rate": float("nan")}},
     {"training": {"iterations": True}}, {"training": {"batch_size": 32}},
+    {"training": {"gradient_clip": 0}}, {"training": {"gradient_clip": float("nan")}},
     {"arena": {"games": 193}}, {"execution": {"workers": 1}},
     {"ab_tests": [{"id": "test", "iterations": 1, "A": {}, "B": {}, "arena": {"every_iterations": 2}}]},
     {"ab_tests": [{"id": "test", "iterations": 1, "A": {}, "B": {"typo": 1}}]},
@@ -130,7 +142,8 @@ def test_start_settings_survive_real_outbox_and_are_delivered_once(tmp_path):
     from gocube_golden.notifications import NotificationStore, NotificationDispatcher, format_event
     cfg = EffectiveConfig(topology="torus9", compatibility={"input_channels": 5},
         self_play={"komi": 1.5, "games_per_iteration": 384, "mcts_simulations": 200},
-        training={"learning_rate": 5e-5, "optimizer_steps_per_iteration": 160, "batch_size": 64},
+        training={"learning_rate": 5e-5, "optimizer_steps_per_iteration": 160, "batch_size": 64,
+                  "gradient_clip": 8.0},
         replay={"generations": 6, "cap": None}, arena={"simulations": 128},
         execution={"workers": 16, "active_games_per_worker": 4})
     store = NotificationStore(tmp_path / "outbox")
@@ -149,7 +162,7 @@ def test_start_settings_survive_real_outbox_and_are_delivered_once(tmp_path):
     assert event.payload["stop_after_iterations"] == 5
     assert event.payload["training"]["optimizer_steps_per_iteration"] == 160
     text = format_event(event)
-    for expected in ("LR=5e-05", "Steps: 160", "Batch: 64", "Contexts: 64", "no position cap",
+    for expected in ("LR=5e-05", "Steps: 160", "Batch: 64", "Gradient clip: 8.0", "Contexts: 64", "no position cap",
                      "every 5 generations", "MCTS: 128 sims", "Stop: after 5 iterations"):
         assert expected in text
     dispatcher.flush(1)
