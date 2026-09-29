@@ -9,6 +9,7 @@
     "mcts_simulations": 200,
     "updates_per_iteration": 160,
     "batch_size": 64,
+    "gradient_clip": 1.0,
     "replay_generations": 6
   },
   "arena": {"every_iterations": 5, "games": 192, "mcts_simulations": 128},

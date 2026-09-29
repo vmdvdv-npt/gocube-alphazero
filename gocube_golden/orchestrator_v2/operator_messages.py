@@ -31,6 +31,7 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     lr = _pick(training, "learning_rate", "lr")
     steps = _pick(training, "optimizer_steps_per_iteration", "optimizer_steps", "steps")
     batch = _pick(training, "batch_size", "batch")
+    gradient_clip = _pick(training, "gradient_clip")
     replay_generations = _pick(replay, "generations", "window")
     replay_cap = _pick(replay, "cap", "positions_cap", "max_positions")
     arena_sims = _pick(arena, "simulations", "mcts_simulations")
@@ -51,6 +52,7 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
         lines.append(f"LR={lr}")
     _line(lines, "Steps", steps)
     _line(lines, "Batch", batch)
+    _line(lines, "Gradient clip", gradient_clip)
     lines.extend(["", "Replay:"])
     if replay_generations is not None or replay_cap is not None:
         cap_text = "no position cap" if replay_cap is None else f"{replay_cap} positions"

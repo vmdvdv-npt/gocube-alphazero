@@ -9,8 +9,11 @@ import __main__
 import math
 import os
 from pathlib import Path
+import selectors
+import signal
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 from typing import Any, Mapping
 
@@ -938,11 +941,177 @@ def _workflow_spec_from_payload(payload: Mapping[str, object]) -> WorkflowSpec:
     return WorkflowSpec.from_dict(raw)
 
 
+CONTROLLER_READY_SCHEMA = "gocube-orchestrator-v2-controller-ready-v1"
+CONTROLLER_STARTUP_TIMEOUT_SECONDS = 20.0
+CONTROLLER_STARTUP_GRACE_SECONDS = 2.0
+
+
+class _ControllerStartupFailure(RuntimeError):
+    """The detached controller did not complete its authenticated bootstrap."""
+
+
+def _close_startup_fd(fd: int | None) -> None:
+    if fd is None:
+        return
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _send_controller_ready(fd: int, spec: WorkflowSpec, code_identity: str) -> None:
+    """Tell the operator job that permit validation completed successfully."""
+    message = (
+        canonical_json(
+            {
+                "schema": CONTROLLER_READY_SCHEMA,
+                "pid": os.getpid(),
+                "workflow_id": spec.workflow_id,
+                "code_identity": code_identity,
+            }
+        )
+        + "\n"
+    ).encode("utf-8")
+    offset = 0
+    while offset < len(message):
+        try:
+            written = os.write(fd, message[offset:])
+        except OSError as exc:
+            raise RuntimeError("workflow controller could not send READY") from exc
+        if written <= 0:  # pragma: no cover - defensive OS boundary
+            raise RuntimeError("workflow controller could not send READY")
+        offset += written
+
+
+def _controller_process_group(process: subprocess.Popen[bytes]) -> int:
+    """Return the detached process group, tolerating an immediate child exit."""
+    try:
+        return int(os.getpgid(process.pid))
+    except (OSError, ProcessLookupError):
+        # start_new_session=True makes the child PID its process-group ID.
+        return int(process.pid)
+
+
+def _terminate_controller_process(
+    process: subprocess.Popen[bytes],
+    process_group: int,
+    *,
+    grace_seconds: float,
+) -> int | None:
+    """Terminate and reap a controller which failed during startup."""
+    if process.poll() is None:
+        try:
+            os.killpg(process_group, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            # The process may have exited between poll() and killpg(). Reap it
+            # below; failure to signal an already-dead group is not a reason
+            # to leave a child unreaped.
+            process.terminate()
+        try:
+            process.wait(timeout=max(0.0, float(grace_seconds)))
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                process.kill()
+            process.wait()
+    else:
+        process.wait()
+    return process.returncode
+
+
+def _validate_controller_ready(
+    value: object,
+    *,
+    process: subprocess.Popen[bytes],
+    spec: WorkflowSpec,
+    expected_code_identity: str,
+) -> None:
+    if not isinstance(value, Mapping):
+        raise _ControllerStartupFailure("controller READY message is not an object")
+    if value.get("schema") != CONTROLLER_READY_SCHEMA:
+        raise _ControllerStartupFailure("controller READY schema mismatch")
+    if type(value.get("pid")) is not int or int(value["pid"]) != int(process.pid):
+        raise _ControllerStartupFailure("controller READY PID does not match spawned child")
+    if value.get("workflow_id") != spec.workflow_id:
+        raise _ControllerStartupFailure("controller READY workflow identity mismatch")
+    if value.get("code_identity") != expected_code_identity:
+        raise _ControllerStartupFailure("controller READY code identity mismatch")
+
+
+def _wait_for_controller_ready(
+    read_fd: int,
+    process: subprocess.Popen[bytes],
+    *,
+    spec: WorkflowSpec,
+    expected_code_identity: str,
+    timeout_seconds: float,
+) -> None:
+    """Wait for one complete READY message without waiting for workflow work."""
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    buffer = bytearray()
+    selector = selectors.DefaultSelector()
+    try:
+        os.set_blocking(read_fd, False)
+        selector.register(read_fd, selectors.EVENT_READ)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _ControllerStartupFailure(
+                    "workflow controller did not become ready within startup timeout"
+                )
+            events = selector.select(remaining)
+            if not events:
+                raise _ControllerStartupFailure(
+                    "workflow controller did not become ready within startup timeout"
+                )
+            try:
+                chunk = os.read(read_fd, 65536)
+            except BlockingIOError:
+                continue
+            if not chunk:
+                if process.poll() is None:
+                    reason = "workflow controller failed before READY (closed startup pipe)"
+                else:
+                    reason = "workflow controller failed before READY (child exited)"
+                raise _ControllerStartupFailure(reason)
+            buffer.extend(chunk)
+            try:
+                ready = json.loads(buffer.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                if process.poll() is not None:
+                    raise _ControllerStartupFailure(
+                        "workflow controller sent an invalid READY message"
+                    )
+                # The child writes a small single JSON record, but tolerate a
+                # partial read and wait for the rest of the pipe message.
+                if len(buffer) > 65536:
+                    raise _ControllerStartupFailure(
+                        "workflow controller READY message is too large"
+                    )
+                continue
+            _validate_controller_ready(
+                ready,
+                process=process,
+                spec=spec,
+                expected_code_identity=expected_code_identity,
+            )
+            return
+    finally:
+        selector.close()
+
+
 def _launch_durable_workflow_controller(
     config_path: Path,
     *,
     runs_root: Path,
     runtime: object | None = None,
+    _startup_timeout_seconds: float = CONTROLLER_STARTUP_TIMEOUT_SECONDS,
+    _startup_grace_seconds: float = CONTROLLER_STARTUP_GRACE_SECONDS,
 ) -> dict[str, object]:
     """Start a detached controller which owns the workflow until completion."""
     payload = load_v2_config(config_path)
@@ -972,22 +1141,67 @@ def _launch_durable_workflow_controller(
         str(runs_root.resolve()),
         "--controller",
     ]
-    with log_path.open("ab") as log:
-        process = subprocess.Popen(
-            command,
-            cwd=_repo_root() if runtime is None else runtime.path,
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            close_fds=True,
-            **({} if runtime is None else {"env": runtime.environment(os.environ)}),
+    expected_code_identity = (
+        _entrypoint_code_identity() if runtime is None else str(runtime.commit)
+    )
+    ready_read_fd, ready_write_fd = os.pipe()
+    command.extend(["--startup-ready-fd", str(ready_write_fd)])
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with log_path.open("ab") as log:
+            process = subprocess.Popen(
+                command,
+                cwd=_repo_root() if runtime is None else runtime.path,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+                pass_fds=(ready_write_fd,),
+                **({} if runtime is None else {"env": runtime.environment(os.environ)}),
+            )
+    except BaseException:
+        _close_startup_fd(ready_write_fd)
+        _close_startup_fd(ready_read_fd)
+        raise
+    finally:
+        # The parent must not keep the write end alive, otherwise a failed
+        # child could never produce EOF for the readiness wait.
+        _close_startup_fd(ready_write_fd)
+
+    assert process is not None
+    process_group = _controller_process_group(process)
+    try:
+        _wait_for_controller_ready(
+            ready_read_fd,
+            process,
+            spec=spec,
+            expected_code_identity=expected_code_identity,
+            timeout_seconds=_startup_timeout_seconds,
         )
+    except _ControllerStartupFailure as exc:
+        exit_code = _terminate_controller_process(
+            process,
+            process_group,
+            grace_seconds=_startup_grace_seconds,
+        )
+        raise RuntimeError(
+            f"{exc}; exit code: {exit_code}; log: {log_path}"
+        ) from exc
+    except BaseException:
+        _terminate_controller_process(
+            process,
+            process_group,
+            grace_seconds=_startup_grace_seconds,
+        )
+        raise
+    finally:
+        _close_startup_fd(ready_read_fd)
     return {
         "state": "STARTED",
         "workflow_id": spec.workflow_id,
         "controller_pid": int(process.pid),
-        "controller_process_group": int(os.getpgid(process.pid)),
+        "controller_process_group": process_group,
         "controller_root": str(root),
         "log": str(log_path),
     }
@@ -1214,6 +1428,7 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--allow-code-rollover", action="store_true", default=None)
         if name == "workflow":
             command.add_argument("--controller", action="store_true", help=argparse.SUPPRESS)
+            command.add_argument("--startup-ready-fd", type=int, help=argparse.SUPPRESS)
         command.set_defaults(kind=name)
     args = parser.parse_args(argv)
     if args.kind == "telegram":
@@ -1250,8 +1465,21 @@ def main(argv: list[str] | None = None) -> int:
         result = run_performance_tuning_from_config(payload, runs_root=args.runs_root)
     elif args.kind == "workflow":
         if getattr(args, "controller", False):
-            _require_operator_workflow_controller(payload)
-            result = run_workflow_from_config(payload, runs_root=args.runs_root)
+            startup_ready_fd = getattr(args, "startup_ready_fd", None)
+            try:
+                spec = _require_operator_workflow_controller(payload)
+                if startup_ready_fd is None:
+                    raise RuntimeError(
+                        "workflow controller requires the internal startup handshake"
+                    )
+                _send_controller_ready(
+                    startup_ready_fd,
+                    spec,
+                    _entrypoint_code_identity(),
+                )
+                result = run_workflow_from_config(payload, runs_root=args.runs_root)
+            finally:
+                _close_startup_fd(startup_ready_fd)
         else:
             result = _launch_durable_workflow_controller(
                 args.config,

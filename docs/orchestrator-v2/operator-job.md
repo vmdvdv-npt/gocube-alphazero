@@ -36,6 +36,7 @@ python -m gocube_golden.orchestrator_v2.production_entrypoint job job.json
     "mcts_simulations": 200,
     "updates_per_iteration": 160,
     "batch_size": 64,
+    "gradient_clip": 1.0,
     "replay_generations": 6
   },
   "arena": {"every_iterations": 5, "games": 192, "mcts_simulations": 128},
@@ -56,6 +57,8 @@ python -m gocube_golden.orchestrator_v2.production_entrypoint job job.json
 валидация и исходный replay наследуются проверяемым способом; Adam не сбрасывается.
 Текущий backend требует batch 64 и CUDA/16 workers (4 игры на worker).
 Replay — последние N поколений без ограничения числа позиций.
+`training.gradient_clip` — положительное конечное число; значение передаётся в
+global gradient norm clipping learner-а. Если поле не указано, используется 1.0.
 Неизвестные поля и неподдерживаемые значения — ошибка до старта, включая A/B.
 Полей для скриптов, команд, отключения уведомлений или смены кода нет.
 
@@ -92,7 +95,12 @@ Replay — последние N поколений без ограничения
 Повтор той же команды использует сохранённое состояние; завершённые шаги
 не выполняются повторно. Одновременное исполнение защищает штатная lease V2.
 Изменение параметров требует нового `run_id`. Это не команда перезапуска уже
-работающего контроллера.
+работающего контроллера. После запуска detached controller сначала валидирует
+подписанный PID-bound child-permit в pinned runtime и посылает оператору короткий
+versioned `READY` через anonymous pipe. `job` сообщает `STARTED` только после
+этого handshake; bounded timeout и остановка process group не оставляют
+неподтверждённый controller при ошибке запуска. После `READY` controller
+продолжает работу независимо от завершения launcher-процесса.
 
 Telegram берётся из стандартного `~/.config/gocube-alphazero/telegram.env`
 или переменных `GOCUBE_TELEGRAM_BOT_TOKEN` / `GOCUBE_TELEGRAM_CHAT_ID`.

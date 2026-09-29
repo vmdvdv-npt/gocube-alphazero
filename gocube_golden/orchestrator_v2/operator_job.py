@@ -25,7 +25,7 @@ _COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 TRAINING_DEFAULTS = {
     "iterations": 5, "games_per_iteration": 384, "mcts_simulations": 200,
     "learning_rate": 0.00005, "updates_per_iteration": 160,
-    "batch_size": 64, "replay_generations": 6,
+    "batch_size": 64, "gradient_clip": 1.0, "replay_generations": 6,
 }
 ARENA_DEFAULTS = {"every_iterations": 5, "games": 192, "mcts_simulations": 128}
 EXECUTION_DEFAULTS = {"device": "cuda", "workers": 16}
@@ -59,6 +59,9 @@ def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
         if key == "learning_rate":
             if type(number) not in (float, int) or not math.isfinite(number) or number <= 0:
                 raise ValueError("learning_rate must be a finite positive number")
+        elif key == "gradient_clip":
+            if type(number) not in (float, int) or not math.isfinite(number) or number <= 0:
+                raise ValueError("gradient_clip must be a finite positive number")
         else:
             _integer(number, key, minimum=0 if key == "iterations" else 1)
     if result["batch_size"] != 64:
@@ -178,7 +181,8 @@ def _effective(base, training, arena):
     cfg = copy.deepcopy(base)
     cfg["self_play"].update(games_per_iteration=training["games_per_iteration"], mcts_simulations=training["mcts_simulations"])
     cfg["training"].update(learning_rate=training["learning_rate"], batch_size=training["batch_size"],
-                           optimizer_steps_per_iteration=training["updates_per_iteration"])
+                           optimizer_steps_per_iteration=training["updates_per_iteration"],
+                           gradient_clip=training["gradient_clip"])
     cfg["replay"].update(generations=training["replay_generations"], cap=None)
     cfg["execution"].update(EXECUTION_DEFAULTS)
     cfg["arena"] = {"komi": 1.5, "games": arena["games"], "simulations": arena["mcts_simulations"],

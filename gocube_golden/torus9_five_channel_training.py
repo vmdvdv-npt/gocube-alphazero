@@ -33,7 +33,7 @@ SCHEMA = 'torus9-five-channel-ordinary-training-v1'
 
 
 class OrdinaryTrainer(AdaptationTrainer):
-    def __init__(self, checkpoint, *, learning_rate, seed, device='cpu'):
+    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, device='cpu'):
         raw = torch.load(checkpoint, map_location='cpu', weights_only=False)
         meta = raw['metadata']
         assert_new_komi_training_checkpoint_metadata(meta)
@@ -53,6 +53,11 @@ class OrdinaryTrainer(AdaptationTrainer):
         self.learning_rate = float(learning_rate)
         if not math.isfinite(self.learning_rate) or self.learning_rate <= 0:
             raise ValueError('Invalid learning rate')
+        configured_clip = meta.get('gradient_clip', 1.0) if gradient_clip is None else gradient_clip
+        if (type(configured_clip) not in (float, int) or
+                not math.isfinite(configured_clip) or configured_clip <= 0):
+            raise ValueError('Invalid gradient clip')
+        self.gradient_clip = float(configured_clip)
         for group in self.optimizer.param_groups:
             group['lr'] = self.learning_rate
             if group['weight_decay'] != 0:
@@ -123,7 +128,7 @@ class OrdinaryTrainer(AdaptationTrainer):
         if not torch.isfinite(total):
             raise FloatingPointError('Nonfinite ordinary loss')
         total.backward()
-        grad = torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1., error_if_nonfinite=True)
+        grad = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip, error_if_nonfinite=True)
         self.optimizer.step()
         self.update += 1
         self.validate_clocks()
@@ -131,6 +136,7 @@ class OrdinaryTrainer(AdaptationTrainer):
             raise FloatingPointError('Nonfinite ordinary weights')
         return {'update': self.update, 'losses': {k: float(v.detach()) for k,v in losses.items()},
                 'grad_norm_before_clip': float(grad), 'learning_rate': self.learning_rate,
+                'gradient_clip': self.gradient_clip,
                 'l2_sp_coefficient': 0.}
 
     def save(self, path, *, config_hash, parent, replay_buckets):
@@ -140,7 +146,8 @@ class OrdinaryTrainer(AdaptationTrainer):
                 'model_hash': model_hash(self.model), 'komi': 1.5, 'training_ready': True,
                 'target_fingerprint': FINGERPRINT, 'ordinary_schema': SCHEMA,
                 'ordinary_update': self.update, 'config_hash': config_hash,
-                'parent_checkpoint': parent, 'learning_rate': self.learning_rate}
+                'parent_checkpoint': parent, 'learning_rate': self.learning_rate,
+                'gradient_clip': self.gradient_clip}
         save_torch(path, {'metadata': meta, 'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(), 'ordinary_update': self.update,
             'clock_origin': self.clock_origin, 'seed': self.seed, 'replay_buckets': replay_buckets})
@@ -175,8 +182,12 @@ def load_replay(buckets, *, split):
 def validate_config(config):
     if config.compatibility.get('input_channels') != 5:
         raise ValueError('Legacy 6-channel Torus9 training is retired; use a 5CH checkpoint')
+    gradient_clip = config.training.get('gradient_clip', 1.0)
+    if (type(gradient_clip) not in (float, int) or
+            not math.isfinite(gradient_clip) or gradient_clip <= 0):
+        raise ValueError('gradient_clip must be a finite positive number')
     expected = {'batch_size': 64, 'optimizer': 'Adam', 'weight_decay': 0.0,
-                'l2_sp': False, 'gradient_clip': 1.0}
+                'l2_sp': False}
     if any(config.training.get(k) != v for k,v in expected.items()):
         raise ValueError('Unsupported ordinary training contract')
     if config.self_play.get('komi') != 1.5 or config.replay.get('cap') is not None:
@@ -219,7 +230,9 @@ def run_generation(resolved):
     seed = int(cfg.execution['training_master_seed'])
     device = str(cfg.execution['device'])
     torch.set_num_threads(1)
-    trainer = OrdinaryTrainer(parent.path, learning_rate=cfg.training['learning_rate'], seed=seed, device=device)
+    trainer = OrdinaryTrainer(parent.path, learning_rate=cfg.training['learning_rate'],
+                               gradient_clip=cfg.training.get('gradient_clip', 1.0),
+                               seed=seed, device=device)
     raw_parent = torch.load(parent.path, map_location='cpu', weights_only=False)
     if raw_parent['metadata'].get('ordinary_schema') == SCHEMA:
         buckets = raw_parent['replay_buckets']
@@ -324,7 +337,9 @@ def run_generation(resolved):
         checkpoint_path = root / 'checkpoints' / f'M{generation}.pt'
         trainer.save(checkpoint_path, config_hash=cfg.fingerprint,
                      parent=parent.ref.to_dict(), replay_buckets=buckets)
-        reloaded = OrdinaryTrainer(checkpoint_path,learning_rate=cfg.training['learning_rate'],seed=seed,device='cpu')
+        reloaded = OrdinaryTrainer(checkpoint_path, learning_rate=cfg.training['learning_rate'],
+                                   gradient_clip=cfg.training.get('gradient_clip', 1.0),
+                                   seed=seed, device='cpu')
         if model_hash(reloaded.model) != model_hash(trainer.model):
             raise ValueError('Checkpoint reload changed model')
         for name,p in trainer.model.named_parameters():
