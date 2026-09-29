@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from gocube_golden.orchestrator_v2 import ArenaRunner
+from gocube_golden.orchestrator_v2 import production_entrypoint
 from gocube_golden.orchestrator_v2.production_entrypoint import run_spec
 
 
@@ -16,6 +17,16 @@ ROOT = Path(__file__).resolve().parents[1]
 def _run_legacy_entrypoint(path: str, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, path, *args],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _run_v2_entrypoint(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "gocube_golden.orchestrator_v2.production_entrypoint", *args],
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -74,3 +85,28 @@ def test_standalone_v2_arena_run_spec_is_disabled(mode: str) -> None:
             "mode": mode,
             mode: {},
         })
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["run", "continuous", "performance-tuning", "experiment", "komi-calibration", "workflow"],
+)
+def test_public_production_launch_commands_are_disabled(command: str) -> None:
+    result = _run_v2_entrypoint(
+        command,
+        "/tmp/configuration-is-not-read.json",
+    )
+
+    assert result.returncode != 0
+    assert "single gocube-operator-job-v1 file" in result.stderr
+
+
+def test_hidden_workflow_controller_requires_operator_job_permit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        production_entrypoint,
+        "_workflow_spec_from_payload",
+        lambda _payload: type("Spec", (), {"topology": "torus9", "workflow_id": "job"})(),
+    )
+
+    with pytest.raises(RuntimeError, match="execution permit"):
+        production_entrypoint._require_operator_workflow_controller({})

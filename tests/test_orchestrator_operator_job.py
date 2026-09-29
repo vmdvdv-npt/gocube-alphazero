@@ -1,4 +1,6 @@
 import copy
+import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +8,7 @@ import pytest
 from gocube_golden.artifact_graph import CheckpointRef, EffectiveConfig
 from gocube_golden.orchestrator_v2 import operator_job as job
 from gocube_golden.orchestrator_v2 import production_entrypoint as entry
+from gocube_golden.orchestrator_v2.execution_permit import PERMIT_ENV
 from gocube_golden.orchestrator_v2.workflow import WorkflowRunner, WorkflowSpec
 
 
@@ -107,12 +110,14 @@ def test_launch_pins_runtime_and_rejects_parameter_drift(parent, tmp_path, monke
     monkeypatch.setattr(ImmutableRuntimeManager, "ensure", lambda self, commit: pins.append(commit) or commit)
     launches = []
     monkeypatch.setattr(entry, "_launch_durable_workflow_controller",
-        lambda path, **kw: launches.append((path, kw)) or {"state": "STARTED"})
+        lambda path, **kw: launches.append((path, kw, json.loads(os.environ[PERMIT_ENV]))) or {"state": "STARTED"})
     entry.launch_operator_job(parameters(), runs_root=tmp_path)
     monkeypatch.setattr(entry, "_entrypoint_code_identity", lambda: "commit-two")
     entry.launch_operator_job(parameters(), runs_root=tmp_path)
     assert pins == ["commit-one", "commit-one"]
     assert launches[1][1]["runtime"] == "commit-one"
+    assert launches[1][2]["action_type"] == "workflow-controller"
+    assert launches[1][2]["run_id"] == "five-iterations"
     altered = copy.deepcopy(parameters())
     altered["training"]["learning_rate"] = 1e-5
     with pytest.raises(ValueError, match="different parameters"):

@@ -24,7 +24,12 @@ from .artifact_resolver import ArtifactResolver
 from .continuous_training import ContinuousTrainingConfig, ContinuousTrainingRunnerV2
 from .contracts import StartsetRef
 from .generation_runner import OutputLineage
-from .execution_permit import _production_authority, active_authority
+from .execution_permit import (
+    _child_execution_permit,
+    _production_authority,
+    active_authority,
+    require_child_execution_permit,
+)
 from .experiment_plan import ExperimentConfig
 from ..scenarios.calibration import CalibrationArm, CalibrationRunner
 from ..scenarios.experiment.runner import ExperimentRunnerV2
@@ -988,6 +993,19 @@ def _launch_durable_workflow_controller(
     }
 
 
+def _require_operator_workflow_controller(payload: Mapping[str, object]) -> WorkflowSpec:
+    """Authorize only the workflow controller child minted by ``job``."""
+    spec = _workflow_spec_from_payload(payload)
+    require_child_execution_permit(
+        "production_entrypoint workflow --controller",
+        action_type="workflow-controller",
+        topology=spec.topology,
+        run_id=spec.workflow_id,
+        code_identity=_entrypoint_code_identity(),
+    )
+    return spec
+
+
 def _require_committed_job_code() -> None:
     dirty = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all", "--", "gocube_golden", "tools"],
@@ -1038,7 +1056,21 @@ def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path 
             path = plan_root / name
             if not path.exists():
                 atomic_write_text(path, canonical_json(value) + "\n")
-        return _launch_durable_workflow_controller(plan_root / "resolved.json", runs_root=root, runtime=runtime)
+        resolved_spec = _workflow_spec_from_payload(resolved)
+        with _authority(
+            mode="workflow",
+            topology=resolved_spec.topology,
+            run_id=resolved_spec.workflow_id,
+        ):
+            with _child_execution_permit(
+                action_type="workflow-controller",
+                topology=resolved_spec.topology,
+                run_id=resolved_spec.workflow_id,
+                code_identity=commit,
+            ):
+                return _launch_durable_workflow_controller(
+                    plan_root / "resolved.json", runs_root=root, runtime=runtime
+                )
 
 
 def run_workflow_from_config(
@@ -1118,6 +1150,16 @@ def run_workflow_from_config(
 
 def run_spec(payload: Mapping[str, object], *, runs_root: str | Path | None = None, **runner_kwargs: Any) -> object:
     spec = RunSpecV2.from_dict(payload)
+    if active_authority() is None:
+        if spec.mode in {RunMode.ARENA, RunMode.EVALUATION}:
+            raise RuntimeError(
+                "Standalone Arena run-specs are disabled; launch Arena through "
+                "the Orchestrator V2 workflow/operator controller."
+            )
+        raise RuntimeError(
+            "Direct V2 run-specs are disabled; launch production work through "
+            "the single gocube-operator-job-v1 file."
+        )
     wrapped = {spec.mode.value: dict(spec.payload)}
     if spec.mode is RunMode.CONTINUOUS:
         return run_continuous_from_config(wrapped, runs_root=runs_root, **runner_kwargs)
@@ -1184,6 +1226,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.kind == "drain":
         print(json.dumps(drain_notifications(args.root, timeout=args.timeout), sort_keys=True))
         return 0
+    if args.kind == "workflow" and not getattr(args, "controller", False):
+        raise SystemExit(
+            "Direct workflow launches are disabled; use the single "
+            "gocube-operator-job-v1 file."
+        )
+    if args.kind in {"run", "continuous", "performance-tuning", "experiment", "komi-calibration"}:
+        raise SystemExit(
+            "Direct V2 launches are disabled; use the single "
+            "gocube-operator-job-v1 file."
+        )
     payload = load_v2_config(args.config)
     result: object
     if args.kind == "job":
@@ -1198,6 +1250,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_performance_tuning_from_config(payload, runs_root=args.runs_root)
     elif args.kind == "workflow":
         if getattr(args, "controller", False):
+            _require_operator_workflow_controller(payload)
             result = run_workflow_from_config(payload, runs_root=args.runs_root)
         else:
             result = _launch_durable_workflow_controller(
