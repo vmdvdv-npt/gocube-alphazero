@@ -7,6 +7,8 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from gocube_golden.artifact_graph import (
     ArtifactRef,
     CheckpointNode,
@@ -706,3 +708,56 @@ def test_completion_reports_reason_on_each_launch(tmp_path: Path) -> None:
         assert event.payload["reason"] == "iteration limit reached"
         assert event.payload["checkpoint"] == "M20"
         assert "🛑 ALL STOPPED" in format_event(event)
+
+
+@pytest.mark.parametrize("generations", [None, 1, 3])
+def test_soft_stop_during_arena_stops_before_next_generation_or_completion(
+    tmp_path: Path, generations: int | None,
+) -> None:
+    from gocube_golden.notifications import RecordingEventSink, format_event
+
+    sink = RecordingEventSink()
+    runner, train, arena, _resolver, _parent = _runner(
+        tmp_path, generations=generations, cadence=1
+    )
+    runner._event_sink = sink
+    # Bound the regression case where the runner incorrectly starts M22.
+    train.stop_at = 22
+    original_arena_run = arena.run
+
+    def stop_during_arena(request):
+        result = original_arena_run(request)
+        runner.request_soft_stop(reason="operator during Arena")
+        return result
+
+    arena.run = stop_during_arena
+    result = runner.run()
+
+    assert result.state == "SOFT_STOPPED"
+    assert result.final_checkpoint.generation == 21
+    assert train.calls == [21]
+    assert len(arena.requests) == 1
+    assert len(result.arenas) == 1
+    state = json.loads(runner.state_path.read_text())
+    assert state["state"] == "SOFT_STOPPED"
+    assert state["soft_stop_requested"] is True
+    assert state["active_generation"] is None
+    assert state["active_phase"] is None
+    assert state["arena_generations"] == [21]
+    assert state["arena_results"][0]["evaluation_id"] == result.arenas[0].evaluation_id
+    assert state["arena_results"][0]["summary"] == dict(result.arenas[0].summary)
+    stopped = [event for event in sink.events if event.event_type == "RUN_STOPPED"]
+    assert len(stopped) == 1
+    assert stopped[0].payload["checkpoint"] == "M21"
+    assert "Reason: soft stop: operator during Arena" in format_event(stopped[0])
+    assert not any(event.event_type == "RUN_COMPLETED" for event in sink.events)
+
+    # The persisted Arena result is reused after an explicit resume.
+    resumed = runner.resume()
+    assert len(arena.requests) == 1
+    if generations == 1:
+        assert resumed.state == "COMPLETED"
+        assert train.calls == [21]
+    else:
+        assert resumed.state == "SOFT_STOPPED"
+        assert train.calls == [21, 22]

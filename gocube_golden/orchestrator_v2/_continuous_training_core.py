@@ -585,6 +585,11 @@ class ContinuousTrainingRunnerV2:
                 arena = self._run_arena(original_parent, current)
                 arenas.append(arena)
                 self._record_arena(state, arena, current.generation)
+                # A stop requested during Arena takes precedence over completion
+                # or another generation. Reuse the safe-stop path above after
+                # durably recording the finished Arena result.
+                if self.soft_stop_path.is_file():
+                    continue
 
             if target is not None and current.generation >= target:
                 state.update(
