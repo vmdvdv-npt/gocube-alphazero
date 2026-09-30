@@ -5,12 +5,23 @@ to make one bounded ``sendMessage`` request and classify its response.
 """
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+
+def format_telegram_html(text: str) -> str:
+    """Escape plain operator text and add Telegram presentation markup."""
+    escaped = html.escape(text, quote=False)
+    escaped = re.sub(r"(?<![A-Za-z0-9])M[0-9]+(?![A-Za-z0-9])", r"<b>\g<0></b>", escaped)
+    if "TRAINING STARTED" in text.split("\n", 1)[0]:
+        escaped = re.sub(r"^(Self-play|Training|Replay|Arena):$", r"<b>\g<0></b>", escaped, flags=re.MULTILINE)
+    return escaped
 
 
 TOKEN_ENV = "GOCUBE_TELEGRAM_BOT_TOKEN"
@@ -103,7 +114,7 @@ class TelegramTransport:
             raise TelegramTransportError("FORMAT_EMPTY", retryable=False)
         if len(text) > 4096:
             raise TelegramTransportError("FORMAT_TOO_LONG", retryable=False)
-        body = json.dumps({"chat_id": self._chat_id, "text": text}, ensure_ascii=False).encode("utf-8")
+        body = json.dumps({"chat_id": self._chat_id, "text": format_telegram_html(text), "parse_mode": "HTML"}, ensure_ascii=False).encode("utf-8")
         request = Request(
             f"{self._endpoint}/bot{self._token}/sendMessage",
             data=body,

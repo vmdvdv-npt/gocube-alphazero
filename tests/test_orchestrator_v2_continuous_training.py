@@ -655,3 +655,54 @@ def test_runner_is_a_coordinator_and_does_not_import_training_engine(tmp_path: P
     assert "torus9_run_driver" not in source
     assert "torch" not in source
     assert "run_generation_v2" not in source
+
+
+def test_terminal_events_include_stop_reason_and_checkpoint(tmp_path: Path) -> None:
+    from gocube_golden.notifications import RecordingEventSink, format_event
+
+    sink = RecordingEventSink()
+    runner, train, arena, _resolver, _parent = _runner(
+        tmp_path, generations=None, cadence=1
+    )
+    runner._event_sink = sink
+    train.stop_at = 21
+    result = runner.run()
+    stopped = [event for event in sink.events if event.event_type == "RUN_STOPPED"]
+    assert result.state == "SOFT_STOPPED"
+    assert arena.requests == []
+    assert len(stopped) == 1
+    assert stopped[0].payload["reason"] == "soft stop: test"
+    assert stopped[0].payload["checkpoint"] == "M21"
+    assert format_event(stopped[0]).startswith("🛑 ALL STOPPED — GoCube AlphaZero\n")
+    assert "Reason: soft stop: test" in format_event(stopped[0])
+
+    # Stop a second launch at the same safe boundary.
+    original_report_start = runner._report_start
+
+    def stop_on_start(*args):
+        original_report_start(*args)
+        runner.request_soft_stop(reason="operator")
+
+    runner._report_start = stop_on_start
+    runner.run()
+    stopped = [event for event in sink.events if event.event_type == "RUN_STOPPED"]
+    assert len(stopped) == 2
+    assert stopped[0].event_id != stopped[1].event_id
+    assert stopped[1].payload["reason"] == "soft stop: operator"
+
+
+def test_completion_reports_reason_on_each_launch(tmp_path: Path) -> None:
+    from gocube_golden.notifications import RecordingEventSink, format_event
+
+    sink = RecordingEventSink()
+    runner, _train, _arena, _resolver, _parent = _runner(tmp_path, generations=0)
+    runner._event_sink = sink
+    runner.run()
+    runner.run()
+    completed = [event for event in sink.events if event.event_type == "RUN_COMPLETED"]
+    assert len(completed) == 2
+    assert completed[0].event_id != completed[1].event_id
+    for event in completed:
+        assert event.payload["reason"] == "iteration limit reached"
+        assert event.payload["checkpoint"] == "M20"
+        assert "🛑 ALL STOPPED" in format_event(event)

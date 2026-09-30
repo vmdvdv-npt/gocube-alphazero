@@ -161,7 +161,7 @@ def test_operator_start_messages_are_multiline_and_resolved() -> None:
         arena_cadence=5,
         arena_config=arena_config,
     )
-    assert training.startswith("TRAINING STARTED — GoCube AlphaZero\n")
+    assert training.startswith("🎬 TRAINING STARTED — GoCube AlphaZero\n")
     assert "\nSelf-play:\n" in training
     assert "\nTraining:\n" in training
     assert "\nReplay:\n" in training

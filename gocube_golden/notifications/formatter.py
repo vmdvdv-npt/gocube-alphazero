@@ -36,8 +36,13 @@ def _ref(value: object) -> str | None:
 
 def _format_arena(event: OperatorEvent) -> str:
     payload = event.payload
-    title = "ARENA COMPLETED" if event.event_type == "ARENA_COMPLETED" else event.event_type.replace("_", " ")
-    lines = [f"{title} — GoCube AlphaZero", ""]
+    title = "🟢 ARENA COMPLETED" if event.event_type == "ARENA_COMPLETED" else event.event_type.replace("_", " ")
+    lines = [f"{title} — GoCube AlphaZero"]
+    if payload.get("wld") is not None:
+        wld = payload.get("wld")
+        if isinstance(wld, (list, tuple)) and len(wld) == 3:
+            _line(lines, "W/L/D", "/".join(str(item) for item in wld))
+    lines.append("")
     _line(lines, "Topology", event.topology)
     _line(lines, "Owner", f"{event.owner_type}/{event.owner_id}")
     _line(lines, "Action", event.action_id)
@@ -46,10 +51,6 @@ def _format_arena(event: OperatorEvent) -> str:
     _line(lines, "Reference", _ref(payload.get("reference")))
     _line(lines, "Candidate lineage", payload.get("candidate_lineage"))
     _line(lines, "Reference lineage", payload.get("reference_lineage"))
-    if payload.get("wld") is not None:
-        wld = payload.get("wld")
-        if isinstance(wld, (list, tuple)) and len(wld) == 3:
-            _line(lines, "W/L/D", "/".join(str(item) for item in wld))
     _line(lines, "Validity", payload.get("validity"))
     _line(lines, "Execution commit", event.execution_code_commit)
     _line(lines, "Report", payload.get("evaluation_report", payload.get("report_ref")))
@@ -89,8 +90,15 @@ def format_event(event: OperatorEvent, *, max_chars: int = DEFAULT_MESSAGE_BUDGE
         text += "\nStop: " + (f"after {budget} iterations" if budget is not None else "operator request")
     elif event.event_type in {"ARENA_STARTED", "ARENA_COMPLETED", "ARENA_FAILED"}:
         text = _format_arena(event)
+    elif event.event_type in {"RUN_STOPPED", "RUN_COMPLETED"}:
+        lines = ["🛑 ALL STOPPED — GoCube AlphaZero", ""]
+        _line(lines, "Reason", event.payload.get("reason") or event.payload.get("legacy_message") or event.event_type.replace("_", " ").lower())
+        _line(lines, "Topology", event.topology)
+        _line(lines, "Lineage", event.owner_id)
+        _line(lines, "Checkpoint", event.payload.get("checkpoint"))
+        text = "\n".join(lines)
     else:
-        title = event.event_type.replace("_", " ")
+        title = "🎬 TRAINING STARTED" if event.event_type == "TRAINING_STARTED" else event.event_type.replace("_", " ")
         lines = [f"{title} — GoCube AlphaZero", ""]
         _line(lines, "Topology", event.topology)
         _line(lines, "Owner", f"{event.owner_type}/{event.owner_id}")
