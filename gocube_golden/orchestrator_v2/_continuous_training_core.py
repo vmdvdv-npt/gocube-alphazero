@@ -538,7 +538,8 @@ class ContinuousTrainingRunnerV2:
             self._notify_operator(
                 "COMPLETED",
                 f"Continuous training already completed at M{current.generation}.",
-                key_suffix=f"completed:{current.generation}",
+                key_suffix=f"completed:{current.generation}:{self._launch_id}",
+                payload={"reason": "iteration limit reached", "checkpoint": f"M{current.generation}"},
             )
             return self._result(state, original_parent, current, committed, arenas)
 
@@ -559,10 +560,18 @@ class ContinuousTrainingRunnerV2:
                     "Soft stop reached a safe generation boundary; lineage remains resumable",
                     generation=current.generation,
                 )
+                try:
+                    stop_request = _read_object(self.soft_stop_path, "soft stop request")
+                except (OSError, RuntimeError, ValueError):
+                    stop_request = {}
                 self._notify_operator(
                     "SOFT_STOPPED",
                     f"Soft stop completed at M{current.generation}; lineage remains resumable.",
-                    key_suffix=f"soft-stopped:{current.generation}",
+                    key_suffix=f"soft-stopped:{current.generation}:{self._launch_id}",
+                    payload={
+                        "reason": "soft stop: " + str(stop_request.get("requested_by", "operator")),
+                        "checkpoint": f"M{current.generation}",
+                    },
                 )
                 return self._result(state, original_parent, current, committed, arenas)
 
@@ -576,6 +585,11 @@ class ContinuousTrainingRunnerV2:
                 arena = self._run_arena(original_parent, current)
                 arenas.append(arena)
                 self._record_arena(state, arena, current.generation)
+                # A stop requested during Arena takes precedence over completion
+                # or another generation. Reuse the safe-stop path above after
+                # durably recording the finished Arena result.
+                if self.soft_stop_path.is_file():
+                    continue
 
             if target is not None and current.generation >= target:
                 state.update(
@@ -590,7 +604,8 @@ class ContinuousTrainingRunnerV2:
                 self._notify_operator(
                     "COMPLETED",
                     f"Continuous training completed at M{current.generation}.",
-                    key_suffix=f"completed:{current.generation}",
+                    key_suffix=f"completed:{current.generation}:{self._launch_id}",
+                    payload={"reason": "iteration limit reached", "checkpoint": f"M{current.generation}"},
                 )
                 return self._result(state, original_parent, current, committed, arenas)
 

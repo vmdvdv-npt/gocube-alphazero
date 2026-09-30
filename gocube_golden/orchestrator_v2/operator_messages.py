@@ -35,7 +35,7 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     replay_generations = _pick(replay, "generations", "window")
     replay_cap = _pick(replay, "cap", "positions_cap", "max_positions")
     arena_sims = _pick(arena, "simulations", "mcts_simulations")
-    lines = ["TRAINING STARTED — GoCube AlphaZero", ""]
+    lines = ["🎬 TRAINING STARTED — GoCube AlphaZero", ""]
     _line(lines, "Topology", topology)
     _line(lines, "Lineage", lineage_id)
     _line(lines, "Parent", parent_label)
@@ -93,10 +93,10 @@ def format_arena_completed(*, topology: str, evaluation_id: str, candidate: str,
                            summary: object, execution_code_commit: str | None) -> str:
     data = dict(summary or {})
     telemetry = data.get("telemetry", {})
-    lines = ["ARENA COMPLETED — GoCube AlphaZero", ""]
+    lines = ["🟢 ARENA COMPLETED — GoCube AlphaZero", "W/L/D: " + "/".join(map(str, wld)), ""]
     for label, value in (("Topology", topology), ("Evaluation", evaluation_id),
                          ("Candidate", candidate), ("Reference", reference),
-                         ("Validity", validity), ("W/L/D", "/".join(map(str, wld)))):
+                         ("Validity", validity)):
         _line(lines, label, value)
     _line(lines, "Valid games", _pick(data, "valid_games", "games_valid"))
     _line(lines, "Technical games", _pick(telemetry, "technical_games"))

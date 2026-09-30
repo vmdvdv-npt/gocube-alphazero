@@ -379,3 +379,44 @@ def test_late_rate_limit_restarts_background_delivery(tmp_path):
     assert sent.wait(5)
     dispatcher.close()
     assert transport.calls == 2
+
+
+def test_arena_score_immediately_follows_completed_title():
+    lines = format_event(arena_event()).splitlines()
+    assert lines[:2] == ["🟢 ARENA COMPLETED — GoCube AlphaZero", "W/L/D: 8/8/0"]
+    assert sum(line.startswith("W/L/D:") for line in lines) == 1
+
+
+def test_telegram_request_bolds_sections_and_iterations_and_escapes_values():
+    from gocube_golden.notifications.telegram import TelegramTransport
+
+    bodies = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read(self):
+            return b'{"ok":true,"result":{"message_id":1}}'
+
+    def opener(request, **_kwargs):
+        bodies.append(json.loads(request.data))
+        return Response()
+
+    transport = TelegramTransport("test-token", "test-chat", opener=opener)
+    transport.send("🎬 TRAINING STARTED — GoCube AlphaZero\nParent: M201\nSelf-play:\nTraining:\nReplay:\nArena:\nNetwork: Golden-M201-5CH\nNote: x < y & <b>literal</b>")
+    body = bodies[0]
+    assert body["parse_mode"] == "HTML"
+    assert "Parent: <b>M201</b>" in body["text"]
+    for section in ("Self-play", "Training", "Replay", "Arena"):
+        assert f"<b>{section}:</b>" in body["text"]
+    assert "Golden-<b>M201</b>-5CH" in body["text"]
+    assert "x &lt; y &amp; &lt;b&gt;literal&lt;/b&gt;" in body["text"]
+    transport.send("ARENA STARTED\nCandidate: M202\nReference: M201")
+    assert "Candidate: <b>M202</b>" in bodies[1]["text"]
+    assert "Reference: <b>M201</b>" in bodies[1]["text"]
