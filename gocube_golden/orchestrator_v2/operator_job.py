@@ -519,7 +519,7 @@ def compile_job(value, *, runs_root=None, resolver=None):
         reference = resolve_checkpoint(item["reference"], resolver=resolver)
         _require_five_channel_checkpoint(candidate, "Arena candidate")
         _require_five_channel_checkpoint(reference, "Arena reference")
-        if candidate.topology != reference.topology:
+        if candidate.ref.topology != reference.ref.topology:
             raise ValueError("Arena candidate/reference topologies differ")
         step = _arena_step(job, item, candidate, reference, previous)
         steps.append(step)
