@@ -372,7 +372,7 @@ class NotificationDispatcher:
                 # Even after flush's deadline, save the actual late outcome.
                 # Other dispatchers see the durable reservation and cannot send.
                 self.store.write_delivery(final)
-                if final.status == "RETRY_WAIT":
+                if final.status == "RETRY_WAIT" and self.background:
                     self._ensure_worker()
                     self._wake.set()
             except OSError:
