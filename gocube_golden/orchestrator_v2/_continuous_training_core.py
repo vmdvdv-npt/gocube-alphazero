@@ -693,6 +693,7 @@ class ContinuousTrainingRunnerV2:
             (self.lineage_root / name).mkdir(parents=True, exist_ok=True)
 
     def _persist_operator_metadata(self, parent: ResolvedCheckpointNode) -> None:
+        from ..torus9_pcr import search_description
         manifest_path = self.lineage_root / "manifest.json"
         if not manifest_path.is_file():
             return
@@ -708,6 +709,9 @@ class ContinuousTrainingRunnerV2:
             "self_play_mcts_simulations": self_play.get(
                 "mcts_simulations", self_play.get("simulations")
             ),
+            **({'self_play_search_mode': 'pcr', 'self_play_pcr': dict(self_play['pcr']),
+                'self_play_search_description': search_description(self_play)}
+               if self_play.get('search_mode') == 'pcr' else {}),
             "games_per_generation": self_play.get(
                 "games_per_iteration", self_play.get("games")
             ),

@@ -27,6 +27,7 @@ from .torus9_adaptation import (
     AdaptationModel, AdaptationTrainer, FINGERPRINT, activation,
     game_targets, save_torch, selfplay, validate_game,
 )
+from .torus9_pcr import position_telemetry, resolve_search_mode, search_description
 from .torus9_new_komi_guard import assert_new_komi_training_checkpoint_metadata
 
 SCHEMA = 'torus9-five-channel-ordinary-training-v1'
@@ -194,8 +195,13 @@ def validate_config(config):
         raise ValueError('Ordinary training requires komi=1.5 and uncapped replay')
     if int(config.replay['generations']) <= 0:
         raise ValueError('Replay window must be positive')
+    caps = resolve_search_mode(config.self_play)
+    if caps is None:
+        value = config.self_play.get('mcts_simulations')
+        if type(value) is not int or value <= 0:
+            raise ValueError('Generation budgets must be positive integers')
     for value in (config.training['optimizer_steps_per_iteration'],
-                  config.self_play['games_per_iteration'], config.self_play['mcts_simulations'],
+                  config.self_play['games_per_iteration'],
                   config.execution['workers']):
         if type(value) is not int or value <= 0:
             raise ValueError('Generation budgets must be positive integers')
@@ -223,6 +229,7 @@ def run_generation(resolved):
     validate_config(cfg)
     if resolved.execution_overrides:
         raise ValueError('5CH execution overrides are not supported')
+    caps = resolve_search_mode(cfg.self_play)
     root, generation = resolved.output_lineage.root, resolved.generation
     parent = resolved.parent_checkpoint
     if file_sha256(parent.path) != parent.ref.sha256:
@@ -274,6 +281,7 @@ def run_generation(resolved):
     thread.start()
     try:
         fresh_shards = []
+        shard_telemetry = []
         games_count = int(cfg.self_play['games_per_iteration'])
         for offset in range(0, games_count, 128):
             number = min(128, games_count-offset)
@@ -286,12 +294,15 @@ def run_generation(resolved):
                 if saved['request'] != expected or file_sha256(path) != saved['shard']['sha']:
                     raise ValueError('Saved self-play shard identity mismatch')
                 fresh_shards.append(saved['shard'])
+                if caps is not None:
+                    shard_telemetry.append(saved['pcr_telemetry'])
                 continue
             mark('selfplay', offset, games_count)
             ids = [f'{root.name}-g{generation:04d}-game-{i:04d}' for i in range(offset,offset+number)]
             result = selfplay(trainer.model, checkpoint=parent.path, run_id=root.name, ids=ids,
                 seed=int(cfg.execution['selfplay_master_seed']), device=device,
-                workers=int(cfg.execution['workers']), simulations=int(cfg.self_play['mcts_simulations']),
+                workers=int(cfg.execution['workers']), simulations=caps.full_simulations if caps else int(cfg.self_play['mcts_simulations']),
+                **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {}),
                 progress=lambda d,n: mark('selfplay',offset+d,games_count))
             raw_path = path.with_suffix('.games.jsonl.gz')
             raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -304,17 +315,28 @@ def run_generation(resolved):
             for i, record in enumerate(result.records):
                 mark('target-build', offset+i,games_count)
                 game = game_targets(record)
+                if game is None:
+                    continue
                 game['split'] = 'train'
                 validate_game(game)
                 games.append(game)
-            if len(games) != number:
+            if len(result.records) != number:
                 raise ValueError('Incomplete self-play batch')
             save_torch(path, {'contract': FINGERPRINT, 'actor_hash': model_hash(trainer.model),
                 'games': games, 'raw_games_sha': file_sha256(raw_path), 'generation': generation,
-                'selfplay_simulations': cfg.self_play['mcts_simulations']})
+                'selfplay_simulations': None if caps else cfg.self_play['mcts_simulations'],
+                **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {})})
             shard = {'path': str(path), 'sha': file_sha256(path), 'games': number}
-            atomic_write_json(path.with_suffix('.telemetry.json'), result.telemetry)
-            atomic_write_json(identity_path, {'request': expected, 'shard': shard})
+            telemetry = dict(result.telemetry)
+            pcr_telemetry = position_telemetry(result.records, caps) if caps else {}
+            if caps:
+                if pcr_telemetry['training_positions'] != sum(len(g['score']) for g in games):
+                    raise ValueError('PCR learner position count drift')
+                shard_telemetry.append(pcr_telemetry)
+            telemetry.update(pcr_telemetry)
+            atomic_write_json(path.with_suffix('.telemetry.json'), telemetry)
+            atomic_write_json(identity_path, {'request': expected, 'shard': shard,
+                **({'pcr_telemetry': pcr_telemetry} if caps else {})})
             fresh_shards.append(shard)
             del result, games
         fresh_path = root / 'replay' / f'iter-{generation:02d}-fresh.json'
@@ -354,6 +376,14 @@ def run_generation(resolved):
                    'learning_rate':cfg.training['learning_rate'],'replay_generations':len(buckets),
                    'replay_positions':sum(len(g['score']) for g in games),
                    'validation':result_validation,'checkpoint_reload_verified':True}
+        if caps:
+            counts = {key: sum(t[key] for t in shard_telemetry) for key in (
+                'pcr_full_positions', 'pcr_cheap_positions', 'training_positions', 'raw_positions')}
+            summary.update(counts, search_mode='pcr', pcr=dict(cfg.self_play['pcr']),
+                pcr_full_fraction=counts['pcr_full_positions'] / counts['raw_positions'] if counts['raw_positions'] else 0.,
+                pcr_cheap_fraction=counts['pcr_cheap_positions'] / counts['raw_positions'] if counts['raw_positions'] else 0.,
+                pcr_full_simulations=caps.full_simulations, pcr_cheap_simulations=caps.cheap_simulations,
+                nominal_mean_simulations=caps.nominal_mean_simulations)
         atomic_write_json(summary_path,summary)
         paths = {'checkpoint':checkpoint_path, 'checkpoint_metadata':checkpoint_path.with_suffix('.metadata.json'),
                  'fresh_replay':fresh_path,'rolling_replay':rolling_path,'training_metrics':training_path,'summary':summary_path}
@@ -406,4 +436,6 @@ def write_block_report(result):
              f'SHA: {result.final_checkpoint.ref.sha256}', '',
              '## Арена', '', '```json', json.dumps(arenas,ensure_ascii=False,indent=2), '```', '',
              'Блок завершён. Следующий блок автоматически не запускается.']
+    if rows[-1].get('search_mode') == 'pcr':
+        lines[2:2] = [search_description(rows[-1]), '']
     atomic_write_text(root / 'reports' / 'block-report.md', '\n'.join(lines)+'\n')

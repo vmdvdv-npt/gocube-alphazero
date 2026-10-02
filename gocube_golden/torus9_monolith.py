@@ -652,8 +652,19 @@ class Torus9SelfPlayPosition:
     selected_action: int | str
     search_seed: int
     model_hash: str
+    search_mode: str = 'fixed'
+    search_simulations: int | None = None  # Historical records have no cap metadata.
+    training_eligible: bool = True
 
     def validate(self, expected_model_hash: str | None = None) -> None:
+        if self.search_mode not in ('fixed', 'full', 'cheap'):
+            raise ValueError('Invalid Torus9 position search mode')
+        if type(self.training_eligible) is not bool or self.training_eligible != (self.search_mode != 'cheap'):
+            raise ValueError('Torus9 position training eligibility drift')
+        if self.search_simulations is not None and (type(self.search_simulations) is not int or self.search_simulations <= 0):
+            raise ValueError('Invalid Torus9 position simulation cap')
+        if self.search_mode != 'fixed' and self.search_simulations is None:
+            raise ValueError('PCR position requires explicit simulation cap')
         state = torus9_state_from_identity(self.state)
         if self.side_to_move != state.side_to_move.name or self.ply <= 0:
             raise ValueError("Torus 9×9 self-play position provenance drift")
@@ -734,6 +745,8 @@ def torus9_build_replay_samples(game: Torus9SelfPlayGameRecord) -> tuple[dict[st
         raise ValueError("Torus 9×9 replay did not reach DOUBLE_PASS")
     samples: list[dict[str, object]] = []
     for position in game.positions:
+        if not position.training_eligible:
+            continue
         sample_state = torus9_state_from_identity(position.state)
         context = prepare_legal_actions(sample_state)
         observation = build_torus9_observation(sample_state, legal_context=context)

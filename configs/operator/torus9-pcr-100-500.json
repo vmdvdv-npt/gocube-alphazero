@@ -1,0 +1,29 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "torus9-pcr-100-500-example",
+  "parent": "torus9-m137-5ch-komi15-adaptation-20260927-v1/update-2400",
+  "training": {
+    "iterations": 5,
+    "learning_rate": 5e-05,
+    "games_per_iteration": 384,
+    "mcts_simulations": 200,
+    "updates_per_iteration": 160,
+    "batch_size": 64,
+    "gradient_clip": 1.0,
+    "replay_generations": 6
+  },
+  "arena": {
+    "every_iterations": 5,
+    "games": 192,
+    "mcts_simulations": 128
+  },
+  "ab_tests": [],
+  "self_play": {
+    "search_mode": "pcr",
+    "pcr": {
+      "cheap_simulations": 100,
+      "full_simulations": 500,
+      "full_probability": 0.25
+    }
+  }
+}

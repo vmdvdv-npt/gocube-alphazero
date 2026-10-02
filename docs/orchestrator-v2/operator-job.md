@@ -62,6 +62,49 @@ global gradient norm clipping learner-а. Если поле не указано,
 Неизвестные поля и неподдерживаемые значения — ошибка до старта, включая A/B.
 Полей для скриптов, команд, отключения уведомлений или смены кода нет.
 
+## Playout Cap Randomization (PCR)
+
+Готовый пример без запуска: `configs/operator/torus9-pcr-100-500.json`.
+В простом операторском JSON добавьте отдельный объект:
+
+```json
+"self_play": {
+  "search_mode": "pcr",
+  "pcr": {
+    "cheap_simulations": 100,
+    "full_simulations": 500,
+    "full_probability": 0.25
+  }
+}
+```
+
+Перед каждым root search Torus9 выбирает full/cheap по seed партии, ply и
+отдельному versioned PCR namespace, независимо от порядка workers. Cheap:
+100 sims и root noise OFF; full: 500 sims и обычный root noise ON. Номинальное
+среднее — 200 sims/ход. Temperature schedule остаётся одинаковым. Caps должны
+быть положительными целыми, full больше cheap, probability строго между 0 и 1.
+Значения 100/500/0.25 — пример, а не ограничение.
+
+При отсутствующем `self_play` или `"search_mode": "fixed"` используется
+`training.mcts_simulations`. В PCR это поле не определяет caps; caps задаются
+только объектом `pcr`. PCR применяется и к A/B arms данного job. Арена остаётся
+с собственным фиксированным бюджетом.
+
+Raw `.games.jsonl.gz` хранит все ходы с `search_mode`, `search_simulations` и
+`training_eligible`. Learner `.pt` содержит только full-позиции: targets policy,
+WDL, ownership и score для cheap не строятся. Полностью cheap партии остаются
+только в raw storage. Terminal targets вычисляются по всей trajectory.
+Исторический fixed replay читается как прежде и не переписывается.
+
+PCR параметры входят в effective config, fingerprint, manifest и shard resume
+identity. Изменение параметров требует нового `run_id`. Новый lineage ссылается
+на родительский checkpoint по существующей identity/path/SHA без его копирования.
+Raw и новый replay сохраняются в существующем lineage-owned storage. Сведения
+о PCR показываются при старте и в block report; `.telemetry.json` каждого shard
+и generation summary содержат full/cheap counts/fractions, caps, nominal mean,
+`raw_positions` и `training_positions` (число новых learner позиций).
+Доля full в маленьком shard может отличаться от заданной вероятности.
+
 ## A/B
 
 Добавьте, например:

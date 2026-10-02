@@ -5,7 +5,7 @@ is provided by the existing cooperative self-play and arena engines.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, fields
 import copy
 import os
 from pathlib import Path
@@ -23,6 +23,7 @@ from .process_supervision import atomic_write_json
 from .selfplay_engine import SharedMemorySpec, SelfPlayEngineConfig, run_cooperative_selfplay
 from .torus9_m137_5ch import Torus9M137FiveChannelGraphNet, build_m137_five_channel_observation
 from .torus9_new_komi_guard import assert_new_komi_training_model
+from .torus9_pcr import PlayoutCapRandomization, resolve_search_mode
 from .torus9_run_owned import RunOwnedTorus9SelfPlaySearchContract
 from .torus9_selfplay import (Torus9SelfPlayAdapter, Torus9SelfPlayWorkerContext,
     _decode_torus9_shared_output)
@@ -67,6 +68,18 @@ class AdaptationSearchContract(RunOwnedTorus9SelfPlaySearchContract):
         return sha256_fingerprint({'target': FINGERPRINT, 'search': asdict(self)})
 
 
+@dataclass(frozen=True)
+class PCRSearchContract(AdaptationSearchContract):
+    pcr: PlayoutCapRandomization | None = None
+
+    def validate(self):
+        AdaptationSearchContract(**{
+            f.name: getattr(self, f.name) for f in fields(AdaptationSearchContract)
+        }).validate()
+        if not isinstance(self.pcr, PlayoutCapRandomization):
+            raise ValueError('PCR search requires resolved playout caps')
+
+
 def write_observation(payload, destination):
     state, context = payload
     if state.komi != 1.5:
@@ -75,7 +88,11 @@ def write_observation(payload, destination):
 
 
 class AdaptationSelfPlayAdapter(Torus9SelfPlayAdapter):
-    def __init__(self, model, *, run_id, checkpoint, seed, device, simulations=200):
+    def __init__(self, model, *, run_id, checkpoint, seed, device, simulations=200, search_mode='fixed', pcr=None):
+        caps = resolve_search_mode({'search_mode': search_mode, 'pcr': pcr})
+        contract = (AdaptationSearchContract(simulations=simulations, komi=1.5) if caps is None
+                    else PCRSearchContract(simulations=simulations, komi=1.5, pcr=caps))
+        contract.validate()
         assert_new_komi_training_model(model)
         self.model = model
         self.device = torch.device(device)
@@ -87,7 +104,7 @@ class AdaptationSelfPlayAdapter(Torus9SelfPlayAdapter):
             run_id=run_id, model_checkpoint_label=Path(checkpoint).stem,
             checkpoint_artifact_hash=file_sha256(checkpoint), master_seed=seed,
             profile_fingerprint=FINGERPRINT, code_identity=capture_code_identity(),
-            contract=AdaptationSearchContract(simulations=simulations, komi=1.5),
+            contract=contract,
             profile_id=core.TORUS9_CURRENT_PROFILE_ID, expected_model_hash=model_hash(model))
         self.shared_memory = SharedMemorySpec(
             observation_shape=(5, 81), policy_size=82, wdl_size=3,
@@ -95,11 +112,12 @@ class AdaptationSelfPlayAdapter(Torus9SelfPlayAdapter):
 
 
 def selfplay(model, *, checkpoint, run_id, ids, seed, device='cuda', workers=16,
-             simulations=200, progress=None):
+             simulations=200, progress=None, search_mode='fixed', pcr=None):
     from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
     require_engine_execution('gocube_golden/torus9_adaptation.py:selfplay', action='selfplay', topology='torus9')
     adapter = AdaptationSelfPlayAdapter(model, run_id=run_id, checkpoint=checkpoint,
-                                        seed=seed, device=device, simulations=simulations)
+                                        seed=seed, device=device, simulations=simulations,
+                                        search_mode=search_mode, pcr=pcr)
     return run_cooperative_selfplay(
         ids, adapter=adapter,
         engine_config=SelfPlayEngineConfig(workers=workers, inference_batch_cap=64,
@@ -108,7 +126,7 @@ def selfplay(model, *, checkpoint, run_id, ids, seed, device='cuda', workers=16,
         active_games_per_worker=4, progress_callback=progress)
 
 
-def game_targets(game) -> dict:
+def game_targets(game) -> dict | None:
     """Reconstruct formal trajectory; never accept inherited replay targets."""
     game.validate()
     if game.technical_termination or not game.formal_result:
@@ -120,6 +138,8 @@ def game_targets(game) -> dict:
         raise ValueError('Terminal result/trace mismatch')
     fields = {k: [] for k in ('observation', 'pi', 'z', 'ownership', 'score', 'legal', 'visits')}
     for p in game.positions:
+        if not p.training_eligible:
+            continue
         state = core.torus9_state_from_identity(p.state, expected_komi=1.5)
         context = core.prepare_legal_actions(state)
         fields['observation'].append(build_m137_five_channel_observation(state, legal_context=context))
@@ -129,6 +149,8 @@ def game_targets(game) -> dict:
         fields['score'].append(core.torus9_score_target(final, state.side_to_move) / 81.5)
         fields['legal'].append(context.action_mask)
         fields['visits'].append(p.root_visits)
+    if not fields['observation']:
+        return None  # Entirely cheap games remain in raw storage only.
     return {
         'game_id': game.game_id, 'actor_hash': game.model_hash,
         'actor_artifact': game.checkpoint_artifact_hash, 'contract': FINGERPRINT,

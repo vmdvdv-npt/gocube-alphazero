@@ -5,7 +5,7 @@ engine owns only execution; retired training paths are not used here.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import time
 from typing import Any, Mapping, MutableMapping, Sequence
@@ -106,6 +106,8 @@ class _Torus9CooperativeGame:
         self._session: SequentialPUCTSession | None = None
         self._root_noise: _t9.Torus9RootNoiseEvaluator | None = None
         self._nn_evaluations = 0
+        self._search_mode = 'fixed'
+        self._search_simulations = context.contract.simulations
 
     def _finish(self) -> _t9.Torus9SelfPlayGameRecord:
         record = _t9.Torus9SelfPlayGameRecord(
@@ -136,18 +138,23 @@ class _Torus9CooperativeGame:
 
     def _start_search(self) -> None:
         search_seed = derive_seed(self.game_seed, len(self.trace) + 1, "search")
+        caps = getattr(self.context.contract, 'pcr', None)
+        self._search_mode = caps.mode(self.game_seed, len(self.trace) + 1) if caps else 'fixed'
+        self._search_simulations = (
+            caps.full_simulations if self._search_mode == 'full' else caps.cheap_simulations
+        ) if caps else self.context.contract.simulations
         self._root_noise = _t9.Torus9RootNoiseEvaluator(
             None,
             self.state,
             seed=derive_seed(search_seed, "dirichlet"),
             alpha=self.context.contract.dirichlet_alpha,
-        )
+        ) if self._search_mode != 'cheap' else None
         self._session = SequentialPUCTSession(
             self.state,
-            self.context.contract.settings,
+            replace(self.context.contract.settings, simulations=self._search_simulations),
             adapter=_t9.GoldenSearchAdapter(),
             seed=search_seed,
-            evaluation_transform=self._root_noise.transform,
+            evaluation_transform=self._root_noise.transform if self._root_noise is not None else None,
         )
 
     def advance(self) -> InferenceNeed | GameFinished:
@@ -184,6 +191,9 @@ class _Torus9CooperativeGame:
                     selected_action=action,
                     search_seed=search_seed,
                     model_hash=self.context.expected_model_hash,
+                    search_mode=self._search_mode,
+                    search_simulations=self._search_simulations,
+                    training_eligible=self._search_mode != 'cheap',
                 ))
                 self.trace.append(action)
                 try:
