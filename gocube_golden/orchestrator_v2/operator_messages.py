@@ -1,6 +1,8 @@
 """Central operator-facing multiline messages for Orchestrator V2."""
 from __future__ import annotations
 
+from ..torus9_pcr import search_description
+
 
 def _pick(mapping: object, *names: str) -> object | None:
     data = dict(mapping or {}) if hasattr(mapping, "items") else {}
@@ -44,8 +46,8 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     lines.extend(["", "Self-play:"])
     if games is not None:
         lines.append(f"games/generation={games}")
-    if selfplay_sims is not None:
-        lines.append(f"self-play MCTS={selfplay_sims} sims")
+    if selfplay_sims is not None or self_play.get('search_mode') == 'pcr':
+        lines.append(search_description(self_play))
     _line(lines, "Contexts", contexts)
     lines.extend(["", "Training:"])
     if lr is not None:

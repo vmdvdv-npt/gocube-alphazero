@@ -15,6 +15,7 @@ import re
 from ..artifact_graph import CheckpointNode, EffectiveConfig
 from ..artifact_resolver import ArtifactResolver
 from ..provenance import file_sha256
+from ..torus9_pcr import resolve_search_mode
 from ..torus9_five_channel_training import SCHEMA as DRIVER, validate_config
 from .continuous_training import ContinuousTrainingConfig
 from .experiment_plan import ExperimentConfig
@@ -134,7 +135,7 @@ def parse_job(value):
         value,
         {
             "schema", "run_id", "topology", "parent", "training", "arena",
-            "execution", "ab_tests", "arenas",
+            "execution", "ab_tests", "arenas", "self_play",
         },
         "job",
     )
@@ -147,6 +148,10 @@ def parse_job(value):
             "other topologies use the existing V2 run-spec"
         )
 
+    self_play = None
+    if 'self_play' in raw:
+        self_play = _object(raw['self_play'], {'search_mode', 'pcr'}, 'self_play')
+        resolve_search_mode(self_play)
     arena = _arena(raw.get("arena", {}))
     arenas = _arena_runs(raw.get("arenas", []), defaults=arena)
 
@@ -212,6 +217,7 @@ def parse_job(value):
         )
 
     return {
+        **({"self_play": self_play} if self_play is not None else {}),
         "schema": SCHEMA,
         "run_id": raw["run_id"],
         "topology": "torus9",
@@ -339,8 +345,13 @@ def _base_config(parent):
     ).to_dict()
 
 
-def _effective(base, training, arena):
+def _effective(base, training, arena, self_play=None):
     cfg = copy.deepcopy(base)
+    # A new job defaults to fixed even when its parent used PCR.
+    cfg['self_play'].pop('pcr', None)
+    cfg['self_play'].pop('search_mode', None)
+    if self_play is not None:
+        cfg['self_play'].update(copy.deepcopy(self_play))
     cfg["self_play"].update(
         games_per_iteration=training["games_per_iteration"],
         mcts_simulations=training["mcts_simulations"],
@@ -441,7 +452,7 @@ def compile_job(value, *, runs_root=None, resolver=None):
             raise ValueError("Simple jobs cannot launch retired 6-channel training")
 
         arena = job["arena"]
-        main_config = _effective(base, job["training"], arena)
+        main_config = _effective(base, job["training"], arena, job.get("self_play"))
         parent_ref = parent.ref.to_dict()
         if job["training"]["iterations"]:
             config = {
@@ -487,7 +498,7 @@ def compile_job(value, *, runs_root=None, resolver=None):
                         "arm_id": arm,
                         "generations": test["iterations"],
                         "lineage_id": job["run_id"] + "-" + step_id + "-" + arm,
-                        "config": _effective(base, test[arm], test_arena),
+                        "config": _effective(base, test[arm], test_arena, job.get("self_play")),
                     }
                     for arm in ("A", "B")
                 ],
