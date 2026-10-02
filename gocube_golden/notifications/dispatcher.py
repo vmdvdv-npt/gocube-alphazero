@@ -26,7 +26,7 @@ class DeliveryPolicy:
     max_delay_seconds: float = 3600.0
     max_message_chars: int = DEFAULT_MESSAGE_BUDGET
     sender_lock_timeout_seconds: float = 0.0
-    max_attempts: int = 20
+    max_attempts: int = 20  # Compatibility field; explicit HTTP 429 retries remain unbounded.
 
     def delay(self, attempts: int, retry_after: float | None = None) -> float:
         if retry_after is not None:
@@ -260,7 +260,6 @@ class NotificationDispatcher:
         self._utc_clock = utc_clock
         self._sleep = sleeper
         self._wake = threading.Event()
-        self._stop = threading.Event()
         self._close_lock = threading.Lock()
         self._worker_lock = threading.Lock()
         self._closed = False
@@ -294,10 +293,9 @@ class NotificationDispatcher:
 
     def _ensure_worker(self) -> None:
         with self._worker_lock:
-            if self._closed or (self.thread is not None and self.thread.is_alive()):
+            if self.thread is not None and self.thread.is_alive():
                 return
-            self._stop.clear()
-            self.thread = threading.Thread(target=self._worker, name="gocube-notifications", daemon=True)
+            self.thread = threading.Thread(target=self._worker, name="gocube-notifications", daemon=False)
             self.thread.start()
 
     def _mark_blocked(self, event_id: str, code: str) -> None:
@@ -356,7 +354,7 @@ class NotificationDispatcher:
             except TelegramTransportError as exc:
                 # Only an explicit rate-limit rejection proves no message was
                 # accepted. 5xx, network errors and invalid responses do not.
-                safe_retry = exc.code == "HTTP_429" and attempts < self.policy.max_attempts
+                safe_retry = exc.code == "HTTP_429"
                 next_at = self._now() + self.policy.delay(attempts, exc.retry_after)
                 final = DeliveryState(event_id=event.event_id,
                     status="RETRY_WAIT" if safe_retry else (
@@ -374,14 +372,14 @@ class NotificationDispatcher:
                 # Even after flush's deadline, save the actual late outcome.
                 # Other dispatchers see the durable reservation and cannot send.
                 self.store.write_delivery(final)
-                if final.status == "RETRY_WAIT" and self.background and not self._closed:
+                if final.status == "RETRY_WAIT" and self.background:
                     self._ensure_worker()
                     self._wake.set()
             except OSError:
                 self.store._diagnose({"kind": "receipt_persist_failed",
                     "event_id": event.event_id, "at": self._utc_clock()})
 
-        sender = threading.Thread(target=send_once, name="gocube-notification-attempt", daemon=True)
+        sender = threading.Thread(target=send_once, name="gocube-notification-attempt", daemon=False)
         sender.start()
         sender.join(timeout=None if deadline is None else max(0.0, deadline - self._now()))
 
@@ -398,7 +396,7 @@ class NotificationDispatcher:
                 self._attempt(event, state, deadline)
 
     def _worker(self) -> None:
-        while not self._stop.is_set():
+        while True:
             self._drain(self._now() + 0.5)
             self._wake.wait(timeout=0.5)
             self._wake.clear()
@@ -421,7 +419,8 @@ class NotificationDispatcher:
                 return
             self._closed = True
         deadline = self._now() + max(0.0, float(timeout))
-        self._stop.set()
+        # Closing prevents new publications, but does not cancel outstanding
+        # delivery. The non-daemon worker stays alive through safe 429 retries.
         self._wake.set()
         thread = self.thread
         if thread is not None:
