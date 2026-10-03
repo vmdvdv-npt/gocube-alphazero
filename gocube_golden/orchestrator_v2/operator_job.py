@@ -67,7 +67,11 @@ def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
     allowed = set(TRAINING_DEFAULTS) - (set() if allow_iterations else {"iterations"})
     result = {**defaults, **_object(value, allowed, "training")}
     for key, number in result.items():
-        if key == "learning_rate":
+        if key == "iterations" and number is None:
+            # The public operator job uses JSON null for the V2 continuous
+            # runner's existing unbounded generation budget.
+            continue
+        elif key == "learning_rate":
             if type(number) not in (float, int) or not math.isfinite(number) or number <= 0:
                 raise ValueError("learning_rate must be a finite positive number")
         elif key == "gradient_clip":
@@ -204,14 +208,18 @@ def parse_job(value):
             {"id": name, "iterations": iterations, **arms, "arena": checked_arena}
         )
 
+    if training["iterations"] is None and normalized_tests:
+        raise ValueError("Unbounded training cannot be followed by A/B tests")
+
     parent = raw.get("parent")
-    needs_parent = training["iterations"] > 0 or bool(normalized_tests)
+    training_requested = training["iterations"] != 0
+    needs_parent = training_requested or bool(normalized_tests)
     if needs_parent:
         parent = _selector(parent, "parent")
     elif parent is not None:
         parent = _selector(parent, "parent")
 
-    if training["iterations"] == 0 and not normalized_tests and not arenas:
+    if not training_requested and not normalized_tests and not arenas:
         raise ValueError(
             "Job has no work: specify training iterations, A/B tests, or arenas"
         )
@@ -445,7 +453,8 @@ def compile_job(value, *, runs_root=None, resolver=None):
 
     parent = None
     base = None
-    if job["training"]["iterations"] > 0 or job["ab_tests"]:
+    training_requested = job["training"]["iterations"] != 0
+    if training_requested or job["ab_tests"]:
         parent = resolve_parent(job["parent"], resolver=resolver)
         base = _base_config(parent)
         if base["compatibility"].get("input_channels") != 5:
@@ -454,7 +463,7 @@ def compile_job(value, *, runs_root=None, resolver=None):
         arena = job["arena"]
         main_config = _effective(base, job["training"], arena, job.get("self_play"))
         parent_ref = parent.ref.to_dict()
-        if job["training"]["iterations"]:
+        if training_requested:
             config = {
                 "parent_checkpoint": parent_ref,
                 "lineage_id": job["run_id"],
