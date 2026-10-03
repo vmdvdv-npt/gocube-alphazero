@@ -309,9 +309,9 @@ def test_final_verdict_refuses_supported_with_unknown_root_cause_or_mutated_arti
 
 
 def test_audit_paths_remain_under_tmp_and_pure_diagnostics_do_not_write():
-    production_path = Path("/home/codex/projects/gocube-alphazero/runs/torus9/active")
-    before = tuple(production_path.iterdir())
+    repository_path = Path(__file__).resolve().parents[1]
+    before = tuple(repository_path.iterdir())
     with pytest.raises(ValueError, match="under /tmp"):
-        gate.ensure_tmp_path(production_path / "diagnostic.json")
+        gate.ensure_tmp_path(repository_path / "diagnostic.json")
     gate._DIAGNOSTICS.compare_root_traces(_trace_fixture(), _trace_fixture())
-    assert tuple(production_path.iterdir()) == before
+    assert tuple(repository_path.iterdir()) == before
