@@ -243,10 +243,17 @@ def test_generation_resume_reuses_raw_shard_and_filtered_replay(parent, tmp_path
     request = ResolvedGenerationInput(source,1,resolved_cfg,OutputLineage(topology='torus9',lineage_id=root.name,root=root))
     with _test_authority(), pytest.raises(RuntimeError,match='test interruption'):
         ordinary.run_generation(request)
+    committed_identity_path = root/'replay/g0001-0000.identity.json'
+    committed_shard_path = root/'replay/g0001-0000.pt'
+    committed_identity_before = json.loads(committed_identity_path.read_text())
+    committed_identity_sha_before = file_sha256(committed_identity_path)
+    committed_shard_sha_before = file_sha256(committed_shard_path)
     monkeypatch.setattr(ordinary.OrdinaryTrainer,'step',original_step)
     with _test_authority():
         result = ordinary.run_generation(request)
     assert len(calls) == 1
+    assert file_sha256(committed_identity_path) == committed_identity_sha_before
+    assert file_sha256(committed_shard_path) == committed_shard_sha_before
     validate_generation_commit(root=root,lineage_id=root.name,generation=1,
                                reuse_committed_rolling_replay_identity=True)
     summary = json.loads((root/'iter-01-summary.json').read_text())
@@ -266,6 +273,37 @@ def test_generation_resume_reuses_raw_shard_and_filtered_replay(parent, tmp_path
     checkpoint = ArtifactResolver(tmp_path/'runs').checkpoint(result.checkpoint)
     assert checkpoint.effective_config.config.fingerprint == cfg.fingerprint
     assert checkpoint.effective_config.config.self_play['pcr']['cheap_simulations'] == 3
+
+    uninterrupted_root, uninterrupted_cfg = Torus9ProductionLineage(
+        tmp_path/'uninterrupted-runs').prepare(
+            topology='torus9',lineage_id=root.name,parent=source,effective_config=cfg,
+            experiment_id='pcr-test',arm_id='pcr-test')
+    uninterrupted_request = ResolvedGenerationInput(
+        source,1,uninterrupted_cfg,
+        OutputLineage(topology='torus9',lineage_id=uninterrupted_root.name,root=uninterrupted_root))
+    with _test_authority():
+        ordinary.run_generation(uninterrupted_request)
+    assert len(calls) == 2 and calls[0] == calls[1]
+    with gzip.open(uninterrupted_root/'replay/g0001-0000.games.jsonl.gz','rt') as stream:
+        uninterrupted_records = [json.loads(line) for line in stream]
+    assert records == uninterrupted_records
+    uninterrupted_identity = json.loads(
+        (uninterrupted_root/'replay/g0001-0000.identity.json').read_text())
+    assert committed_identity_before['request'] == uninterrupted_identity['request']
+    resumed_shard = torch.load(committed_shard_path,weights_only=False)
+    uninterrupted_shard = torch.load(
+        uninterrupted_root/'replay/g0001-0000.pt',weights_only=False)
+    for key in ('contract','actor_hash','generation','selfplay_simulations','search_mode','pcr'):
+        assert resumed_shard[key] == uninterrupted_shard[key]
+    assert len(resumed_shard['games']) == len(uninterrupted_shard['games'])
+    for resumed_game, uninterrupted_game in zip(resumed_shard['games'],uninterrupted_shard['games']):
+        assert resumed_game.keys() == uninterrupted_game.keys()
+        for key in resumed_game:
+            left, right = resumed_game[key], uninterrupted_game[key]
+            if torch.is_tensor(left):
+                assert torch.equal(left,right), key
+            else:
+                assert left == right, key
 
 
 def test_start_outbox_and_manifest_show_resolved_pcr_without_sending(tmp_path):
