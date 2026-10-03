@@ -13,7 +13,10 @@ from collections import Counter
 from dataclasses import fields
 import gzip
 import hashlib
+import importlib.util
 import json
+import math
+import multiprocessing
 import os
 from pathlib import Path
 import queue
@@ -24,6 +27,15 @@ import time
 from typing import Any, Iterable, Mapping, Sequence
 
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
+_DIAGNOSTICS_PATH = Path(__file__).with_name("scientific_continuation_diagnostics.py")
+_DIAGNOSTICS_SPEC = importlib.util.spec_from_file_location(
+    "scientific_continuation_diagnostics", _DIAGNOSTICS_PATH)
+if _DIAGNOSTICS_SPEC is None or _DIAGNOSTICS_SPEC.loader is None:
+    raise RuntimeError(f"Could not load diagnostics module: {_DIAGNOSTICS_PATH}")
+_DIAGNOSTICS = importlib.util.module_from_spec(_DIAGNOSTICS_SPEC)
+sys.modules[_DIAGNOSTICS_SPEC.name] = _DIAGNOSTICS
+_DIAGNOSTICS_SPEC.loader.exec_module(_DIAGNOSTICS)
 
 EXPECTED_REVISIONS = {
     "A": "3010cc0de2fcb3770cdceb9abad98a66d0ff956c",
@@ -351,15 +363,208 @@ def _target_summaries(records: Sequence[Mapping[str, Any]], target_games: Sequen
     }
 
 
-class _RootAuditFactory:
-    """Picklable test-only wrapper that observes each production root contract."""
+def _trace_observation(request: Any, torch: Any) -> tuple[str, str]:
+    """Materialize the exact Torus9 input through the production observation writer."""
+    from gocube_golden.torus9_adaptation import write_observation
+    observation = torch.empty((5, 81), dtype=torch.float32)
+    write_observation((request.state, request.legal_context), observation)
+    raw = observation.contiguous().view(torch.uint8).numpy().tobytes()
+    return _tensor_sha256(observation, torch), raw.hex()
 
-    def __init__(self, output: Path) -> None:
+
+def _install_tracing_session(owner_module: Any, core: Any, torch: Any):
+    """Build an audit-only Session subclass over the source revision's real PUCT."""
+    from gocube_golden.search import SearchEvaluationRequest
+
+    base = getattr(owner_module, "_continuation_audit_session_base",
+                   owner_module.SequentialPUCTSession)
+    owner_module._continuation_audit_session_base = base
+
+    class TracingSequentialPUCTSession(base):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._audit_trace: dict[str, Any] | None = None
+            self._audit_metadata: dict[str, Any] = {}
+            self._audit_request_count = 0
+            self._audit_next_simulation = 0
+            self._audit_active_simulation: dict[str, Any] | None = None
+            self._audit_root_node = None
+            self._audit_root_eval_seen = False
+
+        def _audit_enabled(self) -> bool:
+            return self._audit_trace is not None
+
+        def _audit_action(self, action: object) -> int | str:
+            return _json_action(action)
+
+        def _audit_state(self, state: Any) -> dict[str, Any]:
+            identity = core.torus9_state_identity(state)
+            return {"identity": identity, "sha256": sha256_json(identity)}
+
+        def _audit_root_visits(self) -> list[int]:
+            if self._audit_root_node is None:
+                return []
+            root = self._audit_root_node
+            actions = self.adapter.action_space(root.state)
+            return [int(root.edges[action].visits) if action in root.edges else 0
+                    for action in actions]
+
+        def _audit_root_priors(self) -> list[float]:
+            if self._audit_root_node is None:
+                return []
+            root = self._audit_root_node
+            actions = self.adapter.action_space(root.state)
+            return [float(root.edges[action].prior) if action in root.edges else 0.0
+                    for action in actions]
+
+        def _audit_eval_request(self, evaluation: Any) -> dict[str, Any]:
+            request = self.pending
+            if not isinstance(request, SearchEvaluationRequest):
+                raise RuntimeError("tracing session resumed without a pending Evaluation request")
+            observation_sha, observation_blob = _trace_observation(request, torch)
+            state = self._audit_state(request.state)
+            legal_mask = [bool(value) for value in request.legal_context.action_mask]
+            policy = [float(value) for value in evaluation.policy]
+            wdl = [float(value) for value in evaluation.wdl]
+            policy_tensor = torch.tensor(policy, dtype=torch.float32)
+            wdl_tensor = torch.tensor(wdl, dtype=torch.float32)
+            row = {
+                "session_request_index": self._audit_request_count,
+                "state_identity": state["identity"], "state_sha256": state["sha256"],
+                "legal_mask_sha256": sha256_json(legal_mask), "legal_mask": legal_mask,
+                "legal_actions": [_json_action(action) for action in request.legal_context.actions],
+                "observation_sha256": observation_sha,
+                "observation_dtype": "float32", "observation_shape": [5, 81],
+                "observation_blob_hex": observation_blob,
+                "policy": policy, "wdl": wdl,
+                "policy_sha256": _tensor_sha256(policy_tensor, torch),
+                "wdl_sha256": _tensor_sha256(wdl_tensor, torch),
+            }
+            self._audit_request_count += 1
+            self._audit_trace["evaluation_requests"].append(row)
+            if self._audit_active_simulation is not None:
+                self._audit_active_simulation["evaluation_request_index"] = row[
+                    "session_request_index"]
+            return row
+
+        def resume(self, evaluation: Any):
+            if not self._audit_enabled():
+                return super().resume(evaluation)
+            row = self._audit_eval_request(evaluation)
+            is_root = not self._audit_root_eval_seen
+            if is_root:
+                self._audit_trace["root_evaluation_request_index"] = row[
+                    "session_request_index"]
+            step = super().resume(evaluation)
+            if is_root:
+                self._audit_root_eval_seen = True
+                self._audit_trace["root_priors"] = self._audit_root_priors()
+                self._audit_trace["root_priors_sha256"] = sha256_json(
+                    self._audit_trace["root_priors"])
+            return step
+
+        def _traverse(self, root: Any):
+            if not self._audit_enabled():
+                return super()._traverse(root)
+            self._audit_root_node = root
+            event: dict[str, Any] = {
+                "simulation_index": self._audit_next_simulation,
+                "puct_decisions": [],
+            }
+            self._audit_root_node = root
+            event["root_visits_before"] = self._audit_root_visits()
+            self._audit_active_simulation = event
+            path, leaf = super()._traverse(root)
+            event["traversal_path"] = [
+                {"state_sha256": self._audit_state(parent.state)["sha256"],
+                 "action": self._audit_action(action)}
+                for parent, action, _edge in path]
+            event["leaf"] = self._audit_state(leaf.state)
+            event["leaf_is_terminal"] = bool(self.adapter.is_terminal(leaf.state))
+            self._audit_trace["simulations"].append(event)
+            return path, leaf
+
+        def _select(self, node: Any):
+            if not self._audit_enabled():
+                return super()._select(node)
+            rng_before = sha256_json(repr(self._rng.getstate()))
+            selected_action, selected_edge = super()._select(node)
+            total_visits = sum(edge.visits for edge in node.edges.values())
+            scale = math.sqrt(total_visits + 1.0)
+            candidates = []
+            for action, edge in node.edges.items():
+                q = edge.q if edge.visits else float(self.settings.fpu)
+                u = float(self.settings.cpuct) * edge.prior * scale / (1.0 + edge.visits)
+                score = q + u
+                candidates.append({
+                    "action": self._audit_action(action),
+                    "action_index": int(self.adapter.action_index(node.state, action)),
+                    "visits": int(edge.visits), "q": float(q),
+                    "q_value_sum": float(edge.value_sum), "prior": float(edge.prior),
+                    "u": float(u), "score": float(score),
+                })
+            candidates.sort(key=lambda item: (-item["score"], item["action_index"]))
+            node_identity = self._audit_state(node.state)
+            root_identity = self._audit_trace["root_identity"]["state_sha256"]
+            if node_identity["sha256"] == root_identity:
+                retained = candidates
+            else:
+                retained = candidates[:2]
+            if self._audit_active_simulation is not None:
+                event = self._audit_active_simulation
+                depth = len(event["puct_decisions"])
+                selected_index = int(self.adapter.action_index(node.state, selected_action))
+                event["puct_decisions"].append({
+                    "depth": depth, "node_state_sha256": node_identity["sha256"],
+                    "node_is_root": node_identity["sha256"] == root_identity,
+                    "rng_state_sha256_before": rng_before,
+                    "candidate_scores": retained,
+                    "selected_action": self._audit_action(selected_action),
+                    "selected_action_index": selected_index,
+                    "selected_edge_visits_before": int(selected_edge.visits),
+                    "selected_edge_q_before": float(
+                        selected_edge.q if selected_edge.visits else float(self.settings.fpu)),
+                    "selected_edge_prior": float(selected_edge.prior),
+                })
+            return selected_action, selected_edge
+
+        def _backup(self, path: Sequence[Any], utility: float) -> float:
+            if not self._audit_enabled():
+                return super()._backup(path, utility)
+            result = super()._backup(path, utility)
+            event = self._audit_active_simulation
+            if event is not None:
+                event["leaf_utility"] = float(utility)
+                event["backup_utility"] = float(result)
+                event["root_visits_after"] = self._audit_root_visits()
+                event["selected_root_edge"] = (
+                    self._audit_action(path[0][1]) if path else None)
+                self._audit_next_simulation += 1
+                self._audit_active_simulation = None
+            return result
+
+    return TracingSequentialPUCTSession
+
+
+class _RootAuditFactory:
+    """Picklable test-only wrapper for root contract and optional search trace."""
+
+    def __init__(self, output: Path, *, trace_game_id: str | None = None,
+                 trace_ply: int = 1, observation_queue: Any = None) -> None:
         self.output = output
+        self.trace_game_id = trace_game_id
+        self.trace_ply = int(trace_ply)
+        self.observation_queue = observation_queue
 
     def __call__(self, context: object, game_id: str, client: object):
+        from gocube_golden import torus9_selfplay as owner_module
+        from gocube_golden import torus9_monolith as core
         from gocube_golden.torus9_selfplay import _make_torus9_cooperative_game
         game = _make_torus9_cooperative_game(context, game_id, client)
+        trace_target = str(game_id) == self.trace_game_id
+        if trace_target:
+            owner_module.SequentialPUCTSession = _install_tracing_session(
+                owner_module, core, core.torch)
         original_start = game._start_search
 
         def observed_start() -> None:
@@ -383,14 +588,125 @@ class _RootAuditFactory:
             with path.open("a", encoding="utf-8") as stream:
                 stream.write(canonical_json(item).decode("utf-8") + "\n")
 
+            if trace_target and int(item["ply"]) == self.trace_ply:
+                session = game._session
+                root_identity = core.torus9_state_identity(game.state)
+                session._audit_metadata = {
+                    "game_id": game.game_id, "ply": self.trace_ply,
+                    "worker_id": int(getattr(client, "worker_id", -1)),
+                    "lane_id": int(getattr(client, "lane_id", -1)),
+                    "pid": os.getpid(), "game_seed": int(game.game_seed),
+                    "search_seed": int(item["search_seed"]),
+                    "root_identity": root_identity,
+                    "root_state_sha256": sha256_json(root_identity),
+                    "simulation_cap": int(item["simulation_cap"]),
+                    "settings": {name: getattr(session.settings, name) for name in
+                                 ("simulations", "cpuct", "fpu", "deterministic_tie_break")
+                                 if hasattr(session.settings, name)},
+                    "noise": {"enabled": noise is not None,
+                              "alpha": None if noise is None else float(noise.alpha),
+                              "epsilon": None if noise is None else float(
+                                  game.context.contract.dirichlet_epsilon),
+                              "seed": None if noise is None else int(
+                                  __import__("gocube_golden.provenance", fromlist=["derive_seed"])
+                                  .derive_seed(int(item["search_seed"]), "dirichlet"))},
+                }
+                session._audit_trace = {
+                    "schema": _DIAGNOSTICS.ROOT_TRACE_SCHEMA,
+                    "game_id": game.game_id, "ply": self.trace_ply,
+                    "worker_id": session._audit_metadata["worker_id"],
+                    "lane_id": session._audit_metadata["lane_id"],
+                    "pid": os.getpid(), "game_seed": int(game.game_seed),
+                    "search_seed": int(item["search_seed"]),
+                    "simulation_cap": int(item["simulation_cap"]),
+                    "root_identity": {"identity": root_identity,
+                                      "state_sha256": session._audit_metadata[
+                                          "root_state_sha256"]},
+                    "settings": session._audit_metadata["settings"],
+                    "noise": session._audit_metadata["noise"],
+                    "evaluation_requests": [], "simulations": [],
+                }
+                game._audit_trace_session = session
+                game._audit_trace_written = False
+
         game._start_search = observed_start
+
+        if trace_target and self.observation_queue is not None:
+            original_advance = game.advance
+
+            def observed_advance():
+                outcome = original_advance()
+                session = getattr(game, "_audit_trace_session", None)
+                if (session is not None and int(len(game.trace) + 1) == self.trace_ply
+                        and getattr(outcome, "payload", None) is not None):
+                    state, legal_context = outcome.payload
+                    class RequestView:
+                        pass
+                    view = RequestView()
+                    view.state, view.legal_context = state, legal_context
+                    observation_sha, _blob = _trace_observation(view, core.torch)
+                    payload_identities[id(outcome.payload)] = {
+                        "game_id": game.game_id, "ply": self.trace_ply,
+                        "session_request_index": len(session._audit_trace[
+                            "evaluation_requests"]),
+                        "observation_sha256": observation_sha,
+                    }
+                session = getattr(game, "_audit_trace_session", None)
+                if (session is not None and session.result is not None
+                        and not game._audit_trace_written):
+                    result = session.result
+                    trace = session._audit_trace
+                    trace.update({
+                        "root_visits": [int(value) for value in result.root_visits],
+                        "pi": [float(value) for value in result.pi],
+                        "selected_action": _json_action(result.action),
+                        "simulations_completed": len(trace["simulations"]),
+                    })
+                    trace_path = self.output / (
+                        f"root-trace-{os.getpid()}-{self.trace_ply:04d}.json")
+                    write_json(trace_path, trace)
+                    stream_path = self.output / (
+                        f"evaluation-stream-{os.getpid()}-{self.trace_ply:04d}.json")
+                    write_json(stream_path,
+                               _DIAGNOSTICS.serialize_evaluation_stream(trace))
+                    game._audit_trace_written = True
+                return outcome
+
+            game.advance = observed_advance
+            payload_identities = getattr(client, "_continuation_audit_payloads", None)
+            if payload_identities is None:
+                payload_identities = {}
+                client._continuation_audit_payloads = payload_identities
+            if not hasattr(client, "_continuation_audit_original_request_shared_batch"):
+                original_request_shared_batch = client.request_shared_batch
+                client._continuation_audit_original_request_shared_batch = (
+                    original_request_shared_batch)
+
+                def observed_request_shared_batch(rows: Sequence[tuple[int, object]]):
+                    request_id = int(client._next_id)
+                    for slot, payload in rows:
+                        identity = payload_identities.pop(id(payload), None)
+                        if identity is not None:
+                            self.observation_queue.put({
+                                **identity, "worker_id": int(client.worker_id),
+                                "lane_id": int(client.lane_id), "request_id": request_id,
+                                "slot_id": int(slot),
+                            })
+                    return original_request_shared_batch(rows)
+
+                client.request_shared_batch = observed_request_shared_batch
         return game
 
 
 class _InstrumentedAdapter:
-    def __init__(self, delegate: object, audit_output: Path) -> None:
+    def __init__(self, delegate: object, audit_output: Path, *,
+                 trace_game_id: str | None = None, trace_ply: int = 1,
+                 observation_queue: Any = None) -> None:
         self.delegate = delegate
         self.audit_output = audit_output
+        self.trace_game_id = trace_game_id
+        self.trace_ply = int(trace_ply)
+        self.observation_queue = observation_queue
 
     @property
     def worker_context(self):
@@ -406,7 +722,9 @@ class _InstrumentedAdapter:
 
     @property
     def worker_game_factory(self):
-        return _RootAuditFactory(self.audit_output)
+        return _RootAuditFactory(self.audit_output, trace_game_id=self.trace_game_id,
+                                 trace_ply=self.trace_ply,
+                                 observation_queue=self.observation_queue)
 
     @property
     def record_metrics(self):
@@ -417,6 +735,7 @@ def _run_games(*, runtime: Mapping[str, Any], model: Any, checkpoint: Path,
                output: Path, game_ids: Sequence[str], run_id: str, seed: int,
                search_mode: str, pcr: Mapping[str, Any] | None,
                workers: int, active_games_per_worker: int,
+               trace_game_id: str | None = None, trace_ply: int = 1,
                progress_interval: int = 4):
     import torch
     from gocube_golden.orchestrator_v2.execution_permit import _test_authority
@@ -429,7 +748,14 @@ def _run_games(*, runtime: Mapping[str, Any], model: Any, checkpoint: Path,
     if search_mode == "pcr":
         adapter_kwargs.update(search_mode="pcr", pcr=dict(pcr or {}))
     delegate = AdaptationSelfPlayAdapter(model, **adapter_kwargs)
-    adapter = _InstrumentedAdapter(delegate, output)
+    observation_queue = None
+    manager = None
+    if trace_game_id is not None:
+        manager = multiprocessing.Manager()
+        observation_queue = manager.Queue()
+    adapter = _InstrumentedAdapter(
+        delegate, output, trace_game_id=trace_game_id, trace_ply=trace_ply,
+        observation_queue=observation_queue)
     config = SelfPlayEngineConfig(
         workers=workers, inference_batch_cap=64, inference_batch_wait_ms=1.0,
         device="cuda", process_start_method="spawn", lanes_per_worker=1,
@@ -443,14 +769,85 @@ def _run_games(*, runtime: Mapping[str, Any], model: Any, checkpoint: Path,
             progress["last_report"] = done
             print(f"[{runtime['revision'][:8]}] {run_id}: games {done}/{total}", flush=True)
 
-    with _test_authority():
-        result = run_cooperative_selfplay(
-            game_ids, adapter=adapter, engine_config=config,
-            active_games_per_worker=active_games_per_worker,
-            progress_callback=mark,
-        )
+    original_dispatch = None
+    if trace_game_id is not None:
+        import selfplay_engine as execution_module
+        original_dispatch = execution_module._CentralInference._dispatch
+        _install_batch_observer(execution_module, output, observation_queue, torch)
+    try:
+        with _test_authority():
+            result = run_cooperative_selfplay(
+                game_ids, adapter=adapter, engine_config=config,
+                active_games_per_worker=active_games_per_worker,
+                progress_callback=mark,
+            )
+    finally:
+        if original_dispatch is not None:
+            execution_module._CentralInference._dispatch = original_dispatch
+        if manager is not None:
+            manager.shutdown()
     torch.cuda.synchronize()
     return result
+
+
+def _install_batch_observer(execution_module: Any, output: Path,
+                            observation_queue: Any, torch: Any) -> None:
+    """Capture only rows whose exact observation was requested by the traced root."""
+    from queue import Empty
+    original_dispatch = execution_module._CentralInference._dispatch
+    candidates: dict[tuple[int, int, int], dict[str, Any]] = {}
+    batch_counter = {"value": 0}
+
+    def observed_dispatch(owner: Any, batch: Sequence[Any]) -> None:
+        while True:
+            try:
+                request = observation_queue.get_nowait()
+            except Empty:
+                break
+            key = (int(request["worker_id"]), int(request["request_id"]),
+                   int(request["slot_id"]))
+            candidates[key] = dict(request)
+        rows = []
+        if candidates:
+            row_index = 0
+            for envelope in batch:
+                source = owner.shared_inputs[envelope.worker_id]
+                for slot_id in envelope.slot_ids:
+                    key = (int(envelope.worker_id), int(envelope.request_id), int(slot_id))
+                    identity = candidates.pop(key, None)
+                    if identity is not None:
+                        input_row = source[slot_id]
+                        observation_sha = _tensor_sha256(input_row, torch)
+                        if observation_sha != identity["observation_sha256"]:
+                            raise RuntimeError(
+                                "traced request observation did not map to its shared inference row")
+                        rows.append((row_index, envelope, int(slot_id), observation_sha,
+                                     identity))
+                    row_index += 1
+        original_dispatch(owner, batch)
+        if rows:
+            batch_size = sum(int(envelope.rows) for envelope in batch)
+            path = output / "inference-batch-matches.jsonl"
+            with path.open("a", encoding="utf-8") as stream:
+                for row_index, envelope, slot_id, observation_sha, identity in rows:
+                    policy = owner.shared_policy[envelope.worker_id][slot_id].detach().clone()
+                    wdl = owner.shared_wdl[envelope.worker_id][slot_id].detach().clone()
+                    item = {
+                        "batch_index": batch_counter["value"], "batch_size": batch_size,
+                        "row_index": row_index,
+                        "worker_id": int(envelope.worker_id), "lane_id": int(envelope.lane_id),
+                        "request_id": int(envelope.request_id), "slot_id": slot_id,
+                        "trace_request": identity,
+                        "observation_sha256": observation_sha,
+                        "policy": [float(value) for value in policy.tolist()],
+                        "wdl": [float(value) for value in wdl.tolist()],
+                        "policy_sha256": _tensor_sha256(policy, torch),
+                        "wdl_sha256": _tensor_sha256(wdl, torch),
+                    }
+                    stream.write(canonical_json(item).decode("utf-8") + "\n")
+        batch_counter["value"] += 1
+
+    execution_module._CentralInference._dispatch = observed_dispatch
 
 
 def _read_root_audit(output: Path) -> list[dict[str, Any]]:
@@ -592,7 +989,9 @@ def worker_selfplay(args: argparse.Namespace, *, mode: str) -> dict[str, Any]:
         game_ids=game_ids, run_id=args.run_id, seed=args.seed,
         search_mode=search_mode, pcr=pcr, workers=args.workers,
         active_games_per_worker=args.active_games_per_worker,
+        trace_game_id=args.trace_game_id, trace_ply=args.trace_ply,
     )
+    trace_batch_rows = _enrich_root_traces(output) if args.trace_game_id is not None else 0
     records = sorted(result.records, key=lambda record: record.game_id)
     raw_rows = []
     for record in records:
@@ -627,6 +1026,9 @@ def worker_selfplay(args: argparse.Namespace, *, mode: str) -> dict[str, Any]:
     checkpoint_after = sha256_file(checkpoint)
     if checkpoint_after != checkpoint_before:
         raise RuntimeError("Read-only M233 checkpoint changed during self-play")
+    inference_batch_rows = [int(value) for value in result.telemetry.get("batch_rows", [])]
+    inference_batch_distribution = {
+        str(size): int(count) for size, count in sorted(Counter(inference_batch_rows).items())}
     summary = {
         "source_revision": runtime["revision"], "checkpoint_sha256": checkpoint_before,
         "model_hash": model_hash_value, "torch": torch.__version__, "cuda": runtime["cuda"],
@@ -645,6 +1047,18 @@ def worker_selfplay(args: argparse.Namespace, *, mode: str) -> dict[str, Any]:
                       "active_games_per_worker": args.active_games_per_worker,
                       "inference_batch_cap": 64, "inference_batch_wait_ms": 1.0,
                       "start_method": "spawn"},
+        "inference_batches": {
+            "forwards": int(result.telemetry.get("inference_forwards", 0)),
+            "rows": int(result.telemetry.get("inference_rows", 0)),
+            "batch_size_distribution": inference_batch_distribution,
+            "all_batches_size_one": bool(inference_batch_rows)
+                                     and set(inference_batch_rows) == {1},
+        },
+        "root_trace": ({"game_id": args.trace_game_id, "ply": args.trace_ply,
+                        "trace_files": [str(path) for path in sorted(
+                            output.glob("root-trace-*.json"))],
+                        "inference_batch_match_rows": trace_batch_rows}
+                       if args.trace_game_id is not None else None),
         "pcr": PCR_CONFIG if mode == "pcr" else None,
         "resume_shard": resume_shard,
         "pcr_telemetry": pcr_telemetry,
@@ -652,6 +1066,63 @@ def worker_selfplay(args: argparse.Namespace, *, mode: str) -> dict[str, Any]:
     write_json(output / "summary.json", summary)
     print(json.dumps(summary, sort_keys=True, indent=2), flush=True)
     return summary
+
+
+def _enrich_root_traces(output: Path) -> int:
+    """Join worker Evaluation records to the exact parent dispatch request/slot."""
+    match_path = output / "inference-batch-matches.jsonl"
+    matches = read_jsonl(match_path) if match_path.exists() else []
+    by_index: dict[int, dict[str, Any]] = {}
+    for match in matches:
+        identity = match["trace_request"]
+        index = int(identity["session_request_index"])
+        if index in by_index:
+            raise ValueError(f"duplicate central batch mapping for traced request {index}")
+        by_index[index] = match
+    joined = 0
+    for trace_path in sorted(output.glob("root-trace-*.json")):
+        trace = json.loads(trace_path.read_text(encoding="utf-8"))
+        requests = trace["evaluation_requests"]
+        if set(by_index) != set(range(len(requests))):
+            raise ValueError("root trace and central batch mapping do not have one row per Evaluation")
+        for request in requests:
+            index = int(request["session_request_index"])
+            row = by_index[index]
+            mapped = row["trace_request"]
+            if (mapped["game_id"] != trace["game_id"]
+                    or int(mapped["ply"]) != int(trace["ply"])
+                    or mapped["observation_sha256"] != request["observation_sha256"]
+                    or row["observation_sha256"] != request["observation_sha256"]
+                    or row["policy_sha256"] != request["policy_sha256"]
+                    or row["wdl_sha256"] != request["wdl_sha256"]):
+                raise ValueError(f"inference row mapping/evaluation mismatch at request {index}")
+            request["inference_batch"] = {
+                "batch_index": int(row["batch_index"]),
+                "batch_size": int(row["batch_size"]),
+                "row_index": int(row["row_index"]),
+                "worker_id": int(row["worker_id"]),
+                "lane_id": int(row["lane_id"]),
+                "request_id": int(row["request_id"]),
+                "slot_id": int(row["slot_id"]),
+            }
+            joined += 1
+        trace["central_batch_mapping"] = {
+            "exact_request_slot_mapping": True,
+            "matched_rows": len(requests),
+            "dispatch_rows_sha256": sha256_json([
+                {"request_index": int(row["trace_request"]["session_request_index"]),
+                 "batch_index": int(row["batch_index"]),
+                 "batch_size": int(row["batch_size"]),
+                 "row_index": int(row["row_index"]),
+                 "policy_sha256": row["policy_sha256"], "wdl_sha256": row["wdl_sha256"]}
+                for row in sorted(matches,
+                                  key=lambda item: int(item["trace_request"][
+                                      "session_request_index"]))])
+        }
+        write_json(trace_path, trace)
+        stream_path = output / f"evaluation-stream-{trace_path.stem.removeprefix('root-trace-')}.json"
+        write_json(stream_path, _DIAGNOSTICS.serialize_evaluation_stream(trace))
+    return joined
 
 
 def _position_examples(games_jsonl: Path, core: Any) -> list[dict[str, Any]]:
@@ -727,6 +1198,7 @@ def _mcts_via_shared_dispatch(*, state: Any, example: Mapping[str, Any], request
                               core: Any, contract: Any, search_module: Any) -> dict[str, Any]:
     from gocube_golden.provenance import derive_seed
     from gocube_golden.selfplay_policy import sample_action_from_search_result
+    from gocube_golden import search as search_module
     from gocube_golden.search import Evaluation, SearchEvaluationRequest, SearchResult
     from selfplay_engine import _Request
 
@@ -1424,6 +1896,752 @@ def worker_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
         "raw_right_root": json.loads(Path(args.right_root_json).read_text(encoding="utf-8")),
     }
     write_json(output / "first-divergence.json", summary)
+    return summary
+
+
+def _serialized_request_identity(request: Any, *, index: int, core: Any,
+                                torch: Any) -> dict[str, Any]:
+    observation_sha, _blob = _trace_observation(request, torch)
+    identity = core.torus9_state_identity(request.state)
+    legal_mask = [bool(value) for value in request.legal_context.action_mask]
+    return {"session_request_index": int(index),
+            "state_sha256": sha256_json(identity),
+            "legal_mask_sha256": sha256_json(legal_mask),
+            "observation_sha256": observation_sha}
+
+
+def worker_replay_evaluations(args: argparse.Namespace) -> dict[str, Any]:
+    output = ensure_tmp_path(args.output)
+    output.mkdir(parents=True, exist_ok=True)
+    runtime = _runtime(Path(args.repo).resolve(), expected_revision=args.expected_revision,
+                       device="cuda")
+    torch = runtime["torch"]
+    from gocube_golden import torus9_monolith as core
+    from gocube_golden.arena_contract import SearchSettings
+    from gocube_golden import search as search_module
+    from gocube_golden.search import Evaluation, SearchEvaluationRequest, SearchResult
+    stream = json.loads(Path(args.stream_json).read_text(encoding="utf-8"))
+    if stream.get("schema") != _DIAGNOSTICS.EVALUATION_STREAM_SCHEMA:
+        raise ValueError("unsupported fixed Evaluation stream schema")
+    state = core.torus9_state_from_identity(stream["root_identity"]["identity"])
+    settings_data = stream["settings"]
+    settings = SearchSettings(
+        simulations=int(stream["simulation_cap"]),
+        cpuct=float(settings_data["cpuct"]), fpu=float(settings_data["fpu"]),
+        deterministic_tie_break=bool(settings_data["deterministic_tie_break"]))
+    noise_data = stream["noise"]
+    noise = core.Torus9RootNoiseEvaluator(
+        None, state, seed=int(noise_data["seed"]), alpha=float(noise_data["alpha"]))
+    session = search_module.SequentialPUCTSession(
+        state, settings, adapter=core.GoldenSearchAdapter(),
+        seed=int(stream["search_seed"]), evaluation_transform=noise.transform)
+    step: Any = session.advance()
+    observed_requests = []
+    request_sequence_matches = True
+    divergence = None
+    for expected in stream["evaluations"]:
+        if not isinstance(step, SearchEvaluationRequest):
+            request_sequence_matches = False
+            divergence = {"request_index": len(observed_requests),
+                          "expected": expected.get("request"),
+                          "actual": "search completed before stream was exhausted"}
+            break
+        actual = _serialized_request_identity(
+            step, index=len(observed_requests), core=core, torch=torch)
+        observed_requests.append(actual)
+        if actual != expected["request"] and divergence is None:
+            request_sequence_matches = False
+            divergence = {"request_index": len(observed_requests) - 1,
+                          "expected": expected["request"], "actual": actual}
+        evaluation = Evaluation(
+            policy=tuple(float(value) for value in expected["policy"]),
+            wdl=tuple(float(value) for value in expected["wdl"]))
+        step = session.resume(evaluation)
+    completed = isinstance(step, SearchResult)
+    if not completed:
+        request_sequence_matches = False
+        divergence = divergence or {
+            "request_index": len(observed_requests),
+            "expected": "end of stream", "actual": type(step).__name__}
+    result = None
+    if completed:
+        result = {"root_visits": [int(value) for value in step.root_visits],
+                  "pi": [float(value) for value in step.pi],
+                  "selected_action": _json_action(step.action),
+                  "simulations": int(step.simulations),
+                  "evaluator_calls": int(step.evaluator_calls)}
+    summary = {
+        "source_revision": runtime["revision"],
+        "stream_sha256": sha256_file(Path(args.stream_json)),
+        "stream_evaluations": len(stream["evaluations"]),
+        "observed_requests": len(observed_requests),
+        "request_sequence_matches": request_sequence_matches,
+        "first_request_difference": divergence,
+        "completed": completed, "result": result,
+        "result_sha256": None if result is None else sha256_json(result),
+    }
+    write_json(output / "replay.json", summary)
+    write_json(output / "requested-leaves.json", observed_requests)
+    return summary
+
+
+def _observation_from_identity(identity: Mapping[str, Any], core: Any,
+                               torch: Any) -> Any:
+    from gocube_golden.torus9_adaptation import write_observation
+    state = core.torus9_state_from_identity(identity)
+    legal = core.prepare_legal_actions(state)
+    observation = torch.empty((5, 81), dtype=torch.float32)
+    write_observation((state, legal), observation)
+    return observation
+
+
+def worker_batch_geometry(args: argparse.Namespace) -> dict[str, Any]:
+    output = ensure_tmp_path(args.output)
+    output.mkdir(parents=True, exist_ok=True)
+    runtime = _runtime(Path(args.repo).resolve(), expected_revision=args.expected_revision,
+                       device="cuda")
+    torch = runtime["torch"]
+    checkpoint = Path(args.checkpoint).resolve()
+    if sha256_file(checkpoint) != args.expected_checkpoint_sha:
+        raise ValueError("M233 checkpoint SHA mismatch in batch geometry worker")
+    _raw, model, model_hash_value = _load_model(checkpoint, torch, "cuda")
+    trace = json.loads(Path(args.trace_json).read_text(encoding="utf-8"))
+    request_index = int(args.request_index)
+    requests = trace["evaluation_requests"]
+    if request_index < 0 or request_index >= len(requests):
+        raise ValueError("frozen observation request index is outside the root trace")
+    selected = requests[request_index]
+    target_bytes = bytes.fromhex(selected["observation_blob_hex"])
+    target = torch.frombuffer(bytearray(target_bytes), dtype=torch.float32).clone().reshape(5, 81)
+    if _tensor_sha256(target, torch) != selected["observation_sha256"]:
+        raise ValueError("serialized frozen observation SHA does not match its trace")
+
+    from gocube_golden import torus9_monolith as core
+    filler_observations = []
+    seen = set()
+    for row in sorted(read_jsonl(Path(args.filler_games_jsonl)),
+                      key=lambda item: str(item["game_id"])):
+        raw = row["raw_record"]
+        for position in raw["positions"]:
+            identity = position["state"]
+            identity_sha = sha256_json(identity)
+            if identity_sha in seen or identity_sha == trace["root_identity"]["state_sha256"]:
+                continue
+            seen.add(identity_sha)
+            filler_observations.append(_observation_from_identity(identity, core, torch))
+            if len(filler_observations) >= 96:
+                break
+        if len(filler_observations) >= 96:
+            break
+    if not filler_observations:
+        raise ValueError("batch geometry requires real Torus9 filler observations")
+
+    actual_geometry = selected.get("inference_batch")
+
+    def variant_rows(batch_size: int) -> list[int]:
+        if batch_size == 1:
+            return [0]
+        rows = [0, batch_size // 2, batch_size - 1]
+        if actual_geometry and int(actual_geometry["batch_size"]) == batch_size:
+            rows.append(int(actual_geometry["row_index"]))
+        return list(dict.fromkeys(rows))
+
+    def forward(batch_cpu: Any, repeat: int, batch_size: int, target_row: int) -> dict[str, Any]:
+        batch = batch_cpu.to("cuda", non_blocking=False)
+        torch.cuda.synchronize()
+        with torch.inference_mode():
+            raw_policy, raw_wdl = model(batch)
+            policy = torch.softmax(raw_policy, dim=1)
+            wdl = torch.softmax(raw_wdl, dim=1)
+        torch.cuda.synchronize()
+        policy_logits = raw_policy[target_row].detach().cpu().contiguous()
+        wdl_logits = raw_wdl[target_row].detach().cpu().contiguous()
+        policy_row = policy[target_row].detach().cpu().contiguous()
+        wdl_row = wdl[target_row].detach().cpu().contiguous()
+        return {
+            "scope": args.scope, "repeat": int(repeat), "pid": os.getpid(),
+            "batch_size": int(batch_size), "target_row": int(target_row),
+            "target_observation_sha256": selected["observation_sha256"],
+            "batch_observation_sha256": [
+                _tensor_sha256(batch_cpu[row], torch) for row in range(batch_size)],
+            "policy_logits": [float(value) for value in policy_logits.tolist()],
+            "wdl_logits": [float(value) for value in wdl_logits.tolist()],
+            "policy": [float(value) for value in policy_row.tolist()],
+            "wdl": [float(value) for value in wdl_row.tolist()],
+            "policy_logits_sha256": _tensor_sha256(policy_logits, torch),
+            "wdl_logits_sha256": _tensor_sha256(wdl_logits, torch),
+            "policy_sha256": _tensor_sha256(policy_row, torch),
+            "wdl_sha256": _tensor_sha256(wdl_row, torch),
+        }
+
+    rows = []
+    repeats = int(args.repeats)
+    batch_sizes = [1, 2, 4, 8, 16, 32, 64]
+    if actual_geometry and int(actual_geometry["batch_size"]) not in batch_sizes:
+        batch_sizes.append(int(actual_geometry["batch_size"]))
+    # Warm the exact inference path; warmup is excluded from repeat evidence.
+    with torch.inference_mode():
+        model(target.unsqueeze(0).to("cuda"))
+    torch.cuda.synchronize()
+    for repeat in range(repeats):
+        repeat_index = int(args.repeat_offset) + repeat
+        for batch_size in batch_sizes:
+            for target_row in variant_rows(batch_size):
+                batch_rows = []
+                for row_index in range(batch_size):
+                    filler = filler_observations[(repeat_index * 67 + batch_size * 3 + row_index)
+                                                 % len(filler_observations)]
+                    batch_rows.append(filler.clone())
+                batch_rows[target_row] = target.clone()
+                rows.append(forward(torch.stack(batch_rows), repeat_index,
+                                    batch_size, target_row))
+    write_jsonl(output / "rows.jsonl", rows)
+    summary = {
+        "source_revision": runtime["revision"], "checkpoint_sha256": sha256_file(checkpoint),
+        "model_hash": model_hash_value, "gpu": runtime["gpu"], "cuda": runtime["cuda"],
+        "torch": torch.__version__, "scope": args.scope, "repeat_count": repeats,
+        "frozen_observation_sha256": selected["observation_sha256"],
+        "frozen_observation_request_index": request_index,
+        "actual_inference_batch": actual_geometry,
+        "filler_observation_count": len(filler_observations),
+        "rows_path": str(output / "rows.jsonl"),
+    }
+    write_json(output / "summary.json", summary)
+    return summary
+
+
+def worker_controlled_geometry_search(args: argparse.Namespace) -> dict[str, Any]:
+    """Run real sequential PUCT with root Evaluation fixed and leaf batch shape varied."""
+    output = ensure_tmp_path(args.output)
+    output.mkdir(parents=True, exist_ok=False)
+    runtime = _runtime(Path(args.repo).resolve(), expected_revision=args.expected_revision,
+                       device="cuda")
+    torch = runtime["torch"]
+    checkpoint = Path(args.checkpoint).resolve()
+    if sha256_file(checkpoint) != args.expected_checkpoint_sha:
+        raise ValueError("M233 checkpoint SHA mismatch in controlled geometry search")
+    _raw, model, model_hash_value = _load_model(checkpoint, torch, "cuda")
+    trace = json.loads(Path(args.trace_json).read_text(encoding="utf-8"))
+    if trace.get("schema") != _DIAGNOSTICS.ROOT_TRACE_SCHEMA:
+        raise ValueError("unsupported root trace schema")
+
+    from gocube_golden import torus9_monolith as core
+    from gocube_golden.arena_contract import SearchSettings
+    from gocube_golden import search as search_module
+    from gocube_golden.search import Evaluation, SearchEvaluationRequest, SearchResult
+
+    root_identity = trace["root_identity"]
+    root_state = core.torus9_state_from_identity(root_identity["identity"])
+    settings_data = trace["settings"]
+    settings = SearchSettings(
+        simulations=int(trace["simulation_cap"]), cpuct=float(settings_data["cpuct"]),
+        fpu=float(settings_data["fpu"]),
+        deterministic_tie_break=bool(settings_data["deterministic_tie_break"]))
+    noise_data = trace["noise"]
+    tracing_session = _install_tracing_session(search_module, core, torch)
+
+    filler_observations = []
+    seen = {str(root_identity["state_sha256"])}
+    for row in sorted(read_jsonl(Path(args.filler_games_jsonl)),
+                      key=lambda item: str(item["game_id"])):
+        for position in row["raw_record"]["positions"]:
+            identity = position["state"]
+            identity_sha = sha256_json(identity)
+            if identity_sha in seen:
+                continue
+            seen.add(identity_sha)
+            filler_observations.append(_observation_from_identity(identity, core, torch))
+            if len(filler_observations) >= 96:
+                break
+        if len(filler_observations) >= 96:
+            break
+    if len(filler_observations) < 27:
+        raise ValueError("controlled geometry search requires 27 real Torus9 filler observations")
+
+    variants = {
+        "batch1_row0": {"batch_size": 1, "target_row": 0},
+        "batch28_row16": {"batch_size": 28, "target_row": 16},
+        "batch16_row0": {"batch_size": 16, "target_row": 0},
+    }
+    traces: dict[str, list[dict[str, Any]]] = {name: [] for name in variants}
+    repeat_count = int(args.repeats)
+    if repeat_count < 2:
+        raise ValueError("controlled geometry search requires at least two repeats per variant")
+
+    def run_one(name: str, repeat: int) -> dict[str, Any]:
+        variant = variants[name]
+        noise = core.Torus9RootNoiseEvaluator(
+            None, root_state, seed=int(noise_data["seed"]), alpha=float(noise_data["alpha"]))
+        session = tracing_session(
+            root_state, settings, adapter=core.GoldenSearchAdapter(),
+            seed=int(trace["search_seed"]), evaluation_transform=noise.transform)
+        audit_trace = {
+            "schema": _DIAGNOSTICS.ROOT_TRACE_SCHEMA,
+            "game_id": trace["game_id"], "ply": int(trace["ply"]),
+            "root_identity": root_identity, "search_seed": int(trace["search_seed"]),
+            "simulation_cap": int(trace["simulation_cap"]),
+            "settings": dict(settings_data), "noise": dict(noise_data),
+            "evaluation_requests": [], "simulations": [],
+        }
+        session._audit_trace = audit_trace
+        step = session.advance()
+        request_count = 0
+        while isinstance(step, SearchEvaluationRequest):
+            if request_count == 0:
+                batch_size, target_row = 1, 0
+            else:
+                batch_size, target_row = int(variant["batch_size"]), int(variant["target_row"])
+            observation_sha, observation_hex = _trace_observation(step, torch)
+            target_observation = torch.frombuffer(
+                bytearray.fromhex(observation_hex), dtype=torch.float32).clone().reshape(5, 81)
+            batch_rows = [filler_observations[index].clone() for index in range(batch_size)]
+            batch_rows[target_row] = target_observation
+            batch_cpu = torch.stack(batch_rows)
+            torch.cuda.synchronize()
+            with torch.inference_mode():
+                raw_policy, raw_wdl = model(batch_cpu.to("cuda", non_blocking=False))
+                policy_batch = torch.softmax(raw_policy, dim=1)
+                wdl_batch = torch.softmax(raw_wdl, dim=1)
+            torch.cuda.synchronize()
+            policy = policy_batch[target_row].detach().cpu().contiguous()
+            wdl = wdl_batch[target_row].detach().cpu().contiguous()
+            step = session.resume(Evaluation(
+                policy=tuple(float(value) for value in policy.tolist()),
+                wdl=tuple(float(value) for value in wdl.tolist())))
+            request = audit_trace["evaluation_requests"][-1]
+            request["controlled_batch"] = {
+                "batch_size": batch_size, "row_index": target_row,
+                "target_observation_sha256": observation_sha,
+                "batch_observation_sha256": [_tensor_sha256(row, torch) for row in batch_cpu],
+            }
+            request_count += 1
+        if not isinstance(step, SearchResult):
+            raise RuntimeError(f"controlled geometry search ended as {type(step).__name__}")
+        audit_trace.update({
+            "root_visits": [int(value) for value in step.root_visits],
+            "pi": [float(value) for value in step.pi],
+            "selected_action": _json_action(step.action),
+            "simulations_completed": int(step.simulations),
+            "evaluator_calls": int(step.evaluator_calls),
+        })
+        write_json(output / f"{name}-repeat-{repeat:02d}.json", audit_trace)
+        return audit_trace
+
+    for repeat in range(repeat_count):
+        order = tuple(variants) if repeat % 2 == 0 else tuple(reversed(variants))
+        for name in order:
+            traces[name].append(run_one(name, repeat))
+
+    pairs = (("batch28_row16", "batch16_row0"),
+             ("batch1_row0", "batch28_row16"),
+             ("batch1_row0", "batch16_row0"))
+    pairwise = {}
+    for left_name, right_name in pairs:
+        pairwise[f"{left_name}_vs_{right_name}"] = (
+            _DIAGNOSTICS.compare_controlled_geometry_traces(
+                traces[left_name][0], traces[right_name][0],
+                left_repeats=traces[left_name][1:],
+                right_repeats=traces[right_name][1:]))
+    comparison = pairwise["batch28_row16_vs_batch16_row0"]
+    status = ("PROVEN_FOR_THIS_ROOT"
+              if any(row["status"] == "PROVEN_FOR_THIS_ROOT"
+                     for row in pairwise.values()) else "UNKNOWN")
+    summary = {
+        "schema": "torus9-controlled-root-geometry-causality-v1",
+        "source_revision": runtime["revision"],
+        "checkpoint_sha256": sha256_file(checkpoint),
+        "model_hash": model_hash_value,
+        "gpu": runtime["gpu"], "cuda": runtime["cuda"], "torch": torch.__version__,
+        "game_id": trace["game_id"], "ply": int(trace["ply"]),
+        "root_identity": root_identity, "search_seed": int(trace["search_seed"]),
+        "simulation_cap": int(trace["simulation_cap"]),
+        "root_geometry": {"batch_size": 1, "row_index": 0},
+        "variants": {name: {"batch_size": int(config["batch_size"]),
+                            "target_row": int(config["target_row"]),
+                            "repeats": len(traces[name]),
+                            "trace_files": [f"{name}-repeat-{i:02d}.json"
+                                            for i in range(len(traces[name]))],
+                            "root_visits": row["root_visits"],
+                            "selected_action": row["selected_action"],
+                            "root_priors_sha256": row["root_priors_sha256"]}
+                     for name, config in variants.items()
+                     for row in [traces[name][0]]},
+        "causality": comparison,
+        "pairwise_causality": pairwise,
+        "status": status,
+    }
+    write_json(output / "controlled-geometry-causality.json", summary)
+    return summary
+
+
+def run_batch_geometry(args: argparse.Namespace) -> dict[str, Any]:
+    output = ensure_tmp_path(args.output)
+    output.mkdir(parents=True, exist_ok=False)
+    script = Path(__file__).resolve()
+    same = output / "same-process"
+    _launch(args.python, script, "worker-batch-geometry", [
+        "--repo", args.repo, "--expected-revision", args.expected_revision,
+        "--checkpoint", args.checkpoint, "--expected-checkpoint-sha",
+        args.expected_checkpoint_sha, "--trace-json", args.trace_json,
+        "--request-index", args.request_index, "--filler-games-jsonl",
+        args.filler_games_jsonl, "--output", same, "--scope", "same-process",
+        "--repeats", args.same_process_repeats,
+    ])
+    row_paths = [same / "rows.jsonl"]
+    fresh_outputs = []
+    for repeat in range(args.fresh_process_repeats):
+        fresh = output / f"fresh-process-{repeat:02d}"
+        _launch(args.python, script, "worker-batch-geometry", [
+            "--repo", args.repo, "--expected-revision", args.expected_revision,
+            "--checkpoint", args.checkpoint, "--expected-checkpoint-sha",
+            args.expected_checkpoint_sha, "--trace-json", args.trace_json,
+            "--request-index", args.request_index, "--filler-games-jsonl",
+            args.filler_games_jsonl, "--output", fresh, "--scope", "fresh-process",
+            "--repeats", 1,
+            "--repeat-offset", repeat,
+        ])
+        row_paths.append(fresh / "rows.jsonl")
+        fresh_outputs.append(str(fresh))
+    rows = [row for path in row_paths for row in read_jsonl(path)]
+    aggregated = _DIAGNOSTICS.aggregate_batch_geometry(rows)
+    summary = {
+        "schema": "torus9-batch-geometry-audit-v1",
+        "source_revision": args.expected_revision,
+        "checkpoint_sha256": sha256_file(Path(args.checkpoint)),
+        "frozen_observation_sha256": rows[0]["target_observation_sha256"],
+        "same_process_repeats": args.same_process_repeats,
+        "fresh_process_repeats": args.fresh_process_repeats,
+        "same_process_output": str(same), "fresh_process_outputs": fresh_outputs,
+        "shape_or_row_dependent": aggregated["shape_or_row_dependent"],
+        "variants": aggregated["variants"],
+    }
+    write_jsonl(output / "all-rows.jsonl", rows)
+    write_json(output / "batch-geometry.json", summary)
+    return summary
+
+
+def compare_root_trace_files(left_path: Path, right_path: Path,
+                             output_path: Path) -> dict[str, Any]:
+    output_path = ensure_tmp_path(output_path)
+    left = json.loads(Path(left_path).read_text(encoding="utf-8"))
+    right = json.loads(Path(right_path).read_text(encoding="utf-8"))
+    report = _DIAGNOSTICS.compare_root_traces(left, right)
+    report.update({"left_trace": str(left_path), "right_trace": str(right_path),
+                   "left_trace_sha256": sha256_file(Path(left_path)),
+                   "right_trace_sha256": sha256_file(Path(right_path))})
+    write_json(output_path, report)
+    return report
+
+
+def run_replay_evaluations(args: argparse.Namespace) -> dict[str, Any]:
+    output = ensure_tmp_path(args.output)
+    output.mkdir(parents=True, exist_ok=False)
+    trace_path = Path(args.trace_json)
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    stream = _DIAGNOSTICS.serialize_evaluation_stream(trace)
+    stream_path = output / "fixed-evaluation-stream.json"
+    write_json(stream_path, stream)
+    script = Path(__file__).resolve()
+    revisions = {"A": (args.repo_a, EXPECTED_REVISIONS["A"]),
+                 "B": (args.repo_b, EXPECTED_REVISIONS["B"]),
+                 "C": (args.repo_c, EXPECTED_REVISIONS["C"])}
+    run_dirs: dict[str, Path] = {}
+    summaries: dict[str, dict[str, Any]] = {}
+    request_rows: dict[str, Any] = {}
+    for name in ("A1", "A2", "B", "C"):
+        revision_name = "A" if name.startswith("A") else name
+        repo, revision = revisions[revision_name]
+        run_output = output / name
+        _launch(args.python, script, "worker-replay-evaluations", [
+            "--repo", repo, "--expected-revision", revision,
+            "--stream-json", stream_path, "--output", run_output,
+        ])
+        run_dirs[name] = run_output
+        summaries[name] = json.loads((run_output / "replay.json").read_text(encoding="utf-8"))
+        request_rows[name] = json.loads(
+            (run_output / "requested-leaves.json").read_text(encoding="utf-8"))
+    expected_leaves = request_rows["A1"]
+    exact = {
+        name: summaries[name]["request_sequence_matches"]
+              and request_rows[name] == expected_leaves
+              and summaries[name]["result"] == summaries["A1"]["result"]
+        for name in ("A2", "B", "C")
+    }
+    report = {
+        "schema": "torus9-fixed-evaluation-replay-report-v1",
+        "stream_sha256": sha256_file(stream_path),
+        "stream_source_trace": str(trace_path),
+        "evaluation_count": len(stream["evaluations"]),
+        "runs": summaries,
+        "exact_against_A1": exact,
+        "same_revision_AA_exact": bool(exact["A2"]),
+        "cross_revision_ABC_exact": bool(exact["B"] and exact["C"]),
+        "status": "PASS" if all(exact.values()) else "FAIL",
+    }
+    write_json(output / "fixed-evaluation-replay.json", report)
+    return report
+
+
+def run_deterministic_core(args: argparse.Namespace) -> dict[str, Any]:
+    output = ensure_tmp_path(args.output)
+    output.mkdir(parents=True, exist_ok=False)
+    if int(args.games) < 16:
+        raise ValueError("deterministic-core acceptance requires at least 16 complete games")
+    repos = {"A": (args.repo_a, EXPECTED_REVISIONS["A"]),
+             "B": (args.repo_b, EXPECTED_REVISIONS["B"]),
+             "C": (args.repo_c, EXPECTED_REVISIONS["C"])}
+    runs: dict[str, Path] = {}
+    summaries: dict[str, dict[str, Any]] = {}
+    script = Path(__file__).resolve()
+    for label in ("A1", "A2", "B", "C"):
+        revision_name = "A" if label.startswith("A") else label
+        repo, revision = repos[revision_name]
+        run_output = output / label
+        _launch_selfplay(
+            args.python, script, mode="fixed", repo=repo,
+            expected_revision=revision, checkpoint=args.checkpoint, output=run_output,
+            expected_checkpoint_sha=args.expected_checkpoint_sha,
+            games=args.games, run_id=FIXED_RUN_ID, workers=1,
+            active_games_per_worker=1)
+        runs[label] = run_output
+        summaries[label] = json.loads((run_output / "summary.json").read_text(encoding="utf-8"))
+    labels = ("A1", "A2", "B", "C")
+    comparisons = []
+    for left_index, left_label in enumerate(labels):
+        for right_label in labels[left_index + 1:]:
+            left, right = runs[left_label], runs[right_label]
+            left_rows, right_rows = _load_game_rows(left / "games.jsonl"), _load_game_rows(
+                right / "games.jsonl")
+            comparison = _DIAGNOSTICS.compare_game_runs(
+                left_rows, right_rows, f"{left_label} vs {right_label}")
+            target_equal = (
+                summaries[left_label]["target_field_sha256"]
+                == summaries[right_label]["target_field_sha256"]
+                and summaries[left_label]["learner_samples"]
+                == summaries[right_label]["learner_samples"])
+            exact_games = bool(comparison["same_game_id_set"]
+                               and comparison["root_visit_mismatch_count"] == 0
+                               and comparison["selected_action_mismatch_count"] == 0
+                               and comparison["action_trace_mismatch_games"] == 0
+                               and comparison["result_mismatch_games"] == 0
+                               and comparison["length_mismatch_games"] == 0)
+            comparisons.append({**comparison, "target_builder_exact": target_equal,
+                                "complete_selfplay_exact": exact_games})
+    batch_one = {label: summaries[label]["inference_batches"]["all_batches_size_one"]
+                 for label in labels}
+    passed = (all(item["complete_selfplay_exact"] and item["target_builder_exact"]
+                  for item in comparisons) and all(batch_one.values())
+              and all(summaries[label]["games"] == args.games for label in labels))
+    report = {
+        "schema": "torus9-deterministic-core-report-v1", "games_per_run": int(args.games),
+        "run_id": FIXED_RUN_ID, "master_seed": MASTER_SEED,
+        "execution": {label: summaries[label]["execution"] for label in labels},
+        "inference_batches_size_one": batch_one,
+        "runs": {label: {"source_revision": summaries[label]["source_revision"],
+                          "games": summaries[label]["games"],
+                          "roots": summaries[label]["root_contract"]["roots"],
+                          "learner_samples": summaries[label]["learner_samples"],
+                          "semantic_games_sha256": summaries[label]["semantic_games_sha256"],
+                          "target_field_sha256": summaries[label]["target_field_sha256"],
+                          "path": str(runs[label])} for label in labels},
+        "comparisons": comparisons,
+        "status": "PASS" if passed else "FAIL",
+    }
+    write_json(output / "deterministic-core.json", report)
+    return report
+
+
+def compare_existing_deterministic_core(args: argparse.Namespace) -> dict[str, Any]:
+    """Compare completed A1/A2/B/C artifacts without rerunning any revision."""
+    output = ensure_tmp_path(args.output)
+    output.mkdir(parents=True, exist_ok=False)
+    run_paths = {"A1": Path(args.a1), "A2": Path(args.a2),
+                 "B": Path(args.b), "C": Path(args.c)}
+    expected_revision = {"A1": EXPECTED_REVISIONS["A"],
+                         "A2": EXPECTED_REVISIONS["A"],
+                         "B": EXPECTED_REVISIONS["B"],
+                         "C": EXPECTED_REVISIONS["C"]}
+    summaries: dict[str, dict[str, Any]] = {}
+    rows_by_run: dict[str, dict[str, dict[str, Any]]] = {}
+    runs_report: dict[str, dict[str, Any]] = {}
+    for label, run_path in run_paths.items():
+        summary = json.loads((run_path / "summary.json").read_text(encoding="utf-8"))
+        if summary.get("source_revision") != expected_revision[label]:
+            raise ValueError(f"{label} source revision mismatch: {summary.get('source_revision')}")
+        if summary.get("checkpoint_sha256") != EXPECTED_M233_SHA256:
+            raise ValueError(f"{label} M233 checkpoint SHA mismatch")
+        if summary.get("games") != int(args.games):
+            raise ValueError(f"{label} is incomplete: {summary.get('games')} games")
+        if summary.get("technical_games") != 0:
+            raise ValueError(f"{label} contains technical games")
+        if not summary.get("inference_batches", {}).get("all_batches_size_one"):
+            raise ValueError(f"{label} did not use batch-size-one inference throughout")
+        if summary.get("execution") != {
+                "active_games_per_worker": 1, "inference_batch_cap": 64,
+                "inference_batch_wait_ms": 1.0, "start_method": "spawn", "workers": 1}:
+            raise ValueError(f"{label} execution settings drifted")
+        rows = _load_game_rows(run_path / "games.jsonl")
+        if len(rows) != int(args.games):
+            raise ValueError(f"{label} games.jsonl is incomplete")
+        if any(row["raw_record"].get("technical_termination") for row in rows.values()):
+            raise ValueError(f"{label} games.jsonl contains a technical game")
+        root_rows = _read_root_audit(run_path)
+        root_contract = validate_root_audit(list(rows.values()), root_rows, mode="fixed")
+        if root_contract["roots"] != summary.get("root_contract", {}).get("roots"):
+            raise ValueError(f"{label} root audit disagrees with its summary")
+        if summary.get("learner_samples") != sum(
+                len(row["raw_record"]["positions"]) for row in rows.values()):
+            raise ValueError(f"{label} learner sample count does not match its games")
+        summaries[label] = summary
+        rows_by_run[label] = rows
+        runs_report[label] = {
+            "source_revision": summary["source_revision"],
+            "games": summary["games"],
+            "roots": root_contract["roots"],
+            "learner_samples": summary["learner_samples"],
+            "technical_games": summary["technical_games"],
+            "inference_batches_size_one": summary["inference_batches"]["all_batches_size_one"],
+            "semantic_games_sha256": summary["semantic_games_sha256"],
+            "target_field_sha256": summary["target_field_sha256"],
+            "path": str(run_path),
+        }
+
+    labels = ("A1", "A2", "B", "C")
+    comparisons = []
+    for left_index, left_label in enumerate(labels):
+        for right_label in labels[left_index + 1:]:
+            left_rows, right_rows = rows_by_run[left_label], rows_by_run[right_label]
+            comparison = _DIAGNOSTICS.compare_game_runs(
+                left_rows, right_rows, f"{left_label} vs {right_label}")
+            common_ids = set(left_rows) & set(right_rows)
+            semantic_hash_mismatches = sum(
+                left_rows[game_id]["semantic_sha256"]
+                != right_rows[game_id]["semantic_sha256"] for game_id in common_ids)
+            target_equal = (
+                summaries[left_label]["target_field_sha256"]
+                == summaries[right_label]["target_field_sha256"]
+                and summaries[left_label]["learner_samples"]
+                == summaries[right_label]["learner_samples"])
+            exact_games = bool(
+                comparison["same_game_id_set"]
+                and semantic_hash_mismatches == 0
+                and comparison["root_visit_mismatch_count"] == 0
+                and comparison["selected_action_mismatch_count"] == 0
+                and comparison["action_trace_mismatch_games"] == 0
+                and comparison["result_mismatch_games"] == 0
+                and comparison["length_mismatch_games"] == 0)
+            comparisons.append({**comparison,
+                                "semantic_game_hash_mismatch_count": semantic_hash_mismatches,
+                                "target_builder_exact": target_equal,
+                                "complete_selfplay_exact": exact_games})
+
+    passed = (all(item["complete_selfplay_exact"] and item["target_builder_exact"]
+                  for item in comparisons)
+              and all(summary["games"] == int(args.games)
+                      and summary["technical_games"] == 0
+                      and summary["inference_batches"]["all_batches_size_one"]
+                      for summary in summaries.values()))
+    report = {
+        "schema": "torus9-deterministic-core-report-v1",
+        "games_per_run": int(args.games), "run_id": FIXED_RUN_ID,
+        "master_seed": MASTER_SEED,
+        "execution": {label: summaries[label]["execution"] for label in labels},
+        "inference_batches_size_one": {
+            label: summaries[label]["inference_batches"]["all_batches_size_one"]
+            for label in labels},
+        "runs": runs_report, "comparisons": comparisons,
+        "status": "PASS" if passed else "FAIL",
+    }
+    write_json(output / "deterministic-core.json", report)
+    return report
+
+
+def _load_compact_games(path: Path) -> dict[str, dict[str, Any]]:
+    result = {}
+    with Path(path).open("r", encoding="utf-8") as stream:
+        for line in stream:
+            row = json.loads(line)
+            raw = row["raw_record"]
+            compact_positions = [{
+                "ply": int(position["ply"]),
+                "root_visits": [int(value) for value in position["root_visits"]],
+                "selected_action": position["selected_action"],
+            } for position in raw["positions"]]
+            result[str(row["game_id"])] = {
+                "game_id": str(row["game_id"]),
+                "semantic_sha256": row["semantic_sha256"],
+                "raw_record": {"positions": compact_positions,
+                               "final_action_trace": list(raw["final_action_trace"]),
+                               "formal_result": raw.get("formal_result")},
+            }
+    return result
+
+
+def run_concurrent_report(args: argparse.Namespace) -> dict[str, Any]:
+    output = ensure_tmp_path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    a_paths = list(args.a_run)
+    if len(a_paths) < 5:
+        raise ValueError("production-concurrent baseline requires five revision-A runs")
+    revision_runs = {"A": a_paths, "B": [args.b_run], "C": [args.c_run]}
+    run_summaries: dict[str, dict[str, Any]] = {}
+    for label, paths in revision_runs.items():
+        for index, path_text in enumerate(paths):
+            path = Path(path_text)
+            summary = json.loads((path / "summary.json").read_text(encoding="utf-8"))
+            if (summary["source_revision"] != EXPECTED_REVISIONS[label]
+                    or summary["mode"] != "fixed" or int(summary["games"]) != 64
+                    or summary["run_id"] != FIXED_RUN_ID
+                    or int(summary["master_seed"]) != MASTER_SEED
+                    or summary["execution"] != {
+                        "workers": 16, "active_games_per_worker": 4,
+                        "inference_batch_cap": 64, "inference_batch_wait_ms": 1.0,
+                        "start_method": "spawn"}):
+                raise ValueError(f"concurrent run has a different identity/config: {path}")
+            run_summaries[f"{label}{index + 1}"] = {**summary, "path": str(path)}
+
+    aa_pairs = []
+    for left_index in range(len(a_paths)):
+        left_path = Path(a_paths[left_index])
+        left_rows = _load_compact_games(left_path / "games.jsonl")
+        for right_index in range(left_index + 1, len(a_paths)):
+            right_path = Path(a_paths[right_index])
+            right_rows = _load_compact_games(right_path / "games.jsonl")
+            aa_pairs.append(_DIAGNOSTICS.compare_game_runs(
+                left_rows, right_rows, f"A{left_index + 1} vs A{right_index + 1}"))
+            del right_rows
+        del left_rows
+    baseline = _DIAGNOSTICS.aggregate_same_revision_baseline(aa_pairs)
+
+    b_rows = _load_compact_games(Path(args.b_run) / "games.jsonl")
+    c_rows = _load_compact_games(Path(args.c_run) / "games.jsonl")
+    cross = {"A_vs_B": [], "B_vs_C": [], "A_vs_C": []}
+    for index, path_text in enumerate(a_paths):
+        a_rows = _load_compact_games(Path(path_text) / "games.jsonl")
+        ab = _DIAGNOSTICS.compare_game_runs(a_rows, b_rows, f"A{index + 1} vs B")
+        ac = _DIAGNOSTICS.compare_game_runs(a_rows, c_rows, f"A{index + 1} vs C")
+        cross["A_vs_B"].append({**ab, "baseline_classification":
+                                _DIAGNOSTICS.classify_against_baseline(ab, baseline)})
+        cross["A_vs_C"].append({**ac, "baseline_classification":
+                                _DIAGNOSTICS.classify_against_baseline(ac, baseline)})
+        del a_rows
+    bc = _DIAGNOSTICS.compare_game_runs(b_rows, c_rows, "B vs C")
+    cross["B_vs_C"].append({**bc, "baseline_classification":
+                            _DIAGNOSTICS.classify_against_baseline(bc, baseline)})
+    baseline_consistent = all(
+        comparison["baseline_classification"]["inside_all_observed_AA_ranges"]
+        for comparisons in cross.values() for comparison in comparisons)
+    summary = {
+        "schema": "torus9-production-concurrent-baseline-v1",
+        "game_count_per_run": 64, "same_revision_A_run_count": len(a_paths),
+        "same_revision_A_pair_count": len(aa_pairs),
+        "same_revision_baseline": baseline, "cross_revision": cross,
+        "cross_revision_inside_AA_observed_ranges": baseline_consistent,
+        "run_identities": run_summaries,
+        "strict_production_bitwise_reproducible": baseline["all_pairs_bitwise_identical"],
+        "interpretation": "descriptive empirical ranges; no significance or arbitrary tolerance threshold",
+    }
+    write_json(output, summary)
     return summary
 
 
@@ -2397,6 +3615,8 @@ def _parser() -> argparse.ArgumentParser:
     selfplay.add_argument("--seed", type=int, required=True)
     selfplay.add_argument("--workers", type=int, required=True)
     selfplay.add_argument("--active-games-per-worker", type=int, required=True)
+    selfplay.add_argument("--trace-game-id")
+    selfplay.add_argument("--trace-ply", type=int, default=1)
     selfplay.add_argument("--device", choices=("cuda",), default="cuda")
     selfplay.add_argument("--save-shard", action="store_true")
     selfplay.add_argument("--checkpoint-ref", type=Path)
@@ -2446,6 +3666,92 @@ def _parser() -> argparse.ArgumentParser:
     diagnostic.add_argument("--search-seed", type=int, required=True)
     diagnostic.add_argument("--left-root-json", type=Path, required=True)
     diagnostic.add_argument("--right-root-json", type=Path, required=True)
+
+    replay = sub.add_parser("worker-replay-evaluations", help=argparse.SUPPRESS)
+    replay.add_argument("--repo", type=Path, required=True)
+    replay.add_argument("--expected-revision", required=True)
+    replay.add_argument("--stream-json", type=Path, required=True)
+    replay.add_argument("--output", type=Path, required=True)
+
+    geometry = sub.add_parser("batch-geometry", help="sweep exact frozen M233 observation shapes")
+    geometry.add_argument("--repo", type=Path, required=True)
+    geometry.add_argument("--expected-revision", default=EXPECTED_REVISIONS["A"])
+    geometry.add_argument("--checkpoint", type=Path, required=True)
+    geometry.add_argument("--expected-checkpoint-sha", default=EXPECTED_M233_SHA256)
+    geometry.add_argument("--trace-json", type=Path, required=True)
+    geometry.add_argument("--request-index", type=int, required=True)
+    geometry.add_argument("--filler-games-jsonl", type=Path, required=True)
+    geometry.add_argument("--same-process-repeats", type=int, default=10)
+    geometry.add_argument("--fresh-process-repeats", type=int, default=5)
+    geometry.add_argument("--output", type=Path, required=True)
+    geometry.add_argument("--python", default=sys.executable)
+
+    geometry_worker = sub.add_parser("worker-batch-geometry", help=argparse.SUPPRESS)
+    geometry_worker.add_argument("--repo", type=Path, required=True)
+    geometry_worker.add_argument("--expected-revision", required=True)
+    geometry_worker.add_argument("--checkpoint", type=Path, required=True)
+    geometry_worker.add_argument("--expected-checkpoint-sha", required=True)
+    geometry_worker.add_argument("--trace-json", type=Path, required=True)
+    geometry_worker.add_argument("--request-index", type=int, required=True)
+    geometry_worker.add_argument("--filler-games-jsonl", type=Path, required=True)
+    geometry_worker.add_argument("--output", type=Path, required=True)
+    geometry_worker.add_argument("--scope", choices=("same-process", "fresh-process"), required=True)
+    geometry_worker.add_argument("--repeats", type=int, required=True)
+    geometry_worker.add_argument("--repeat-offset", type=int, default=0)
+
+    causal_geometry = sub.add_parser(
+        "controlled-root-geometry",
+        help="hold root Evaluation fixed and vary batch geometry for leaf Evaluations")
+    causal_geometry.add_argument("--repo", type=Path, required=True)
+    causal_geometry.add_argument("--expected-revision", default=EXPECTED_REVISIONS["A"])
+    causal_geometry.add_argument("--checkpoint", type=Path, required=True)
+    causal_geometry.add_argument("--expected-checkpoint-sha", default=EXPECTED_M233_SHA256)
+    causal_geometry.add_argument("--trace-json", type=Path, required=True)
+    causal_geometry.add_argument("--filler-games-jsonl", type=Path, required=True)
+    causal_geometry.add_argument("--repeats", type=int, default=3)
+    causal_geometry.add_argument("--output", type=Path, required=True)
+
+    trace_compare = sub.add_parser("compare-root-traces",
+                                   help="find the first divergent simulation in two traces")
+    trace_compare.add_argument("--left", type=Path, required=True)
+    trace_compare.add_argument("--right", type=Path, required=True)
+    trace_compare.add_argument("--output", type=Path, required=True)
+
+    replay_group = sub.add_parser("replay-evaluations",
+                                  help="replay one exact Evaluation stream on revisions A/B/C")
+    replay_group.add_argument("--trace-json", type=Path, required=True)
+    replay_group.add_argument("--repo-a", type=Path, required=True)
+    replay_group.add_argument("--repo-b", type=Path, required=True)
+    replay_group.add_argument("--repo-c", type=Path, required=True)
+    replay_group.add_argument("--output", type=Path, required=True)
+    replay_group.add_argument("--python", default=sys.executable)
+
+    core_gate = sub.add_parser("deterministic-core",
+                               help="run one-worker A/A/B/C complete self-play parity")
+    core_gate.add_argument("--repo-a", type=Path, required=True)
+    core_gate.add_argument("--repo-b", type=Path, required=True)
+    core_gate.add_argument("--repo-c", type=Path, required=True)
+    core_gate.add_argument("--checkpoint", type=Path, required=True)
+    core_gate.add_argument("--expected-checkpoint-sha", default=EXPECTED_M233_SHA256)
+    core_gate.add_argument("--games", type=int, default=16)
+    core_gate.add_argument("--output", type=Path, required=True)
+    core_gate.add_argument("--python", default=sys.executable)
+
+    core_compare = sub.add_parser(
+        "compare-core-runs",
+        help="compare completed A1/A2/B/C deterministic-core outputs without rerunning them")
+    for label in ("a1", "a2", "b", "c"):
+        core_compare.add_argument(f"--{label}", type=Path, required=True)
+    core_compare.add_argument("--games", type=int, default=16)
+    core_compare.add_argument("--output", type=Path, required=True)
+
+    concurrent_report = sub.add_parser("compare-concurrent",
+                                       help="compare five A/A runs with A/B/B/C/C results")
+    concurrent_report.add_argument("--a-run", action="append", required=True,
+                                   help="revision-A 64-game output directory; pass five times")
+    concurrent_report.add_argument("--b-run", type=Path, required=True)
+    concurrent_report.add_argument("--c-run", type=Path, required=True)
+    concurrent_report.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -2471,6 +3777,40 @@ def main() -> int:
         return 0
     if args.command == "worker-diagnostic":
         worker_diagnostic(args)
+        return 0
+    if args.command == "worker-replay-evaluations":
+        worker_replay_evaluations(args)
+        return 0
+    if args.command == "batch-geometry":
+        run_batch_geometry(args)
+        return 0
+    if args.command == "worker-batch-geometry":
+        worker_batch_geometry(args)
+        return 0
+    if args.command == "controlled-root-geometry":
+        report = worker_controlled_geometry_search(args)
+        print(json.dumps({"status": report["status"],
+                          "report": str(args.output / "controlled-geometry-causality.json")},
+                         sort_keys=True), flush=True)
+        return 0 if report["status"] == "PROVEN_FOR_THIS_ROOT" else 1
+    if args.command == "compare-root-traces":
+        compare_root_trace_files(args.left, args.right, args.output)
+        return 0
+    if args.command == "replay-evaluations":
+        run_replay_evaluations(args)
+        return 0
+    if args.command == "deterministic-core":
+        report = run_deterministic_core(args)
+        print(json.dumps(report, sort_keys=True, indent=2), flush=True)
+        return 0 if report["status"] == "PASS" else 1
+    if args.command == "compare-core-runs":
+        report = compare_existing_deterministic_core(args)
+        print(json.dumps({"status": report["status"],
+                          "report": str(args.output / "deterministic-core.json")},
+                         sort_keys=True), flush=True)
+        return 0 if report["status"] == "PASS" else 1
+    if args.command == "compare-concurrent":
+        run_concurrent_report(args)
         return 0
     raise AssertionError(f"Unknown command: {args.command}")
 
