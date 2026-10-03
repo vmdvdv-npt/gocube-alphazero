@@ -65,6 +65,7 @@ class BatchedPolicyWDLInferenceOwner:
         return forward(batch)
 
     def evaluate_shared_batch(self, observations: Any) -> SharedInferenceResult:
+        """Return validated CPU heads backed by one batch materialization."""
         if not isinstance(observations, torch.Tensor):
             raise ValueError("Shared observations must be a torch.Tensor")
         if observations.ndim != len(self.expected_observation_shape) + 1:
@@ -97,13 +98,17 @@ class BatchedPolicyWDLInferenceOwner:
         outputs = torch.cat((policies, wdls), dim=1)
         if not bool(torch.isfinite(outputs).all()) or bool((outputs < 0.0).any()):
             raise ValueError("Central inference produced invalid probabilities")
+        # Materialize the complete batch once. Validation and shared-slot
+        # dispatch must use these same CPU values; returning the CUDA heads
+        # would cause two more blocking D2H copies for every dispatched row.
+        outputs = outputs.detach().to("cpu")
         # Softmax should guarantee this, but the explicit check catches custom
         # kernels and dtype/device regressions at the common boundary.
-        if any(not math.isfinite(float(value)) for value in outputs.detach().to("cpu").flatten().tolist()):
+        if any(not math.isfinite(float(value)) for value in outputs.flatten().tolist()):
             raise ValueError("Central inference produced non-finite probabilities")
         return SharedInferenceResult(
-            policy=policies,
-            wdl=wdls,
+            policy=outputs[:, :self.expected_policy_size],
+            wdl=outputs[:, self.expected_policy_size:],
             h2d_started_at=h2d_started,
             h2d_finished_at=h2d_finished,
             forward_started_at=forward_started,
