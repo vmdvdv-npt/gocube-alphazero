@@ -16,7 +16,7 @@
   "arena": {
     "every_iterations": 1,
     "games": 192,
-    "mcts_simulations": 200
+    "mcts_simulations": 64
   },
   "execution": {
     "device": "cuda",
