@@ -57,6 +57,52 @@ def test_gradient_clip_is_normalized_and_compiled_into_effective_config(parent):
     assert config["training"]["optimizer"] == "Adam"
 
 
+@pytest.mark.parametrize("seed", [0, 2026100501])
+@pytest.mark.parametrize("mode", ["fixed", "pcr"])
+def test_selfplay_seed_reaches_every_training_arm_without_changing_learner_seed(parent, seed, mode):
+    inherited = parent.effective_config.config.to_dict()
+    inherited['execution'].update(selfplay_master_seed=2026092901, training_master_seed=2026092701)
+    parent.effective_config.config = EffectiveConfig.from_dict(inherited)
+    raw = parameters()
+    raw['self_play'] = {'master_seed': seed, 'search_mode': mode}
+    if mode == 'pcr':
+        raw['self_play']['pcr'] = {'cheap_simulations': 100, 'full_simulations': 500,
+                                 'full_probability': 0.25}
+    normalized = job.parse_job(raw)
+    assert job.parse_job(normalized) == normalized
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    configs = [steps[0]['config']['effective_config']]
+    configs.extend(arm['config'] for arm in steps[1]['config']['arms'])
+    for config in configs:
+        assert config['execution']['selfplay_master_seed'] == seed
+        assert config['execution']['training_master_seed'] == 2026092701
+        assert 'master_seed' not in config['self_play']
+    assert raw['self_play']['master_seed'] == seed
+    assert parent.effective_config.config.execution['selfplay_master_seed'] == 2026092901
+
+
+def test_omitted_selfplay_seed_preserves_parent_seed_and_explicit_seed_changes_fingerprint(parent):
+    inherited = parent.effective_config.config.to_dict()
+    inherited['execution']['selfplay_master_seed'] = 123
+    parent.effective_config.config = EffectiveConfig.from_dict(inherited)
+    raw = parameters()
+    old = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps'][0]['config']['effective_config']
+    raw['self_play'] = {'master_seed': 456}
+    new = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps'][0]['config']['effective_config']
+    assert old['execution']['selfplay_master_seed'] == 123
+    assert new['execution']['selfplay_master_seed'] == 456
+    assert EffectiveConfig.from_dict(old).fingerprint != EffectiveConfig.from_dict(new).fingerprint
+
+
+@pytest.mark.parametrize('seed', [True, False, -1, 1.5, '2026100501', None, float('nan')])
+def test_invalid_selfplay_seed_rejected_before_parent_resolution(monkeypatch, seed):
+    monkeypatch.setattr(job, 'resolve_parent', lambda *a, **kw: pytest.fail('resolved invalid seed'))
+    raw = parameters()
+    raw['self_play'] = {'master_seed': seed}
+    with pytest.raises(ValueError, match='self_play.master_seed'):
+        job.compile_job(raw)
+
+
 def test_null_iterations_compiles_as_unbounded_continuation(parent, tmp_path):
     raw = parameters()
     raw["training"] = {"iterations": None, "games_per_iteration": 768,
@@ -172,6 +218,10 @@ def test_launch_pins_runtime_and_rejects_parameter_drift(parent, tmp_path, monke
     altered["training"]["learning_rate"] = 1e-5
     with pytest.raises(ValueError, match="different parameters"):
         entry.launch_operator_job(altered, runs_root=tmp_path)
+    reseeded = copy.deepcopy(parameters())
+    reseeded['self_play'] = {'master_seed': 2026100501}
+    with pytest.raises(ValueError, match="different parameters"):
+        entry.launch_operator_job(reseeded, runs_root=tmp_path)
     assert len(launches) == 2
 
 

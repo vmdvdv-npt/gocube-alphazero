@@ -154,7 +154,9 @@ def parse_job(value):
 
     self_play = None
     if 'self_play' in raw:
-        self_play = _object(raw['self_play'], {'search_mode', 'pcr'}, 'self_play')
+        self_play = _object(raw['self_play'], {'search_mode', 'pcr', 'master_seed'}, 'self_play')
+        if 'master_seed' in self_play:
+            _integer(self_play['master_seed'], 'self_play.master_seed', minimum=0)
         resolve_search_mode(self_play)
     arena = _arena(raw.get("arena", {}))
     arenas = _arena_runs(raw.get("arenas", []), defaults=arena)
@@ -376,7 +378,12 @@ def _effective(base, training, arena, self_play=None):
     cfg['self_play'].pop('pcr', None)
     cfg['self_play'].pop('search_mode', None)
     if self_play is not None:
-        cfg['self_play'].update(copy.deepcopy(self_play))
+        settings = copy.deepcopy(self_play)
+        if 'master_seed' in settings:
+            # The engine already owns this seed in the execution contract.
+            # Keep the learner seed and inherited Adam state unchanged.
+            cfg['execution']['selfplay_master_seed'] = settings.pop('master_seed')
+        cfg['self_play'].update(settings)
     cfg["self_play"].update(
         games_per_iteration=training["games_per_iteration"],
         mcts_simulations=training["mcts_simulations"],
