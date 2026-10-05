@@ -57,6 +57,39 @@ def test_gradient_clip_is_normalized_and_compiled_into_effective_config(parent):
     assert config["training"]["optimizer"] == "Adam"
 
 
+def test_null_iterations_compiles_as_unbounded_continuation(parent, tmp_path):
+    raw = parameters()
+    raw["training"] = {"iterations": None, "games_per_iteration": 768,
+                       "updates_per_iteration": 1280, "batch_size": 64,
+                       "learning_rate": 1e-4, "replay_generations": 3}
+    raw["ab_tests"] = []
+    raw["arena"] = {"every_iterations": 1, "games": 192,
+                    "mcts_simulations": 200}
+
+    normalized = job.parse_job(raw)
+    assert normalized["training"]["iterations"] is None
+
+    compiled = job.compile_job(raw, runs_root=tmp_path)
+    step = compiled["workflow"]["steps"][0]
+    assert step["action"] == "continuous_training"
+    assert step["config"]["generations"] is None
+    assert step["config"]["arena_cadence"] == 1
+
+
+def test_null_iterations_still_requires_training_parent():
+    raw = {"schema": job.SCHEMA, "run_id": "unbounded-no-parent",
+           "training": {"iterations": None}, "ab_tests": []}
+    with pytest.raises(ValueError, match="parent"):
+        job.parse_job(raw)
+
+
+def test_unbounded_training_cannot_be_followed_by_ab_tests():
+    raw = parameters()
+    raw["training"]["iterations"] = None
+    with pytest.raises(ValueError, match="cannot be followed by A/B"):
+        job.parse_job(raw)
+
+
 @pytest.mark.parametrize("patch", [
     {"notifications": False}, {"command": "arbitrary executable"},
     {"parent": "../../checkpoint"}, {"training": {"learning_rate": float("nan")}},

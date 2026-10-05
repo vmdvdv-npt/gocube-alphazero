@@ -15,6 +15,7 @@ import json
 import inspect
 import logging
 from pathlib import Path
+import signal
 import uuid
 
 from ..artifact_graph import CheckpointRef, EffectiveConfig
@@ -432,6 +433,7 @@ class ContinuousTrainingRunnerV2:
         self.logger = logger or logging.getLogger(__name__)
         self._lineage_root: Path | None = None
         self._resolved_config: ResolvedEffectiveConfig | None = None
+        self._pending_signal_soft_stop: str | None = None
 
     @property
     def lineage_root(self) -> Path:
@@ -480,6 +482,51 @@ class ContinuousTrainingRunnerV2:
         return self.run()
 
     def run(self) -> ContinuousTrainingResult:
+        """Run the lineage, converting TERM/INT into a durable soft stop.
+
+        The signal handler only records intent.  The request is materialized
+        by the coordinator at a safe boundary, so the active generation or
+        Arena is allowed to finish normally before the lineage stops.
+        """
+        self._pending_signal_soft_stop = None
+        previous_handlers: dict[int, object] = {}
+
+        def _soft_signal(signum: int, _frame: object) -> None:
+            if self._pending_signal_soft_stop is None:
+                self._pending_signal_soft_stop = f"signal-{signum}"
+
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            try:
+                previous_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, _soft_signal)
+            except (ValueError, OSError):
+                # ``signal.signal`` is only available from the main thread;
+                # injected/test runners may legitimately execute elsewhere.
+                continue
+
+        try:
+            return self._run()
+        finally:
+            for signum, previous in previous_handlers.items():
+                try:
+                    signal.signal(signum, previous)
+                except (ValueError, OSError):
+                    pass
+
+    def _materialize_pending_signal_soft_stop(self, state: dict[str, object]) -> None:
+        reason = self._pending_signal_soft_stop
+        if reason is None:
+            return
+        if self.soft_stop_path.is_file():
+            self._pending_signal_soft_stop = None
+            return
+        if self._lineage_root is None or not self.lineage_root.joinpath("manifest.json").is_file():
+            return
+        self.request_soft_stop(reason=reason)
+        state["soft_stop_requested"] = True
+        self._pending_signal_soft_stop = None
+
+    def _run(self) -> ContinuousTrainingResult:
         self._launch_id = uuid.uuid4().hex
         original_parent = self.resolver.checkpoint(self.config.parent_checkpoint)
         prepare_args: dict[str, object] = {
@@ -528,6 +575,11 @@ class ContinuousTrainingRunnerV2:
             state["state"] = "RUNNING"
             self._persist_state(state)
 
+        # A signal can arrive during startup, before the durable lineage state
+        # exists.  Materialize it once the run has reached its first safe
+        # coordinator boundary.
+        self._materialize_pending_signal_soft_stop(state)
+
         self._initialize_concurrency_sweep(state, current)
 
         self._report_start(original_parent, resolved_config)
@@ -544,6 +596,7 @@ class ContinuousTrainingRunnerV2:
             return self._result(state, original_parent, current, committed, arenas)
 
         while True:
+            self._materialize_pending_signal_soft_stop(state)
             target = self.config.target_generation
             if self.soft_stop_path.is_file():
                 state.update(
@@ -585,6 +638,7 @@ class ContinuousTrainingRunnerV2:
                 arena = self._run_arena(original_parent, current)
                 arenas.append(arena)
                 self._record_arena(state, arena, current.generation)
+                self._materialize_pending_signal_soft_stop(state)
                 # A stop requested during Arena takes precedence over completion
                 # or another generation. Reuse the safe-stop path above after
                 # durably recording the finished Arena result.
@@ -636,6 +690,7 @@ class ContinuousTrainingRunnerV2:
                         execution_mode=execution_mode,
                     ),
                 )
+                self._materialize_pending_signal_soft_stop(state)
             except (KeyboardInterrupt, SystemExit):
                 raise
             except Exception as exc:

@@ -42,6 +42,10 @@ class WorkflowError(RuntimeError):
     """A workflow cannot safely continue from its durable state."""
 
 
+class WorkflowDecisionRequired(WorkflowError):
+    """An Arena cannot choose a training parent without operator input."""
+
+
 class WorkflowControllerLease:
     """Publish the durable controller that owns a running workflow.
 
@@ -576,6 +580,8 @@ class WorkflowRunner:
 
     @staticmethod
     def _select(config: Mapping[str, object], outputs: Mapping[str, object]) -> dict[str, object]:
+        if config.get("rule") == "arena-winner":
+            return WorkflowRunner._select_arena_winner(config, outputs)
         source_raw = config.get("source", config.get("candidates"))
         if source_raw is None:
             raise WorkflowError("select step requires source or candidates")
@@ -626,6 +632,50 @@ class WorkflowRunner:
             result["selected_effective_config"] = _jsonable(item["effective_config"])
         return result
 
+    @staticmethod
+    def _select_arena_winner(config: Mapping[str, object], outputs: Mapping[str, object]) -> dict[str, object]:
+        resolved = WorkflowRunner._resolve(config, outputs)
+        arena = resolved.get("arena_result")
+        choices = resolved.get("candidates")
+        expected = resolved.get("expected_games")
+        if not isinstance(arena, Mapping) or arena.get("validity") != "VALID":
+            raise WorkflowDecisionRequired("Winner selection requires a VALID Arena; operator decision required")
+        metrics = arena.get("metrics")
+        summary = arena.get("summary")
+        if not isinstance(metrics, Mapping) or not isinstance(summary, Mapping):
+            raise WorkflowDecisionRequired("Winner selection requires complete Arena metrics")
+        counts = [metrics.get(k) for k in ("candidate_wins", "reference_wins", "draws", "valid_games")]
+        if (type(expected) is not int or expected < 64 or expected % 2
+                or any(type(n) is not int or n < 0 for n in counts)):
+            raise WorkflowDecisionRequired("Winner selection has invalid Arena game counts")
+        wins, losses, draws, valid_games = counts
+        technical_games = summary.get("technical_games")
+        if (valid_games != expected or wins + losses + draws != expected
+                or type(technical_games) is not int or technical_games != 0):
+            raise WorkflowDecisionRequired("Winner selection requires all declared games and no technical games")
+        if not isinstance(choices, Mapping) or set(choices) != {"candidate", "reference"}:
+            raise WorkflowError("Winner selection requires candidate and reference configurations")
+        for role, choice in choices.items():
+            if (not isinstance(choice, Mapping)
+                    or choice.get("checkpoint") != arena.get(role + "_checkpoint")
+                    or not isinstance(choice.get("effective_config"), Mapping)):
+                raise WorkflowDecisionRequired("Winner selection checkpoint identity does not match the Arena")
+        if wins == losses:
+            raise WorkflowDecisionRequired("Arena is tied; operator decision required before training")
+        role = "candidate" if wins > losses else "reference"
+        choice = choices[role]
+        return {
+            "selected": _jsonable(choice["checkpoint"]),
+            "selected_value": _jsonable(choice["checkpoint"]),
+            "selected_key": role,
+            "selected_score": wins if role == "candidate" else losses,
+            "selected_effective_config": _jsonable(choice["effective_config"]),
+            "rule": "arena-winner:strict-wins-majority;tie=stop",
+            "evaluation_id": arena.get("evaluation_id"),
+            "evaluation_fingerprint": arena.get("evaluation_fingerprint"),
+            "metrics": _jsonable(metrics),
+        }
+
     def _ready(self, step: WorkflowStep, state: Mapping[str, object]) -> bool:
         steps = state["steps"]
         assert isinstance(steps, Mapping)
@@ -661,7 +711,8 @@ class WorkflowRunner:
     @staticmethod
     def _is_durable_stop(exc: Exception) -> bool:
         text = str(exc).lower()
-        return "supervisor-stop.json" in text or "durable supervisor stop" in text
+        return (isinstance(exc, WorkflowDecisionRequired)
+                or "supervisor-stop.json" in text or "durable supervisor stop" in text)
 
     def run(self) -> Mapping[str, object]:
         with self._exclusive_lock():
