@@ -70,6 +70,32 @@ global gradient norm clipping learner-а. Если поле не указано,
 
 ## Playout Cap Randomization (PCR)
 
+### Seed self-play
+
+В объекте `self_play` можно задать `"master_seed": 2026100501` — целое
+неотрицательное число (включая 0; boolean, дроби и `null` отклоняются).
+Поле работает и с fixed, и с PCR, например:
+
+```json
+"self_play": {
+  "master_seed": 2026100501,
+  "search_mode": "pcr",
+  "pcr": {
+    "cheap_simulations": 100,
+    "full_simulations": 500,
+    "full_probability": 0.25
+  }
+}
+```
+
+Операторский seed записывается как `execution.selfplay_master_seed` в effective
+config и передаётся существующему self-play adapter. Он определяет seed партий,
+root noise и PCR full/cheap sampling. Если поле отсутствует, наследуется seed
+self-play родителя. Seed learner-а и состояние Adam сохраняются; seed арены
+этим полем не меняется. Поле применяется к основному обучению, A/B arms и обоим
+вариантам `winner_selection`. Seed входит в fingerprint и shard identity;
+изменение seed требует нового `run_id`, а не правки уже работающего запуска.
+
 Готовый пример без запуска: `configs/operator/torus9-pcr-100-500.json`.
 В простом операторском JSON добавьте отдельный объект:
 

@@ -16,7 +16,7 @@ def parameters():
                              "games": 192, "mcts_simulations": 200},
         "training": {"iterations": 3, "gradient_clip": 8.0, "replay_generations": 3},
         "arena": {"every_iterations": 1, "games": 192, "mcts_simulations": 64},
-        "self_play": {"search_mode": "pcr", "pcr": {
+        "self_play": {"master_seed": 2026100501, "search_mode": "pcr", "pcr": {
             "cheap_simulations": 100, "full_simulations": 500, "full_probability": 0.25}},
     }
 
@@ -64,6 +64,7 @@ def test_both_winners_inherit_their_own_config_and_resume_without_replaying_aren
         assert config["effective_config"]["training"]["optimizer"] == "Adam"
         assert config["effective_config"]["training"]["gradient_clip"] == 8.0
         assert config["effective_config"]["self_play"]["search_mode"] == "pcr"
+        assert config["effective_config"]["execution"]["selfplay_master_seed"] == 2026100501
         assert config["effective_config"]["replay"]["generations"] == 3
         assert "simulations=64" in config["arena_profile"]
         assert config["arena_cadence"] == 1
