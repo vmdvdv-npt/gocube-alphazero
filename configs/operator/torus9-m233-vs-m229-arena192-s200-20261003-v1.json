@@ -1,0 +1,26 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "torus9-m233-vs-m229-arena192-s200-20261003-v1",
+  "topology": "torus9",
+  "training": {
+    "iterations": 0
+  },
+  "arena": {
+    "every_iterations": 1,
+    "games": 192,
+    "mcts_simulations": 200
+  },
+  "execution": {
+    "device": "cuda",
+    "workers": 16
+  },
+  "arenas": [
+    {
+      "id": "m233-vs-m229-arena192-s200",
+      "candidate": "torus9-m214-g768-s200-train1280-r3-arena1-20260930-v1/M233",
+      "reference": "torus9-m214-g768-s200-train1280-r3-arena1-20260930-v1/M229",
+      "games": 192,
+      "mcts_simulations": 200
+    }
+  ]
+}

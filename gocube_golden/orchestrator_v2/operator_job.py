@@ -139,7 +139,7 @@ def parse_job(value):
         value,
         {
             "schema", "run_id", "topology", "parent", "training", "arena",
-            "execution", "ab_tests", "arenas", "self_play",
+            "execution", "ab_tests", "arenas", "self_play", "winner_selection",
         },
         "job",
     )
@@ -158,6 +158,19 @@ def parse_job(value):
         resolve_search_mode(self_play)
     arena = _arena(raw.get("arena", {}))
     arenas = _arena_runs(raw.get("arenas", []), defaults=arena)
+    winner_selection = None
+    if raw.get("winner_selection") is not None:
+        selection = _object(raw["winner_selection"],
+                            {"candidate", "reference", "games", "mcts_simulations", "master_seed"},
+                            "winner_selection")
+        winner_selection = _arena_runs(
+            [{"id": "winner-selection", **selection}], defaults=arena)[0]
+        if winner_selection["candidate"] == winner_selection["reference"]:
+            raise ValueError("winner_selection must compare two distinct checkpoints")
+        if raw.get("parent") is not None:
+            raise ValueError("winner_selection replaces parent; do not specify both")
+        if raw.get("ab_tests"):
+            raise ValueError("winner_selection cannot be combined with ab_tests")
 
     # Arena-only jobs must not accidentally inherit the historical five-iteration
     # training default merely because the training section was omitted.
@@ -168,6 +181,8 @@ def parse_job(value):
         else TRAINING_DEFAULTS
     )
     training = _training(raw.get("training", {}), defaults=training_defaults)
+    if winner_selection is not None and training["iterations"] == 0:
+        raise ValueError("winner_selection requires positive training iterations or null")
 
     execution = {
         **EXECUTION_DEFAULTS,
@@ -214,7 +229,7 @@ def parse_job(value):
     parent = raw.get("parent")
     training_requested = training["iterations"] != 0
     needs_parent = training_requested or bool(normalized_tests)
-    if needs_parent:
+    if needs_parent and winner_selection is None:
         parent = _selector(parent, "parent")
     elif parent is not None:
         parent = _selector(parent, "parent")
@@ -225,6 +240,8 @@ def parse_job(value):
         )
 
     return {
+        **({"winner_selection": {k: v for k, v in winner_selection.items() if k != "id"}}
+           if winner_selection is not None else {}),
         **({"self_play": self_play} if self_play is not None else {}),
         "schema": SCHEMA,
         "run_id": raw["run_id"],
@@ -453,16 +470,46 @@ def compile_job(value, *, runs_root=None, resolver=None):
 
     parent = None
     base = None
+    selection = job.get("winner_selection")
+    if selection is not None:
+        item = {"id": "winner-selection", **selection}
+        candidates = {}
+        for role in ("candidate", "reference"):
+            node = resolve_checkpoint(item[role], resolver=resolver)
+            _require_five_channel_checkpoint(node, "Winner selection " + role)
+            candidates[role] = node
+        step = _arena_step(job, item, candidates["candidate"], candidates["reference"], None)
+        steps.append(step)
+        choices = {}
+        for role, node in candidates.items():
+            effective = _effective(_base_config(node), job["training"], job["arena"], job.get("self_play"))
+            choices[role] = {"checkpoint": node.ref.to_dict(), "effective_config": effective}
+            ContinuousTrainingConfig(
+                parent_checkpoint=node.ref.to_dict(), lineage_id=job["run_id"],
+                effective_config=effective, generations=job["training"]["iterations"],
+                arena_cadence=job["arena"]["every_iterations"],
+                arena_config=_arena_execution(job["arena"]),
+                arena_profile=_arena_profile(job["arena"]),
+            )
+        steps.append({"step_id": "winner", "action": "select",
+                      "dependencies": [step["step_id"]], "config": {
+                          "rule": "arena-winner",
+                          "arena_result": {"$ref": step["step_id"] + ".outputs"},
+                          "expected_games": item["games"], "candidates": choices}})
+        previous = "winner"
     training_requested = job["training"]["iterations"] != 0
     if training_requested or job["ab_tests"]:
-        parent = resolve_parent(job["parent"], resolver=resolver)
-        base = _base_config(parent)
-        if base["compatibility"].get("input_channels") != 5:
-            raise ValueError("Simple jobs cannot launch retired 6-channel training")
-
         arena = job["arena"]
-        main_config = _effective(base, job["training"], arena, job.get("self_play"))
-        parent_ref = parent.ref.to_dict()
+        if selection is not None:
+            main_config = {"$ref": "winner.outputs.selected_effective_config"}
+            parent_ref = {"$ref": "winner.outputs.selected"}
+        else:
+            parent = resolve_parent(job["parent"], resolver=resolver)
+            base = _base_config(parent)
+            if base["compatibility"].get("input_channels") != 5:
+                raise ValueError("Simple jobs cannot launch retired 6-channel training")
+            main_config = _effective(base, job["training"], arena, job.get("self_play"))
+            parent_ref = parent.ref.to_dict()
         if training_requested:
             config = {
                 "parent_checkpoint": parent_ref,
@@ -481,11 +528,13 @@ def compile_job(value, *, runs_root=None, resolver=None):
                     "color_swap": True,
                 },
             }
-            ContinuousTrainingConfig(**config)
+            if selection is None:
+                ContinuousTrainingConfig(**config)
             steps.append(
                 {
                     "step_id": "training",
                     "action": "continuous_training",
+                    **({"dependencies": [previous]} if previous else {}),
                     "config": config,
                 }
             )

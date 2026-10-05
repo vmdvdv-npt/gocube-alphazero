@@ -19,6 +19,10 @@ active `train_one` finish, then leaves the lineage `SOFT_STOPPED`; a later
 launch (or `resume()`) consumes the request and starts at the first
 unfinished generation. Existing committed children are reused by
 `ProductionTrainOne`.
+`SIGINT` and `SIGTERM` received by the continuous controller are converted to
+the same durable request; the current generation or Arena is allowed to finish
+before the lineage stops. The temporary signal handlers are restored when the
+controller exits.
 
 Arena cadence is relative to the supplied parent generation. Same-lineage
 Arena output is owned by the lineage under `arena/generation-NNNN/`; a

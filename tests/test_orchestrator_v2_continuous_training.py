@@ -4,6 +4,7 @@ import inspect
 import json
 import logging
 from pathlib import Path
+import signal
 import sys
 from types import SimpleNamespace
 
@@ -30,6 +31,7 @@ from gocube_golden.orchestrator_v2 import (
     SupervisorV2,
 )
 import gocube_golden.orchestrator_v2.continuous_training as continuous_training
+import gocube_golden.orchestrator_v2._continuous_training_core as training_core
 from gocube_golden.provenance import sha256_fingerprint
 from gocube_golden import telegram_notifier
 from tools.arena_engine import ArenaExecutionConfig
@@ -296,6 +298,36 @@ def test_soft_stop_finishes_current_generation_without_starting_next_or_arena(
     assert train.calls == [21]
     assert arena.requests == []
     assert json.loads(runner.state_path.read_text())["state"] == "SOFT_STOPPED"
+
+
+def test_sigterm_becomes_soft_stop_after_current_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed: dict[int, object] = {}
+
+    def capture_handler(signum: int, handler: object) -> None:
+        installed[signum] = handler
+
+    monkeypatch.setattr(training_core.signal, "signal", capture_handler)
+    runner, train, arena, _resolver, _parent = _runner(tmp_path, generations=None, cadence=1)
+    original_train = train
+
+    def train_and_signal(*, parent, config, output_lineage):
+        child = original_train(parent=parent, config=config, output_lineage=output_lineage)
+        handler = installed[signal.SIGTERM]
+        assert callable(handler)
+        handler(signal.SIGTERM, None)
+        return child
+
+    runner.train_one = train_and_signal  # type: ignore[assignment]
+
+    result = runner.run()
+
+    assert result.state == "SOFT_STOPPED"
+    assert train.calls == [21]
+    assert arena.requests == []
+    stop_request = json.loads(runner.soft_stop_path.read_text())
+    assert stop_request["requested_by"] == f"signal-{signal.SIGTERM}"
 
 
 def test_arena_runs_exactly_on_relative_cadence_and_is_lineage_owned(tmp_path: Path) -> None:
