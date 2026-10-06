@@ -63,6 +63,12 @@ def _integer(value, label, minimum=1):
     return value
 
 
+def _tree_reuse(value, label):
+    if type(value) is not bool:
+        raise ValueError(f"{label} must be a boolean")
+    return value
+
+
 def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
     allowed = set(TRAINING_DEFAULTS) - (set() if allow_iterations else {"iterations"})
     result = {**defaults, **_object(value, allowed, "training")}
@@ -85,8 +91,11 @@ def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
 
 
 def _arena(value, *, defaults=ARENA_DEFAULTS):
-    result = {**defaults, **_object(value, ARENA_DEFAULTS, "arena")}
+    result = {**defaults, **_object(value, {*ARENA_DEFAULTS, "tree_reuse"}, "arena")}
     for key, number in result.items():
+        if key == "tree_reuse":
+            _tree_reuse(number, "arena.tree_reuse")
+            continue
         _integer(number, "arena." + key)
     if result["games"] % 2 or result["games"] < 64:
         raise ValueError("Production arena requires an even games count >= 64")
@@ -100,7 +109,7 @@ def _arena_runs(value, *, defaults):
         raise ValueError("arenas must be a list")
     normalized = []
     names = set()
-    allowed = {"id", "candidate", "reference", "games", "mcts_simulations", "master_seed"}
+    allowed = {"id", "candidate", "reference", "games", "mcts_simulations", "master_seed", "tree_reuse"}
     for index, raw_item in enumerate(value):
         item = _object(raw_item, allowed, f"arenas[{index}]")
         arena_id = _name(item.get("id"), f"arenas[{index}].id")
@@ -121,6 +130,7 @@ def _arena_runs(value, *, defaults):
             f"arenas[{index}].master_seed",
             minimum=0,
         )
+        reuse = _tree_reuse(item.get("tree_reuse", defaults.get("tree_reuse", False)), f"arenas[{index}].tree_reuse")
         normalized.append(
             {
                 "id": arena_id,
@@ -129,6 +139,7 @@ def _arena_runs(value, *, defaults):
                 "games": games,
                 "mcts_simulations": simulations,
                 "master_seed": seed,
+                **({"tree_reuse": reuse} if "tree_reuse" in item or "tree_reuse" in defaults else {}),
             }
         )
     return normalized
@@ -154,7 +165,9 @@ def parse_job(value):
 
     self_play = None
     if 'self_play' in raw:
-        self_play = _object(raw['self_play'], {'search_mode', 'pcr', 'master_seed'}, 'self_play')
+        self_play = _object(raw['self_play'], {'search_mode', 'pcr', 'master_seed', 'tree_reuse'}, 'self_play')
+        if 'tree_reuse' in self_play:
+            _tree_reuse(self_play['tree_reuse'], 'self_play.tree_reuse')
         if 'master_seed' in self_play:
             _integer(self_play['master_seed'], 'self_play.master_seed', minimum=0)
         resolve_search_mode(self_play)
@@ -163,7 +176,7 @@ def parse_job(value):
     winner_selection = None
     if raw.get("winner_selection") is not None:
         selection = _object(raw["winner_selection"],
-                            {"candidate", "reference", "games", "mcts_simulations", "master_seed"},
+                            {"candidate", "reference", "games", "mcts_simulations", "master_seed", "tree_reuse"},
                             "winner_selection")
         winner_selection = _arena_runs(
             [{"id": "winner-selection", **selection}], defaults=arena)[0]
@@ -217,7 +230,7 @@ def parse_job(value):
         for arm in arms.values():
             arm.pop("iterations")
         test_arena = _object(
-            item.get("arena", {}), {"games", "mcts_simulations"}, "ab_test.arena"
+            item.get("arena", {}), {"games", "mcts_simulations", "tree_reuse"}, "ab_test.arena"
         )
         checked_arena = _arena(test_arena, defaults=arena)
         checked_arena.pop("every_iterations")
@@ -377,6 +390,8 @@ def _effective(base, training, arena, self_play=None):
     # A new job defaults to fixed even when its parent used PCR.
     cfg['self_play'].pop('pcr', None)
     cfg['self_play'].pop('search_mode', None)
+    # Reuse always requires explicit opt-in for the new job.
+    cfg['self_play'].pop('tree_reuse', None)
     if self_play is not None:
         settings = copy.deepcopy(self_play)
         if 'master_seed' in settings:
@@ -407,6 +422,7 @@ def _effective(base, training, arena, self_play=None):
         "watchdog": 1000,
         "diagnostic_only": True,
         "gating": False,
+        **({"tree_reuse": arena["tree_reuse"]} if "tree_reuse" in arena else {}),
     }
     result = EffectiveConfig.from_dict(cfg)
     validate_config(result)
@@ -433,6 +449,7 @@ def _arena_profile(arena):
     return (
         f"torus9|komi=1.5|simulations={arena['mcts_simulations']}"
         "|cpuct=1.25|fpu=0|watchdog=1000|5ch"
+        + ("|tree_reuse=true" if arena.get("tree_reuse", False) else "")
     )
 
 
@@ -440,6 +457,7 @@ def _arena_step(job, item, candidate, reference, previous):
     arena = {
         "games": item["games"],
         "mcts_simulations": item["mcts_simulations"],
+        **({"tree_reuse": item["tree_reuse"]} if "tree_reuse" in item else {}),
     }
     step_id = "arena-" + item["id"]
     config = {

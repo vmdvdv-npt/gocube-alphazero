@@ -100,7 +100,8 @@ def test_legacy_rejected_before_driver_or_workers():
         _default_driver(resolved)
 
 
-def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monkeypatch):
+@pytest.mark.parametrize('tree_reuse', [False, True])
+def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monkeypatch,tree_reuse):
     raw=torch.load(parent,weights_only=False)
     actor=raw['metadata']['model_hash']
     buckets=[]
@@ -116,7 +117,7 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     ref=CheckpointRef('torus9','source','update-2400',198,'source.pt',file_sha256(parent))
     source=SimpleNamespace(ref=ref,path=parent,generation=198)
     cfg=EffectiveConfig(topology='torus9',compatibility={'input_channels':5},
-        self_play={'komi':1.5,'games_per_iteration':2,'mcts_simulations':1},
+        self_play={'komi':1.5,'games_per_iteration':2,'mcts_simulations':1,'tree_reuse':tree_reuse},
         training={'batch_size':64,'optimizer':'Adam','weight_decay':0.,'l2_sp':False,
                   'gradient_clip':1.,'learning_rate':5e-5,'optimizer_steps_per_iteration':2},
         replay={'cap':None,'generations':6},execution={'device':'cpu','workers':1,
@@ -128,6 +129,7 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
         parent=source,effective_config=cfg,experiment_id='test',arm_id='test')
     calls=[]
     def fake_selfplay(model,**kwargs):
+        assert kwargs.get('tree_reuse', False) is tree_reuse
         calls.append(kwargs['ids'])
         records=[SimpleNamespace(to_dict=lambda:{}, payload=game(i,'train',model_hash(model))) for i in kwargs['ids']]
         return SimpleNamespace(records=records,telemetry={})

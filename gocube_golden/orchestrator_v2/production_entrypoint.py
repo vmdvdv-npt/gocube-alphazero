@@ -212,6 +212,7 @@ _ARENA_SEARCH_FIELDS = frozenset(
         "mcts_simulations",
         "cpuct",
         "fpu",
+        "tree_reuse",
         "watchdog",
         "technical_move_limit",
         "komi",
@@ -281,6 +282,8 @@ def _arena_search(raw: Mapping[str, object], config: ArenaExecutionConfig) -> di
             values[key] = nested[key]
         elif key in raw:
             values[key] = raw[key]
+    if type(values.get("tree_reuse", False)) is not bool:
+        raise ValueError("Arena search.tree_reuse must be a boolean")
     if "simulations" not in values and "mcts_simulations" in values:
         values["simulations"] = values.pop("mcts_simulations")
     elif "simulations" in values and "mcts_simulations" in values:
@@ -355,9 +358,13 @@ def _torus_profile_with_search(profile: str, search: Mapping[str, object]) -> st
         )
     )
     channel_suffix = "|5ch" if getattr(parsed, "observation_shape", (6,))[0] == 5 else ""
+    reuse = search.get("tree_reuse", getattr(parsed, "tree_reuse", False))
+    if type(reuse) is not bool:
+        raise ValueError("Arena search.tree_reuse must be a boolean")
+    reuse_suffix = "|tree_reuse=true" if reuse else ""
     return (
         f"torus9|komi={komi:g}|simulations={simulations}"
-        f"|cpuct={cpuct:g}|fpu={fpu:g}|watchdog={watchdog}{channel_suffix}"
+        f"|cpuct={cpuct:g}|fpu={fpu:g}|watchdog={watchdog}{channel_suffix}{reuse_suffix}"
     )
 
 
@@ -414,6 +421,7 @@ def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResol
             fpu=float(search.get("fpu", defaults.fpu)),
             watchdog=int(search.get("watchdog", defaults.watchdog)),
             deterministic_tie_break=True,
+            tree_reuse=search.get("tree_reuse", defaults.tree_reuse),
         )
         profile = type(default_profile)(
             size=int(getattr(default_profile, "size")),

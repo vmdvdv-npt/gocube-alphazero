@@ -91,6 +91,7 @@ def _selfplay_plan(resolved: ResolvedGenerationInput) -> CubeSelfPlayPlan:
             )
         ),
         komi=float(_required(raw, ("komi",), "Cube komi")),
+        tree_reuse=raw.get("tree_reuse", False),
     )
     return CubeSelfPlayPlan(
         games=int(

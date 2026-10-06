@@ -210,6 +210,9 @@ class RunOwnedTorus9SelfPlaySearchContract(_core.Torus9SelfPlaySearchContract):
     def validate(self) -> None:
         actual = asdict(self)
         expected = asdict(_core.Torus9SelfPlaySearchContract())
+        if type(actual.pop("tree_reuse")) is not bool:
+            raise ValueError("self_play.tree_reuse must be a boolean")
+        expected.pop("tree_reuse")
         simulations = actual.pop("simulations")
         expected.pop("simulations")
         actual.pop("komi", None)

@@ -68,6 +68,45 @@ global gradient norm clipping learner-а. Если поле не указано,
 Неизвестные поля и неподдерживаемые значения — ошибка до старта, включая A/B.
 Полей для скриптов, команд, отключения уведомлений или смены кода нет.
 
+## Переиспользование MCTS-дерева
+
+По умолчанию `tree_reuse` выключен: каждый ход получает новое дерево, как раньше.
+Для явного включения добавьте `"tree_reuse": true` в `self_play` и/или `arena`:
+
+```json
+"self_play": {"tree_reuse": true},
+"arena": {"every_iterations": 5, "games": 192, "mcts_simulations": 128, "tree_reuse": true}
+```
+
+Поле принимает только JSON boolean. Его можно задавать также в отдельных
+`arenas[]`, `winner_selection` и `ab_tests[].arena`; они наследуют значение
+из `arena`, если собственного значения нет. Новый job не наследует включённый
+reuse self-play от родителя: требуется явное включение в `self_play`.
+
+После каждого фактически сыгранного действия сохраняется соответствующее
+поддерево с visits/Q, priors и expanded nodes. Проверяется полный state key,
+включая superko history; отсутствие child или несовпадение состояния приводит
+к новому дереву. В self-play используется фактически sampled action. В Arena
+каждая партия хранит отдельные деревья кандидата и reference; оба продвигаются
+после каждого хода, включая ход противника. Между партиями деревья не передаются.
+Dirichlet noise обновляется на каждом self-play root из исходного neural policy,
+без повторного смешивания уже зашумлённых priors.
+
+Simulation cap остаётся числом **новых** симуляций за ход. При ON root visits
+и policy target учитывают также накопленные симуляции поддерева, поэтому сумма
+root visits может превышать cap текущего хода (включая PCR). Режим входит в
+search fingerprint, effective config, self-play contract identity и telemetry;
+исторические OFF search fingerprints сохраняются.
+
+Для внутренних V2 effective configs используются `self_play.tree_reuse` и
+`arena.tree_reuse`; Arena profile ID при ON содержит `|tree_reuse=true`.
+Это относится также к Cube V2, использующему общий Golden PUCT.
+Для отдельного synchronous search используйте `SearchSettings(tree_reuse=True)`
+и вызывайте `advance_root(action, resulting_state)` после каждого реального хода;
+при новой партии вызывайте `reset_tree()` или создавайте новый searcher.
+Cooperative sessions одной партии получают один `SearchTree`, отдельный для
+каждой модели. Изменение режима оформляется новым job; работающий запуск не меняется.
+
 ## Playout Cap Randomization (PCR)
 
 ### Seed self-play

@@ -68,8 +68,11 @@ class SearchSettings:
     root_policy_temperature: bool = False
     move_temperature: float = 0.0
     deterministic_tie_break: bool = True
+    tree_reuse: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.tree_reuse) is not bool:
+            raise ValueError("Golden search tree_reuse must be a boolean")
         if (
             isinstance(self.simulations, bool)
             or not isinstance(self.simulations, int)
@@ -99,10 +102,14 @@ def search_contract_payload(
     settings: SearchSettings | None = None,
 ) -> dict[str, object]:
     effective = settings or SearchSettings()
+    search_settings = asdict(effective)
+    # Preserve the frozen OFF contract identity for existing runs/artifacts.
+    if not effective.tree_reuse:
+        search_settings.pop("tree_reuse")
     return {
         "arena_contract_id": ARENA_CONTRACT_ID,
         "search_implementation_id": SEARCH_IMPLEMENTATION_ID,
-        "search_settings": asdict(effective),
+        "search_settings": search_settings,
         "move_limit": GOLDEN_MOVE_LIMIT,
         "execution": {
             "batching": False,
@@ -186,6 +193,7 @@ _CHECKPOINT_FORBIDDEN_ARENA_KEYS = frozenset(
         "temperature",
         "root_policy_temperature",
         "resign",
+        "tree_reuse",
     }
 )
 

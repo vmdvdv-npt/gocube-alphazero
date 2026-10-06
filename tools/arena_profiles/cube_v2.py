@@ -53,6 +53,7 @@ def _profile_id(size: int, search: CubeArenaSearchConfig) -> str:
         f"cube-v2|size={int(size)}|simulations={int(search.simulations)}|"
         f"cpuct={float(search.cpuct):.17g}|fpu={float(search.fpu):.17g}|"
         f"watchdog={int(search.watchdog)}"
+        + ("|tree_reuse=true" if search.tree_reuse else "")
     )
 
 
@@ -68,14 +69,17 @@ def _parse_profile_id(value: str) -> tuple[int, CubeArenaSearchConfig]:
         if key in fields:
             raise ValueError(f"Duplicate Cube V2 Arena profile field: {key}")
         fields[key] = raw
-    if set(fields) != {"size", "simulations", "cpuct", "fpu", "watchdog"}:
+    if set(fields) - {"tree_reuse"} != {"size", "simulations", "cpuct", "fpu", "watchdog"}:
         raise ValueError("Cube V2 Arena profile id is incomplete")
+    if fields.get("tree_reuse", "false") not in {"true", "false"}:
+        raise ValueError("Cube Arena tree_reuse must be true or false")
     size = int(fields["size"])
     search = CubeArenaSearchConfig(
         simulations=int(fields["simulations"]),
         cpuct=float(fields["cpuct"]),
         fpu=float(fields["fpu"]),
         watchdog=int(fields["watchdog"]),
+        tree_reuse=fields.get("tree_reuse", "false") == "true",
     )
     search.validate()
     return size, search

@@ -8,7 +8,7 @@ validation, timeouts, replenishment and execution telemetry.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 import os
 from queue import Empty
@@ -23,6 +23,7 @@ from gocube_golden.search import (
     Evaluation,
     SearchEvaluationRequest,
     SearchResult,
+    SearchTree,
     SequentialPUCTSession,
 )
 
@@ -50,6 +51,18 @@ class _LaneRuntime:
     session: SequentialPUCTSession | None = None
     pending_evaluator: "_RemoteEvaluator | None" = None
     generation: int = 0
+    trees: dict[str, SearchTree] = field(default_factory=dict)
+
+    def search_tree(self, role: str) -> SearchTree:
+        if role not in {"candidate", "reference"}:
+            raise RuntimeError(f"Arena scientific adapter returned invalid role {role!r}")
+        if role not in self.trees:
+            self.trees[role] = SearchTree(True)
+        return self.trees[role]
+
+    def advance_trees(self, action: int | str, state: Any) -> None:
+        for tree in self.trees.values():
+            tree.advance(action, state)
 
 
 class _ImmediateInferenceTransport:
@@ -402,6 +415,11 @@ def run_cooperative_arena_worker(
                 raise RuntimeError("Cooperative Arena search returned malformed result")
 
             finished = bool(callbacks.apply_search_result(runtime.game, step))
+            if callbacks.search_settings.tree_reuse:
+                state = callbacks.search_state(runtime.game)
+                # Both model-owned trees observe every real move, including
+                # the opponent's; statistics never cross model boundaries.
+                runtime.advance_trees(step.action, state)
             runtime.session = None
             runtime.pending_evaluator = None
             runtime.generation += 1
@@ -419,11 +437,16 @@ def run_cooperative_arena_worker(
             runtime = active[lane_id]
             try:
                 if runtime.session is None:
+                    tree = None
+                    if callbacks.search_settings.tree_reuse:
+                        role = callbacks.model_role(runtime.game)
+                        tree = runtime.search_tree(role)
                     runtime.session = SequentialPUCTSession(
                         callbacks.search_state(runtime.game),
                         callbacks.search_settings,
                         adapter=callbacks.search_adapter,
                         seed=callbacks.search_seed(runtime.game),
+                        tree=tree,
                     )
                 step = runtime.session.advance()
                 process_step(lane_id, step)

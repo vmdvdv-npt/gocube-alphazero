@@ -535,15 +535,19 @@ class Torus9SelfPlaySearchContract:
     dirichlet_alpha: float = TORUS9_CURRENT_DIRICHLET_ALPHA
     watchdog: int = TORUS9_MOVE_LIMIT
     komi: float = TORUS9_KOMI
+    tree_reuse: bool = False
 
     @property
     def settings(self) -> SearchSettings:
-        return SearchSettings(simulations=self.simulations, cpuct=self.cpuct, fpu=self.fpu, deterministic_tie_break=True)
+        return SearchSettings(simulations=self.simulations, cpuct=self.cpuct, fpu=self.fpu, deterministic_tie_break=True, tree_reuse=self.tree_reuse)
 
     def validate(self) -> None:
         expected = Torus9SelfPlaySearchContract()
         actual = asdict(self)
         expected_values = asdict(expected)
+        if type(actual.pop("tree_reuse")) is not bool:
+            raise ValueError("tree_reuse must be a boolean")
+        expected_values.pop("tree_reuse")
         actual_komi = float(actual.pop("komi"))
         expected_values.pop("komi")
         if actual != expected_values or actual_komi not in TORUS9_ALLOWED_KOMI:
@@ -552,7 +556,8 @@ class Torus9SelfPlaySearchContract:
     @property
     def fingerprint(self) -> str:
         base = current_torus9_selfplay_contract_fingerprint(self.dirichlet_alpha)
-        return base if float(self.komi) == TORUS9_KOMI else sha256_fingerprint({"base": base, "komi": float(self.komi)})
+        base = base if float(self.komi) == TORUS9_KOMI else sha256_fingerprint({"base": base, "komi": float(self.komi)})
+        return sha256_fingerprint({"base": base, "tree_reuse": True}) if self.tree_reuse else base
 
 
 def _action_index(action: int | str) -> int:

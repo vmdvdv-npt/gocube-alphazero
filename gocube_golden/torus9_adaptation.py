@@ -24,6 +24,7 @@ from .selfplay_engine import SharedMemorySpec, SelfPlayEngineConfig, run_coopera
 from .torus9_m137_5ch import Torus9M137FiveChannelGraphNet, build_m137_five_channel_observation
 from .torus9_new_komi_guard import assert_new_komi_training_model
 from .torus9_pcr import PlayoutCapRandomization, resolve_search_mode
+from .search import search_implementation_fingerprint, search_semantics
 from .torus9_run_owned import RunOwnedTorus9SelfPlaySearchContract
 from .torus9_selfplay import (Torus9SelfPlayAdapter, Torus9SelfPlayWorkerContext,
     _decode_torus9_shared_output)
@@ -65,7 +66,10 @@ class AdaptationSearchContract(RunOwnedTorus9SelfPlaySearchContract):
 
     @property
     def fingerprint(self):
-        return sha256_fingerprint({'target': FINGERPRINT, 'search': asdict(self)})
+        search = asdict(self)
+        if not self.tree_reuse:
+            search.pop('tree_reuse')
+        return sha256_fingerprint({'target': FINGERPRINT, 'search': search})
 
 
 @dataclass(frozen=True)
@@ -88,10 +92,10 @@ def write_observation(payload, destination):
 
 
 class AdaptationSelfPlayAdapter(Torus9SelfPlayAdapter):
-    def __init__(self, model, *, run_id, checkpoint, seed, device, simulations=200, search_mode='fixed', pcr=None):
+    def __init__(self, model, *, run_id, checkpoint, seed, device, simulations=200, search_mode='fixed', pcr=None, tree_reuse=False):
         caps = resolve_search_mode({'search_mode': search_mode, 'pcr': pcr})
-        contract = (AdaptationSearchContract(simulations=simulations, komi=1.5) if caps is None
-                    else PCRSearchContract(simulations=simulations, komi=1.5, pcr=caps))
+        contract = (AdaptationSearchContract(simulations=simulations, komi=1.5, tree_reuse=tree_reuse) if caps is None
+                    else PCRSearchContract(simulations=simulations, komi=1.5, pcr=caps, tree_reuse=tree_reuse))
         contract.validate()
         assert_new_komi_training_model(model)
         self.model = model
@@ -112,18 +116,24 @@ class AdaptationSelfPlayAdapter(Torus9SelfPlayAdapter):
 
 
 def selfplay(model, *, checkpoint, run_id, ids, seed, device='cuda', workers=16,
-             simulations=200, progress=None, search_mode='fixed', pcr=None):
+             simulations=200, progress=None, search_mode='fixed', pcr=None, tree_reuse=False):
     from gocube_golden.orchestrator_v2.execution_permit import require_engine_execution
     require_engine_execution('gocube_golden/torus9_adaptation.py:selfplay', action='selfplay', topology='torus9')
     adapter = AdaptationSelfPlayAdapter(model, run_id=run_id, checkpoint=checkpoint,
                                         seed=seed, device=device, simulations=simulations,
-                                        search_mode=search_mode, pcr=pcr)
-    return run_cooperative_selfplay(
+                                        search_mode=search_mode, pcr=pcr, tree_reuse=tree_reuse)
+    result = run_cooperative_selfplay(
         ids, adapter=adapter,
         engine_config=SelfPlayEngineConfig(workers=workers, inference_batch_cap=64,
             inference_batch_wait_ms=1.0, device=device, process_start_method='spawn',
             lanes_per_worker=1, active_games_per_worker=4),
         active_games_per_worker=4, progress_callback=progress)
+    result.telemetry.update(
+        tree_reuse=tree_reuse,
+        search_semantics=search_semantics(tree_reuse),
+        search_implementation_fingerprint=search_implementation_fingerprint(tree_reuse),
+    )
+    return result
 
 
 def game_targets(game) -> dict | None:

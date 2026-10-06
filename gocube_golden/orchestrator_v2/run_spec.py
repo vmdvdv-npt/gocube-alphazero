@@ -30,6 +30,7 @@ def _validate_search_payload(value: object, label: str = "search") -> None:
         "mcts_simulations",
         "cpuct",
         "fpu",
+        "tree_reuse",
         "watchdog",
         "technical_move_limit",
         "komi",
@@ -45,6 +46,8 @@ def _validate_search_payload(value: object, label: str = "search") -> None:
             f"{label} contains unsupported fields: "
             + ", ".join(sorted(map(str, unknown)))
         )
+    if type(value.get("tree_reuse", False)) is not bool:
+        raise ValueError(f"{label}.tree_reuse must be a boolean")
     fixed = {
         "root_noise": False,
         "temperature": 0.0,
@@ -98,7 +101,7 @@ def _validate_arena_config_payload(value: object, label: str = "arena_config") -
     unknown = set(value) - execution - {
         "simulations", "mcts_simulations", "cpuct", "fpu", "watchdog",
         "technical_move_limit", "komi", "root_noise", "temperature",
-        "fast_search", "resign", "deterministic_tie_break", "search", "evaluation",
+        "fast_search", "resign", "deterministic_tie_break", "tree_reuse", "search", "evaluation",
     }
     if unknown:
         raise ValueError(
@@ -126,7 +129,7 @@ def _validate_arena_config_payload(value: object, label: str = "arena_config") -
         if key in {
             "simulations", "mcts_simulations", "cpuct", "fpu", "watchdog",
             "technical_move_limit", "komi", "root_noise", "temperature",
-            "fast_search", "resign", "deterministic_tie_break",
+            "fast_search", "resign", "deterministic_tie_break", "tree_reuse",
         }
     }
     _validate_search_payload(top_level_search, f"{label}.search")

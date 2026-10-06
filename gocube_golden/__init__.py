@@ -36,6 +36,7 @@ from .search import (
     Evaluation,
     SearchResult,
     SearchPosition,
+    SearchTree,
     SequentialPUCT,
     SequentialPUCTSession,
 )
