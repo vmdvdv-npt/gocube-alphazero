@@ -118,7 +118,7 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     source=SimpleNamespace(ref=ref,path=parent,generation=198)
     cfg=EffectiveConfig(topology='torus9',compatibility={'input_channels':5},
         self_play={'komi':1.5,'games_per_iteration':2,'mcts_simulations':1,'tree_reuse':tree_reuse},
-        training={'batch_size':64,'optimizer':'Adam','weight_decay':0.,'l2_sp':False,
+        training={'batch_size':128,'optimizer':'Adam','weight_decay':0.,'l2_sp':False,
                   'gradient_clip':1.,'learning_rate':5e-5,'optimizer_steps_per_iteration':2},
         replay={'cap':None,'generations':6},execution={'device':'cpu','workers':1,
                   'training_master_seed':91,'selfplay_master_seed':92},
@@ -155,6 +155,7 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     validate_generation_commit(root=root,lineage_id=root.name,generation=200,reuse_committed_rolling_replay_identity=True)
     saved=torch.load(root/second.checkpoint.path,weights_only=False)
     assert saved['ordinary_update']==4
+    assert saved['metadata']['batch_size'] == 128
     assert [b['generation'] for b in saved['replay_buckets']]==[2,3,4,5,199,200]
     train=ordinary.load_replay(saved['replay_buckets'],split='train')
     assert 'heldout' not in {g['game_id'] for g in train}
@@ -175,3 +176,19 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     shard.write_bytes(b'corruption')
     with pytest.raises(ValueError,match='SHA'):
         ordinary.load_replay(saved['replay_buckets'],split='train')
+
+
+def test_batch128_trains_and_resumes(parent, tmp_path):
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=2.5e-5, seed=91, batch_size=128)
+    games = [game('train', 'train', model_hash(trainer.model))]
+    assert all(value.shape[0] == 128 for value in trainer.batch(games, 1).values())
+    with _test_authority():
+        assert trainer.step(games)['batch_size'] == 128
+    saved = tmp_path / 'batch128.pt'
+    trainer.save(saved, config_hash='cfg', parent={}, replay_buckets=[])
+    resumed = ordinary.OrdinaryTrainer(saved, learning_rate=2.5e-5, seed=91)
+    assert resumed.batch_size == 128
+    with _test_authority():
+        trainer.step(games)
+        resumed.step(games)
+    assert model_hash(trainer.model) == model_hash(resumed.model)

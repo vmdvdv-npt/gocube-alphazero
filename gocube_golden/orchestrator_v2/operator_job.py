@@ -85,8 +85,6 @@ def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
                 raise ValueError("gradient_clip must be a finite positive number")
         else:
             _integer(number, key, minimum=0 if key == "iterations" else 1)
-    if result["batch_size"] != 64:
-        raise ValueError("Current Torus9 5CH driver supports batch_size=64 only")
     return result
 
 

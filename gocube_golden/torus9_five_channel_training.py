@@ -34,7 +34,7 @@ SCHEMA = 'torus9-five-channel-ordinary-training-v1'
 
 
 class OrdinaryTrainer(AdaptationTrainer):
-    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, device='cpu'):
+    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, batch_size=None, device='cpu'):
         raw = torch.load(checkpoint, map_location='cpu', weights_only=False)
         meta = raw['metadata']
         assert_new_komi_training_checkpoint_metadata(meta)
@@ -59,6 +59,10 @@ class OrdinaryTrainer(AdaptationTrainer):
                 not math.isfinite(configured_clip) or configured_clip <= 0):
             raise ValueError('Invalid gradient clip')
         self.gradient_clip = float(configured_clip)
+        configured_batch = meta.get('batch_size', 64) if batch_size is None else batch_size
+        if type(configured_batch) is not int or configured_batch <= 0:
+            raise ValueError('batch_size must be a positive integer')
+        self.batch_size = configured_batch
         for group in self.optimizer.param_groups:
             group['lr'] = self.learning_rate
             if group['weight_decay'] != 0:
@@ -99,7 +103,7 @@ class OrdinaryTrainer(AdaptationTrainer):
             cumulative.append(count)
         rng = random.Random(self.seed + update)
         indices = []
-        for _ in range(64):
+        for _ in range(self.batch_size):
             index = rng.randrange(count)
             game = bisect.bisect_right(cumulative, index)
             indices.append((games[game], index - (cumulative[game - 1] if game else 0)))
@@ -137,7 +141,7 @@ class OrdinaryTrainer(AdaptationTrainer):
             raise FloatingPointError('Nonfinite ordinary weights')
         return {'update': self.update, 'losses': {k: float(v.detach()) for k,v in losses.items()},
                 'grad_norm_before_clip': float(grad), 'learning_rate': self.learning_rate,
-                'gradient_clip': self.gradient_clip,
+                'gradient_clip': self.gradient_clip, 'batch_size': self.batch_size,
                 'l2_sp_coefficient': 0.}
 
     def save(self, path, *, config_hash, parent, replay_buckets):
@@ -148,7 +152,7 @@ class OrdinaryTrainer(AdaptationTrainer):
                 'target_fingerprint': FINGERPRINT, 'ordinary_schema': SCHEMA,
                 'ordinary_update': self.update, 'config_hash': config_hash,
                 'parent_checkpoint': parent, 'learning_rate': self.learning_rate,
-                'gradient_clip': self.gradient_clip}
+                'gradient_clip': self.gradient_clip, 'batch_size': self.batch_size}
         save_torch(path, {'metadata': meta, 'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(), 'ordinary_update': self.update,
             'clock_origin': self.clock_origin, 'seed': self.seed, 'replay_buckets': replay_buckets})
@@ -187,7 +191,10 @@ def validate_config(config):
     if (type(gradient_clip) not in (float, int) or
             not math.isfinite(gradient_clip) or gradient_clip <= 0):
         raise ValueError('gradient_clip must be a finite positive number')
-    expected = {'batch_size': 64, 'optimizer': 'Adam', 'weight_decay': 0.0,
+    batch_size = config.training.get('batch_size')
+    if type(batch_size) is not int or batch_size <= 0:
+        raise ValueError('batch_size must be a positive integer')
+    expected = {'optimizer': 'Adam', 'weight_decay': 0.0,
                 'l2_sp': False}
     if any(config.training.get(k) != v for k,v in expected.items()):
         raise ValueError('Unsupported ordinary training contract')
@@ -241,6 +248,7 @@ def run_generation(resolved):
     torch.set_num_threads(1)
     trainer = OrdinaryTrainer(parent.path, learning_rate=cfg.training['learning_rate'],
                                gradient_clip=cfg.training.get('gradient_clip', 1.0),
+                               batch_size=cfg.training['batch_size'],
                                seed=seed, device=device)
     raw_parent = torch.load(parent.path, map_location='cpu', weights_only=False)
     if raw_parent['metadata'].get('ordinary_schema') == SCHEMA:
@@ -364,6 +372,7 @@ def run_generation(resolved):
                      parent=parent.ref.to_dict(), replay_buckets=buckets)
         reloaded = OrdinaryTrainer(checkpoint_path, learning_rate=cfg.training['learning_rate'],
                                    gradient_clip=cfg.training.get('gradient_clip', 1.0),
+                                   batch_size=cfg.training['batch_size'],
                                    seed=seed, device='cpu')
         if model_hash(reloaded.model) != model_hash(trainer.model):
             raise ValueError('Checkpoint reload changed model')
