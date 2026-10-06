@@ -127,6 +127,8 @@ def _mapping(value: object, label: str) -> Mapping[str, object]:
 
 def _validate_fixed_search_options(value: Mapping[str, object], label: str) -> None:
     """Reject Arena options which the engine cannot vary."""
+    if type(value.get("tree_reuse", False)) is not bool:
+        raise ValueError(f"{label}.tree_reuse must be a boolean")
     fixed: dict[str, object] = {
         "root_noise": False,
         "temperature": 0.0,
@@ -174,7 +176,7 @@ def _preflight_action_config(action: str, config: Mapping[str, object]) -> None:
         "min_effective_cpu_cores", "early_gate_enabled", "early_gate_min_forwards",
         "early_gate_min_wall_sec", "simulations", "mcts_simulations", "cpuct",
         "fpu", "watchdog", "technical_move_limit", "komi", "root_noise",
-        "temperature", "fast_search", "resign", "deterministic_tie_break",
+        "temperature", "fast_search", "resign", "deterministic_tie_break", "tree_reuse",
         "search", "evaluation",
     }
     unknown = set(raw_arena) - allowed
@@ -202,7 +204,7 @@ def _preflight_action_config(action: str, config: Mapping[str, object]) -> None:
         search_allowed = {
             "simulations", "mcts_simulations", "cpuct", "fpu", "watchdog",
             "technical_move_limit", "komi", "root_noise", "temperature",
-            "fast_search", "resign", "deterministic_tie_break",
+            "fast_search", "resign", "deterministic_tie_break", "tree_reuse",
         }
         unknown = set(nested_mapping) - search_allowed
         if unknown:

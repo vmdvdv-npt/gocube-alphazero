@@ -30,6 +30,7 @@ class _RunOwnedTorus9ProfileMixin(_RunOwnedExecutionMixin):
         fpu: float = 0.0,
         watchdog: int = 500,
         five_channel: bool = False,
+        tree_reuse: bool = False,
     ) -> None:
         if isinstance(komi, bool) or not isinstance(komi, (int, float)) or not math.isfinite(float(komi)):
             raise ValueError("Torus9 Arena komi must be a finite number")
@@ -47,6 +48,9 @@ class _RunOwnedTorus9ProfileMixin(_RunOwnedExecutionMixin):
             raise ValueError("Torus9 Arena watchdog must be a positive integer")
         self.cpuct = float(cpuct)
         self.fpu = float(fpu)
+        if type(tree_reuse) is not bool:
+            raise ValueError("Torus9 Arena tree_reuse must be a boolean")
+        self.tree_reuse = tree_reuse
         self.watchdog = int(watchdog)
         self._five_channel = bool(five_channel)
         self.observation_shape = (5 if self._five_channel else 6, TORUS9_POINT_COUNT)
@@ -60,6 +64,7 @@ def _torus_profile(
     fpu: float = 0.0,
     watchdog: int = 500,
     five_channel: bool = False,
+    tree_reuse: bool = False,
     profile_id: str = "torus9",
 ) -> ArenaProfile:
     from tools.arena_profiles.torus9 import Torus9ArenaProfile
@@ -75,6 +80,7 @@ def _torus_profile(
         fpu=fpu,
         watchdog=watchdog,
         five_channel=five_channel,
+        tree_reuse=tree_reuse,
     )
 
 
@@ -94,7 +100,7 @@ def _profiles() -> dict[str, ArenaProfile]:
     return {profile.profile_id: profile}
 
 
-def _parse_torus_fields(value: str) -> tuple[float, int, float, float, int, bool]:
+def _parse_torus_fields(value: str) -> tuple[float, int, float, float, int, bool, bool]:
     fields = value.split("|")
     komi = 0.5
     simulations = 64
@@ -102,6 +108,7 @@ def _parse_torus_fields(value: str) -> tuple[float, int, float, float, int, bool
     fpu = 0.0
     watchdog = 500
     five_channel = False
+    tree_reuse = False
     if value.startswith("torus9-komi-calibration|"):
         try:
             komi = float(fields[1])
@@ -122,19 +129,24 @@ def _parse_torus_fields(value: str) -> tuple[float, int, float, float, int, bool
                 cpuct = float(field.split("=", 1)[1])
             elif field.startswith("fpu="):
                 fpu = float(field.split("=", 1)[1])
+            elif field.startswith("tree_reuse="):
+                raw_reuse = field.split("=", 1)[1]
+                if raw_reuse not in {"true", "false"}:
+                    raise ValueError("tree_reuse must be true or false")
+                tree_reuse = raw_reuse == "true"
             elif field.startswith("watchdog=") or field.startswith("technical_move_limit="):
                 watchdog = int(field.split("=", 1)[1])
             elif field:
                 raise ValueError(f"unknown Torus9 profile field {field!r}")
     except ValueError as exc:
         raise ValueError(f"Malformed Torus9 profile {value!r}") from exc
-    return komi, simulations, cpuct, fpu, watchdog, five_channel
+    return komi, simulations, cpuct, fpu, watchdog, five_channel, tree_reuse
 
 
 def get_profile(profile_id: str) -> ArenaProfile:
     value = str(profile_id)
     if value.startswith("torus9-komi-calibration|") or value.startswith("torus9|"):
-        komi, simulations, cpuct, fpu, watchdog, five_channel = _parse_torus_fields(value)
+        komi, simulations, cpuct, fpu, watchdog, five_channel, tree_reuse = _parse_torus_fields(value)
         return _torus_profile(
             komi=komi,
             profile_id=value,
@@ -143,6 +155,7 @@ def get_profile(profile_id: str) -> ArenaProfile:
             fpu=fpu,
             watchdog=watchdog,
             five_channel=five_channel,
+            tree_reuse=tree_reuse,
         )
     if value.startswith("cube-v2|"):
         return _cube_profile(value)

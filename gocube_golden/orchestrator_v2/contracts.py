@@ -138,6 +138,7 @@ PARAMETER_CHANGEABILITY_V2: tuple[ChangeabilityRule, ...] = tuple(
         "self_play.pcr.full_simulations", "self_play.pcr.full_probability",
         "self_play.mcts_simulations", "self_play.games_per_iteration", "self_play.cpuct", "self_play.fpu",
         "self_play.root_noise", "self_play.dirichlet_epsilon", "self_play.dirichlet_alpha",
+        "self_play.tree_reuse", "arena.tree_reuse",
         "self_play.temperature_schedule", "self_play.fast_search", "self_play.resign",
         "training.learning_rate", "training.optimizer_steps", "training.batch_size", "training.weight_decay",
         "training.warmup", "training.scheduler", "replay.window", "replay.cap",

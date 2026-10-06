@@ -196,6 +196,8 @@ def validate_config(config):
     if int(config.replay['generations']) <= 0:
         raise ValueError('Replay window must be positive')
     caps = resolve_search_mode(config.self_play)
+    if type(config.self_play.get('tree_reuse', False)) is not bool:
+        raise ValueError('self_play.tree_reuse must be a boolean')
     if caps is None:
         value = config.self_play.get('mcts_simulations')
         if type(value) is not int or value <= 0:
@@ -303,6 +305,7 @@ def run_generation(resolved):
                 seed=int(cfg.execution['selfplay_master_seed']), device=device,
                 workers=int(cfg.execution['workers']), simulations=caps.full_simulations if caps else int(cfg.self_play['mcts_simulations']),
                 **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {}),
+                **({'tree_reuse': True} if cfg.self_play.get('tree_reuse', False) else {}),
                 progress=lambda d,n: mark('selfplay',offset+d,games_count))
             raw_path = path.with_suffix('.games.jsonl.gz')
             raw_path.parent.mkdir(parents=True, exist_ok=True)
