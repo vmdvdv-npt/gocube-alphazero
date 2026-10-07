@@ -309,3 +309,28 @@ def test_batch_size_reaches_effective_config(parent, batch_size):
     compiled = job.compile_job(raw, runs_root=".")
     config = compiled["workflow"]["steps"][0]["config"]["effective_config"]
     assert config["training"]["batch_size"] == batch_size
+
+
+def test_offline_named_arms_are_stable_and_experiment_only(parent, monkeypatch):
+    from gocube_golden.orchestrator_v2 import offline_replay
+    raw = parameters()
+    raw['training']['iterations'] = 0
+    raw['ab_tests'] = [{'id': 'batch', 'iterations': 2,
+        'offline_replay': ['source/M199', 'source/M200'],
+        'arms': {f'B{b}': {'batch_size': b, 'updates_per_iteration': 256 // b}
+                 for b in (64, 128, 256)}}]
+    normalized = job.parse_job(raw)
+    assert job.parse_job(normalized) == normalized
+    replay = [{'generation': g, 'buckets': [{}] * 6} for g in (199, 200)]
+    monkeypatch.setattr(offline_replay, 'resolve_offline_replay', lambda *a, **kw: replay)
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    assert len(steps) == 1 and steps[0]['action'] == 'experiment'
+    arms = steps[0]['config']['arms']
+    assert [a['arm_id'] for a in arms] == ['B64', 'B128', 'B256']
+    assert all(a['config']['extensions']['offline_ab_replay'] == replay for a in arms)
+    raw['training']['iterations'] = 1
+    with pytest.raises(ValueError, match='iterations=0'):
+        job.parse_job(raw)
+    raw['training'] = {'offline_replay': ['source/M199']}
+    with pytest.raises(ValueError, match='unknown fields'):
+        job.parse_job(raw)

@@ -239,6 +239,8 @@ def run_generation(resolved):
     if resolved.execution_overrides:
         raise ValueError('5CH execution overrides are not supported')
     caps = resolve_search_mode(cfg.self_play)
+    from .orchestrator_v2.offline_replay import iteration_input
+    offline = iteration_input(cfg, resolved.generation)
     root, generation = resolved.output_lineage.root, resolved.generation
     parent = resolved.parent_checkpoint
     if file_sha256(parent.path) != parent.ref.sha256:
@@ -293,67 +295,74 @@ def run_generation(resolved):
         fresh_shards = []
         shard_telemetry = []
         games_count = int(cfg.self_play['games_per_iteration'])
-        for offset in range(0, games_count, 128):
-            number = min(128, games_count-offset)
-            path = root / 'replay' / f'g{generation:04d}-{offset:04d}.pt'
-            identity_path = path.with_suffix('.identity.json')
-            expected = {'parent': parent.ref.to_dict(), 'config': cfg.fingerprint,
-                        'generation': generation, 'offset': offset, 'games': number}
-            if identity_path.exists():
-                saved = json.loads(identity_path.read_text())
-                if saved['request'] != expected or file_sha256(path) != saved['shard']['sha']:
-                    raise ValueError('Saved self-play shard identity mismatch')
-                fresh_shards.append(saved['shard'])
-                if caps is not None:
-                    shard_telemetry.append(saved['pcr_telemetry'])
-                continue
-            mark('selfplay', offset, games_count)
-            ids = [f'{root.name}-g{generation:04d}-game-{i:04d}' for i in range(offset,offset+number)]
-            result = selfplay(trainer.model, checkpoint=parent.path, run_id=root.name, ids=ids,
-                seed=int(cfg.execution['selfplay_master_seed']), device=device,
-                workers=int(cfg.execution['workers']), simulations=caps.full_simulations if caps else int(cfg.self_play['mcts_simulations']),
-                **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {}),
-                **({'tree_reuse': True} if cfg.self_play.get('tree_reuse', False) else {}),
-                progress=lambda d,n: mark('selfplay',offset+d,games_count))
-            raw_path = path.with_suffix('.games.jsonl.gz')
-            raw_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = raw_path.with_suffix('.tmp')
-            with gzip.open(temporary, 'wt', encoding='utf-8') as stream:
-                for game in result.records:
-                    stream.write(json.dumps(game.to_dict())+'\n')
-            os.replace(temporary,raw_path)
-            games = []
-            for i, record in enumerate(result.records):
-                mark('target-build', offset+i,games_count)
-                game = game_targets(record)
-                if game is None:
+        if offline is None:
+            for offset in range(0, games_count, 128):
+                number = min(128, games_count-offset)
+                path = root / 'replay' / f'g{generation:04d}-{offset:04d}.pt'
+                identity_path = path.with_suffix('.identity.json')
+                expected = {'parent': parent.ref.to_dict(), 'config': cfg.fingerprint,
+                            'generation': generation, 'offset': offset, 'games': number}
+                if identity_path.exists():
+                    saved = json.loads(identity_path.read_text())
+                    if saved['request'] != expected or file_sha256(path) != saved['shard']['sha']:
+                        raise ValueError('Saved self-play shard identity mismatch')
+                    fresh_shards.append(saved['shard'])
+                    if caps is not None:
+                        shard_telemetry.append(saved['pcr_telemetry'])
                     continue
-                game['split'] = 'train'
-                validate_game(game)
-                games.append(game)
-            if len(result.records) != number:
-                raise ValueError('Incomplete self-play batch')
-            save_torch(path, {'contract': FINGERPRINT, 'actor_hash': model_hash(trainer.model),
-                'games': games, 'raw_games_sha': file_sha256(raw_path), 'generation': generation,
-                'selfplay_simulations': None if caps else cfg.self_play['mcts_simulations'],
-                **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {})})
-            shard = {'path': str(path), 'sha': file_sha256(path), 'games': number}
-            telemetry = dict(result.telemetry)
-            pcr_telemetry = position_telemetry(result.records, caps) if caps else {}
-            if caps:
-                if pcr_telemetry['training_positions'] != sum(len(g['score']) for g in games):
-                    raise ValueError('PCR learner position count drift')
-                shard_telemetry.append(pcr_telemetry)
-            telemetry.update(pcr_telemetry)
-            atomic_write_json(path.with_suffix('.telemetry.json'), telemetry)
-            atomic_write_json(identity_path, {'request': expected, 'shard': shard,
-                **({'pcr_telemetry': pcr_telemetry} if caps else {})})
-            fresh_shards.append(shard)
-            del result, games
+                mark('selfplay', offset, games_count)
+                ids = [f'{root.name}-g{generation:04d}-game-{i:04d}' for i in range(offset,offset+number)]
+                result = selfplay(trainer.model, checkpoint=parent.path, run_id=root.name, ids=ids,
+                    seed=int(cfg.execution['selfplay_master_seed']), device=device,
+                    workers=int(cfg.execution['workers']), simulations=caps.full_simulations if caps else int(cfg.self_play['mcts_simulations']),
+                    **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {}),
+                    **({'tree_reuse': True} if cfg.self_play.get('tree_reuse', False) else {}),
+                    progress=lambda d,n: mark('selfplay',offset+d,games_count))
+                raw_path = path.with_suffix('.games.jsonl.gz')
+                raw_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = raw_path.with_suffix('.tmp')
+                with gzip.open(temporary, 'wt', encoding='utf-8') as stream:
+                    for game in result.records:
+                        stream.write(json.dumps(game.to_dict())+'\n')
+                os.replace(temporary,raw_path)
+                games = []
+                for i, record in enumerate(result.records):
+                    mark('target-build', offset+i,games_count)
+                    game = game_targets(record)
+                    if game is None:
+                        continue
+                    game['split'] = 'train'
+                    validate_game(game)
+                    games.append(game)
+                if len(result.records) != number:
+                    raise ValueError('Incomplete self-play batch')
+                save_torch(path, {'contract': FINGERPRINT, 'actor_hash': model_hash(trainer.model),
+                    'games': games, 'raw_games_sha': file_sha256(raw_path), 'generation': generation,
+                    'selfplay_simulations': None if caps else cfg.self_play['mcts_simulations'],
+                    **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {})})
+                shard = {'path': str(path), 'sha': file_sha256(path), 'games': number}
+                telemetry = dict(result.telemetry)
+                pcr_telemetry = position_telemetry(result.records, caps) if caps else {}
+                if caps:
+                    if pcr_telemetry['training_positions'] != sum(len(g['score']) for g in games):
+                        raise ValueError('PCR learner position count drift')
+                    shard_telemetry.append(pcr_telemetry)
+                telemetry.update(pcr_telemetry)
+                atomic_write_json(path.with_suffix('.telemetry.json'), telemetry)
+                atomic_write_json(identity_path, {'request': expected, 'shard': shard,
+                    **({'pcr_telemetry': pcr_telemetry} if caps else {})})
+                fresh_shards.append(shard)
+                del result, games
+        else:
+            # Offline experiment inputs are immutable external references. No
+            # self-play adapter is called and no source artifact is rewritten.
+            fresh_shards = list(offline['fresh_bucket']['shards'])
+            games_count = 0
         fresh_path = root / 'replay' / f'iter-{generation:02d}-fresh.json'
         fresh_bucket = {'generation': generation, 'shards': fresh_shards}
         atomic_write_json(fresh_path, fresh_bucket)
-        buckets = (list(buckets)+[fresh_bucket])[-int(cfg.replay['generations']):]
+        buckets = (offline['buckets'] if offline is not None else
+                   (list(buckets)+[fresh_bucket])[-int(cfg.replay['generations']):])
         games = load_replay(buckets,split='train')
         if {g['game_id'] for g in games} & {g['game_id'] for g in validation}:
             raise ValueError('Validation leaked into training')
@@ -361,9 +370,23 @@ def run_generation(resolved):
         atomic_write_text(rolling_path, ''.join(json.dumps(b,sort_keys=True)+'\n' for b in buckets))
         updates = int(cfg.training['optimizer_steps_per_iteration'])
         metrics = []
+        if device.startswith('cuda'):
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+        training_started = time.perf_counter()
         for i in range(updates):
             metrics.append(trainer.step(games))
             mark('training',i+1,updates)
+        if device.startswith('cuda'):
+            torch.cuda.synchronize()
+        training_wall = time.perf_counter() - training_started
+        performance = {'training_wall_time_sec': training_wall,
+                       'training_minutes': training_wall / 60,
+                       'optimizer_updates_per_sec': updates / training_wall,
+                       'samples_per_sec': updates * trainer.batch_size / training_wall,
+                       'processed_samples': updates * trainer.batch_size,
+                       'peak_allocated_vram_bytes': torch.cuda.max_memory_allocated() if device.startswith('cuda') else None,
+                       'peak_reserved_vram_bytes': torch.cuda.max_memory_reserved() if device.startswith('cuda') else None}
         result_validation = trainer.evaluate(validation)
         if not all(math.isfinite(v) for v in result_validation.values()):
             raise FloatingPointError('Nonfinite validation')
@@ -382,13 +405,18 @@ def run_generation(resolved):
                 if not torch.equal(trainer.optimizer.state[p][key].cpu(),reloaded.optimizer.state[q][key].cpu()):
                     raise ValueError('Checkpoint reload changed Adam state')
         training_path = root / 'training' / f'iter-{generation:02d}.json'
-        atomic_write_json(training_path, {'updates': metrics,'baseline_validation': baseline,'validation': result_validation})
+        mean_losses = {key: sum(row['losses'][key] for row in metrics) / updates
+                       for key in metrics[0]['losses']}
+        performance['mean_losses'] = mean_losses
+        performance['mean_total_loss'] = sum(mean_losses.values())
+        atomic_write_json(training_path, {'updates': metrics,'baseline_validation': baseline,'validation': result_validation, 'performance': performance})
         summary_path = root / f'iter-{generation:02d}-summary.json'
         summary = {'status':'COMPLETED','generation':generation,'games':games_count,'updates':updates,
                    'learning_rate':cfg.training['learning_rate'],'replay_generations':len(buckets),
                    'replay_positions':sum(len(g['score']) for g in games),
                    'validation':result_validation,'checkpoint_reload_verified':True}
-        if caps:
+        summary.update(performance, offline_replay=offline is not None)
+        if caps and offline is None:
             counts = {key: sum(t[key] for t in shard_telemetry) for key in (
                 'pcr_full_positions', 'pcr_cheap_positions', 'training_positions', 'raw_positions')}
             summary.update(counts, search_mode='pcr', pcr=dict(cfg.self_play['pcr']),
@@ -402,7 +430,7 @@ def run_generation(resolved):
         identities = {k:{'path':p.relative_to(root).as_posix(),'sha256':file_sha256(p),'size_bytes':p.stat().st_size}
                       for k,p in paths.items()}
         # Publish every payload used by the fresh replay ledger in the catalog.
-        for index, shard in enumerate(fresh_shards):
+        for index, shard in enumerate(fresh_shards if offline is None else []):
             p = Path(shard['path'])
             identities[f'replay_shard_{index}'] = {'path':p.relative_to(root).as_posix(),'sha256':shard['sha'],'size_bytes':p.stat().st_size}
         marker = {'generation':generation,'lineage_id':root.name,

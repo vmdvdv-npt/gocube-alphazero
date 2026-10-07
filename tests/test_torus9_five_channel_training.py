@@ -101,7 +101,8 @@ def test_legacy_rejected_before_driver_or_workers():
 
 
 @pytest.mark.parametrize('tree_reuse', [False, True])
-def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monkeypatch,tree_reuse):
+@pytest.mark.parametrize('offline', [False, True])
+def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monkeypatch,tree_reuse,offline):
     raw=torch.load(parent,weights_only=False)
     actor=raw['metadata']['model_hash']
     buckets=[]
@@ -124,11 +125,26 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
                   'training_master_seed':91,'selfplay_master_seed':92},
         extensions={'training_driver':ordinary.SCHEMA,'adaptation_parent':ref.to_dict(),
                     'initial_replay_buckets':buckets,'validation_buckets':[buckets[0]]})
+    if offline:
+        rows = []
+        for g in (199, 200):
+            fresh = {'generation': g, 'shards': buckets[-1]['shards']}
+            rolling = buckets[:5] + [fresh]
+            fp, rp = tmp_path/f'fresh-{g}.json', tmp_path/f'rolling-{g}.jsonl'
+            fp.write_text(json.dumps(fresh))
+            rp.write_text(''.join(json.dumps(b)+'\n' for b in rolling))
+            rows.append({'generation': g, 'fresh_bucket': fresh, 'buckets': rolling,
+                         'fresh_replay': {'path': str(fp), 'sha256': file_sha256(fp)},
+                         'rolling_replay': {'path': str(rp), 'sha256': file_sha256(rp)}})
+        payload = cfg.to_dict()
+        payload['extensions']['offline_ab_replay'] = rows
+        cfg = EffectiveConfig.from_dict(payload)
     runs=tmp_path/'runs'
     root,resolved_cfg=Torus9ProductionLineage(runs).prepare(topology='torus9',lineage_id='test-ordinary',
         parent=source,effective_config=cfg,experiment_id='test',arm_id='test')
     calls=[]
     def fake_selfplay(model,**kwargs):
+        assert not offline, 'offline must never call selfplay'
         assert kwargs.get('tree_reuse', False) is tree_reuse
         calls.append(kwargs['ids'])
         records=[SimpleNamespace(to_dict=lambda:{}, payload=game(i,'train',model_hash(model))) for i in kwargs['ids']]
@@ -146,7 +162,7 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     monkeypatch.setattr(ordinary.OrdinaryTrainer,'step',original_step)
     with _test_authority():
         first=ordinary.run_generation(request)
-    assert len(calls)==1
+    assert len(calls)==(0 if offline else 1)
     validate_generation_commit(root=root,lineage_id=root.name,generation=199,reuse_committed_rolling_replay_identity=True)
     resolver=ArtifactResolver(runs)
     child=resolver.checkpoint(first.checkpoint)
@@ -156,10 +172,13 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     saved=torch.load(root/second.checkpoint.path,weights_only=False)
     assert saved['ordinary_update']==4
     assert saved['metadata']['batch_size'] == 128
-    assert [b['generation'] for b in saved['replay_buckets']]==[2,3,4,5,199,200]
+    assert [b['generation'] for b in saved['replay_buckets']]==([0,1,2,3,4,200] if offline else [2,3,4,5,199,200])
+    telemetry=json.loads((root/'training/iter-200.json').read_text())['performance']
+    assert telemetry['processed_samples']==256
+    assert telemetry['training_minutes'] > 0
     train=ordinary.load_replay(saved['replay_buckets'],split='train')
     assert 'heldout' not in {g['game_id'] for g in train}
-    assert len(calls)==2
+    assert len(calls)==(0 if offline else 2)
     from tools.arena_profiles import get_profile
     profile=get_profile('torus9|komi=1.5|simulations=128|cpuct=1.25|fpu=0|watchdog=1000|5ch')
     identity=profile.load_identity(root/second.checkpoint.path)

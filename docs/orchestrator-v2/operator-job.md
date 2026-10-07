@@ -268,3 +268,45 @@ Telegram берётся из стандартного `~/.config/gocube-alphazer
 `AGENTS.md` — инструкция агенту, не разграничение прав ОС. Правило запрещает
 агенту менять реализацию без отдельного разрешения, но не блокирует запись в
 файлы технически. Защита GitHub и CODEOWNERS по просьбе пользователя не добавляются.
+
+## Offline A/B и A/B/C на существующем replay
+
+Только в `ab_tests` доступно поле `offline_replay`: список зарегистрированных
+checkpoint selectors, чьи fresh/rolling replay-манифесты являются входами каждой
+iteration. Checkpoints должны образовывать последовательную цепочку от `parent`.
+`training.iterations` должен быть 0; обычное обучение эту опцию не принимает.
+Новые self-play игры не генерируются. SHA манифестов и shards проверяются до
+старта и при чтении. Исторические окна replay используются целиком, включая
+предшествующие поколения, а не только fresh data.
+
+Для offline теста можно указать `arms` с двумя или более именованными ветками
+вместо `A`/`B`. Все ветки стартуют от одного parent с Adam state, после обучения
+выполняется полный round-robin с одинаковыми arena settings, seed, paired starts
+и color swap. Арены диагностические; победитель не продолжает production.
+
+```json
+"training": {"iterations": 0, "learning_rate": 0.000025,
+             "gradient_clip": 8.0, "replay_generations": 5},
+"ab_tests": [{
+  "id": "batch", "iterations": 5,
+  "offline_replay": ["source/M256", "source/M257", "source/M258", "source/M259", "source/M260"],
+  "arms": {
+    "B64": {"batch_size": 64, "updates_per_iteration": 2560},
+    "B128": {"batch_size": 128, "updates_per_iteration": 1280},
+    "B256": {"batch_size": 256, "updates_per_iteration": 640}
+  },
+  "arena": {"games": 192, "mcts_simulations": 64, "tree_reuse": true}
+}]
+```
+
+Используйте реальные selectors: поколения могут относиться к разным lineage.
+В `runs/torus9/experiments/<experiment_id>/state.json` сохраняются результаты
+всех пар и ссылки на независимые output lineages. Production parent и replay
+не копируются и не изменяются. Метрики каждой iteration содержат losses,
+validation, wall time/минуты, optimizer updates/sec, samples/sec и CUDA allocator
+peak VRAM. Время измеряет optimizer loop с синхронизацией CUDA, включая
+публикацию progress, без replay loading, validation и checkpoint I/O.
+
+Sampler сохранён: `random.Random(training_seed + ordinary_update)` на каждый
+update. При разных batch/числе updates одинаковый seed не означает одинаковый
+поток sample IDs. Распределение остаётся uniform-over-positions с replacement.

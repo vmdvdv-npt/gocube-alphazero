@@ -1,0 +1,59 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "torus9-offline-batch-m255-g256-260-20261007-v1",
+  "parent": "torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/M255",
+  "training": {
+    "iterations": 0,
+    "learning_rate": 2.5e-05,
+    "gradient_clip": 8.0,
+    "replay_generations": 5,
+    "games_per_iteration": 1536,
+    "mcts_simulations": 199
+  },
+  "arena": {
+    "games": 192,
+    "mcts_simulations": 64,
+    "tree_reuse": true
+  },
+  "ab_tests": [
+    {
+      "id": "batch",
+      "iterations": 5,
+      "offline_replay": [
+        "torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/M256",
+        "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M257",
+        "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M258",
+        "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M259",
+        "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M260"
+      ],
+      "arms": {
+        "B64": {
+          "batch_size": 64,
+          "updates_per_iteration": 2560
+        },
+        "B128": {
+          "batch_size": 128,
+          "updates_per_iteration": 1280
+        },
+        "B256": {
+          "batch_size": 256,
+          "updates_per_iteration": 640
+        }
+      },
+      "arena": {
+        "games": 192,
+        "mcts_simulations": 64,
+        "tree_reuse": true
+      }
+    }
+  ],
+  "self_play": {
+    "search_mode": "pcr",
+    "pcr": {
+      "cheap_simulations": 100,
+      "full_simulations": 400,
+      "full_probability": 0.33
+    },
+    "tree_reuse": true
+  }
+}

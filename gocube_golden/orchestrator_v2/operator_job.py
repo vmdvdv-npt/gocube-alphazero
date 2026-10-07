@@ -209,21 +209,38 @@ def parse_job(value):
         raise ValueError("ab_tests must be a list")
     normalized_tests, names = [], set()
     for test in tests:
-        item = _object(test, {"id", "iterations", "A", "B", "arena"}, "ab_test")
+        item = _object(test, {"id", "iterations", "A", "B", "arena", "arms", "offline_replay"}, "ab_test")
         name = _name(item.get("id"), "ab_test.id")
         if name in names:
             raise ValueError("Duplicate A/B test id")
         names.add(name)
         iterations = _integer(item.get("iterations"), "ab_test.iterations")
-        if "A" not in item or "B" not in item:
+        offline = item.get("offline_replay")
+        arm_values = item.get("arms")
+        if arm_values is not None:
+            if offline is None or "A" in item or "B" in item:
+                raise ValueError("named arms are supported only for offline A/B tests")
+            if not isinstance(arm_values, dict) or len(arm_values) < 2:
+                raise ValueError("offline arms must contain at least two variants")
+            for arm_name in arm_values:
+                _name(arm_name, "offline arm id")
+        else:
+            arm_values = {arm: item.get(arm) for arm in ("A", "B")}
+        if offline is not None:
+            if training["iterations"] != 0:
+                raise ValueError("offline A/B tests require training.iterations=0")
+            if not isinstance(offline, list) or len(offline) != iterations:
+                raise ValueError("offline_replay must specify one checkpoint per iteration")
+            offline = [_selector(v, "offline_replay checkpoint") for v in offline]
+        if arm_values is None or any(v is None for v in arm_values.values()):
             raise ValueError("Every A/B test must specify A and B training overrides")
         arms = {
             arm: _training(
-                item[arm],
+                arm_values[arm],
                 defaults={**training, "iterations": iterations},
                 allow_iterations=False,
             )
-            for arm in ("A", "B")
+            for arm in arm_values
         }
         for arm in arms.values():
             arm.pop("iterations")
@@ -233,7 +250,8 @@ def parse_job(value):
         checked_arena = _arena(test_arena, defaults=arena)
         checked_arena.pop("every_iterations")
         normalized_tests.append(
-            {"id": name, "iterations": iterations, **arms, "arena": checked_arena}
+            {"id": name, "iterations": iterations, "arena": checked_arena,
+             **({"offline_replay": offline, "arms": arms} if offline is not None else arms)}
         )
 
     if training["iterations"] is None and normalized_tests:
@@ -427,6 +445,15 @@ def _effective(base, training, arena, self_play=None):
     return result.to_dict()
 
 
+def _offline_effective(base, training, arena, offline, self_play=None):
+    cfg = _effective(base, training, arena, self_play)
+    if offline is not None:
+        if any(len(row["buckets"]) != training["replay_generations"] for row in offline):
+            raise ValueError("offline replay window differs from requested replay_generations")
+        cfg["extensions"]["offline_ab_replay"] = offline
+    return cfg
+
+
 def _arena_execution(arena):
     return {
         "games": arena["games"],
@@ -570,6 +597,10 @@ def compile_job(value, *, runs_root=None, resolver=None):
                 **test["arena"],
                 "every_iterations": test["iterations"],
             }
+            offline = None
+            if "offline_replay" in test:
+                from .offline_replay import resolve_offline_replay
+                offline = resolve_offline_replay(test["offline_replay"], parent=parent, resolver=resolver)
             config = {
                 "experiment_id": job["run_id"] + "-" + step_id,
                 "topology": "torus9",
@@ -579,9 +610,9 @@ def compile_job(value, *, runs_root=None, resolver=None):
                         "arm_id": arm,
                         "generations": test["iterations"],
                         "lineage_id": job["run_id"] + "-" + step_id + "-" + arm,
-                        "config": _effective(base, test[arm], test_arena, job.get("self_play")),
+                        "config": _offline_effective(base, test.get("arms", test)[arm], test_arena, offline, job.get("self_play")),
                     }
-                    for arm in ("A", "B")
+                    for arm in test.get("arms", {"A": {}, "B": {}})
                 ],
                 "arena": {
                     "config": _arena_execution(test_arena),
