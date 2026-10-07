@@ -126,6 +126,7 @@ def test_raw_trajectory_retained_and_all_learner_targets_exclude_cheap(monkeypat
     loaded = ordinary.load_replay([{'shards':[{'path':str(path),'sha':file_sha256(path)}]}], split='train')
     trainer = object.__new__(ordinary.OrdinaryTrainer)
     trainer.seed = 91
+    trainer.batch_size = 64
     trainer.model = torch.nn.Linear(1,1)
     batch = trainer.batch(loaded,1)
     assert batch['score'].shape == (64,)
