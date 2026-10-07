@@ -14,6 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 INTERFACE_PATHS = (
     "gocube_golden/orchestrator_v2/operator_guide.py",
     "gocube_golden/orchestrator_v2/operator_job.py",
+    "gocube_golden/orchestrator_v2/continuous_training.py",
+    "gocube_golden/orchestrator_v2/_continuous_training_core.py",
     "gocube_golden/orchestrator_v2/production_entrypoint.py",
     "gocube_golden/orchestrator_v2/experiment_plan.py",
     "gocube_golden/orchestrator_v2/offline_replay.py",

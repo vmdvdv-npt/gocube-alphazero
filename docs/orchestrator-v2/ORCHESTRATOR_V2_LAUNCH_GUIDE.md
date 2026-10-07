@@ -275,13 +275,21 @@ training metrics, heartbeat и manifests — в соответствующей `
 experiment state/report/arenas — в `experiments/<run_id>-ab-<test_id>/`.
 Читайте эти файлы пассивно. Сравнивайте liveness, phase, done/total и durable state,
 а не только отсутствие stdout. Для внешних GPU/process измерений используйте
-документированный training efficiency monitor, если он есть в рабочем checkout;
+[training efficiency monitor](../diagnostics/training-efficiency-monitor.md);
 outputs пишите вне live run. Не профилируйте конкурентной GPU нагрузкой измеряемый job.
 
 В публичном parser нет команд `stop`, `restart`, `migrate`, `set-code-pin` или
 `resume --force`. Не придумывайте их. Остановку/миграцию выполняйте только по
 явному запросу пользователя и существующей документированной процедуре конкретного
 runner. Изменение кода действующего run требует отдельного разрешения и worktree.
+
+Для обычного continuous runner SIGINT/SIGTERM контроллеру преобразуются в durable
+soft stop: активное поколение или арена завершается, затем lineage становится
+SOFT_STOPPED. При возобновлении тем же job запрос потребляется. Обработчики
+восстанавливаются после выхода. Эта процедура относится к continuous runner;
+не переносите её автоматически на offline experiment или отдельный arena worker.
+Подробности: [continuous-training.md](continuous-training.md). Сигнал посылается
+только после явного запроса пользователя на остановку и проверки нужного PID.
 
 ## Внутренние режимы V2 и служебные команды
 
@@ -340,4 +348,4 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 50ad0c2612c83bc27b8ecaec0e0c0b5e8da63bf4d16322754e08361f902cccc6 -->
+<!-- reviewed-interface-sha256: cd49f24f80897fb6dca353e5d8a1e803f2d34715662a6b32cbde9cf6b50212c9 -->
