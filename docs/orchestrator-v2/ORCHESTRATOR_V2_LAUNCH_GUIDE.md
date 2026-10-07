@@ -348,7 +348,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: abf62e61d030c11f833c1430519a5e1129741eaeebe2e79114be7152fb06f4b3 -->
+<!-- reviewed-interface-sha256: 07037ebd9a53bd9ec5991738f806e4dd36438e4cfc284896f5ebd18dd4750401 -->
 
 ## B64 bounded performance audit
 
@@ -413,3 +413,15 @@ and JSON summary with `python -m gocube_golden.b64_speedup_report OUTPUT`; optio
 The measured comparison is checked in at
 `docs/diagnostics/b64-speedup-20261007/REPORT.md` and `report.json`. A separate
 `configs/diagnostics/b64-speedup-nsys-20261007.json` selects the short trace pass.
+
+The next B64 comparison uses
+`configs/diagnostics/b64-next-speedup-comparison-20261007.json`, with the current
+optimized trainer from `cfed84a` as its SHA-pinned reference. Reference modules
+with a cached replay-window class use their own window type; older modules use
+the uncached list. The eight-update gate checks model and complete Adam byte
+hashes after each update, in addition to sample identity and telemetry.
+Ordinary CUDA FP32 Adam batches compatible execution lists through the same
+PyTorch functional Adam path. Named singleton groups, order, options, unequal
+CPU clocks and serialized state remain intact. Unsupported execution options,
+heterogeneous groups and aliased parameters retain ordinary Adam dispatch.
+`configs/diagnostics/b64-next-speedup-nsys-20261007.json` selects its short trace.

@@ -72,18 +72,25 @@ def compare(payload, report, trainer, checkpoint, games, *, training, execution,
         gradient_clip=training['gradient_clip'],batch_size=64,
         seed=execution['training_master_seed'],device='cuda')
     # This copies only the container of game references, never targets/replay tensors.
-    reference_games = list(games)
+    window_type = getattr(sys.modules[reference_type.__module__], 'OrdinaryReplayWindow', None)
+    reference_games = window_type.from_games(games) if window_type else list(games)
     left, right = copy.deepcopy(reference), copy.deepcopy(trainer)
     a, b = Collector(timings=False,capture_positions=True), Collector(timings=False,capture_positions=True)
-    with a.activate():
-        first_metrics = [left.step(reference_games) for _ in range(8)]
-    with b.activate():
-        second_metrics = [right.step(games) for _ in range(8)]
+    first_metrics, second_metrics, update_hashes = [], [], []
+    for _ in range(8):
+        with a.activate():
+            first_metrics.append(left.step(reference_games))
+        with b.activate():
+            second_metrics.append(right.step(games))
+        left_hash, right_hash = fingerprint(left), fingerprint(right)
+        update_hashes.append({'reference': left_hash, 'optimized': right_hash})
+        if left_hash != right_hash or state_hash(first_metrics[-1]) != state_hash(second_metrics[-1]):
+            raise RuntimeError('B64 optimization violates per-update exact trajectory parity')
     before, after = fingerprint(left), fingerprint(right)
     parity={'updates':8,'sampled_positions_equal':a.positions==b.positions,
         'telemetry_equal':first_metrics==second_metrics,'model_bytes_equal':before['model']==after['model'],
         'adam_bytes_equal':before['adam']==after['adam'],'update_equal':left.update==right.update,
-        'reference':before,'optimized':after}
+        'reference':before,'optimized':after,'per_update_fingerprints':update_hashes}
     (output/'parity.json').write_text(json.dumps(parity,indent=2)+'\n')
     if not all(parity[key] for key in ('sampled_positions_equal','telemetry_equal','model_bytes_equal','adam_bytes_equal','update_equal')):
         raise RuntimeError('B64 optimization violates exact trajectory parity')

@@ -121,6 +121,7 @@ def run(payload):
         'replay_buckets':[b['generation'] for b in row['buckets']], 'replay_games':len(games),
         'replay_positions':sum(len(g['score']) for g in games),
         'measurement_code_sha256':{str(p.relative_to(Path(__file__).resolve().parents[1])):file_sha256(p) for p in [Path(__file__),Path(__file__).with_name('training_profile.py'),Path(__file__).with_name('torus9_five_channel_training.py'),Path(__file__).with_name('torus9_adaptation.py'),Path(__file__).with_name('process_supervision.py')]},
+        'adam_execution_code_sha256':file_sha256(Path(__file__).with_name('ordinary_adam.py')),
         'environment':{'torch':torch.__version__,'cuda':torch.version.cuda,
             'device':torch.cuda.get_device_name(0),'threads':torch.get_num_threads(),
             'deterministic_algorithms':torch.are_deterministic_algorithms_enabled(),
