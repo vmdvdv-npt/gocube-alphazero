@@ -379,7 +379,8 @@ class ExperimentRunnerV2:
                       else dict(getattr(arm.effective_config, "replay", {})))
             report["arms"][arm.arm_id] = {"batch_size": arm.effective_config.training["batch_size"],
                 "learning_rate": arm.effective_config.training["learning_rate"],
-                "optimizer_steps": arm.effective_config.training.get("optimizer_steps"),
+                "optimizer_steps": arm.effective_config.training.get(
+                    "optimizer_steps_per_iteration", arm.effective_config.training.get("optimizer_steps")),
                 "training_master_seed": arm.effective_config.execution.get("training_master_seed"),
                 "total_training_minutes": minutes, "mean_training_minutes": minutes / len(iterations),
                 "iterations": iterations, "sampling": replay.get("sampling", {"mode": "uniform"}),

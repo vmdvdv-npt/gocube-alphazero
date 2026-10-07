@@ -956,7 +956,8 @@ def test_experiment_runner_v2_migrates_legacy_v2_stopped_state_without_reexecuti
 
 
 @pytest.mark.parametrize('fixed_reference', [True, False])
-def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypatch, fixed_reference):
+@pytest.mark.parametrize('steps_field', ['optimizer_steps_per_iteration', 'optimizer_steps'])
+def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypatch, fixed_reference, steps_field):
     from gocube_golden.notifications import RecordingEventSink, format_event
     from gocube_golden import policy_surprise
     parent = _make_parent(tmp_path)
@@ -992,6 +993,7 @@ def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypa
     configs = []
     for name, lr in zip('ABCD', (2.5e-5, 5e-5, 1e-4, 2e-4)):
         config = _config(learning_rate=lr, games=1536, steps=2560, sims=199).to_dict()
+        config['training'][steps_field] = config['training'].pop('optimizer_steps')
         config['training']['batch_size'] = 64
         config['execution']['device'] = 'cpu'
         config['extensions'] = {'offline_ab_replay': [{'generation': 1}, {'generation': 2}],
@@ -1040,6 +1042,7 @@ def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypa
     report = json.loads((tmp_path / 'experiment' / 'report.json').read_text())
     assert report['selfplay_games'] == 0
     assert set(report['arms']) == set('ABCD')
+    assert all(row['optimizer_steps'] == 2560 for row in report['arms'].values())
     assert all(row['final_checkpoint']['generation'] == 2 for row in report['arms'].values())
     starts = [e for e in sink.events if e.event_type == 'TRAINING_STARTED']
     assert {e.payload['lineage_id'] for e in starts} == {'abcd-' + a for a in 'ABCD'}
