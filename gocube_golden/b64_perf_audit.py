@@ -130,6 +130,10 @@ def run(payload):
         'parameters':sum(p.numel() for p in trainer.model.parameters()),
         'optimizer_group_flags':[{k:g.get(k) for k in ('foreach','fused','capturable')} for g in trainer.optimizer.param_groups],
         'passes':{}}
+    if payload.get('reference_trainer_source'):
+        from .b64_speedup_comparison import compare
+        return compare(payload,report,trainer,checkpoint,games,training=training,execution=execution,
+                       output=output,warmup=warmup,updates=updates)
     # Observe sampler identity without timing spans on the ordinary parity arm.
     left,right=copy.deepcopy(trainer),copy.deepcopy(trainer)
     plain=Collector(timings=False, capture_positions=True); profiled=Collector(cuda=True, capture_positions=True)

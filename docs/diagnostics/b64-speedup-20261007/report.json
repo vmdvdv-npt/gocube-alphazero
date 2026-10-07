@@ -1,0 +1,1312 @@
+{
+  "schema": "gocube-b64-perf-audit-v1",
+  "config": {
+    "schema": "gocube-b64-perf-audit-v1",
+    "runs_root": "/home/codex/projects/gocube-alphazero/runs",
+    "resolved_experiment": "/home/codex/projects/gocube-alphazero/runs/torus9/orchestration/jobs/torus9-offline-batch-m255-g256-260-20261007-v1/resolved.json",
+    "output": "/home/codex/diagnostics/gocube-b64-speedup-20261007",
+    "warmup": 32,
+    "updates": 128,
+    "reference_trainer_source": "/tmp/gocube-b64-perf-worktree/gocube_golden/torus9_five_channel_training.py",
+    "reference_trainer_sha256": "sha256:3034ce8c26d77967cf20e0e1746eca1c787713cfc4c5e413a34da3a72e42d3ce"
+  },
+  "parent": {
+    "checkpoint_id": "M255",
+    "generation": 255,
+    "lineage_id": "torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1",
+    "path": "checkpoints/M255.pt",
+    "sha256": "sha256:b37e2600431fbc2248291fdf10944fa0d890d9e262f23b82689cefe52cfb0e9d",
+    "topology": "torus9"
+  },
+  "source_sha256": {
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/checkpoints/M255.pt": "sha256:b37e2600431fbc2248291fdf10944fa0d890d9e262f23b82689cefe52cfb0e9d",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/orchestration/jobs/torus9-offline-batch-m255-g256-260-20261007-v1/resolved.json": "sha256:5e6d7a80013a4143ec80b9863ccd6f9c3ecf3e3f0704029814b9bdc64bb27090",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/iter-256-fresh.json": "sha256:806168a342d53afa223002e46a31c275789cdb5e2a45dd9fc727436bf386a8dd",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/rolling-after-256.jsonl": "sha256:6385a37a8f6a8028a838a4679dd4630dee238d433906cabf1ea2683eebdd4836",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-500sims-p033-u1280-lr25e6-m248-itrnull-20261005-v1/replay/g0252-0000.pt": "sha256:a188848a601392d6bbff909e8574e44e082f63a2130d8717fe8c87015e48d86e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-500sims-p033-u1280-lr25e6-m248-itrnull-20261005-v1/replay/g0252-0128.pt": "sha256:85057ecc1962110bbe549b4195d01f4164cfb94ed39f6658a4c777173d4dd33c",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-500sims-p033-u1280-lr25e6-m248-itrnull-20261005-v1/replay/g0252-0256.pt": "sha256:15ae83d599c52fab71b481df06b135cb5761906ac515a21e04096c1ab9057183",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-500sims-p033-u1280-lr25e6-m248-itrnull-20261005-v1/replay/g0252-0384.pt": "sha256:df51b2636e8f2d6c0291c81d27691ed86ec9331b49afe41078bfa32eaa545596",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-500sims-p033-u1280-lr25e6-m248-itrnull-20261005-v1/replay/g0252-0512.pt": "sha256:3065384621f5fc308c55650a0d77f11fb71de3c82db44ef77e854c6ad19124b2",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-500sims-p033-u1280-lr25e6-m248-itrnull-20261005-v1/replay/g0252-0640.pt": "sha256:bda06aa29e8aa97e9a71ec506605f3cbbbba28998c02fdbafd042d1eb29d5d74",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-0000.pt": "sha256:a6fddbaf970566b9d959ca56c16108e479eca221f11a7b330f62733517c4e0a3",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-0128.pt": "sha256:56ca4a3f9f7800c871d6d6449fd726dae62d30b843766596bf38e8179b96405e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-0256.pt": "sha256:b92df0368f3db7c688c802c00d0b391050b0e957a430325b3361c8b4d911a8dc",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-0384.pt": "sha256:32dd6b23c11c03e0343249fc6b99db38d076ecb2fb9f19e7b79574771703763d",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-0512.pt": "sha256:b35957242d226c77e10816908470717a994acd949c94167025ef74dcdb37e6e0",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-0640.pt": "sha256:5175e6c67a4016fa04000eafbc755636fa674e1167bdeefa8113ca9189c9555f",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-0768.pt": "sha256:dc628f15d46c25c1147aa1350569f89aefc4a38f7d63c82d3e1644df018de840",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-0896.pt": "sha256:6352255ad2866e8503cc4f9cb8b48a76f53b347d088c246c1ba2f5454c4563fd",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-1024.pt": "sha256:834489a9befb056147ee2b8a3f95a4de00abb6c8e42a888c10bf46523f71c41e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-1152.pt": "sha256:3c0ab0695c135804b9493b6b8d3d45cd48f7346f6d94b7de3c10d936b1492d42",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-1280.pt": "sha256:a6cf52e87aa531d61fecee53493d22d3a2f59472ccd33e361ea1a53868fcb52a",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0253-1408.pt": "sha256:30f0ca85417aef778d5c3c73d02a9c135180a54522f543bd87d9496fc34ee863",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-0000.pt": "sha256:7f92b82dd26b32a7175d4b86e1fc4e4d35ad91a895a7626272ef8856bce4e84c",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-0128.pt": "sha256:55403200429c61044faea40ed81e9ef4b5bdb48e2815aee0b610a60f144ad1f5",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-0256.pt": "sha256:b5398d9f428094c678e5ec8e26713413a919a06c0aa1e4d20621f1d802f1b40e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-0384.pt": "sha256:1b1d572e0330bbd419e91b7c704aa4817238a378b8839b31ebf28e18755ec789",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-0512.pt": "sha256:ad2014f5bae39fafed044fc69892545853487a8b38d7a93f0245c443636923ee",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-0640.pt": "sha256:cf65ba5e872c3a5626b079bbbf88921e1f6f41a8da8ae35b184762e2d3ef758b",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-0768.pt": "sha256:e826cbcb232f26b217110734d94541bf9667039881c7f034e28caa1c092feb69",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-0896.pt": "sha256:46fe375333751b11bc225ca86b1958270d22794ca00e94d8c447c4679b68c362",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-1024.pt": "sha256:5b2c27dad6099ae3e10010a1dd04fd96e17b94408fd547bbafc1d3551bdf04c6",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-1152.pt": "sha256:800fa1ac3227a27b5fbe882133db974d7da82da4aa57e5d1779f6835be33dd42",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-1280.pt": "sha256:6e884617590ee9efcdca229e006f254bc4fe44848612bb3dc9faf390a772c2be",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0254-1408.pt": "sha256:cd232ec85c5e50d1f891aef7bcaaad3e10d7c8a32a9aa5681ebd84af110bd4b1",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-0000.pt": "sha256:4e2ec9f7cc61df4e1b8dcd93207dbf41bb2310bacd95445553f3ffc5e6c44243",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-0128.pt": "sha256:3073aa964bb975926082aef96cae2fe668072ff020598a5d67660b44664cf448",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-0256.pt": "sha256:cf42aa38776983894d995b9497284843b19a50b131a0bb4e4b95eeb7d19c0c08",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-0384.pt": "sha256:59116cec7e722e032cb58b613f8f1e3458f40da2024edf1dec4cf8d61b6bba1c",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-0512.pt": "sha256:103f1a185dd83c75af109504b08539f9e6773db8d536dbb8371d601617759415",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-0640.pt": "sha256:bcb2dce33fb886139aadb90bf713053f682de752e925535c8f3b52294f0d0297",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-0768.pt": "sha256:6dbed60b6cd51ccc65d25dee9e9d5e37664b84ccb5c3b7b797e0eecebb1fa0f2",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-0896.pt": "sha256:79229f5a6904186ace378b199aa8ee0bb0953eb8961ffd193f3ae21dc1b5c594",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-1024.pt": "sha256:11ec706f530595ddb02b8690ef4011606840719655dd872a569b4ca0f8bb5f5d",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-1152.pt": "sha256:bbc113724c5bce8d8a111e76f1c3080c1687e6816e369b63e110776b2f689242",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-1280.pt": "sha256:153a11aa95d5d383ff212be07071013faa8cf8a3cbeb182c04167d521e7178bb",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0255-1408.pt": "sha256:3a6fd05745a44b916ecd5ca5e3e275dc672db9b67307da6dd5a05f0e8701a13e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-0000.pt": "sha256:be35fb39f20c80790ffd31022724e39516667b5e3525fac62c0e64bfff42717e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-0128.pt": "sha256:f0f449c732ea60ce8df68b544dfcfb01ec65269461c2b04e9423a092eb4d74fd",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-0256.pt": "sha256:fd60cee404e4d58ccdeb54fe00adb744e0d4f7a86ee67fd4f1e9e2f2f85edef4",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-0384.pt": "sha256:b2a92a6f3e8056369d7bf07343a78c567ccb522ed1f8ee300f21f7085c044e69",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-0512.pt": "sha256:8fdfad979809c25a41dbf63c85d7d1ba7447f04edf23a89b8d91ee83d9adf7e7",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-0640.pt": "sha256:b21e2cd3709a3cd10cd4b73502b84e57b3416471146e3150bd2451c976161d26",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-0768.pt": "sha256:8684ff40199e436fd94a5c4ba6cd414f73bfc3e3d5b4bcde33ed5091e3617ae7",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-0896.pt": "sha256:1c8c76ba7ef04cf128eecdfd64e30b41aa6b09683a3cdeb0a80a0bcc9d317d3a",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-1024.pt": "sha256:73bb8777f9537ebc5e8d3640db7a663c102c6139715b47b94b18b29d9615674a",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-1152.pt": "sha256:8e5884cb1b7b4ee4173939863bffd2626b6c092b3422561f3707dc0b902f98c0",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-1280.pt": "sha256:3c0b1c3cefb4e17c2850448a72e9df9942e16033171f6dfc697346daaa25068d",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/replay/g0256-1408.pt": "sha256:90e0f392290c8b5c5de14bc1febeea22a68b8958ea617a174f9e3735ef3a0e01",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/iter-257-fresh.json": "sha256:152b53ae471cbf57dc3b1336c0eb30d58f305553bb4e232417fa5a6d191b100c",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/rolling-after-257.jsonl": "sha256:51e29773ebd8a1fb5f2129b8c9c966be39b9c070c7861c1130e389ff93bc4cfa",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-0000.pt": "sha256:7b1ffb63e6efccbdeeed317285d43079bc73d185ff8ff7170fd68f8de6547126",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-0128.pt": "sha256:e604d842497575d80e93978581c61bae8face683fe0c3528bd81cb112d7ac0d7",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-0256.pt": "sha256:0789f7035fa789764e498e0bae5dd1047fe93f1120d0818e1a817dc5a52b4f5f",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-0384.pt": "sha256:333cf00c5c9ccd3b2b6767d4cf71064e7312d76cb4e73a2689a0642cccdaa403",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-0512.pt": "sha256:8e6b562ce2efdc4ad41e87313f0aa44b273a2979558ebca478cbe4eea031b280",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-0640.pt": "sha256:d236eade02b4bba42ffd6ebbce577d6b8e42173d6a447ac24da9aab18db74f43",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-0768.pt": "sha256:07872302a37eab392c07884325c6f38cfd2f19c1bba839ec3a5581b8c803f5e0",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-0896.pt": "sha256:217f5310bff3db68086100417c447ee9a662500f391020e77dc735ba9a674cbd",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-1024.pt": "sha256:735c8a3b4fdc9fc4dd25fbf0b7ec320a962deac981a10a5193eba4da3e091619",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-1152.pt": "sha256:2ac4520800943dd21e30da1874f5471bff3e019b470fab72940049a3aa8370e3",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-1280.pt": "sha256:ea95d366258a1c376ac0ff579b7a90bb90efaa7756e1d17294a42708941770d4",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0257-1408.pt": "sha256:51b82ecffebacb47b1c55ae00a95f9bd9ca760c18baa394c105e5596fa60bb15",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/iter-258-fresh.json": "sha256:18cb7226c57bed10ba528c2a7229e36a019098e6264e150ea4b1515dc99fa582",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/rolling-after-258.jsonl": "sha256:f017bbc216cc6e1a54896687515d6c64bd3f48c047fc8dcddbda038a3a07e722",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-0000.pt": "sha256:89c6aa21059788faf5cb77d93d9390c18c3fa561f6b4e45d85fe2148b81d2427",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-0128.pt": "sha256:1630193de5458098123a1ab5f108b1fcd50c727f4c99cc749109c5ea7ccaa582",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-0256.pt": "sha256:8dd9c3f791304154c2c75e0b15f770fa2ae36148a451275813714fc8cc943de4",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-0384.pt": "sha256:6786239555cc8f618236d17e520fd7bb05d53292520e895588aca960afc8f72b",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-0512.pt": "sha256:2ba882dfeac113221497073e731da0ff783baf98b8c3abf717110feb7eea496d",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-0640.pt": "sha256:11b8a1ebcc0e4f91451ed64839fa8a41529282802c14f01a30fd32632bee14e2",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-0768.pt": "sha256:9809ffa4f29d78a7d23ba30a6166f6f3ad231badf24c2abeff459173934dc85e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-0896.pt": "sha256:bd4e0490b2ab880ded5bba279bbe1aca54fb921846dc8d86c4e36a8cadc4b932",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-1024.pt": "sha256:954b32daa3f6c18cb96f2a3bc60451e30e75754a6e6ac0a19dce04f53bfe2bc1",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-1152.pt": "sha256:ac47ada76be2ae4c6a204abd983ed90bb5d598d25a006c92400cdc796d8a00bb",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-1280.pt": "sha256:64f99d262b19501a1842cbacaf89a9fee9167f0014718b13ed3ec348ed4862a2",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0258-1408.pt": "sha256:44d1752d78a214fe931b2c39f79391790547ecf5e863b795913b52cf3d0b2797",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/iter-259-fresh.json": "sha256:ff33f749b39cfdc335e82c95c208e6543f4f8997fc29e710a58ed147ed9ee6ff",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/rolling-after-259.jsonl": "sha256:857d1167761625691433414847867ad35d99bb3ce63a2bdca12d5226003e06b9",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-0000.pt": "sha256:d693707bee4cd8b31bf6769a698694e26ce58b87f697f0d25c685ad43295f262",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-0128.pt": "sha256:73a09aa55e28ec4262d585f0689a101c76ba9595843b1c6922e0b5cafbac6844",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-0256.pt": "sha256:0237ed5c4347ce727f900a2a4bc633a186075aad3f3cffd746bda9b256f4e290",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-0384.pt": "sha256:c5849e41e5ec9e73003575950810153bcfd9fb96d3162fd5154f57852cfe2d3b",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-0512.pt": "sha256:29b40046dca7fe3d9fde949ea265ea03827a0266fe5710037c9a5135800d8e0a",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-0640.pt": "sha256:537b4b1b62ed971a5156db69a9da0375aed9a665447562f2ca6dcb26b1ee797c",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-0768.pt": "sha256:8e1c54b9939b257a3dce11b9f2f64bdffb974aa1cc0bbe8c1d6d4dc12e6f57b1",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-0896.pt": "sha256:251dc7dddd59cd64e033f25617f20f7d1570578ad7a2260ea8e5b7597dded90c",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-1024.pt": "sha256:2659d12a917952294ec024514f4cd74616b89d841fb65f79140ca5d944364763",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-1152.pt": "sha256:980e43c66ef263436df39829330bd3dd3d1c3e2f04b02d2319dd1fedf8ddb9e6",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-1280.pt": "sha256:575dc0f536c136ab48818fba0c94d6f174013a123f65e29bc217755711157499",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0259-1408.pt": "sha256:48b13273975aa98f9a8955930d00691c68e2517ca6c23f4e1d20c29da2fd7561",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/iter-260-fresh.json": "sha256:61c17d1d4fdfefbd3b7219834851ed2afd107d348b24ca709d6b36320b755157",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/rolling-after-260.jsonl": "sha256:9a40d67deb7a459ccb584fc0afba15484ef2b28e2932e2000d3864251fce2775",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-0000.pt": "sha256:0641e4189fe06d45fd1ede72f9bb6fe658a3d1b3e6f80ce48e4b06ebe9ee7f09",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-0128.pt": "sha256:e83b32bf80629606914c9f2880ef22894c660ca1904baae44657409f27c1d2af",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-0256.pt": "sha256:4e561c37355531c4d8ca75c7c1f8cc8e7af40323748dcd8e4a46db9d49878e39",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-0384.pt": "sha256:9ee0acb2bbf44f8bbfd8b05cbae3659346370874677f9d7f95292226d68eac9f",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-0512.pt": "sha256:f43210dd8b7da6b205a53f5b450d105867de1a26f4d84fe72f1e7e71adb22456",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-0640.pt": "sha256:592c12722717c7ecc74f2316001f2e6db9d3dbed9400f52a8d453f21bcd15630",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-0768.pt": "sha256:a24ff1df6f4a2ec26ebd77356a607565fa47faa6711e8b905cbc92bc22a2bfaa",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-0896.pt": "sha256:70483f9e7a8b8ac8a4fb70a62ada172a393b8088703c30073bc58b2f350922a3",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-1024.pt": "sha256:a38d637ed94b54054a9a59e7aafa0a33c9898882486793fab9e151ff5d86a0a0",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-1152.pt": "sha256:98aa8cad4cfc1e1b8e52fed0c309b7567d2b6c8cff3d013525cd47e5515dc866",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-1280.pt": "sha256:7e76caa532f597b27cdba5ba5ef225a9880ecefcfc9f55c8f45e8c9ecf40d5a7",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/replay/g0260-1408.pt": "sha256:6c243a8247273a3c74e941edad31880b90307d98e2bd0c0b890f9830b289e6f6"
+  },
+  "workload_generation": 256,
+  "replay_buckets": [
+    252,
+    253,
+    254,
+    255,
+    256
+  ],
+  "replay_games": 6889,
+  "replay_positions": 203081,
+  "measurement_code_sha256": {
+    "gocube_golden/b64_perf_audit.py": "sha256:0fbf907057499a2a58db1d6324c3c447f667fc8994bce0ad554afc293cb69b26",
+    "gocube_golden/training_profile.py": "sha256:bb037d2cc9dc8ea4d25e8bed869202ce536b54d7f2e5cdfe5c0b2d61cce08392",
+    "gocube_golden/torus9_five_channel_training.py": "sha256:5f4abcf620ad5ebb5b81c503acfd009423f79d309d5d45e63751215274b3c679",
+    "gocube_golden/torus9_adaptation.py": "sha256:a4b01304459e6ef15172a9e3c708edc46596a13f8b492689bf0a694baaf80c13",
+    "gocube_golden/process_supervision.py": "sha256:5ff9b9cf706f118174f8577fafd105316da0f5786abe6504feca3557b6a20a46"
+  },
+  "environment": {
+    "torch": "2.4.1+cu124",
+    "cuda": "12.4",
+    "device": "NVIDIA GeForce RTX 3060 Laptop GPU",
+    "threads": 1,
+    "deterministic_algorithms": false,
+    "cudnn_benchmark": false,
+    "cudnn_deterministic": false,
+    "tf32_matmul": false,
+    "tf32_cudnn": true
+  },
+  "parameter_groups": 84,
+  "parameters": 177609,
+  "optimizer_group_flags": [
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    },
+    {
+      "foreach": null,
+      "fused": null,
+      "capturable": false
+    }
+  ],
+  "passes": {},
+  "comparison": {
+    "reference_source": "/tmp/gocube-b64-perf-worktree/gocube_golden/torus9_five_channel_training.py",
+    "reference_sha256": "sha256:3034ce8c26d77967cf20e0e1746eca1c787713cfc4c5e413a34da3a72e42d3ce",
+    "comparison_code_sha256": "sha256:60d996c2a02b8bfe553488df46a674b21a2ab7547805ceac3797cffab16be732",
+    "parity": {
+      "updates": 8,
+      "sampled_positions_equal": true,
+      "telemetry_equal": true,
+      "model_bytes_equal": true,
+      "adam_bytes_equal": true,
+      "update_equal": true,
+      "reference": {
+        "model": "sha256:828265938ae6e0cf48f1e54fb039a853379939059f75c1d971053bf079217756",
+        "adam": "sha256:3f1a761a8f79b214ac16a70eb630b47f594b5f17b437573c40d8d3eb9122c004",
+        "update": 55208
+      },
+      "optimized": {
+        "model": "sha256:828265938ae6e0cf48f1e54fb039a853379939059f75c1d971053bf079217756",
+        "adam": "sha256:3f1a761a8f79b214ac16a70eb630b47f594b5f17b437573c40d8d3eb9122c004",
+        "update": 55208
+      }
+    },
+    "warmup_fingerprint": {
+      "model": "sha256:83408ba5222b0996f8f92b4059d7af8909a7207a0f422eff8fc33c8b325f3c63",
+      "adam": "sha256:fd2bf6c3993175c8515224710b948fde3a0fe2aeb007f0203ce58ae828d447c4",
+      "update": 55232
+    },
+    "passes": {
+      "reference-1": {
+        "update_wall_ms": {
+          "mean": 176.35565907221462,
+          "p50": 175.64880556892604,
+          "p95": 227.7585162781179,
+          "min": 136.1982070375234,
+          "max": 249.68098802492023,
+          "count": 128
+        },
+        "loop_wall_seconds": 22.574006707873195,
+        "updates": 128,
+        "fingerprint": {
+          "model": "sha256:a543c2fafdea807e0360de25bae81bad5900eea8d20130a2db10f85460be1326",
+          "adam": "sha256:b662583eb65cb1479a4011f4aa939d966a3df93f5ce1841655c0a0639873fff6",
+          "update": 55360
+        },
+        "telemetry_sha256": "sha256:aee096314666d2c7d22d54241de341bd9e84a19b59c558664144e3c60bd44853",
+        "pulse_writes": 2,
+        "peak_allocated_vram_bytes": 90528768,
+        "peak_reserved_vram_bytes": 119537664
+      },
+      "optimized-1": {
+        "update_wall_ms": {
+          "mean": 49.84775794582674,
+          "p50": 45.905508450232446,
+          "p95": 65.55227095959707,
+          "min": 42.72045916877687,
+          "max": 141.96171192452312,
+          "count": 128
+        },
+        "loop_wall_seconds": 6.380840152036399,
+        "updates": 128,
+        "fingerprint": {
+          "model": "sha256:a543c2fafdea807e0360de25bae81bad5900eea8d20130a2db10f85460be1326",
+          "adam": "sha256:b662583eb65cb1479a4011f4aa939d966a3df93f5ce1841655c0a0639873fff6",
+          "update": 55360
+        },
+        "telemetry_sha256": "sha256:aee096314666d2c7d22d54241de341bd9e84a19b59c558664144e3c60bd44853",
+        "pulse_writes": 0,
+        "peak_allocated_vram_bytes": 90528768,
+        "peak_reserved_vram_bytes": 119537664
+      },
+      "optimized-2": {
+        "update_wall_ms": {
+          "mean": 51.22494266470312,
+          "p50": 48.05923963431269,
+          "p95": 68.65615367423743,
+          "min": 42.15928097255528,
+          "max": 75.75288694351912,
+          "count": 128
+        },
+        "loop_wall_seconds": 6.5571547178551555,
+        "updates": 128,
+        "fingerprint": {
+          "model": "sha256:a543c2fafdea807e0360de25bae81bad5900eea8d20130a2db10f85460be1326",
+          "adam": "sha256:b662583eb65cb1479a4011f4aa939d966a3df93f5ce1841655c0a0639873fff6",
+          "update": 55360
+        },
+        "telemetry_sha256": "sha256:aee096314666d2c7d22d54241de341bd9e84a19b59c558664144e3c60bd44853",
+        "pulse_writes": 0,
+        "peak_allocated_vram_bytes": 90528768,
+        "peak_reserved_vram_bytes": 119537664
+      },
+      "reference-2": {
+        "update_wall_ms": {
+          "mean": 166.03126455811434,
+          "p50": 167.91859548538923,
+          "p95": 228.4292969736269,
+          "min": 132.27954017929733,
+          "max": 252.23931903019547,
+          "count": 128
+        },
+        "loop_wall_seconds": 21.252350082155317,
+        "updates": 128,
+        "fingerprint": {
+          "model": "sha256:a543c2fafdea807e0360de25bae81bad5900eea8d20130a2db10f85460be1326",
+          "adam": "sha256:b662583eb65cb1479a4011f4aa939d966a3df93f5ce1841655c0a0639873fff6",
+          "update": 55360
+        },
+        "telemetry_sha256": "sha256:aee096314666d2c7d22d54241de341bd9e84a19b59c558664144e3c60bd44853",
+        "pulse_writes": 2,
+        "peak_allocated_vram_bytes": 90528768,
+        "peak_reserved_vram_bytes": 119537664
+      }
+    },
+    "result": {
+      "reference_ms_per_update": 171.19346181516448,
+      "optimized_ms_per_update": 50.53635030526493,
+      "speedup": 3.387531168773962,
+      "wall_reduction_percent": 70.47997641415277,
+      "full_measured_trajectory_and_telemetry_bytes_equal": true,
+      "end_fingerprint": {
+        "model": "sha256:a543c2fafdea807e0360de25bae81bad5900eea8d20130a2db10f85460be1326",
+        "adam": "sha256:b662583eb65cb1479a4011f4aa939d966a3df93f5ce1841655c0a0639873fff6",
+        "update": 55360
+      },
+      "end_telemetry_sha256": "sha256:aee096314666d2c7d22d54241de341bd9e84a19b59c558664144e3c60bd44853"
+    },
+    "hardware": {
+      "reference-1": {
+        "utilization.gpu": {
+          "mean": 30.954545454545453,
+          "p50": 35.5,
+          "p95": 43.9,
+          "min": 16.0,
+          "max": 44.0,
+          "count": 22
+        },
+        "power.draw": {
+          "mean": 19.74681818181818,
+          "p50": 19.485,
+          "p95": 21.272000000000002,
+          "min": 17.88,
+          "max": 21.4,
+          "count": 22
+        },
+        "memory.used": {
+          "mean": 1629.0,
+          "p50": 1629.0,
+          "p95": 1629.0,
+          "min": 1629.0,
+          "max": 1629.0,
+          "count": 22
+        },
+        "clocks.sm": {
+          "mean": 808.6818181818181,
+          "p50": 753.5,
+          "p95": 1064.6,
+          "min": 585.0,
+          "max": 1065.0,
+          "count": 22
+        }
+      },
+      "optimized-1": {
+        "utilization.gpu": {
+          "mean": 31.5,
+          "p50": 32.0,
+          "p95": 34.5,
+          "min": 27.0,
+          "max": 35.0,
+          "count": 6
+        },
+        "power.draw": {
+          "mean": 23.62,
+          "p50": 24.085,
+          "p95": 25.137500000000003,
+          "min": 19.58,
+          "max": 25.28,
+          "count": 6
+        },
+        "memory.used": {
+          "mean": 1629.0,
+          "p50": 1629.0,
+          "p95": 1629.0,
+          "min": 1629.0,
+          "max": 1629.0,
+          "count": 6
+        },
+        "clocks.sm": {
+          "mean": 968.6666666666666,
+          "p50": 896.0,
+          "p95": 1200.0,
+          "min": 795.0,
+          "max": 1200.0,
+          "count": 6
+        }
+      },
+      "optimized-2": {
+        "utilization.gpu": {
+          "mean": 31.0,
+          "p50": 32.0,
+          "p95": 37.5,
+          "min": 22.0,
+          "max": 38.0,
+          "count": 6
+        },
+        "power.draw": {
+          "mean": 24.755,
+          "p50": 24.25,
+          "p95": 27.1525,
+          "min": 23.08,
+          "max": 27.71,
+          "count": 6
+        },
+        "memory.used": {
+          "mean": 1629.0,
+          "p50": 1629.0,
+          "p95": 1629.0,
+          "min": 1629.0,
+          "max": 1629.0,
+          "count": 6
+        },
+        "clocks.sm": {
+          "mean": 982.5,
+          "p50": 870.0,
+          "p95": 1260.0,
+          "min": 780.0,
+          "max": 1260.0,
+          "count": 6
+        }
+      },
+      "reference-2": {
+        "utilization.gpu": {
+          "mean": 28.571428571428573,
+          "p50": 31.0,
+          "p95": 42.0,
+          "min": 14.0,
+          "max": 54.0,
+          "count": 21
+        },
+        "power.draw": {
+          "mean": 20.818571428571428,
+          "p50": 20.22,
+          "p95": 22.89,
+          "min": 19.15,
+          "max": 25.0,
+          "count": 21
+        },
+        "memory.used": {
+          "mean": 1629.0,
+          "p50": 1629.0,
+          "p95": 1629.0,
+          "min": 1629.0,
+          "max": 1629.0,
+          "count": 21
+        },
+        "clocks.sm": {
+          "mean": 903.7142857142857,
+          "p50": 742.0,
+          "p95": 1260.0,
+          "min": 472.0,
+          "max": 1260.0,
+          "count": 21
+        }
+      }
+    }
+  },
+  "source_identities_unchanged": true,
+  "artifacts_published": [],
+  "optimized_nsight": {
+    "updates": 16,
+    "kernel_count": 16800,
+    "kernels_per_update": 1050.0,
+    "kernel_busy_ms_per_update": 9.6820616875,
+    "kernel_busy_fraction_of_profile_wall": 0.13894968901461935,
+    "kernel_duration_us": {
+      "mean": 9.22101113095238,
+      "p50": 3.232,
+      "p95": 43.617,
+      "min": 1.184,
+      "max": 396.972,
+      "count": 16800
+    },
+    "gpu_idle_gap_ms": {
+      "mean": 0.05631194362759688,
+      "p50": 0.021697,
+      "p95": 0.135108,
+      "min": 0.001568,
+      "max": 14.445699,
+      "count": 16799
+    },
+    "transfer_count": 432,
+    "transfer_gpu_ms_per_update": 0.1684958125,
+    "kernel_names_counts": {
+      "CatArrayBatchedCopy_aligned16_contig": 128,
+      "vectorized_elementwise_kernel": 2624,
+      "reduce_kernel": 992,
+      "CatArrayBatchedCopy_contig": 32,
+      "unrolled_elementwise_kernel": 112,
+      "elementwise_kernel": 352,
+      "ampere_dgemm_64x64_tn": 16,
+      "vectorized_layer_norm_kernel": 144,
+      "index_elementwise_kernel": 128,
+      "ampere_sgemm_32x128_tn": 400,
+      "kernel": 64,
+      "ampere_sgemm_32x32_sliced1x4_tn": 64,
+      "softmax_warp_forward": 96,
+      "nll_loss_forward_reduce_cuda_kernel_2d": 16,
+      "nll_loss_backward_reduce_cuda_kernel_2d": 16,
+      "softmax_warp_backward": 48,
+      "gemmk1_kernel": 32,
+      "gemvNSP_kernel": 32,
+      "ampere_sgemm_32x32_sliced1x4_nn": 32,
+      "ampere_sgemm_32x32_sliced1x4_nt": 48,
+      "ampere_sgemm_32x128_nn": 448,
+      "ampere_sgemm_64x32_sliced1x4_nt": 416,
+      "splitKreduce_kernel": 416,
+      "layer_norm_grad_input_kernel_vectorized": 144,
+      "GammaBetaBackwardCUDAKernel": 144,
+      "elementwise_kernel_with_index": 128,
+      "DeviceRadixSortSingleTileKernel": 128,
+      "indexing_backward_kernel": 128,
+      "Kernel2": 16,
+      "multi_tensor_apply_kernel": 9440,
+      "lpnorm_cleanup": 16
+    },
+    "span_kernel_names_counts": {
+      "validate.pre": {
+        "CatArrayBatchedCopy_aligned16_contig": 32,
+        "vectorized_elementwise_kernel": 144,
+        "reduce_kernel": 48,
+        "CatArrayBatchedCopy_contig": 16
+      },
+      "validate.pre.pack": {
+        "CatArrayBatchedCopy_aligned16_contig": 32
+      },
+      "validate.pre.exp_avg": {
+        "vectorized_elementwise_kernel": 64,
+        "reduce_kernel": 16
+      },
+      "validate.pre.exp_avg_sq": {
+        "vectorized_elementwise_kernel": 64,
+        "reduce_kernel": 16
+      },
+      "validate.pre.negative": {
+        "vectorized_elementwise_kernel": 16,
+        "reduce_kernel": 16
+      },
+      "validate.pre.scalar_sync": {
+        "CatArrayBatchedCopy_contig": 16
+      },
+      "batch_and_losses": {
+        "unrolled_elementwise_kernel": 64,
+        "elementwise_kernel": 80,
+        "ampere_dgemm_64x64_tn": 16,
+        "vectorized_layer_norm_kernel": 144,
+        "index_elementwise_kernel": 128,
+        "ampere_sgemm_32x128_tn": 400,
+        "reduce_kernel": 336,
+        "vectorized_elementwise_kernel": 640,
+        "kernel": 48,
+        "CatArrayBatchedCopy_aligned16_contig": 16,
+        "ampere_sgemm_32x32_sliced1x4_tn": 64,
+        "softmax_warp_forward": 96,
+        "nll_loss_forward_reduce_cuda_kernel_2d": 16
+      },
+      "forward": {
+        "unrolled_elementwise_kernel": 64,
+        "elementwise_kernel": 80,
+        "ampere_dgemm_64x64_tn": 16,
+        "vectorized_layer_norm_kernel": 144,
+        "index_elementwise_kernel": 128,
+        "ampere_sgemm_32x128_tn": 400,
+        "reduce_kernel": 176,
+        "vectorized_elementwise_kernel": 448,
+        "kernel": 48,
+        "CatArrayBatchedCopy_aligned16_contig": 16,
+        "ampere_sgemm_32x32_sliced1x4_tn": 64
+      },
+      "loss.policy": {
+        "softmax_warp_forward": 16,
+        "vectorized_elementwise_kernel": 32,
+        "reduce_kernel": 32
+      },
+      "loss.wdl": {
+        "softmax_warp_forward": 16,
+        "vectorized_elementwise_kernel": 32,
+        "reduce_kernel": 32
+      },
+      "loss.ownership": {
+        "softmax_warp_forward": 16,
+        "nll_loss_forward_reduce_cuda_kernel_2d": 16
+      },
+      "loss.score": {
+        "vectorized_elementwise_kernel": 16,
+        "reduce_kernel": 16
+      },
+      "metric.brier": {
+        "softmax_warp_forward": 16,
+        "vectorized_elementwise_kernel": 32,
+        "reduce_kernel": 32
+      },
+      "metric.score_mae_points": {
+        "vectorized_elementwise_kernel": 48,
+        "reduce_kernel": 16
+      },
+      "metric.policy_entropy": {
+        "softmax_warp_forward": 32,
+        "vectorized_elementwise_kernel": 32,
+        "reduce_kernel": 32
+      },
+      "loss.sum": {
+        "vectorized_elementwise_kernel": 64
+      },
+      "loss.finite": {
+        "vectorized_elementwise_kernel": 64
+      },
+      "backward": {
+        "vectorized_elementwise_kernel": 1360,
+        "elementwise_kernel": 272,
+        "nll_loss_backward_reduce_cuda_kernel_2d": 16,
+        "softmax_warp_backward": 48,
+        "gemmk1_kernel": 32,
+        "gemvNSP_kernel": 32,
+        "reduce_kernel": 528,
+        "ampere_sgemm_32x32_sliced1x4_nn": 32,
+        "ampere_sgemm_32x32_sliced1x4_nt": 48,
+        "ampere_sgemm_32x128_nn": 448,
+        "ampere_sgemm_64x32_sliced1x4_nt": 416,
+        "splitKreduce_kernel": 416,
+        "kernel": 16,
+        "layer_norm_grad_input_kernel_vectorized": 144,
+        "GammaBetaBackwardCUDAKernel": 144,
+        "elementwise_kernel_with_index": 128,
+        "DeviceRadixSortSingleTileKernel": 128,
+        "indexing_backward_kernel": 128,
+        "unrolled_elementwise_kernel": 48,
+        "Kernel2": 16
+      },
+      "grad_clip": {
+        "vectorized_elementwise_kernel": 144,
+        "multi_tensor_apply_kernel": 32,
+        "lpnorm_cleanup": 16,
+        "CatArrayBatchedCopy_aligned16_contig": 16,
+        "reduce_kernel": 16
+      },
+      "adam": {
+        "multi_tensor_apply_kernel": 9408
+      },
+      "validate.post": {
+        "CatArrayBatchedCopy_aligned16_contig": 32,
+        "vectorized_elementwise_kernel": 144,
+        "reduce_kernel": 48,
+        "CatArrayBatchedCopy_contig": 16
+      },
+      "validate.post.pack": {
+        "CatArrayBatchedCopy_aligned16_contig": 32
+      },
+      "validate.post.exp_avg": {
+        "vectorized_elementwise_kernel": 64,
+        "reduce_kernel": 16
+      },
+      "validate.post.exp_avg_sq": {
+        "vectorized_elementwise_kernel": 64,
+        "reduce_kernel": 16
+      },
+      "validate.post.negative": {
+        "vectorized_elementwise_kernel": 16,
+        "reduce_kernel": 16
+      },
+      "validate.post.scalar_sync": {
+        "CatArrayBatchedCopy_contig": 16
+      },
+      "weights.finite": {
+        "CatArrayBatchedCopy_aligned16_contig": 16,
+        "vectorized_elementwise_kernel": 64,
+        "reduce_kernel": 16
+      },
+      "scalar.telemetry": {
+        "CatArrayBatchedCopy_aligned16_contig": 16
+      }
+    },
+    "spans": {
+      "validate.pre": {
+        "kernels_per_update": 15.0,
+        "kernel_ms_per_update": 0.058301625,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.0093078125,
+        "transfer_ms_per_update": 0.001274
+      },
+      "validate.pre.scalar_sync": {
+        "kernels_per_update": 1.0,
+        "kernel_ms_per_update": 0.00268025,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.0093078125,
+        "transfer_ms_per_update": 0.001274
+      },
+      "batch_and_losses": {
+        "kernels_per_update": 128.0,
+        "kernel_ms_per_update": 3.0953713125,
+        "sync_calls_per_update": 5.0,
+        "sync_cpu_ms_per_update": 0.3336686875,
+        "transfer_ms_per_update": 0.02028075
+      },
+      "h2d.observation": {
+        "kernels_per_update": 0.0,
+        "kernel_ms_per_update": 0.0,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.0858195625,
+        "transfer_ms_per_update": 0.0122725
+      },
+      "h2d.pi": {
+        "kernels_per_update": 0.0,
+        "kernel_ms_per_update": 0.0,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.065114375,
+        "transfer_ms_per_update": 0.0025500625
+      },
+      "h2d.z": {
+        "kernels_per_update": 0.0,
+        "kernel_ms_per_update": 0.0,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.06623125,
+        "transfer_ms_per_update": 0.000534
+      },
+      "h2d.ownership": {
+        "kernels_per_update": 0.0,
+        "kernel_ms_per_update": 0.0,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.06024775,
+        "transfer_ms_per_update": 0.0043761875
+      },
+      "h2d.score": {
+        "kernels_per_update": 0.0,
+        "kernel_ms_per_update": 0.0,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.05625575,
+        "transfer_ms_per_update": 0.000548
+      },
+      "loss.finite": {
+        "kernels_per_update": 4.0,
+        "kernel_ms_per_update": 0.00653625,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.0826094375,
+        "transfer_ms_per_update": 0.0015000625
+      },
+      "grad_clip": {
+        "kernels_per_update": 14.0,
+        "kernel_ms_per_update": 0.034873125,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.15725725,
+        "transfer_ms_per_update": 0.001212
+      },
+      "validate.post": {
+        "kernels_per_update": 15.0,
+        "kernel_ms_per_update": 0.059458,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.008056,
+        "transfer_ms_per_update": 0.0014080625
+      },
+      "validate.post.scalar_sync": {
+        "kernels_per_update": 1.0,
+        "kernel_ms_per_update": 0.002792,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.008056,
+        "transfer_ms_per_update": 0.0014080625
+      },
+      "weights.finite": {
+        "kernels_per_update": 6.0,
+        "kernel_ms_per_update": 0.0237109375,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.0581130625,
+        "transfer_ms_per_update": 0.001242
+      },
+      "scalar.telemetry": {
+        "kernels_per_update": 1.0,
+        "kernel_ms_per_update": 0.00215625,
+        "sync_calls_per_update": 1.0,
+        "sync_cpu_ms_per_update": 0.002933,
+        "transfer_ms_per_update": 0.0011060625
+      },
+      "validate.pre.pack": {
+        "kernels_per_update": 2.0,
+        "kernel_ms_per_update": 0.0114801875,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "validate.pre.exp_avg": {
+        "kernels_per_update": 5.0,
+        "kernel_ms_per_update": 0.017702625,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "validate.pre.exp_avg_sq": {
+        "kernels_per_update": 5.0,
+        "kernel_ms_per_update": 0.016968375,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "validate.pre.negative": {
+        "kernels_per_update": 2.0,
+        "kernel_ms_per_update": 0.0094701875,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "forward": {
+        "kernels_per_update": 99.0,
+        "kernel_ms_per_update": 2.9250316875,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "loss.policy": {
+        "kernels_per_update": 5.0,
+        "kernel_ms_per_update": 0.0139604375,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "loss.wdl": {
+        "kernels_per_update": 5.0,
+        "kernel_ms_per_update": 0.0109783125,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "loss.ownership": {
+        "kernels_per_update": 2.0,
+        "kernel_ms_per_update": 0.108689375,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "loss.score": {
+        "kernels_per_update": 2.0,
+        "kernel_ms_per_update": 0.00452425,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "metric.brier": {
+        "kernels_per_update": 5.0,
+        "kernel_ms_per_update": 0.0108145,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "metric.score_mae_points": {
+        "kernels_per_update": 4.0,
+        "kernel_ms_per_update": 0.007350125,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "metric.policy_entropy": {
+        "kernels_per_update": 6.0,
+        "kernel_ms_per_update": 0.014022625,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "loss.sum": {
+        "kernels_per_update": 4.0,
+        "kernel_ms_per_update": 0.006214125,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "backward": {
+        "kernels_per_update": 275.0,
+        "kernel_ms_per_update": 4.60942925,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.140472875
+      },
+      "adam": {
+        "kernels_per_update": 588.0,
+        "kernel_ms_per_update": 1.7860108125,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "validate.post.pack": {
+        "kernels_per_update": 2.0,
+        "kernel_ms_per_update": 0.0097405625,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "validate.post.exp_avg": {
+        "kernels_per_update": 5.0,
+        "kernel_ms_per_update": 0.0188245625,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "validate.post.exp_avg_sq": {
+        "kernels_per_update": 5.0,
+        "kernel_ms_per_update": 0.017540625,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      },
+      "validate.post.negative": {
+        "kernels_per_update": 2.0,
+        "kernel_ms_per_update": 0.01056025,
+        "sync_calls_per_update": 0.0,
+        "sync_cpu_ms_per_update": 0.0,
+        "transfer_ms_per_update": 0.0
+      }
+    },
+    "update_wall_ms": {
+      "mean": 69.67108728713356,
+      "p50": 65.79931254964322,
+      "p95": 100.00948840752244,
+      "min": 54.64213294908404,
+      "max": 107.10635012947023,
+      "count": 16
+    }
+  }
+}

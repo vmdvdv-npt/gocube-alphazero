@@ -7,6 +7,8 @@ komi=1.5 target contract and retains whole-generation buckets.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 import gzip
 import hashlib
 import json
@@ -85,6 +87,44 @@ class OrdinaryTrainer(AdaptationTrainer):
         self.validate_clocks()
 
     def validate_clocks(self):
+        # Adam clocks remain CPU scalars; inspect all structural constraints before
+        # packing the read-only moment tensors. The detailed path preserves the
+        # original first-error order and messages if anything is invalid.
+        moments, variances = [], []
+        device = next(self.model.parameters()).device
+        for n, p in self.model.named_parameters():
+            state = self.optimizer.state[p]
+            with span('validate.step'):
+                try:
+                    clock = int(state['step'])
+                except (KeyError, TypeError, ValueError, OverflowError, RuntimeError):
+                    return self._validate_clocks_detailed()
+                if clock != self.clock_origin[n] + self.update:
+                    return self._validate_clocks_detailed()
+            for key, collection in (('exp_avg', moments), ('exp_avg_sq', variances)):
+                if key not in state or not isinstance(state[key], torch.Tensor):
+                    return self._validate_clocks_detailed()
+                value = state[key]
+                if value.shape != p.shape or value.device != device or value.layout != torch.strided or value.is_complex():
+                    return self._validate_clocks_detailed()
+                collection.append(value)
+        with torch.no_grad():
+            with span('validate.pack'):
+                average = torch.cat([value.reshape(-1) for value in moments])
+                variance = torch.cat([value.reshape(-1) for value in variances])
+            with span('validate.exp_avg'):
+                average_finite = torch.isfinite(average).all()
+            with span('validate.exp_avg_sq'):
+                variance_finite = torch.isfinite(variance).all()
+            with span('validate.negative'):
+                variance_negative = (variance < 0).any()
+            with span('validate.scalar_sync'):
+                valid_average, valid_variance, negative = torch.stack(
+                    (average_finite, variance_finite, variance_negative)).cpu().tolist()
+        if not valid_average or not valid_variance or negative:
+            self._validate_clocks_detailed()
+
+    def _validate_clocks_detailed(self):
         for n, p in self.model.named_parameters():
             state = self.optimizer.state[p]
             if measured('validate.step', lambda: int(state['step']) != self.clock_origin[n] + self.update):
@@ -100,10 +140,14 @@ class OrdinaryTrainer(AdaptationTrainer):
         # adaptation-only game/phase stratification.
         with span('batch.sampling'):
             import bisect
-            cumulative, count = [], 0
-            for g in games:
-                count += len(g['score'])
-                cumulative.append(count)
+            if isinstance(games, OrdinaryReplayWindow):
+                cumulative, count = games.cumulative, games.positions
+            else:
+                # Mutable caller-owned sequences retain the uncached sampler.
+                cumulative, count = [], 0
+                for g in games:
+                    count += len(g['score'])
+                    cumulative.append(count)
             rng = random.Random(self.seed + update)
             indices = []
             for _ in range(self.batch_size):
@@ -153,11 +197,14 @@ class OrdinaryTrainer(AdaptationTrainer):
         with span('validate.post'):
             self.validate_clocks()
         with span('weights.finite'):
-            if any(not torch.isfinite(p).all() for p in self.model.parameters()):
-                raise FloatingPointError('Nonfinite ordinary weights')
+            with torch.no_grad():
+                weights = torch.cat([p.reshape(-1) for p in self.model.parameters()])
+                if not torch.isfinite(weights).all():
+                    raise FloatingPointError('Nonfinite ordinary weights')
         with span('scalar.telemetry'):
-            return {'update': self.update, 'losses': {k: float(v.detach()) for k,v in losses.items()},
-                    'grad_norm_before_clip': float(grad), 'learning_rate': self.learning_rate,
+            scalars = torch.stack([v.detach() for v in losses.values()] + [grad.detach()]).cpu().tolist()
+            return {'update': self.update, 'losses': dict(zip(losses, map(float, scalars[:-1]))),
+                    'grad_norm_before_clip': float(scalars[-1]), 'learning_rate': self.learning_rate,
                     'gradient_clip': self.gradient_clip, 'batch_size': self.batch_size,
                     'l2_sp_coefficient': 0.}
 
@@ -216,6 +263,38 @@ class TrainingHeartbeat:
         self.thread.join(timeout=15)
 
 
+@dataclass(frozen=True)
+class OrdinaryReplayWindow(Sequence):
+    """Read-only generation window; cache lengths without copying replay tensors.
+
+    Loaded games and their targets are immutable for the lifetime of a window.
+    Changing a window requires constructing a new one. Mutable sequences passed
+    directly to batch() continue to rebuild offsets on every call.
+    """
+    games: tuple
+    cumulative: tuple
+    positions: int
+
+    @classmethod
+    def from_games(cls, games):
+        games = tuple(games)
+        cumulative, count = [], 0
+        for game in games:
+            count += len(game['score'])
+            cumulative.append(count)
+        return cls(games, tuple(cumulative), count)
+
+    def __len__(self):
+        return len(self.games)
+
+    def __getitem__(self, index):
+        return self.games[index]
+
+    def __deepcopy__(self, memo):
+        # Immutable window, shared target references; never duplicate replay data.
+        return self
+
+
 def load_replay(buckets, *, split):
     games, seen = [], set()
     for bucket in buckets:
@@ -238,7 +317,7 @@ def load_replay(buckets, *, split):
                 games.append(game)
     if not games:
         raise ValueError('Empty replay split: ' + split)
-    return games
+    return OrdinaryReplayWindow.from_games(games)
 
 
 def validate_config(config):
