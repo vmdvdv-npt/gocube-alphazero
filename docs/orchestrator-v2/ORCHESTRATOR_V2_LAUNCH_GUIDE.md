@@ -260,6 +260,63 @@ Concrete controlled job:
 It performs five offline generations per arm followed by one 192-game Arena,
 then stops. Its seed is inherited identically from M255; no self-play runs.
 
+For an independent offline replicate, `ab_tests[].training_seed` may set one
+integer seed (≥0) shared by every arm in that test. It is written to each arm's
+`effective_config.execution.training_master_seed`; it controls learner sampling
+RNG and does not reset or replace the parent checkpoint's Adam state. It is
+accepted only when that A/B test has `offline_replay`. If omitted, every arm
+continues to inherit the parent's learner seed. Per-arm training seeds are not
+supported.
+
+`ab_tests[].arena.master_seed` optionally selects the embedded final Arena
+startset seed (integer ≥0). It does not change paired starts, color swap, or
+search settings. Omitting it preserves the existing `2026092902` default.
+
+Example independent second replicate, using the same parent and historical replay
+schedule as the first Policy Surprise comparison:
+
+```json
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "torus9-offline-policy-surprise-seed2-example",
+  "parent": "torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/M255",
+  "training": {
+    "iterations": 0,
+    "learning_rate": 0.000025,
+    "gradient_clip": 8,
+    "replay_generations": 5
+  },
+  "ab_tests": [
+    {
+      "id": "sampling-seed2",
+      "iterations": 5,
+      "training_seed": 2026092702,
+      "offline_replay": [
+        "torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/M256",
+        "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M257",
+        "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M258",
+        "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M259",
+        "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M260"
+      ],
+      "arms": {
+        "S50-2": {
+          "batch_size": 64,
+          "updates_per_iteration": 2560,
+          "replay_sampling": {"mode": "policy_surprise", "weight": 0.5}
+        },
+        "U64-2": {"batch_size": 64, "updates_per_iteration": 2560}
+      },
+      "arena": {
+        "games": 192,
+        "mcts_simulations": 64,
+        "tree_reuse": true,
+        "master_seed": 2026100703
+      }
+    }
+  ]
+}
+```
+
 ## Отдельные арены и выбор победителя
 
 ```json
@@ -380,7 +437,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: a9b9126c86d335f4a6e4367679b7498d265691fdc8b46a5a6edece942a1cc517 -->
+<!-- reviewed-interface-sha256: 8be740d05a1b7abbe9663e480e6e711c338c33cc358f9d736d26b14e13686cf4 -->
 
 ## B64 bounded performance audit
 

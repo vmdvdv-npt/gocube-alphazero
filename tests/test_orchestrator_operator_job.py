@@ -341,6 +341,137 @@ def test_offline_named_arms_are_stable_and_experiment_only(parent, monkeypatch):
         job.parse_job(raw)
 
 
+def _offline_sampling_parameters():
+    raw = parameters()
+    raw['training']['iterations'] = 0
+    raw['ab_tests'] = [{
+        'id': 'sampling-seed2',
+        'iterations': 2,
+        'offline_replay': ['source/M199', 'source/M200'],
+        'arms': {
+            'S50': {'replay_sampling': {'mode': 'policy_surprise', 'weight': .5}},
+            'U64': {},
+        },
+        'arena': {
+            'games': 192,
+            'mcts_simulations': 64,
+            'tree_reuse': True,
+            'master_seed': 2026100702,
+        },
+    }]
+    return raw
+
+
+def _set_parent_training_seed(parent, seed):
+    config = parent.effective_config.config.to_dict()
+    config['execution']['training_master_seed'] = seed
+    parent.effective_config.config = EffectiveConfig.from_dict(config)
+
+
+def test_offline_ab_training_seed_is_shared_by_all_arms_and_arena_seed_reaches_experiment(
+    parent, monkeypatch,
+):
+    from gocube_golden import policy_surprise
+    from gocube_golden.orchestrator_v2 import offline_replay
+    from gocube_golden.orchestrator_v2.experiment_plan import ExperimentConfig
+
+    _set_parent_training_seed(parent, 2026092701)
+    raw = _offline_sampling_parameters()
+    raw['ab_tests'][0]['training_seed'] = 2026092702
+    replay = [{'generation': generation, 'buckets': [{}] * 6} for generation in (199, 200)]
+    monkeypatch.setattr(offline_replay, 'resolve_offline_replay', lambda *a, **kw: replay)
+    monkeypatch.setattr(policy_surprise, 'resolve_spec', lambda *a, **kw: {'fingerprint': 'synthetic'})
+
+    normalized = job.parse_job(raw)
+    assert normalized['ab_tests'][0]['training_seed'] == 2026092702
+    compiled = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps'][0]['config']
+    arms = {arm['arm_id']: arm['config'] for arm in compiled['arms']}
+
+    assert compiled['parent'] == parent.ref.to_dict()
+    assert arms['S50']['execution']['training_master_seed'] == 2026092702
+    assert arms['U64']['execution']['training_master_seed'] == 2026092702
+    assert arms['S50']['execution']['training_master_seed'] == arms['U64']['execution']['training_master_seed']
+    assert arms['S50']['replay']['sampling'] == {'mode': 'policy_surprise', 'weight': .5}
+    assert 'sampling' not in arms['U64']['replay']
+    assert arms['S50']['training']['optimizer'] == arms['U64']['training']['optimizer'] == 'Adam'
+    assert parent.effective_config.config.execution['training_master_seed'] == 2026092701
+    assert compiled['arena']['master_seed'] == 2026100702
+    assert ExperimentConfig.from_dict(compiled).arena_master_seed == 2026100702
+
+
+def test_offline_ab_without_new_seeds_keeps_parent_seed_and_legacy_arena_default(
+    parent, monkeypatch,
+):
+    from gocube_golden import policy_surprise
+    from gocube_golden.orchestrator_v2 import offline_replay
+
+    _set_parent_training_seed(parent, 2026092701)
+    raw = _offline_sampling_parameters()
+    raw['ab_tests'][0]['arena'].pop('master_seed')
+    replay = [{'generation': generation, 'buckets': [{}] * 6} for generation in (199, 200)]
+    monkeypatch.setattr(offline_replay, 'resolve_offline_replay', lambda *a, **kw: replay)
+    monkeypatch.setattr(policy_surprise, 'resolve_spec', lambda *a, **kw: {'fingerprint': 'synthetic'})
+
+    compiled = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps'][0]['config']
+    assert [arm['config']['execution']['training_master_seed'] for arm in compiled['arms']] == [
+        2026092701,
+        2026092701,
+    ]
+    assert compiled['arena']['master_seed'] == job.ARENA_RUN_MASTER_SEED
+    assert 'training_seed' not in job.parse_job(raw)['ab_tests'][0]
+
+
+def test_zero_offline_training_and_arena_seeds_are_valid(parent, monkeypatch):
+    from gocube_golden import policy_surprise
+    from gocube_golden.orchestrator_v2 import offline_replay
+
+    raw = _offline_sampling_parameters()
+    raw['ab_tests'][0]['training_seed'] = 0
+    raw['ab_tests'][0]['arena']['master_seed'] = 0
+    replay = [{'generation': generation, 'buckets': [{}] * 6} for generation in (199, 200)]
+    monkeypatch.setattr(offline_replay, 'resolve_offline_replay', lambda *a, **kw: replay)
+    monkeypatch.setattr(policy_surprise, 'resolve_spec', lambda *a, **kw: {'fingerprint': 'synthetic'})
+
+    compiled = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps'][0]['config']
+    assert [arm['config']['execution']['training_master_seed'] for arm in compiled['arms']] == [0, 0]
+    assert compiled['arena']['master_seed'] == 0
+
+
+def test_training_seed_is_rejected_for_non_offline_ab_and_per_arm():
+    ordinary = parameters()
+    ordinary['ab_tests'][0]['training_seed'] = 2026092702
+    with pytest.raises(ValueError, match='only for offline A/B'):
+        job.parse_job(ordinary)
+
+    offline = _offline_sampling_parameters()
+    offline['ab_tests'][0]['arms']['S50']['training_seed'] = 2026092702
+    with pytest.raises(ValueError, match='unknown fields: training_seed'):
+        job.parse_job(offline)
+
+
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [
+        ('training_seed', -1),
+        ('training_seed', True),
+        ('training_seed', 1.5),
+        ('training_seed', None),
+        ('arena.master_seed', -1),
+        ('arena.master_seed', True),
+        ('arena.master_seed', 1.5),
+        ('arena.master_seed', None),
+    ],
+)
+def test_invalid_offline_training_and_arena_seeds_are_rejected(field, value):
+    raw = _offline_sampling_parameters()
+    if field == 'training_seed':
+        raw['ab_tests'][0]['training_seed'] = value
+    else:
+        raw['ab_tests'][0]['arena']['master_seed'] = value
+    with pytest.raises(ValueError):
+        job.parse_job(raw)
+
+
 def test_ordinary_job_from_offline_checkpoint_does_not_inherit_offline_mode(parent):
     config = parent.effective_config.config.to_dict()
     config['extensions']['offline_ab_replay'] = [{'generation': 199, 'buckets': []}]
@@ -362,11 +493,13 @@ def test_policy_surprise_compile_only_sampling_differs(parent, monkeypatch):
     replay = [{'generation':g,'buckets':[{}]*6} for g in (199,200)]
     monkeypatch.setattr(offline_replay,'resolve_offline_replay',lambda *a, **kw:replay)
     monkeypatch.setattr(policy_surprise,'resolve_spec',lambda *a, **kw:{'fingerprint':'synthetic'})
-    arms = job.compile_job(raw,resolver=SimpleNamespace())['workflow']['steps'][0]['config']['arms']
+    compiled = job.compile_job(raw,resolver=SimpleNamespace())['workflow']['steps'][0]['config']
+    arms = compiled['arms']
     assert [a['arm_id'] for a in arms] == ['S50','U64']
     a,b = [arm['config'] for arm in arms]
     assert a['replay'].pop('sampling') == {'mode':'policy_surprise','weight':.5}
     assert a == b
+    assert compiled['arena']['master_seed'] == job.ARENA_RUN_MASTER_SEED
     assert job.parse_job(job.parse_job(raw)) == job.parse_job(raw)
 
 
