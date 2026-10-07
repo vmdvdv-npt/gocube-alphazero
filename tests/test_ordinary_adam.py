@@ -3,8 +3,60 @@ import copy
 import pytest
 import torch
 
+from gocube_golden import ordinary_adam
 from gocube_golden.b64_speedup_comparison import state_hash
 from gocube_golden.ordinary_adam import OrdinaryAdam
+
+
+def test_batched_runtime_guard_requires_verified_version_and_signature(monkeypatch):
+    def compatible(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs,
+                   max_exp_avg_sqs, state_steps):
+        pass
+
+    monkeypatch.setattr(torch, '__version__', ordinary_adam._VERIFIED_TORCH_VERSION)
+    monkeypatch.setattr(torch.version, 'cuda', ordinary_adam._VERIFIED_CUDA_VERSION)
+    monkeypatch.setattr(torch.optim.Adam, '_init_group', compatible)
+    assert ordinary_adam._batched_adam_runtime_supported()
+
+    monkeypatch.setattr(torch, '__version__', '9.9.9+cu124')
+    assert not ordinary_adam._batched_adam_runtime_supported()
+
+    monkeypatch.setattr(torch, '__version__', ordinary_adam._VERIFIED_TORCH_VERSION)
+
+    def incompatible(self, group):
+        pass
+
+    monkeypatch.setattr(torch.optim.Adam, '_init_group', incompatible)
+    assert not ordinary_adam._batched_adam_runtime_supported()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
+def test_unverified_runtime_uses_superclass_adam(monkeypatch):
+    generator = torch.Generator(device='cuda').manual_seed(313)
+    left = [torch.nn.Parameter(torch.randn(shape, device='cuda', generator=generator))
+            for shape in ((17, 9), (9,), (3, 4))]
+    right = [torch.nn.Parameter(p.detach().clone()) for p in left]
+
+    def groups(values):
+        return [{'params': [p], 'name': str(i), 'lr': 2.5e-5} for i, p in enumerate(values)]
+
+    reference = torch.optim.Adam(groups(left))
+    candidate = OrdinaryAdam(groups(right))
+    monkeypatch.setattr(ordinary_adam, '_BATCHED_ADAM_RUNTIME_SUPPORTED', False)
+
+    def forbidden_batched_adam(*args, **kwargs):
+        raise AssertionError('private batched Adam path must not run on an unverified runtime')
+
+    monkeypatch.setattr(ordinary_adam, 'adam', forbidden_batched_adam)
+    for update in range(8):
+        for p, q in zip(left, right):
+            grad = torch.randn(p.shape, device='cuda', generator=generator)
+            p.grad = grad
+            q.grad = grad.clone()
+        reference.step()
+        candidate.step()
+        assert state_hash(left) == state_hash(right), update
+        assert state_hash(reference.state_dict()) == state_hash(candidate.state_dict()), update
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')

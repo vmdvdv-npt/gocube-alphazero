@@ -1,6 +1,30 @@
 """Execution batching for ordinary CUDA Adam; serialized groups stay untouched."""
+import inspect
+
 import torch
 from torch.optim.adam import adam
+
+
+_VERIFIED_TORCH_VERSION = '2.4.1+cu124'
+_VERIFIED_CUDA_VERSION = '12.4'
+_VERIFIED_INIT_GROUP_PARAMETERS = (
+    'self', 'group', 'params_with_grad', 'grads', 'exp_avgs', 'exp_avg_sqs',
+    'max_exp_avg_sqs', 'state_steps',
+)
+
+
+def _batched_adam_runtime_supported():
+    """Fail closed if the private PyTorch Adam contract is not the verified one."""
+    if str(torch.__version__) != _VERIFIED_TORCH_VERSION or torch.version.cuda != _VERIFIED_CUDA_VERSION:
+        return False
+    try:
+        parameters = tuple(inspect.signature(torch.optim.Adam._init_group).parameters)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return parameters == _VERIFIED_INIT_GROUP_PARAMETERS
+
+
+_BATCHED_ADAM_RUNTIME_SUPPORTED = _batched_adam_runtime_supported()
 
 
 class OrdinaryAdam(torch.optim.Adam):
@@ -9,9 +33,10 @@ class OrdinaryAdam(torch.optim.Adam):
         groups = self.param_groups
         keys = ('betas', 'lr', 'weight_decay', 'eps', 'amsgrad', 'maximize',
                 'foreach', 'capturable', 'differentiable', 'fused')
-        # Only the established FP32 CUDA foreach path is batched. Other caller
-        # options retain PyTorch's ordinary dispatch and error behavior.
-        eligible = bool(groups) and closure is None and not hasattr(self, 'grad_scale') and not hasattr(self, 'found_inf')
+        # Only the byte-exact verified PyTorch runtime and established FP32 CUDA
+        # foreach path are batched. Everything else uses PyTorch's own Adam step.
+        eligible = (_BATCHED_ADAM_RUNTIME_SUPPORTED and bool(groups) and closure is None
+                    and not hasattr(self, 'grad_scale') and not hasattr(self, 'found_inf'))
         if eligible:
             first = groups[0]
             parameters = [p for g in groups for p in g['params']]
@@ -35,4 +60,3 @@ class OrdinaryAdam(torch.optim.Adam):
              maximize=first['maximize'], foreach=first['foreach'],
              capturable=False, differentiable=False, fused=first['fused'],
              grad_scale=None, found_inf=None)
-
