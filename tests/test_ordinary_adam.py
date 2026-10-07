@@ -16,10 +16,14 @@ def test_batched_runtime_guard_requires_verified_version_and_signature(monkeypat
     monkeypatch.setattr(torch, '__version__', ordinary_adam._VERIFIED_TORCH_VERSION)
     monkeypatch.setattr(torch.version, 'cuda', ordinary_adam._VERIFIED_CUDA_VERSION)
     monkeypatch.setattr(torch.optim.Adam, '_init_group', compatible)
-    assert ordinary_adam._batched_adam_runtime_supported()
+    supported, reason = ordinary_adam._batched_adam_runtime_status()
+    assert supported
+    assert reason is None
 
     monkeypatch.setattr(torch, '__version__', '9.9.9+cu124')
-    assert not ordinary_adam._batched_adam_runtime_supported()
+    supported, reason = ordinary_adam._batched_adam_runtime_status()
+    assert not supported
+    assert 'PyTorch 9.9.9+cu124' in reason
 
     monkeypatch.setattr(torch, '__version__', ordinary_adam._VERIFIED_TORCH_VERSION)
 
@@ -27,36 +31,23 @@ def test_batched_runtime_guard_requires_verified_version_and_signature(monkeypat
         pass
 
     monkeypatch.setattr(torch.optim.Adam, '_init_group', incompatible)
-    assert not ordinary_adam._batched_adam_runtime_supported()
+    supported, reason = ordinary_adam._batched_adam_runtime_status()
+    assert not supported
+    assert 'signature differs' in reason
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
-def test_unverified_runtime_uses_superclass_adam(monkeypatch):
-    generator = torch.Generator(device='cuda').manual_seed(313)
-    left = [torch.nn.Parameter(torch.randn(shape, device='cuda', generator=generator))
-            for shape in ((17, 9), (9,), (3, 4))]
-    right = [torch.nn.Parameter(p.detach().clone()) for p in left]
-
-    def groups(values):
-        return [{'params': [p], 'name': str(i), 'lr': 2.5e-5} for i, p in enumerate(values)]
-
-    reference = torch.optim.Adam(groups(left))
-    candidate = OrdinaryAdam(groups(right))
+def test_unverified_cuda_runtime_fails_before_training(monkeypatch):
+    parameter = torch.nn.Parameter(torch.tensor([1.0], device='cuda'))
     monkeypatch.setattr(ordinary_adam, '_BATCHED_ADAM_RUNTIME_SUPPORTED', False)
-
-    def forbidden_batched_adam(*args, **kwargs):
-        raise AssertionError('private batched Adam path must not run on an unverified runtime')
-
-    monkeypatch.setattr(ordinary_adam, 'adam', forbidden_batched_adam)
-    for update in range(8):
-        for p, q in zip(left, right):
-            grad = torch.randn(p.shape, device='cuda', generator=generator)
-            p.grad = grad
-            q.grad = grad.clone()
-        reference.step()
-        candidate.step()
-        assert state_hash(left) == state_hash(right), update
-        assert state_hash(reference.state_dict()) == state_hash(candidate.state_dict()), update
+    monkeypatch.setattr(
+        ordinary_adam, '_BATCHED_ADAM_RUNTIME_DISABLED_REASON', 'synthetic runtime mismatch'
+    )
+    with pytest.raises(
+        RuntimeError,
+        match='B64 Adam batching cannot run.*synthetic runtime mismatch.*Training is stopped',
+    ):
+        OrdinaryAdam([{'params': [parameter], 'name': 'p', 'lr': 2.5e-5}])
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
@@ -65,8 +56,10 @@ def test_batched_adam_exact_bytes_and_legacy_roundtrip():
     params = [torch.nn.Parameter(torch.randn(shape, device='cuda', generator=generator))
               for shape in ((32, 17), (17,), (1,), (4, 81))]
     other = [torch.nn.Parameter(p.detach().clone()) for p in params]
+
     def groups(values):
         return [{'params': [p], 'name': str(i), 'lr': 2.5e-5} for i, p in enumerate(values)]
+
     reference = torch.optim.Adam(groups(params))
     candidate = OrdinaryAdam(groups(other))
     for i, p in enumerate(params):
