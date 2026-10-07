@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import asdict, replace
+from pathlib import Path
 from typing import Mapping
 
 from . import _arena_runner_core as _core
@@ -58,8 +59,9 @@ class ArenaRunner(_core.ArenaRunner):
         notifier: object | None = None,
         event_sink: object | None = None,
         supervisor_policy: SupervisorPolicy | None = None,
+        runs_root: str | Path | None = None,
     ) -> None:
-        super().__init__(engine=engine, supervisor_policy=supervisor_policy)
+        super().__init__(engine=engine, supervisor_policy=supervisor_policy, runs_root=runs_root)
         self.event_sink = coerce_event_sink(event_sink if event_sink is not None else notifier)
         # Kept as a compatibility attribute for callers that used to share a
         # notifier instance with ContinuousTrainingRunnerV2.  V2 itself uses

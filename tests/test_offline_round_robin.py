@@ -6,12 +6,14 @@ from gocube_golden.scenarios.experiment.runner import ExperimentRunnerV2
 def test_offline_round_robin_has_three_independent_pairs_and_common_settings(tmp_path):
     runner = ExperimentRunnerV2.__new__(ExperimentRunnerV2)
     runner.experiment_root = tmp_path
-    runner.config = NS(parent={}, fingerprint='stable', experiment_id='offline',
-        arms=[NS(arm_id=a, generations=1, effective_config=NS(training={"batch_size": int(a[1:])})) for a in ('B64', 'B128', 'B256')],
+    runner.config = NS(offline_reference=None, parent={}, fingerprint='stable', experiment_id='offline',
+        arms=[NS(arm_id=a, generations=1, effective_config=NS(training={"batch_size": int(a[1:]), "learning_rate": 2.5e-5}, execution={})) for a in ('B64', 'B128', 'B256')],
         arena_config=NS(games=192), arena_master_seed=17, arena_startset=None,
         arena_profile='torus9', arena_scientific_contract=None,
         arena_execution_contract=None, arena_workload={})
     runner.resolver = NS(checkpoint=lambda _: NS(generation=0))
+    runner._validate_arena_result = lambda *a: None
+    runner._arena_state = lambda result: {"evaluation_id": result.evaluation_id, "summary": dict(result.summary), "output_dir": str(result.output_dir)}
     runner._notify_operator = lambda *a, **kw: None
     import json
     (tmp_path / "training").mkdir()
@@ -41,19 +43,22 @@ def test_surprise_cache_sealed_before_arms_reused_and_checked_on_resume(tmp_path
     from gocube_golden.orchestrator_v2.experiment_plan import ExperimentArmConfig
     runner = ExperimentRunnerV2.__new__(ExperimentRunnerV2)
     runner.experiment_root = tmp_path
-    cfg = EffectiveConfig(topology='torus9', compatibility={'input_channels':5}, training={'batch_size':64},
+    cfg = EffectiveConfig(topology='torus9', compatibility={'input_channels':5}, training={'batch_size':64, 'learning_rate':2.5e-5},
         replay={'sampling':{'mode':'policy_surprise','weight':0.5}},
         execution={'device':'cpu'}, extensions={'policy_surprise_spec':{'fingerprint':'spec'}})
-    runner.config = NS(parent={},fingerprint='stable',experiment_id='offline',
+    runner.config = NS(offline_reference=None, parent={},fingerprint='stable',experiment_id='offline',
         arms=[ExperimentArmConfig(a,1,cfg) for a in ('S50','U64')],
         arena_config=NS(games=192),arena_master_seed=17,arena_startset=None,
         arena_profile='torus9',arena_scientific_contract=None,
         arena_execution_contract=None,arena_workload={})
     runner.resolver=NS(checkpoint=lambda _:NS(generation=0))
+    runner._validate_arena_result = lambda *a: None
+    runner._arena_state = lambda result: {"evaluation_id": result.evaluation_id, "summary": dict(result.summary), "output_dir": str(result.output_dir)}
     runner._notify_operator=lambda *a, **kw:None
     cache={'path':'synthetic','sha256':'sha256:cache','fingerprint':'spec'}
     builds=[]; reads=[]
-    monkeypatch.setattr(ps,'build_cache',lambda *a, **kw:builds.append(kw) or cache)
+    runner.train_one=NS(prepare_replay_cache=lambda **kw:builds.append(kw) or cache)
+    monkeypatch.setattr(ps,'build_cache',lambda *a, **kw:pytest.fail('controller inference'))
     monkeypatch.setattr(ps,'load_cache',lambda ref,spec:reads.append(ref) or {})
     def interrupted(*a, **kw):
         assert all(arm.effective_config.extensions['policy_surprise_cache']==cache

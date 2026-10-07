@@ -220,6 +220,7 @@ class ExperimentConfig:
     winner_rule: WinnerRule | str | Mapping[str, object] = field(default_factory=WinnerRule)
     stage2: ExperimentStage2Config | None = None
     allow_code_rollover: bool = False
+    offline_reference: CheckpointRef | Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "experiment_id", _component(self.experiment_id, "experiment_id"))
@@ -239,6 +240,14 @@ class ExperimentConfig:
                 raise ValueError("offline replay budget differs from arm generations")
         elif len(arms) != 2 or {arm.arm_id for arm in arms} != {"A", "B"}:
             raise ValueError("ExperimentRunner V2 requires exactly the A and B arms")
+        if self.offline_reference is not None:
+            if not all(offline):
+                raise ValueError("offline_reference requires an offline experiment")
+            reference = (self.offline_reference if isinstance(self.offline_reference, CheckpointRef)
+                         else CheckpointRef.from_dict(self.offline_reference))
+            if reference.topology != self.topology:
+                raise ValueError("offline_reference topology differs from experiment")
+            object.__setattr__(self, "offline_reference", reference)
         for arm in arms:
             if arm.effective_config.topology != self.topology:
                 raise ValueError(f"arm {arm.arm_id} config topology does not match experiment")
@@ -290,6 +299,8 @@ class ExperimentConfig:
             "arena": arena,
             "stage2": None if self.stage2 is None else self.stage2.to_dict(),
         }
+        if self.offline_reference is not None:
+            payload["offline_reference"] = self.offline_reference.to_dict()
         return payload
 
     @property
@@ -350,7 +361,8 @@ class ExperimentConfig:
             arena_workload=dict(raw_arena.get("workload", {})),  # type: ignore[arg-type]
             winner_rule=raw_arena.get("winner_rule", EXPERIMENT_WINNER_RULE),  # type: ignore[arg-type]
             stage2=(None if raw_stage2 is None else ExperimentStage2Config.from_dict(raw_stage2)),  # type: ignore[arg-type]
-            allow_code_rollover=value.get("allow_code_rollover", False),  # type: ignore[arg-type]
+            allow_code_rollover=value.get("allow_code_rollover", False),
+            offline_reference=value.get("offline_reference"),  # type: ignore[arg-type]
         )
 
 

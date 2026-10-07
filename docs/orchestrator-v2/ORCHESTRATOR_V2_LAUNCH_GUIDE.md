@@ -52,8 +52,8 @@ Telegram config блокирует запуск. Не отправляйте т�
 | Непрерывное training | `training.iterations: null` | Да | Durable run без заданного последнего поколения |
 | Training, затем A/B | Конечное training и `ab_tests` | Да | Все тесты стартуют от общего результата основной части job |
 | Только обычный A/B | `training.iterations: 0`, `ab_tests` с `A`/`B` | Да, в каждой ветке | Две независимые ветки и итоговая арена |
-| Offline A/B | `training.iterations: 0`, `offline_replay`, `A`/`B` | **Нет** | Обучение на историческом replay, арена финалов |
-| Offline A/B/C и больше | То же, `arms` с ≥2 именами | **Нет** | Все ветки и round-robin каждой пары |
+| Offline A/B | `training.iterations: 0`, `offline_replay`, `A`/`B` | **Нет** | Обучение на историческом replay, арена финалов либо каждого финала против reference |
+| Offline A/B/C и больше | То же, `arms` с ≥2 именами | **Нет** | Все ветки и round-robin каждой пары либо арены против reference |
 | Только арены | `arenas`; training и ab_tests отсутствуют либо iterations=0 | **Нет** | Сравнение уже зарегистрированных checkpoint |
 | Выбор победителя → training | `winner_selection`, без `parent`/A/B; iterations>0 либо null | После выбора — да | Арена выбирает родителя новой lineage |
 | Явные дополнительные арены | `arenas` вместе с конечным training/A/B | По основному режиму | Дополнительные арены известных checkpoint после основных действий |
@@ -100,8 +100,9 @@ Samples = batch_size × updates_per_iteration, с выборкой позици�
 Arena использует paired starts/color swap, noise off, temperature 0,
 cpuct 1.25, FPU 0, watchdog 1000, komi 1.5; resignation/fast search отключены.
 Это не поля свободной настройки operator JSON. `tree_reuse` включайте явно и
-одинаково для сравниваемых сетей. Для A/B arena доступны только games,
-mcts_simulations, tree_reuse; seed общий, публичного arm-specific arena seed нет.
+одинаково для сравниваемых сетей. Для A/B arena доступны games, mcts_simulations, tree_reuse и общий master_seed.
+Offline дополнительно принимает reference для сравнений всех финалов с одной
+зарегистрированной моделью. Публичного arm-specific arena seed нет.
 
 `self_play` доступен ordinary training и обычным A/B веткам:
 
@@ -221,12 +222,57 @@ checkpoint. Mean total loss — сумма policy + WDL/value + ownership + scor
 и указывайте отличие от training time. Не подменяйте allocated bytes показанием
 всей видеокарты из nvidia-smi.
 
-После всех итераций запускается round-robin **финалов**: каждая неупорядоченная
+Без `ab_tests[].arena.reference` после всех итераций запускается round-robin **финалов**: каждая неупорядоченная
 пара один раз, общий budget/seed, paired starts/color swap, noise off. При N arms
 число пар N×(N−1)/2. Игры арены являются оценкой, а не self-play и не добавляются
 в replay. Итог `experiments/<run_id>-ab-<test_id>/report.json`: поколения, losses,
 minutes, среднее/общее время, ускорение относительно наименьшего batch, все арены.
 Ветки имеют отдельные lineage и не выбираются автоматически для production.
+
+### Offline A/B/C/D с общей reference: четыре прогона и четыре арены
+
+В `ab_tests[].arena` можно добавить `reference: "lineage/checkpoint_id"`.
+Это доступно только offline: зарегистрированный Torus9 5CH checkpoint разрешается
+и проверяется до запуска, его SHA закрепляется в experiment config. После обучения
+каждый финал выступает candidate против этой общей reference. При четырёх arms
+будет ровно четыре арены; round-robin дополнительно не запускается. Budget, seed,
+paired starts/color swap и search settings одинаковы для всех сравнений.
+Без reference сохраняется прежний round-robin (шесть арен для четырёх arms).
+
+Готовый AZ-18: `configs/operator/az18-offline-lr-abcd-20261008-v3.json`.
+A/B/C/D стартуют от M255 с его Adam state, проходят исторические M256–M260,
+LR соответственно 2.5e-5 / 5e-5 / 1e-4 / 2e-4. Все используют batch=64,
+2560 updates/iteration, clip=8, Policy Surprise weight=0.5, общий унаследованный
+training seed. Self-play не запускается. Затем четыре финала сравниваются с
+зарегистрированным S50-2/M260: **512 игр, 64 sims**, tree reuse включён,
+arena seed=2026100702. Этот job выполняет четыре новых независимых обучения,
+не переиспользует частичные lineage предыдущих AZ-18 jobs.
+
+```bash
+.venv/bin/python -m gocube_golden.orchestrator_v2.production_entrypoint job configs/operator/az18-offline-lr-abcd-20261008-v3.json --runs-root /absolute/path/runs --check
+.venv/bin/python -m gocube_golden.orchestrator_v2.production_entrypoint job configs/operator/az18-offline-lr-abcd-20261008-v3.json --runs-root /absolute/path/runs
+```
+
+Повторяется та же команда с неизменным JSON для resume. Controller использует
+штатные lease, immutable runtime, child permits, supervisor и notification outbox.
+Он сохраняет checkpoint каждой завершённой итерации; после прерывания controller продолжает с неё,
+а уже закоммиченный child и законченные арены проверяются и переиспользуются.
+Offline experiment использует штатную workflow policy: до двух повторов технической
+ошибки. Ошибки параметров/целостности и durable supervisor stop не обходятся
+повторами; terminal FAILED/STOPPED не сбрасываются повторным `job`.
+Сами Adam updates, replay sampling, Policy Surprise inference и игры выполняют
+training adapter / Arena engine в supervised workers. Controller управляет
+зависимостями и проверяет артефакты; в нём нет model inference или training loop.
+
+Telegram сообщает фактический offline-режим, 0 self-play игр, отключённые
+периодические арены, параметры каждой ветки, поколения и результаты настоящих
+арен. Финальные сравнения публикует штатный Arena lifecycle. Исторические
+effective self-play настройки не представляются как исполняемый план.
+`experiments/<run_id>-ab-lr/report.json` содержит все четыре финала, training
+telemetry и четыре Arena результата; `state.json` хранит прогресс восстановления.
+Арены experiment сохраняются в `<runs-root>/torus9/evaluations/`, а не в
+каталоге `runs` immutable runtime. Транспорт и правила повторной доставки
+уведомлений остаются стандартными.
 
 ### Opt-in historical Policy Surprise frequency sampling
 
@@ -238,7 +284,7 @@ There is no importance correction or per-sample loss scaling.
 
 The compiler resolves each training row's actor model hash and exact actor
 checkpoint SHA through the canonical historical parent graph. Missing or
-ambiguous actors fail closed. The experiment builds one derived, content-addressed
+ambiguous actors fail closed. The experiment launches a supervised training-adapter worker to build one derived, content-addressed
 cache before training; batches use it without model inference. Cache provenance
 includes source shards/checkpoint references, PyTorch/CUDA version, inference
 device/batch size, implementation SHA, algorithm and
@@ -439,7 +485,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 9afdc0f3fb940b00d0c12cdf4fb2489392ede365d5621c2a7baa6f29abf1d1fe -->
+<!-- reviewed-interface-sha256: 363f21c77c960f9f8d72a6afdc6ce0a833a61e9aa6b33e9c62f003ac9896a516 -->
 
 ## B64 bounded performance audit
 

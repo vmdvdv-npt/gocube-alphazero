@@ -525,3 +525,36 @@ def test_new_ordinary_job_drops_inherited_sampling_and_cache(parent):
     result=steps[0]['config']['effective_config']
     assert 'sampling' not in result['replay']
     assert not set(('offline_ab_replay','policy_surprise_spec','policy_surprise_cache')) & result['extensions'].keys()
+
+
+def test_offline_abcd_compiles_fixed_reference_and_four_independent_arms(parent, monkeypatch):
+    from gocube_golden.orchestrator_v2 import offline_replay
+    raw = parameters()
+    raw['training']['iterations'] = 0
+    raw['training']['replay_generations'] = 2
+    raw['ab_tests'] = [{'id': 'lr', 'iterations': 2,
+        'offline_replay': ['source/M199', 'source/M200'],
+        'arms': {name: {'learning_rate': rate} for name, rate in
+                 zip('ABCD', (2.5e-5, 5e-5, 1e-4, 2e-4))},
+        'arena': {'reference': 'baseline/M260', 'games': 192, 'mcts_simulations': 64,
+                  'master_seed': 17, 'tree_reuse': True}}]
+    monkeypatch.setattr(offline_replay, 'resolve_offline_replay',
+                        lambda *a, **kw: [{'generation': g, 'buckets': [{}, {}]} for g in (199, 200)])
+    monkeypatch.setattr(job, 'resolve_checkpoint', lambda *a, **kw: parent)
+    normalized = job.parse_job(raw)
+    assert job.parse_job(normalized) == normalized
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    assert len(steps) == 1 and steps[0]['action'] == 'experiment'
+    config = steps[0]['config']
+    assert config['offline_reference'] == parent.ref.to_dict()
+    assert config['arena']['master_seed'] == 17
+    assert [a['arm_id'] for a in config['arms']] == list('ABCD')
+    assert [a['config']['training']['learning_rate'] for a in config['arms']] == [2.5e-5, 5e-5, 1e-4, 2e-4]
+    assert len({a['lineage_id'] for a in config['arms']}) == 4
+
+
+def test_online_ab_rejects_fixed_reference():
+    raw = parameters()
+    raw['ab_tests'][0]['arena'] = {'reference': 'baseline/M260'}
+    with pytest.raises(ValueError, match='only for offline'):
+        job.parse_job(raw)

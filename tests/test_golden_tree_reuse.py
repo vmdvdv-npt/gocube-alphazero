@@ -222,6 +222,9 @@ def test_non_boolean_reuse_is_rejected(value):
 @pytest.mark.parametrize('reuse', [False, True])
 def test_arena_worker_advances_both_model_trees_and_discards_replenished_games(monkeypatch, reuse):
     import tools.arena_worker as worker
+    # This synthetic worker runs in pytest rather than a fresh CPU-only child.
+    # Earlier CUDA tests may have initialized the parent process.
+    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: False)
     snapshots, moves = [], []
     real_session = SequentialPUCTSession
     class TrackedSession(real_session):
@@ -268,7 +271,7 @@ def test_arena_worker_advances_both_model_trees_and_discards_replenished_games(m
         policy_slot=torch.zeros((1, 26)), wdl_slot=torch.zeros((1, 3)),
         request_queue=requests, response_queues=[Queue()], start_event=SimpleNamespace(wait=lambda: None))
     messages = list(requests.queue)
-    assert not any(m['kind'] == 'error' for m in messages)
+    assert not any(m['kind'] == 'error' for m in messages), messages
     done = next(m for m in messages if m['kind'] == 'done')
     assert done['records'] == [{'game_id': 'g1', 'moves': 4}, {'game_id': 'g2', 'moves': 4}]
     assert len(snapshots) == 8
