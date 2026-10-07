@@ -355,9 +355,13 @@ class ExperimentRunnerV2:
                 iterations.append({"generation": generation, **telemetry.get("performance", {}),
                                    "validation": telemetry["validation"]})
             minutes = sum(row["training_minutes"] for row in iterations)
+            # EffectiveConfig freezes nested mappings; thaw before JSON serialization.
+            replay = (arm.effective_config.to_dict()["replay"]
+                      if hasattr(arm.effective_config, "to_dict")
+                      else dict(getattr(arm.effective_config, "replay", {})))
             report["arms"][arm.arm_id] = {"batch_size": arm.effective_config.training["batch_size"],
                 "total_training_minutes": minutes, "mean_training_minutes": minutes / len(iterations),
-                "iterations": iterations, "sampling": dict(getattr(arm.effective_config, "replay", {})).get("sampling", {"mode": "uniform"}),
+                "iterations": iterations, "sampling": replay.get("sampling", {"mode": "uniform"}),
                 "final_checkpoint": final[arm.arm_id].ref.to_dict()}
         baseline = min(report["arms"].values(), key=lambda row: row["batch_size"])
         for arm_report in report["arms"].values():
