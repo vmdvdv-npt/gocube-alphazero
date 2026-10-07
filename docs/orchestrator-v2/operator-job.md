@@ -1,3 +1,5 @@
+Полное руководство по режимам и запуску: [ORCHESTRATOR_V2_LAUNCH_GUIDE.md](ORCHESTRATOR_V2_LAUNCH_GUIDE.md). Перед запуском прочитайте его для используемого code pin.
+
 # Запуск только из файла параметров
 
 Операторский вход V2 — `production_entrypoint job job.json`. Он проверяет простой

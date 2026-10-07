@@ -189,6 +189,7 @@ def test_check_is_read_only_and_missing_telegram_prevents_launch(parent, tmp_pat
     monkeypatch.setattr(entry, "_launch_durable_workflow_controller", lambda *a, **kw: pytest.fail("launched"))
     result = entry.launch_operator_job(parameters(), runs_root=tmp_path, check_only=True)
     assert result["state"] == "VALIDATED" and not result["telegram_configured"]
+    assert result["operator_guide"]["repository_path"].endswith("ORCHESTRATOR_V2_LAUNCH_GUIDE.md")
     assert list(tmp_path.iterdir()) == []
     with pytest.raises(ValueError, match="Telegram is not configured"):
         entry.launch_operator_job(parameters(), runs_root=tmp_path)
@@ -208,9 +209,13 @@ def test_launch_pins_runtime_and_rejects_parameter_drift(parent, tmp_path, monke
     monkeypatch.setattr(entry, "_launch_durable_workflow_controller",
         lambda path, **kw: launches.append((path, kw, json.loads(os.environ[PERMIT_ENV]))) or {"state": "STARTED"})
     entry.launch_operator_job(parameters(), runs_root=tmp_path)
+    guide_path = tmp_path / "torus9/orchestration/jobs/five-iterations/operator-guide.json"
+    initial_guide = guide_path.read_bytes()
+    assert json.loads(initial_guide)["sha256"]
     monkeypatch.setattr(entry, "_entrypoint_code_identity", lambda: "commit-two")
     entry.launch_operator_job(parameters(), runs_root=tmp_path)
     assert pins == ["commit-one", "commit-one"]
+    assert guide_path.read_bytes() == initial_guide
     assert launches[1][1]["runtime"] == "commit-one"
     assert launches[1][2]["action_type"] == "workflow-controller"
     assert launches[1][2]["run_id"] == "five-iterations"
