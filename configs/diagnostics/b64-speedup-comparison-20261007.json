@@ -1,0 +1,10 @@
+{
+  "schema": "gocube-b64-perf-audit-v1",
+  "runs_root": "/home/codex/projects/gocube-alphazero/runs",
+  "resolved_experiment": "/home/codex/projects/gocube-alphazero/runs/torus9/orchestration/jobs/torus9-offline-batch-m255-g256-260-20261007-v1/resolved.json",
+  "output": "/home/codex/diagnostics/gocube-b64-speedup-20261007",
+  "warmup": 32,
+  "updates": 128,
+  "reference_trainer_source": "/tmp/gocube-b64-perf-worktree/gocube_golden/torus9_five_channel_training.py",
+  "reference_trainer_sha256": "sha256:3034ce8c26d77967cf20e0e1746eca1c787713cfc4c5e413a34da3a72e42d3ce"
+}

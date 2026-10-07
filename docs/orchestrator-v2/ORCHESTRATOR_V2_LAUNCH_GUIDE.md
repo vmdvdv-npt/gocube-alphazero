@@ -348,7 +348,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 39d2a14f9bd43503f4b9c738a4666a560f334d285ebc3375641c4e491e3a9f6f -->
+<!-- reviewed-interface-sha256: abf62e61d030c11f833c1430519a5e1129741eaeebe2e79114be7152fb06f4b3 -->
 
 ## B64 bounded performance audit
 
@@ -389,3 +389,27 @@ Export SQLite using `nsys export --type=sqlite --output=FILE TRACE.nsys-rep`.
 Omit the Nsight arguments for a preliminary report; unavailable CUDA kernel
 activity is reported explicitly. The checked-in measured report is
 `docs/diagnostics/b64-performance-audit-20261007/REPORT.md` with `report.json`.
+
+### B64 speedup comparison
+
+The audit config may additionally specify `reference_trainer_source` and
+`reference_trainer_sha256`: an existing, read-only trainer module from the audit
+revision and its `sha256:` identity. The diagnostic imports that module under a
+separate name; it does not patch either trainer or copy a training loop. This
+selects a paired reference/optimized/optimized/reference comparison, with the
+same historical window, CUDA device, signed child permit, default external
+monitor, durable heartbeat and real Adam updates. It verifies eight sampled
+updates and full warmed/measured model, Adam, counter and telemetry byte hashes.
+There is no checkpoint publication. The ordinary loader now returns a read-only
+replay window that caches cumulative lengths; its target tensors stay referenced
+in their original order. Mutable sequences passed directly to `batch()` retain
+the uncached sampler. Every pre/post Adam validation and weight finite check is
+retained, using packed boolean checks and the original detailed failure path.
+
+Example paired configuration:
+`configs/diagnostics/b64-speedup-comparison-20261007.json`. Generate its Markdown
+and JSON summary with `python -m gocube_golden.b64_speedup_report OUTPUT`; optional
+`--nsys-root OUTPUT --nsys-sqlite FILE` adds the independent optimized CUDA trace.
+The measured comparison is checked in at
+`docs/diagnostics/b64-speedup-20261007/REPORT.md` and `report.json`. A separate
+`configs/diagnostics/b64-speedup-nsys-20261007.json` selects the short trace pass.

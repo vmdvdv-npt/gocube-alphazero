@@ -234,3 +234,74 @@ def test_profile_spans_preserve_exact_b64_trajectory(parent):
     assert exact_equal(trainer.model.state_dict(), profiled.model.state_dict())
     assert exact_equal(trainer.optimizer.state_dict(), profiled.optimizer.state_dict())
     assert {'validate.pre', 'validate.post', 'forward', 'adam', 'scalar.telemetry'} <= collector.finish().keys()
+
+
+@pytest.mark.parametrize('corruption', ['clock', 'average_nan', 'variance_inf', 'negative', 'shape',
+                                        'missing_step', 'missing_average', 'multiple_errors'])
+def test_packed_adam_validation_preserves_first_error(parent, corruption):
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91)
+    params = list(trainer.model.named_parameters())
+    first = trainer.optimizer.state[params[0][1]]
+    second = trainer.optimizer.state[params[1][1]]
+    if corruption == 'clock':
+        first['step'].add_(1)
+    elif corruption == 'average_nan':
+        first['exp_avg'].fill_(float('nan'))
+    elif corruption == 'variance_inf':
+        first['exp_avg_sq'].fill_(float('inf'))
+    elif corruption == 'negative':
+        first['exp_avg_sq'].fill_(-1)
+    elif corruption == 'shape':
+        first['exp_avg'] = first['exp_avg'].reshape(-1)[:1]
+    elif corruption == 'missing_step':
+        del first['step']
+    elif corruption == 'missing_average':
+        del first['exp_avg']
+    else:
+        first['exp_avg'].fill_(float('nan'))
+        second['step'].add_(1)
+    with pytest.raises(Exception) as original:
+        trainer._validate_clocks_detailed()
+    with pytest.raises(type(original.value)) as packed:
+        trainer.validate_clocks()
+    assert str(packed.value) == str(original.value)
+
+
+def test_cached_replay_preserves_sampling_and_mutable_callers(parent):
+    from gocube_golden.training_profile import Collector
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91)
+    a = game('a', 'train', model_hash(trainer.model))
+    b = game('b', 'train', model_hash(trainer.model))
+    a['score'] = torch.arange(3, dtype=torch.float32)
+    b['score'] = torch.arange(3, dtype=torch.float32) + 100
+    mutable = [a, b]
+    window = ordinary.OrdinaryReplayWindow.from_games(mutable)
+    assert window.games[0] is a  # Targets are referenced, never copied/prepacked.
+    assert copy.deepcopy(window) is window
+    for update in (1,2,31,128,255,1024):
+        left, right = Collector(timings=False,capture_positions=True), Collector(timings=False,capture_positions=True)
+        with left.activate():
+            expected = trainer.batch(mutable,update)
+        with right.activate():
+            actual = trainer.batch(window,update)
+        assert left.positions == right.positions
+        assert all(torch.equal(expected[k],actual[k]) for k in expected)
+    mutable.append(game('c','train',model_hash(trainer.model)))
+    refreshed = ordinary.OrdinaryReplayWindow.from_games(mutable)
+    assert len(window) == 2 and len(refreshed) == 3
+    assert all(torch.equal(v,trainer.batch(refreshed,2)[k]) for k,v in trainer.batch(mutable,2).items())
+
+
+@pytest.mark.parametrize('invalid', [float('nan'), float('inf')])
+def test_packed_weight_check_retains_fail_closed_behavior(parent, monkeypatch, invalid):
+    trainer=ordinary.OrdinaryTrainer(parent,learning_rate=5e-5,seed=91)
+    games=[game('train','train',model_hash(trainer.model))]
+    real_step=trainer.optimizer.step
+    def corrupt_after_update():
+        real_step()
+        with torch.no_grad():
+            next(trainer.model.parameters()).fill_(invalid)
+    monkeypatch.setattr(trainer.optimizer,'step',corrupt_after_update)
+    with _test_authority(), pytest.raises(FloatingPointError,match='Nonfinite ordinary weights'):
+        trainer.step(games)
+    assert trainer.update == 1
