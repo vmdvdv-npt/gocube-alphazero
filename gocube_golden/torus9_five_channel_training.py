@@ -20,6 +20,7 @@ import threading
 import time
 
 import torch
+from .ordinary_adam import OrdinaryAdam
 
 from .training_profile import span, measured, sampled, transfer
 
@@ -52,7 +53,7 @@ class OrdinaryTrainer(AdaptationTrainer):
         groups = raw['optimizer_state_dict']['param_groups']
         if [g.get('name') for g in groups] != names or any(len(g['params']) != 1 for g in groups):
             raise ValueError('Named Adam group order mismatch')
-        self.optimizer = torch.optim.Adam([
+        self.optimizer = OrdinaryAdam([
             {'params': [p], 'name': n} for n, p in self.model.named_parameters()])
         self.optimizer.load_state_dict(raw['optimizer_state_dict'])
         self.learning_rate = float(learning_rate)

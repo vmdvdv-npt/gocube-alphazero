@@ -20,6 +20,41 @@ from gocube_golden.provenance import file_sha256
 from gocube_golden.torus9_adaptation import AdaptationModel, FINGERPRINT, activation, save_torch
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
+@pytest.mark.parametrize('failure', ['gradients', 'weights'])
+def test_batched_adam_nonfinite_error_contract(parent, failure):
+    from gocube_golden.b64_speedup_comparison import fingerprint
+    errors, states = [], []
+    for baseline in (True, False):
+        trainer = ordinary.OrdinaryTrainer(parent, learning_rate=2.5e-5,
+                                           seed=91, gradient_clip=8, device='cuda')
+        if baseline:
+            optimizer = torch.optim.Adam(trainer.optimizer.param_groups)
+            optimizer.load_state_dict(trainer.optimizer.state_dict())
+            trainer.optimizer = optimizer
+        parameter = next(trainer.model.parameters())
+        if failure == 'gradients':
+            handle = parameter.register_hook(lambda grad: torch.full_like(grad, float('inf')))
+        else:
+            def corrupt(optimizer, args, kwargs):
+                with torch.no_grad():
+                    parameter.flatten()[0] = float('inf')
+            handle = trainer.optimizer.register_step_post_hook(corrupt)
+        try:
+            with _test_authority():
+                trainer.step([game('synthetic', 'train', model_hash(trainer.model))])
+        except (RuntimeError, FloatingPointError) as error:
+            errors.append((type(error), str(error)))
+        else:
+            pytest.fail('nonfinite update accepted')
+        finally:
+            handle.remove()
+        states.append(fingerprint(trainer))
+    assert errors[0] == errors[1]
+    assert states[0] == states[1]
+    assert errors[0][0] is (RuntimeError if failure == 'gradients' else FloatingPointError)
+
+
 def game(identity, split, actor):
     from gocube_golden import torus9_monolith as core
     from gocube_golden.torus9_m137_5ch import build_m137_five_channel_observation
@@ -236,15 +271,19 @@ def test_profile_spans_preserve_exact_b64_trajectory(parent):
     assert {'validate.pre', 'validate.post', 'forward', 'adam', 'scalar.telemetry'} <= collector.finish().keys()
 
 
-@pytest.mark.parametrize('corruption', ['clock', 'average_nan', 'variance_inf', 'negative', 'shape',
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA required'))])
+@pytest.mark.parametrize('corruption', ['clock', 'invalid_clock', 'average_nan', 'variance_inf', 'negative', 'shape',
                                         'missing_step', 'missing_average', 'multiple_errors'])
-def test_packed_adam_validation_preserves_first_error(parent, corruption):
-    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91)
+def test_packed_adam_validation_preserves_first_error(parent, corruption, device):
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91, device=device)
     params = list(trainer.model.named_parameters())
     first = trainer.optimizer.state[params[0][1]]
     second = trainer.optimizer.state[params[1][1]]
     if corruption == 'clock':
         first['step'].add_(1)
+    elif corruption == 'invalid_clock':
+        first['step'] = torch.tensor(float('nan'))
     elif corruption == 'average_nan':
         first['exp_avg'].fill_(float('nan'))
     elif corruption == 'variance_inf':
