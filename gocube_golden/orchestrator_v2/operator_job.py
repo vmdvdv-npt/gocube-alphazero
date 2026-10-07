@@ -325,7 +325,10 @@ def _base_config(parent):
     """Inherit ordinary config, or bind the completed adaptation's replay."""
     effective = parent.effective_config.config
     if effective.extensions.get("training_driver") == DRIVER:
-        return effective.to_dict()
+        config = effective.to_dict()
+        # Offline replay is an experiment input, never an inherited training mode.
+        config["extensions"].pop("offline_ab_replay", None)
+        return config
     root = parent.owner_root
     metadata_path = parent.path.with_suffix(".metadata.json")
     meta = json.loads(metadata_path.read_text())

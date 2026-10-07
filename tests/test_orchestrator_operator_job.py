@@ -334,3 +334,14 @@ def test_offline_named_arms_are_stable_and_experiment_only(parent, monkeypatch):
     raw['training'] = {'offline_replay': ['source/M199']}
     with pytest.raises(ValueError, match='unknown fields'):
         job.parse_job(raw)
+
+
+def test_ordinary_job_from_offline_checkpoint_does_not_inherit_offline_mode(parent):
+    config = parent.effective_config.config.to_dict()
+    config['extensions']['offline_ab_replay'] = [{'generation': 199, 'buckets': []}]
+    parent.effective_config.config = EffectiveConfig.from_dict(config)
+    raw = parameters()
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    assert 'offline_ab_replay' not in steps[0]['config']['effective_config']['extensions']
+    assert all('offline_ab_replay' not in arm['config']['extensions']
+               for arm in steps[1]['config']['arms'])
