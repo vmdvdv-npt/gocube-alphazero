@@ -135,6 +135,22 @@ def test_legacy_rejected_before_driver_or_workers():
         _default_driver(resolved)
 
 
+def test_single_arm_materializes_policy_surprise_cache_once(tmp_path, monkeypatch):
+    from gocube_golden import policy_surprise as ps
+
+    cfg = SimpleNamespace(extensions={'policy_surprise_spec': {'fingerprint': 'spec'}})
+    cache = {'path': str(tmp_path / 'cache.pt'), 'sha256': 'sha256:cache', 'fingerprint': 'spec'}
+    builds, reads = [], []
+    monkeypatch.setattr(ps, 'build_cache', lambda spec, root, *, device: builds.append((spec, root, device)) or cache)
+    monkeypatch.setattr(ps, 'load_cache', lambda ref, spec: reads.append((ref, spec)) or {})
+
+    assert ordinary._policy_surprise_cache(cfg, tmp_path, device='cpu') == cache
+    assert ordinary._policy_surprise_cache(cfg, tmp_path, device='cpu') == cache
+    assert len(builds) == 1
+    assert len(reads) == 1
+    assert builds[0][1] == tmp_path / 'artifacts' / 'policy-surprise'
+
+
 @pytest.mark.parametrize('sampling', ['uniform', 'policy_surprise'])
 @pytest.mark.parametrize('tree_reuse', [False, True])
 @pytest.mark.parametrize('offline', [False, True])

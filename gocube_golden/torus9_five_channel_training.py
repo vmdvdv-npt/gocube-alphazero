@@ -38,6 +38,41 @@ from .torus9_new_komi_guard import assert_new_komi_training_checkpoint_metadata
 SCHEMA = 'torus9-five-channel-ordinary-training-v1'
 
 
+def _policy_surprise_cache(cfg, root: Path, *, device: str):
+    """Resolve the immutable surprise evidence needed by an offline arm.
+
+    Multi-arm offline experiments materialize this reference in their
+    experiment runner before creating the arm lineages.  A single continuous
+    lineage has no experiment runner, so the production driver must perform
+    the same one-time materialization at its own lineage boundary.  The cache
+    is derived evidence; historical replay and checkpoints remain external
+    references and are never copied here.
+    """
+    if hasattr(cfg, 'to_dict'):
+        extensions = cfg.to_dict()['extensions']
+    else:
+        extensions = dict(cfg.extensions)
+    spec = extensions.get('policy_surprise_spec')
+    if spec is None:
+        return None
+    cache_ref = extensions.get('policy_surprise_cache')
+    if cache_ref is not None:
+        return cache_ref
+
+    from .policy_surprise import build_cache, load_cache
+
+    cache_root = root / 'artifacts' / 'policy-surprise'
+    ref_path = cache_root / 'cache-ref.json'
+    if ref_path.is_file():
+        cache_ref = json.loads(ref_path.read_text())
+        load_cache(cache_ref, spec)
+        return cache_ref
+
+    cache_ref = build_cache(spec, cache_root, device=device)
+    atomic_write_json(ref_path, cache_ref)
+    return cache_ref
+
+
 class OrdinaryTrainer(AdaptationTrainer):
     def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, batch_size=None, device='cpu', replay_sampling=None):
         from .policy_surprise import sampling_setting
@@ -504,7 +539,7 @@ def run_generation(resolved):
         if cfg.extensions.get('policy_surprise_spec') is not None:
             from .policy_surprise import load_cache, SamplingTelemetry
             spec = cfg.to_dict()['extensions']['policy_surprise_spec']
-            cache_ref = cfg.to_dict()['extensions']['policy_surprise_cache']
+            cache_ref = _policy_surprise_cache(cfg, root, device=device)
             evidence = load_cache(cache_ref, spec)
             # Both arms measure the same historical surprises; uniform draws stay intact.
             trainer.sampling_telemetry = SamplingTelemetry(games, evidence, cache_ref, spec['weight'], trainer.replay_sampling['mode'])

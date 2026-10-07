@@ -1,0 +1,28 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "az18-offline-lr-A-2p5e-5-20261008-v2",
+  "parent": "torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/M255",
+  "training": {
+    "iterations": 5,
+    "games_per_iteration": 1536,
+    "mcts_simulations": 199,
+    "learning_rate": 2.5e-5,
+    "updates_per_iteration": 2560,
+    "batch_size": 64,
+    "gradient_clip": 8.0,
+    "replay_generations": 5,
+    "replay_sampling": {"mode": "policy_surprise", "weight": 0.5}
+  },
+  "self_play": {
+    "search_mode": "pcr",
+    "pcr": {"cheap_simulations": 100, "full_simulations": 400, "full_probability": 0.33},
+    "tree_reuse": true
+  },
+  "offline_replay": [
+    "torus9-m252-g1536-pcr100-500-p033-u1280-b128-r5-20261006-v1/M256",
+    "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M257",
+    "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M258",
+    "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M259",
+    "torus9-m256-g1536-pcr100-400-p033-u1920-b128-r5-tree-reuse-20261006-v1/M260"
+  ]
+}
