@@ -211,3 +211,26 @@ def test_batch128_trains_and_resumes(parent, tmp_path):
         trainer.step(games)
         resumed.step(games)
     assert model_hash(trainer.model) == model_hash(resumed.model)
+
+
+def test_profile_spans_preserve_exact_b64_trajectory(parent):
+    from gocube_golden.training_profile import Collector
+    from gocube_golden.b64_perf_audit import exact_equal
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91, batch_size=64)
+    profiled = copy.deepcopy(trainer)
+    games = [game('train-a', 'train', model_hash(trainer.model)),
+             game('train-b', 'train', model_hash(trainer.model))]
+    observer = Collector(timings=False, capture_positions=True)
+    collector = Collector(capture_positions=True)
+    with _test_authority(), observer.activate():
+        plain_metrics = [trainer.step(games) for _ in range(3)]
+    with _test_authority(), collector.activate():
+        profile_metrics = [profiled.step(games) for _ in range(3)]
+    assert observer.rows == []
+    assert observer.positions == collector.positions
+    assert all(len(positions) == 64 for positions in observer.positions)
+    assert plain_metrics == profile_metrics
+    assert trainer.update == profiled.update == 3
+    assert exact_equal(trainer.model.state_dict(), profiled.model.state_dict())
+    assert exact_equal(trainer.optimizer.state_dict(), profiled.optimizer.state_dict())
+    assert {'validate.pre', 'validate.post', 'forward', 'adam', 'scalar.telemetry'} <= collector.finish().keys()

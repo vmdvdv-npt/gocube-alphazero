@@ -277,16 +277,17 @@ class AdaptationTrainer:
                 for k in ('observation', 'pi', 'z', 'ownership', 'score')}
 
     def losses(self, batch):
-        policy, value, ownership, score = self.model.forward_auxiliary(batch['observation'])
+        from .training_profile import measured
+        policy, value, ownership, score = measured('forward', lambda: self.model.forward_auxiliary(batch['observation']))
         losses = {
-            'policy': -(batch['pi'] * F.log_softmax(policy, 1)).sum(1).mean(),
-            'wdl': -(batch['z'] * F.log_softmax(value, 1)).sum(1).mean(),
-            'ownership': F.cross_entropy(ownership.reshape(-1, 3), batch['ownership'].reshape(-1)),
-            'score': F.mse_loss(score, batch['score']),
+            'policy': measured('loss.policy', lambda: -(batch['pi'] * F.log_softmax(policy, 1)).sum(1).mean()),
+            'wdl': measured('loss.wdl', lambda: -(batch['z'] * F.log_softmax(value, 1)).sum(1).mean()),
+            'ownership': measured('loss.ownership', lambda: F.cross_entropy(ownership.reshape(-1, 3), batch['ownership'].reshape(-1))),
+            'score': measured('loss.score', lambda: F.mse_loss(score, batch['score'])),
         }
-        metrics = {'brier': ((value.softmax(1) - batch['z']) ** 2).sum(1).mean(),
-                   'score_mae_points': ((score - batch['score']).abs() * 81.5).mean(),
-                   'policy_entropy': -(policy.softmax(1) * policy.log_softmax(1)).sum(1).mean()}
+        metrics = {'brier': measured('metric.brier', lambda: ((value.softmax(1) - batch['z']) ** 2).sum(1).mean()),
+                   'score_mae_points': measured('metric.score_mae_points', lambda: ((score - batch['score']).abs() * 81.5).mean()),
+                   'policy_entropy': measured('metric.policy_entropy', lambda: -(policy.softmax(1) * policy.log_softmax(1)).sum(1).mean())}
         return losses, metrics
 
     def step(self, games):

@@ -1,0 +1,8 @@
+{
+  "schema": "gocube-b64-perf-audit-v1",
+  "runs_root": "/home/codex/projects/gocube-alphazero/runs",
+  "resolved_experiment": "/home/codex/projects/gocube-alphazero/runs/torus9/orchestration/jobs/torus9-offline-batch-m255-g256-260-20261007-v1/resolved.json",
+  "output": "/home/codex/diagnostics/gocube-b64-perf-audit-20261007-final",
+  "warmup": 32,
+  "updates": 128
+}

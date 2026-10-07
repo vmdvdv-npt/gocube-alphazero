@@ -19,6 +19,8 @@ import time
 
 import torch
 
+from .training_profile import span, measured, sampled, transfer
+
 from .artifact_graph import ArtifactRef, CheckpointRef, publish_checkpoint_graph
 from .neural import model_hash
 from .process_supervision import atomic_write_json, atomic_write_text
@@ -85,30 +87,32 @@ class OrdinaryTrainer(AdaptationTrainer):
     def validate_clocks(self):
         for n, p in self.model.named_parameters():
             state = self.optimizer.state[p]
-            if int(state['step']) != self.clock_origin[n] + self.update:
+            if measured('validate.step', lambda: int(state['step']) != self.clock_origin[n] + self.update):
                 raise ValueError('Adam clock mismatch: ' + n)
             for key in ('exp_avg', 'exp_avg_sq'):
-                if state[key].shape != p.shape or not torch.isfinite(state[key]).all():
+                if measured('validate.' + key, lambda: state[key].shape != p.shape or not torch.isfinite(state[key]).all()):
                     raise ValueError('Invalid Adam state: ' + n)
-            if (state['exp_avg_sq'] < 0).any():
+            if measured('validate.negative', lambda: bool((state['exp_avg_sq'] < 0).any())):
                 raise ValueError('Negative Adam variance')
 
     def batch(self, games, update):
         # Ordinary replay sampling is uniform over positions, without the
         # adaptation-only game/phase stratification.
-        import bisect
-        cumulative, count = [], 0
-        for g in games:
-            count += len(g['score'])
-            cumulative.append(count)
-        rng = random.Random(self.seed + update)
-        indices = []
-        for _ in range(self.batch_size):
-            index = rng.randrange(count)
-            game = bisect.bisect_right(cumulative, index)
-            indices.append((games[game], index - (cumulative[game - 1] if game else 0)))
+        with span('batch.sampling'):
+            import bisect
+            cumulative, count = [], 0
+            for g in games:
+                count += len(g['score'])
+                cumulative.append(count)
+            rng = random.Random(self.seed + update)
+            indices = []
+            for _ in range(self.batch_size):
+                index = rng.randrange(count)
+                game = bisect.bisect_right(cumulative, index)
+                indices.append((games[game], index - (cumulative[game - 1] if game else 0)))
+        sampled(indices, games)
         device = next(self.model.parameters()).device
-        return {k: torch.stack([g[k][i] for g, i in indices]).to(device)
+        return {k: transfer(k, measured('stack.' + k, lambda: torch.stack([g[k][i] for g, i in indices])), device)
                 for k in ('observation', 'pi', 'z', 'ownership', 'score')}
 
     def evaluate(self, games, batches=32):
@@ -124,25 +128,38 @@ class OrdinaryTrainer(AdaptationTrainer):
 
     def step(self, games):
         from .orchestrator_v2.execution_permit import require_engine_execution
-        require_engine_execution(__name__, action='training', topology='torus9')
-        self.validate_clocks()
-        self.model.train()
-        self.optimizer.zero_grad(set_to_none=True)
-        losses, _ = self.losses(self.batch(games, self.update + 1))
-        total = sum(losses.values())
-        if not torch.isfinite(total):
-            raise FloatingPointError('Nonfinite ordinary loss')
-        total.backward()
-        grad = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip, error_if_nonfinite=True)
-        self.optimizer.step()
+        with span('execution_permit'):
+            require_engine_execution(__name__, action='training', topology='torus9')
+        with span('validate.pre'):
+            self.validate_clocks()
+        with span('model.train'):
+            self.model.train()
+        with span('zero_grad'):
+            self.optimizer.zero_grad(set_to_none=True)
+        with span('batch_and_losses'):
+            losses, _ = self.losses(self.batch(games, self.update + 1))
+        with span('loss.sum'):
+            total = sum(losses.values())
+        with span('loss.finite'):
+            if not torch.isfinite(total):
+                raise FloatingPointError('Nonfinite ordinary loss')
+        with span('backward'):
+            total.backward()
+        with span('grad_clip'):
+            grad = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip, error_if_nonfinite=True)
+        with span('adam'):
+            self.optimizer.step()
         self.update += 1
-        self.validate_clocks()
-        if any(not torch.isfinite(p).all() for p in self.model.parameters()):
-            raise FloatingPointError('Nonfinite ordinary weights')
-        return {'update': self.update, 'losses': {k: float(v.detach()) for k,v in losses.items()},
-                'grad_norm_before_clip': float(grad), 'learning_rate': self.learning_rate,
-                'gradient_clip': self.gradient_clip, 'batch_size': self.batch_size,
-                'l2_sp_coefficient': 0.}
+        with span('validate.post'):
+            self.validate_clocks()
+        with span('weights.finite'):
+            if any(not torch.isfinite(p).all() for p in self.model.parameters()):
+                raise FloatingPointError('Nonfinite ordinary weights')
+        with span('scalar.telemetry'):
+            return {'update': self.update, 'losses': {k: float(v.detach()) for k,v in losses.items()},
+                    'grad_norm_before_clip': float(grad), 'learning_rate': self.learning_rate,
+                    'gradient_clip': self.gradient_clip, 'batch_size': self.batch_size,
+                    'l2_sp_coefficient': 0.}
 
     def save(self, path, *, config_hash, parent, replay_buckets):
         self.validate_clocks()
@@ -157,6 +174,46 @@ class OrdinaryTrainer(AdaptationTrainer):
             'optimizer_state_dict': self.optimizer.state_dict(), 'ordinary_update': self.update,
             'clock_origin': self.clock_origin, 'seed': self.seed, 'replay_buckets': replay_buckets})
         atomic_write_json(path.with_suffix('.metadata.json'), {**meta, 'artifact_sha256': file_sha256(path)})
+
+
+class TrainingHeartbeat:
+    """The ordinary driver's durable heartbeat, shared with the diagnostic loop."""
+    def __init__(self, path, generation, collector=None):
+        self.path, self.generation = Path(path), generation
+        self.progress = {'phase': 'prepare', 'done': 0, 'total': 1, 'progress_at': time.time()}
+        self.lock, self.stop = threading.Lock(), threading.Event()
+        self.collector = collector
+        self.pulse_writes = 0
+
+    def beat(self):
+        with span('heartbeat'):
+            with self.lock:
+                payload = dict(self.progress)
+            payload.update(liveness_at=time.time(), generation=self.generation,
+                           progress_token=f"{payload['phase']}:{payload['done']}")
+            atomic_write_json(self.path, payload)
+
+    def mark(self, phase, done, total):
+        with span('mark'):
+            with self.lock:
+                self.progress.update(phase=phase, done=done, total=total, progress_at=time.time())
+            self.beat()
+
+    def pulse(self):
+        from contextlib import nullcontext
+        with self.collector.activate() if self.collector is not None else nullcontext():
+            while not self.stop.wait(10):
+                self.beat()
+                self.pulse_writes += 1
+
+    def start(self):
+        self.beat()
+        self.thread = threading.Thread(target=self.pulse, daemon=True)
+        self.thread.start()
+
+    def close(self):
+        self.stop.set()
+        self.thread.join(timeout=15)
 
 
 def load_replay(buckets, *, split):
@@ -269,28 +326,9 @@ def run_generation(resolved):
     del inherited, raw_parent
     baseline = trainer.evaluate(validation)
     heartbeat = Path(os.environ.get('AZ_DRIVER_HEARTBEAT_PATH', root / 'runtime' / 'heartbeats' / f'generation-{generation:04d}.json'))
-    progress = {'phase': 'prepare', 'done': 0, 'total': 1, 'progress_at': time.time()}
-    lock, stop = threading.Lock(), threading.Event()
-
-    def beat():
-        with lock:
-            payload = dict(progress)
-        payload.update(liveness_at=time.time(), generation=generation,
-                       progress_token=f"{payload['phase']}:{payload['done']}")
-        atomic_write_json(heartbeat, payload)
-
-    def mark(phase, done, total):
-        with lock:
-            progress.update(phase=phase, done=done, total=total, progress_at=time.time())
-        beat()
-
-    def pulse():
-        while not stop.wait(10):
-            beat()
-
-    beat()
-    thread = threading.Thread(target=pulse, daemon=True)
-    thread.start()
+    heartbeat_writer = TrainingHeartbeat(heartbeat, generation)
+    mark = heartbeat_writer.mark
+    heartbeat_writer.start()
     try:
         fresh_shards = []
         shard_telemetry = []
@@ -449,8 +487,7 @@ def run_generation(resolved):
         mark('committed',updates,updates)
         return GenerationExecutionResult(generation,True,checkpoint_ref,marker_ref,fresh_ref)
     finally:
-        stop.set()
-        thread.join(timeout=15)
+        heartbeat_writer.close()
 
 
 def write_block_report(result):
