@@ -70,9 +70,13 @@ def _tree_reuse(value, label):
 
 
 def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
-    allowed = set(TRAINING_DEFAULTS) - (set() if allow_iterations else {"iterations"})
+    allowed = (set(TRAINING_DEFAULTS) | {"replay_sampling"}) - (set() if allow_iterations else {"iterations"})
     result = {**defaults, **_object(value, allowed, "training")}
     for key, number in result.items():
+        if key == "replay_sampling":
+            from ..policy_surprise import sampling_setting
+            result[key] = sampling_setting(number)
+            continue
         if key == "iterations" and number is None:
             # The public operator job uses JSON null for the V2 continuous
             # runner's existing unbounded generation budget.
@@ -194,6 +198,8 @@ def parse_job(value):
         else TRAINING_DEFAULTS
     )
     training = _training(raw.get("training", {}), defaults=training_defaults)
+    if "replay_sampling" in training:
+        raise ValueError("replay_sampling must be an offline arm setting")
     if winner_selection is not None and training["iterations"] == 0:
         raise ValueError("winner_selection requires positive training iterations or null")
 
@@ -244,6 +250,8 @@ def parse_job(value):
         }
         for arm in arms.values():
             arm.pop("iterations")
+            if "replay_sampling" in arm and offline is None:
+                raise ValueError("replay_sampling is supported only for offline experiments")
         test_arena = _object(
             item.get("arena", {}), {"games", "mcts_simulations", "tree_reuse"}, "ab_test.arena"
         )
@@ -327,7 +335,9 @@ def _base_config(parent):
     if effective.extensions.get("training_driver") == DRIVER:
         config = effective.to_dict()
         # Offline replay is an experiment input, never an inherited training mode.
-        config["extensions"].pop("offline_ab_replay", None)
+        for key in ("offline_ab_replay", "policy_surprise_spec", "policy_surprise_cache"):
+            config["extensions"].pop(key, None)
+        config["replay"].pop("sampling", None)
         return config
     root = parent.owner_root
     metadata_path = parent.path.with_suffix(".metadata.json")
@@ -404,7 +414,7 @@ def _base_config(parent):
     ).to_dict()
 
 
-def _effective(base, training, arena, self_play=None):
+def _effective(base, training, arena, self_play=None, offline=None):
     cfg = copy.deepcopy(base)
     # A new job defaults to fixed even when its parent used PCR.
     cfg['self_play'].pop('pcr', None)
@@ -428,6 +438,9 @@ def _effective(base, training, arena, self_play=None):
         optimizer_steps_per_iteration=training["updates_per_iteration"],
         gradient_clip=training["gradient_clip"],
     )
+    cfg["replay"].pop("sampling", None)
+    if "replay_sampling" in training:
+        cfg["replay"]["sampling"] = training["replay_sampling"]
     cfg["replay"].update(generations=training["replay_generations"], cap=None)
     cfg["execution"].update(EXECUTION_DEFAULTS)
     cfg["arena"] = {
@@ -443,13 +456,15 @@ def _effective(base, training, arena, self_play=None):
         "gating": False,
         **({"tree_reuse": arena["tree_reuse"]} if "tree_reuse" in arena else {}),
     }
+    if offline is not None:
+        cfg["extensions"]["offline_ab_replay"] = offline
     result = EffectiveConfig.from_dict(cfg)
     validate_config(result)
     return result.to_dict()
 
 
 def _offline_effective(base, training, arena, offline, self_play=None):
-    cfg = _effective(base, training, arena, self_play)
+    cfg = _effective(base, training, arena, self_play, offline=offline)
     if offline is not None:
         if any(len(row["buckets"]) != training["replay_generations"] for row in offline):
             raise ValueError("offline replay window differs from requested replay_generations")
@@ -604,6 +619,14 @@ def compile_job(value, *, runs_root=None, resolver=None):
             if "offline_replay" in test:
                 from .offline_replay import resolve_offline_replay
                 offline = resolve_offline_replay(test["offline_replay"], parent=parent, resolver=resolver)
+            surprise_spec = None
+            weights = {arm["replay_sampling"]["weight"] for arm in test.get("arms", {key:test[key] for key in ("A", "B") if key in test}).values()
+                       if arm.get("replay_sampling", {}).get("mode") == "policy_surprise"}
+            if weights:
+                if len(weights) != 1:
+                    raise ValueError("One historical surprise weight per experiment is supported")
+                from ..policy_surprise import resolve_spec
+                surprise_spec = resolve_spec(offline, parent=parent, resolver=resolver, weight=next(iter(weights)))
             config = {
                 "experiment_id": job["run_id"] + "-" + step_id,
                 "topology": "torus9",
@@ -624,6 +647,9 @@ def compile_job(value, *, runs_root=None, resolver=None):
                     "winner_rule": "candidate_if_wins_gt_losses_else_reference",
                 },
             }
+            if surprise_spec is not None:
+                for arm in config["arms"]:
+                    arm["config"]["extensions"]["policy_surprise_spec"] = surprise_spec
             # Validate all concrete budgets/contracts before training. Only the
             # future checkpoint identity is replaced here, never an arm setting.
             ExperimentConfig.from_dict({**config, "parent": parent.ref.to_dict()})

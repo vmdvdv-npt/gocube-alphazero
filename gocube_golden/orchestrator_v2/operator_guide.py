@@ -24,6 +24,7 @@ INTERFACE_PATHS = (
     "gocube_golden/scenarios/experiment/runner.py",
     "gocube_golden/torus9_five_channel_training.py",
     "gocube_golden/torus9_pcr.py",
+    "gocube_golden/policy_surprise.py",
 )
 
 
