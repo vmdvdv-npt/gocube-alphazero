@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
-import subprocess
 
-from ..process_supervision import start_owned_child
-from ..provenance import canonical_json
-from .execution_permit import _child_execution_permit, require_engine_execution, require_child_execution_permit
+from .execution_permit import require_engine_execution, require_child_execution_permit
 from .immutable_runtime import resolve_execution_commit, validate_runtime_head
 from .production_generation import _read_json, _write_json
 from .supervisor import SupervisorV2
@@ -37,13 +33,8 @@ def prepare_replay_cache(adapter, *, spec, experiment_root, experiment_id, devic
                "--request", str(request_path), "--result", str(result_path)]
 
     def launch(child_request):
-        env = runtime.environment(os.environ)
-        with _child_execution_permit(action_type="generation", topology="torus9",
-                                     run_id=experiment_id, code_identity=commit,
-                                     attempt=int(child_request.attempt)) as permit:
-            env["AZ_V2_EXECUTION_PERMIT"] = canonical_json(dict(permit))
-            env["AZ_V2_EXECUTION_PERMIT_KEY"] = os.environ["AZ_V2_EXECUTION_PERMIT_KEY"]
-            return start_owned_child(command, cwd=runtime.path, env=env, popen=subprocess.Popen)
+        return adapter.launch_replay_preparation(command=command, runtime=runtime,
+            experiment_id=experiment_id, attempt=int(child_request.attempt))
 
     supervisor = SupervisorV2(root, execution_id=f"{experiment_id}:replay-preparation",
                               liveness_path=heartbeat, progress_path=heartbeat,

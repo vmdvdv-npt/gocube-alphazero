@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from gocube_golden.orchestrator_v2 import replay_preparation as prep
+from gocube_golden.orchestrator_v2 import production_generation as generation
 from gocube_golden.orchestrator_v2.execution_permit import _production_authority
 from gocube_golden import policy_surprise
 
@@ -19,8 +20,9 @@ def test_replay_preparation_requires_authority_before_writing(tmp_path):
 
 def test_supervised_preparation_signs_child_and_reuses_verified_result(tmp_path, monkeypatch):
     root = tmp_path / 'experiment'
-    runtime = SimpleNamespace(path=tmp_path / 'runtime', environment=lambda env: dict(env))
+    runtime = SimpleNamespace(path=tmp_path / 'runtime', commit='test-commit', environment=lambda env: dict(env))
     adapter = SimpleNamespace(repo_root=tmp_path, python_executable='python',
+        launch_replay_preparation=lambda **kw: generation.ProductionTrainOne.launch_replay_preparation(None, **kw),
         supervisor_policy=None, runtime_manager=SimpleNamespace(ensure=lambda commit: runtime))
     monkeypatch.setattr(prep, 'resolve_execution_commit', lambda *a: 'test-commit')
     calls = []
@@ -32,7 +34,7 @@ def test_supervised_preparation_signs_child_and_reuses_verified_result(tmp_path,
         assert command[2] == 'gocube_golden.orchestrator_v2.replay_preparation'
         calls.append('spawn')
         return object()
-    monkeypatch.setattr(prep, 'start_owned_child', spawn)
+    monkeypatch.setattr(generation, 'start_owned_child', spawn)
     class Supervisor:
         def __init__(self, root, **kwargs):
             self.kwargs = kwargs

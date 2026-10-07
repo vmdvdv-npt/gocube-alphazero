@@ -122,6 +122,15 @@ class ProductionTrainOne:
         self.supervisor_policy = supervisor_policy
         self.runtime_manager = ImmutableRuntimeManager(self.repo_root)
 
+    def launch_replay_preparation(self, *, command, runtime, experiment_id, attempt):
+        env = runtime.environment(os.environ)
+        with _child_execution_permit(action_type="generation", topology="torus9",
+                                     run_id=experiment_id, code_identity=runtime.commit,
+                                     attempt=attempt) as permit:
+            env["AZ_V2_EXECUTION_PERMIT"] = canonical_json(dict(permit))
+            env["AZ_V2_EXECUTION_PERMIT_KEY"] = os.environ["AZ_V2_EXECUTION_PERMIT_KEY"]
+            return start_owned_child(command, cwd=runtime.path, env=env, popen=subprocess.Popen)
+
     def prepare_replay_cache(self, **kwargs):
         from .replay_preparation import prepare_replay_cache
         return prepare_replay_cache(self, **kwargs)

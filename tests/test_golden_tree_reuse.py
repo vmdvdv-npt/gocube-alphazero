@@ -268,7 +268,7 @@ def test_arena_worker_advances_both_model_trees_and_discards_replenished_games(m
         policy_slot=torch.zeros((1, 26)), wdl_slot=torch.zeros((1, 3)),
         request_queue=requests, response_queues=[Queue()], start_event=SimpleNamespace(wait=lambda: None))
     messages = list(requests.queue)
-    assert not any(m['kind'] == 'error' for m in messages)
+    assert not any(m['kind'] == 'error' for m in messages), messages
     done = next(m for m in messages if m['kind'] == 'done')
     assert done['records'] == [{'game_id': 'g1', 'moves': 4}, {'game_id': 'g2', 'moves': 4}]
     assert len(snapshots) == 8

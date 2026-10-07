@@ -485,7 +485,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 66fd4f43a23558b76b2a44ee4849ee7c4b3ea8531cd7239efa97b4097bc670d7 -->
+<!-- reviewed-interface-sha256: 363f21c77c960f9f8d72a6afdc6ce0a833a61e9aa6b33e9c62f003ac9896a516 -->
 
 ## B64 bounded performance audit
 
