@@ -955,9 +955,9 @@ def test_experiment_runner_v2_migrates_legacy_v2_stopped_state_without_reexecuti
     assert migrated["stage1"]["winner"]["winner_checkpoint"] == initial.final_checkpoints["A"].ref.to_dict()
 
 
-@pytest.mark.parametrize('fixed_reference', [True, False])
+@pytest.mark.parametrize('fixed_reference,arm_names', [(True, 'ABCD'), (False, 'ABCD'), (True, ('U640',))])
 @pytest.mark.parametrize('steps_field', ['optimizer_steps_per_iteration', 'optimizer_steps'])
-def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypatch, fixed_reference, steps_field):
+def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypatch, fixed_reference, steps_field, arm_names):
     from gocube_golden.notifications import RecordingEventSink, format_event
     from gocube_golden import policy_surprise
     parent = _make_parent(tmp_path)
@@ -976,7 +976,7 @@ def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypa
 
         def __call__(self, **kwargs):
             generation = kwargs['parent'].generation + 1
-            if self.fail and self.active_arm.arm_id == 'B' and generation == 2:
+            if self.fail and self.active_arm.arm_id == ('B' if len(arm_names) > 1 else arm_names[0]) and generation == 2:
                 self.fail = False
                 raise RuntimeError('injected generation failure')
             assert kwargs['config'].config.extensions['policy_surprise_cache']['fingerprint'] == 'synthetic'
@@ -991,7 +991,7 @@ def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypa
     monkeypatch.setattr(policy_surprise, 'load_cache', lambda *a, **kw: {})
     monkeypatch.setattr(policy_surprise, 'build_cache', lambda *a, **kw: pytest.fail('controller must not infer'))
     configs = []
-    for name, lr in zip('ABCD', (2.5e-5, 5e-5, 1e-4, 2e-4)):
+    for name, lr in zip(arm_names, (2.5e-5, 5e-5, 1e-4, 2e-4)):
         config = _config(learning_rate=lr, games=1536, steps=2560, sims=199).to_dict()
         config['training'][steps_field] = config['training'].pop('optimizer_steps')
         config['training']['batch_size'] = 64
@@ -1006,10 +1006,13 @@ def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypa
             min_mean_inference_batch_rows=0, min_effective_cpu_cores=0, early_gate_enabled=False),
         arena_master_seed=17)
     assert ExperimentConfig.from_dict(plan.to_dict()).fingerprint == plan.fingerprint
+    if len(arm_names) == 1:
+        with pytest.raises(ValueError, match='single-arm offline experiment requires'):
+            ExperimentConfig.from_dict({**plan.to_dict(), 'offline_reference': None})
     engine_calls = []
     fail_arena = [True]
     def arena_engine(**kwargs):
-        if len(engine_calls) == 2 and fail_arena[0]:
+        if len(engine_calls) == (2 if len(arm_names) > 1 else 0) and fail_arena[0]:
             fail_arena[0] = False
             raise RuntimeError('injected Arena failure')
         engine_calls.append(kwargs)
@@ -1026,26 +1029,26 @@ def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypa
         arena_runner=ArenaRunner(engine=arena_engine, runs_root=tmp_path / 'runs'), experiment_root=tmp_path / 'experiment', event_sink=sink)
     with pytest.raises(RuntimeError, match='generation failure'):
         runner.run()
-    assert training.generations == [('A', 1), ('A', 2), ('B', 1)]
+    assert training.generations == ([('A', 1), ('A', 2), ('B', 1)] if len(arm_names) > 1 else [(arm_names[0], 1)])
     with pytest.raises(RuntimeError, match='Arena failure'):
         runner.run()
-    assert training.generations == [(a, g) for a in 'ABCD' for g in (1, 2)]
+    assert training.generations == [(a, g) for a in arm_names for g in (1, 2)]
     state = runner.run()
-    expected_arenas = 4 if fixed_reference else 6
+    expected_arenas = len(arm_names) if fixed_reference else 6
     assert state['state'] == 'STOPPED' and len(state['arenas']) == expected_arenas
     assert len(engine_calls) == expected_arenas and training.preparations == 1
     assert all(call['output_dir'].parent == tmp_path / 'runs' / 'torus9' / 'evaluations'
                for call in engine_calls)
-    assert len(state['final_checkpoints']) == 4
+    assert len(state['final_checkpoints']) == len(arm_names)
     assert runner.run() == state
-    assert len(engine_calls) == expected_arenas and len(training.generations) == 8
+    assert len(engine_calls) == expected_arenas and len(training.generations) == len(arm_names) * 2
     report = json.loads((tmp_path / 'experiment' / 'report.json').read_text())
     assert report['selfplay_games'] == 0
-    assert set(report['arms']) == set('ABCD')
+    assert set(report['arms']) == set(arm_names)
     assert all(row['optimizer_steps'] == 2560 for row in report['arms'].values())
     assert all(row['final_checkpoint']['generation'] == 2 for row in report['arms'].values())
     starts = [e for e in sink.events if e.event_type == 'TRAINING_STARTED']
-    assert {e.payload['lineage_id'] for e in starts} == {'abcd-' + a for a in 'ABCD'}
+    assert {e.payload['lineage_id'] for e in starts} == {'abcd-' + a for a in arm_names}
     assert all('games/generation' not in format_event(e) and 'every 5' not in format_event(e) for e in starts)
     committed = [e for e in sink.events if e.event_type == 'GENERATION_COMMITTED']
-    assert len(committed) == 8
+    assert len(committed) == len(arm_names) * 2

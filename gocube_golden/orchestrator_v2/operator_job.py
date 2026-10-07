@@ -235,8 +235,8 @@ def parse_job(value):
         if arm_values is not None:
             if offline is None or "A" in item or "B" in item:
                 raise ValueError("named arms are supported only for offline A/B tests")
-            if not isinstance(arm_values, dict) or len(arm_values) < 2:
-                raise ValueError("offline arms must contain at least two variants")
+            if not isinstance(arm_values, dict) or not arm_values:
+                raise ValueError("offline arms must contain at least one variant")
             for arm_name in arm_values:
                 _name(arm_name, "offline arm id")
         else:
@@ -271,6 +271,8 @@ def parse_job(value):
             if offline is None:
                 raise ValueError("ab_test.arena.reference is supported only for offline experiments")
             arena_reference = _selector(arena_reference, "ab_test.arena.reference")
+        if offline is not None and len(arms) == 1 and arena_reference is None:
+            raise ValueError("single-arm offline jobs require ab_test.arena.reference")
         arena_master_seed = None
         if "master_seed" in test_arena:
             arena_master_seed = _integer(

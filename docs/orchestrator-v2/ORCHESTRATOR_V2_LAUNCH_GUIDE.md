@@ -54,6 +54,7 @@ Telegram config блокирует запуск. Не отправляйте т�
 | Только обычный A/B | `training.iterations: 0`, `ab_tests` с `A`/`B` | Да, в каждой ветке | Две независимые ветки и итоговая арена |
 | Offline A/B | `training.iterations: 0`, `offline_replay`, `A`/`B` | **Нет** | Обучение на историческом replay, арена финалов либо каждого финала против reference |
 | Offline A/B/C и больше | То же, `arms` с ≥2 именами | **Нет** | Все ветки и round-robin каждой пары либо арены против reference |
+| Offline single-arm | То же, одно имя в `arms` и обязательный `arena.reference` | **Нет** | Одна trajectory и одна арена финала против reference |
 | Только арены | `arenas`; training и ab_tests отсутствуют либо iterations=0 | **Нет** | Сравнение уже зарегистрированных checkpoint |
 | Выбор победителя → training | `winner_selection`, без `parent`/A/B; iterations>0 либо null | После выбора — да | Арена выбирает родителя новой lineage |
 | Явные дополнительные арены | `arenas` вместе с конечным training/A/B | По основному режиму | Дополнительные арены известных checkpoint после основных действий |
@@ -240,6 +241,21 @@ minutes, среднее/общее время, ускорение относит
 будет ровно четыре арены; round-robin дополнительно не запускается. Budget, seed,
 paired starts/color swap и search settings одинаковы для всех сравнений.
 Без reference сохраняется прежний round-robin (шесть арен для четырёх arms).
+
+Для single-arm job задайте ровно одно имя в `arms` и обязательно
+`ab_tests[].arena.reference`. Пустой `arms` и одиночная ветка без reference
+отвергаются: dummy arms и пустое сравнение не создаются. Online A/B и прежние
+offline multi-arm режимы сохраняют свои правила. AZ-19 состоит из четырёх JSON
+`configs/operator/az19-offline-updates-u{640,1280,2560,5120}-20261008-v1.json`.
+Запускайте их последовательно стандартной командой `job`: сначала `--check`,
+затем запуск, дождитесь `COMPLETED` предыдущего workflow перед следующим.
+Каждый job проходит M256–M260 от M255 с Adam state и historical replay по ссылкам,
+затем играет одну арену 192 игры × 64 sims против существующего S50-2/M260.
+Общие настройки: LR=2.5e-5, batch=64, clip=8, Policy Surprise weight=0.5,
+training seed=2026092702, arena seed=2026100702, tree reuse включён.
+Меняется только updates/iteration: 640 / 1280 / 2560 / 5120. LR выбран по fallback
+AZ-19: фактические арены AZ-18 имеют 512 игр, а его критерий выбора требует 192.
+Результаты AZ-18 не изменяются и его арены повторно не запускаются.
 
 Готовый AZ-18: `configs/operator/az18-offline-lr-abcd-20261008-v3.json`.
 A/B/C/D стартуют от M255 с его Adam state, проходят исторические M256–M260,
@@ -487,7 +503,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: cddf1f58f36318f90ee13c2fb4d12e93b681f2a631dba8be48270b340e79dfd5 -->
+<!-- reviewed-interface-sha256: baea8c67d936b2878f251a19631c9c2d18f9a978921bbd3374f3bd23f35636b5 -->
 
 ## B64 bounded performance audit
 

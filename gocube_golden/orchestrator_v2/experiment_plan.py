@@ -234,8 +234,10 @@ class ExperimentConfig:
         if any(offline):
             if not all(offline) or any(row != offline[0] for row in offline):
                 raise ValueError("offline arms must share identical replay iterations")
-            if len(arms) < 2 or len({arm.arm_id for arm in arms}) != len(arms) or self.stage2 is not None:
+            if len({arm.arm_id for arm in arms}) != len(arms) or self.stage2 is not None:
                 raise ValueError("offline experiment requires independent arms and no winner-rooted Stage 2")
+            if len(arms) == 1 and self.offline_reference is None:
+                raise ValueError("single-arm offline experiment requires offline_reference")
             if any(arm.generations != len(offline[0]) for arm in arms):
                 raise ValueError("offline replay budget differs from arm generations")
         elif len(arms) != 2 or {arm.arm_id for arm in arms} != {"A", "B"}:

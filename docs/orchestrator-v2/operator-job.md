@@ -333,3 +333,12 @@ with the same JSON to resume. Completed generations and Arenas are reused.
 Training, replay-cache inference and Arena games run in supervised workers;
 Telegram events describe the actual offline execution rather than inherited
 self-play settings. See the launch guide for the full configuration and paths.
+
+### Offline single-arm
+
+A single named `arms` entry is supported with `offline_replay` and a required
+`ab_tests[].arena.reference`. It trains one independent lineage and evaluates its
+final checkpoint once against the pinned reference. No dummy arm or round-robin
+is created. Use a separate run_id/JSON for each independent job and wait for its
+workflow to complete before launching another GPU job. See the AZ-19 examples
+and the launch guide for exact parameters and normal `job --check`/`job` commands.

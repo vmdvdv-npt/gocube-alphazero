@@ -527,7 +527,8 @@ def test_new_ordinary_job_drops_inherited_sampling_and_cache(parent):
     assert not set(('offline_ab_replay','policy_surprise_spec','policy_surprise_cache')) & result['extensions'].keys()
 
 
-def test_offline_abcd_compiles_fixed_reference_and_four_independent_arms(parent, monkeypatch):
+@pytest.mark.parametrize('names,rates', [('ABCD', (2.5e-5, 5e-5, 1e-4, 2e-4)), (('U640',), (2.5e-5,))])
+def test_offline_abcd_compiles_fixed_reference_and_four_independent_arms(parent, monkeypatch, names, rates):
     from gocube_golden.orchestrator_v2 import offline_replay
     raw = parameters()
     raw['training']['iterations'] = 0
@@ -535,7 +536,7 @@ def test_offline_abcd_compiles_fixed_reference_and_four_independent_arms(parent,
     raw['ab_tests'] = [{'id': 'lr', 'iterations': 2,
         'offline_replay': ['source/M199', 'source/M200'],
         'arms': {name: {'learning_rate': rate} for name, rate in
-                 zip('ABCD', (2.5e-5, 5e-5, 1e-4, 2e-4))},
+                 zip(names, rates)},
         'arena': {'reference': 'baseline/M260', 'games': 192, 'mcts_simulations': 64,
                   'master_seed': 17, 'tree_reuse': True}}]
     monkeypatch.setattr(offline_replay, 'resolve_offline_replay',
@@ -548,9 +549,16 @@ def test_offline_abcd_compiles_fixed_reference_and_four_independent_arms(parent,
     config = steps[0]['config']
     assert config['offline_reference'] == parent.ref.to_dict()
     assert config['arena']['master_seed'] == 17
-    assert [a['arm_id'] for a in config['arms']] == list('ABCD')
-    assert [a['config']['training']['learning_rate'] for a in config['arms']] == [2.5e-5, 5e-5, 1e-4, 2e-4]
-    assert len({a['lineage_id'] for a in config['arms']}) == 4
+    assert [a['arm_id'] for a in config['arms']] == list(names)
+    assert [a['config']['training']['learning_rate'] for a in config['arms']] == list(rates)
+    assert len({a['lineage_id'] for a in config['arms']}) == len(names)
+    if len(names) == 1:
+        del raw['ab_tests'][0]['arena']['reference']
+        with pytest.raises(ValueError, match='single-arm offline jobs require'):
+            job.parse_job(raw)
+        raw['ab_tests'][0]['arms'] = {}
+        with pytest.raises(ValueError, match='at least one'):
+            job.parse_job(raw)
 
 
 def test_online_ab_rejects_fixed_reference():
