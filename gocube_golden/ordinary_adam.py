@@ -13,28 +13,57 @@ _VERIFIED_INIT_GROUP_PARAMETERS = (
 )
 
 
-def _batched_adam_runtime_supported():
-    """Fail closed if the private PyTorch Adam contract is not the verified one."""
-    if str(torch.__version__) != _VERIFIED_TORCH_VERSION or torch.version.cuda != _VERIFIED_CUDA_VERSION:
-        return False
+def _batched_adam_runtime_status():
+    """Return whether the private Adam fast path is verified, plus a reason."""
+    actual_torch = str(torch.__version__)
+    actual_cuda = torch.version.cuda
+    if actual_torch != _VERIFIED_TORCH_VERSION:
+        return False, (
+            f'PyTorch {actual_torch} is not the byte-exact-verified '
+            f'{_VERIFIED_TORCH_VERSION}'
+        )
+    if actual_cuda != _VERIFIED_CUDA_VERSION:
+        return False, (
+            f'CUDA runtime {actual_cuda} is not the byte-exact-verified '
+            f'{_VERIFIED_CUDA_VERSION}'
+        )
     try:
         parameters = tuple(inspect.signature(torch.optim.Adam._init_group).parameters)
-    except (AttributeError, TypeError, ValueError):
-        return False
-    return parameters == _VERIFIED_INIT_GROUP_PARAMETERS
+    except (AttributeError, TypeError, ValueError) as error:
+        return False, f'Adam._init_group contract is unavailable: {type(error).__name__}'
+    if parameters != _VERIFIED_INIT_GROUP_PARAMETERS:
+        return False, 'Adam._init_group signature differs from the byte-exact-verified contract'
+    return True, None
 
 
-_BATCHED_ADAM_RUNTIME_SUPPORTED = _batched_adam_runtime_supported()
+def _batched_adam_runtime_supported():
+    return _batched_adam_runtime_status()[0]
+
+
+_BATCHED_ADAM_RUNTIME_SUPPORTED, _BATCHED_ADAM_RUNTIME_DISABLED_REASON = (
+    _batched_adam_runtime_status()
+)
 
 
 class OrdinaryAdam(torch.optim.Adam):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if (not _BATCHED_ADAM_RUNTIME_SUPPORTED
+                and any(p.device.type == 'cuda'
+                        for group in self.param_groups for p in group['params'])):
+            raise RuntimeError(
+                'B64 Adam batching cannot run on this CUDA runtime: '
+                f'{_BATCHED_ADAM_RUNTIME_DISABLED_REASON}. '
+                'Training is stopped rather than silently falling back to slower Adam. '
+                'Re-run the exact parity gate and explicitly verify the new runtime '
+                'before enabling production training.'
+            )
+
     @torch.no_grad()
     def step(self, closure=None):
         groups = self.param_groups
         keys = ('betas', 'lr', 'weight_decay', 'eps', 'amsgrad', 'maximize',
                 'foreach', 'capturable', 'differentiable', 'fused')
-        # Only the byte-exact verified PyTorch runtime and established FP32 CUDA
-        # foreach path are batched. Everything else uses PyTorch's own Adam step.
         eligible = (_BATCHED_ADAM_RUNTIME_SUPPORTED and bool(groups) and closure is None
                     and not hasattr(self, 'grad_scale') and not hasattr(self, 'found_inf'))
         if eligible:
