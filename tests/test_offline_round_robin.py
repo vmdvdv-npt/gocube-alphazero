@@ -42,6 +42,7 @@ def test_surprise_cache_sealed_before_arms_reused_and_checked_on_resume(tmp_path
     runner = ExperimentRunnerV2.__new__(ExperimentRunnerV2)
     runner.experiment_root = tmp_path
     cfg = EffectiveConfig(topology='torus9', compatibility={'input_channels':5}, training={'batch_size':64},
+        replay={'sampling':{'mode':'policy_surprise','weight':0.5}},
         execution={'device':'cpu'}, extensions={'policy_surprise_spec':{'fingerprint':'spec'}})
     runner.config = NS(parent={},fingerprint='stable',experiment_id='offline',
         arms=[ExperimentArmConfig(a,1,cfg) for a in ('S50','U64')],
@@ -68,6 +69,8 @@ def test_surprise_cache_sealed_before_arms_reused_and_checked_on_resume(tmp_path
     runner._run_arena=lambda **kw:NS(validity='VALID',evaluation_id='arena',summary={},output_dir=tmp_path)
     assert runner._run_offline()['state']=='STOPPED'
     assert len(builds)==1 and len(reads)==2
+    report=json.loads((tmp_path/'report.json').read_text())
+    assert report['arms']['S50']['sampling']=={'mode':'policy_surprise','weight':0.5}
     def tampered(*a):
         raise ValueError('cache SHA mismatch')
     monkeypatch.setattr(ps,'load_cache',tampered)
