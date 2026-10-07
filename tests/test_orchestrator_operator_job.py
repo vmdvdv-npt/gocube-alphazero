@@ -139,7 +139,7 @@ def test_unbounded_training_cannot_be_followed_by_ab_tests():
 @pytest.mark.parametrize("patch", [
     {"notifications": False}, {"command": "arbitrary executable"},
     {"parent": "../../checkpoint"}, {"training": {"learning_rate": float("nan")}},
-    {"training": {"iterations": True}}, {"training": {"batch_size": 32}},
+    {"training": {"iterations": True}}, {"training": {"batch_size": 0}},
     {"training": {"gradient_clip": 0}}, {"training": {"gradient_clip": float("nan")}},
     {"arena": {"games": 193}}, {"execution": {"workers": 1}},
     {"ab_tests": [{"id": "test", "iterations": 1, "A": {}, "B": {}, "arena": {"every_iterations": 2}}]},
@@ -300,3 +300,12 @@ def test_controller_uses_pinned_working_directory_and_environment(tmp_path, monk
     assert PERMIT_KEY_ENV in calls[0][1]["env"]
     assert len(calls[0][1]["pass_fds"]) == 1
     assert "--startup-ready-fd" in calls[0][0]
+
+
+@pytest.mark.parametrize("batch_size", [32, 64, 128])
+def test_batch_size_reaches_effective_config(parent, batch_size):
+    raw = parameters()
+    raw["training"]["batch_size"] = batch_size
+    compiled = job.compile_job(raw, runs_root=".")
+    config = compiled["workflow"]["steps"][0]["config"]["effective_config"]
+    assert config["training"]["batch_size"] == batch_size
