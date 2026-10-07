@@ -350,3 +350,42 @@ def test_ordinary_job_from_offline_checkpoint_does_not_inherit_offline_mode(pare
     assert 'offline_ab_replay' not in steps[0]['config']['effective_config']['extensions']
     assert all('offline_ab_replay' not in arm['config']['extensions']
                for arm in steps[1]['config']['arms'])
+
+
+def test_policy_surprise_compile_only_sampling_differs(parent, monkeypatch):
+    from gocube_golden.orchestrator_v2 import offline_replay
+    from gocube_golden import policy_surprise
+    raw = parameters(); raw['training']['iterations'] = 0
+    raw['ab_tests'] = [{'id':'sampling', 'iterations':2,
+        'offline_replay':['source/M199','source/M200'],
+        'arms':{'S50':{'replay_sampling':{'mode':'policy_surprise','weight':.5}},'U64':{}}}]
+    replay = [{'generation':g,'buckets':[{}]*6} for g in (199,200)]
+    monkeypatch.setattr(offline_replay,'resolve_offline_replay',lambda *a, **kw:replay)
+    monkeypatch.setattr(policy_surprise,'resolve_spec',lambda *a, **kw:{'fingerprint':'synthetic'})
+    arms = job.compile_job(raw,resolver=SimpleNamespace())['workflow']['steps'][0]['config']['arms']
+    assert [a['arm_id'] for a in arms] == ['S50','U64']
+    a,b = [arm['config'] for arm in arms]
+    assert a['replay'].pop('sampling') == {'mode':'policy_surprise','weight':.5}
+    assert a == b
+    assert job.parse_job(job.parse_job(raw)) == job.parse_job(raw)
+
+
+@pytest.mark.parametrize('setting', [{}, {'mode':'unknown'}, {'mode':'uniform','weight':.5},
+                                       {'mode':'policy_surprise','weight':float('nan')}])
+def test_invalid_replay_sampling_rejected(setting):
+    raw = parameters(); raw['training']['iterations']=0
+    raw['ab_tests']=[{'id':'sampling','iterations':1,'offline_replay':['source/M199'],
+                     'arms':{'S50':{'replay_sampling':setting},'U64':{}}}]
+    with pytest.raises(ValueError):
+        job.parse_job(raw)
+
+
+def test_new_ordinary_job_drops_inherited_sampling_and_cache(parent):
+    cfg=parent.effective_config.config.to_dict()
+    cfg['replay']['sampling']={'mode':'policy_surprise','weight':.5}
+    cfg['extensions'].update(offline_ab_replay=[{}],policy_surprise_spec={},policy_surprise_cache={})
+    parent.effective_config.config=EffectiveConfig.from_dict(cfg)
+    steps=job.compile_job(parameters(),resolver=SimpleNamespace())['workflow']['steps']
+    result=steps[0]['config']['effective_config']
+    assert 'sampling' not in result['replay']
+    assert not set(('offline_ab_replay','policy_surprise_spec','policy_surprise_cache')) & result['extensions'].keys()

@@ -304,13 +304,33 @@ class ExperimentRunnerV2:
                      "state": "RUNNING", "stage1": {"arms": {}}, "arenas": {}}
             _write_json(self.state_path, state)
         if state.get("state") == "STOPPED":
+            spec = getattr(self.config.arms[0].effective_config, "extensions", {}).get("policy_surprise_spec")
+            if spec is not None:
+                from ...policy_surprise import load_cache
+                load_cache(state["policy_surprise_cache"], self.config.arms[0].effective_config.to_dict()["extensions"]["policy_surprise_spec"])
             for checkpoint in state["final_checkpoints"].values():
                 self.resolver.checkpoint(checkpoint)
             return state
         self._notify_operator("EXPERIMENT_STARTED", "Offline replay experiment started; self-play disabled.",
                               key_suffix="offline-started")
-        final = self._run_arms(state, stage_key="stage1",
-                               arms={a.arm_id: a for a in self.config.arms}, parent=parent)
+        arms = {a.arm_id: a for a in self.config.arms}
+        spec = getattr(self.config.arms[0].effective_config, 'extensions', {}).get('policy_surprise_spec')
+        if spec is not None:
+            from ...policy_surprise import build_cache, load_cache
+            spec = self.config.arms[0].effective_config.to_dict()['extensions']['policy_surprise_spec']
+            cache = state.get('policy_surprise_cache')
+            if cache is None:
+                cache = build_cache(spec, self.experiment_root / 'artifacts' / 'policy-surprise',
+                                    device=self.config.arms[0].effective_config.execution['device'])
+                state['policy_surprise_cache'] = cache
+                _write_json(self.state_path, state)
+            load_cache(cache, spec)
+            arms = {}
+            for arm in self.config.arms:
+                cfg = arm.effective_config.to_dict()
+                cfg['extensions']['policy_surprise_cache'] = cache
+                arms[arm.arm_id] = ExperimentArmConfig(arm.arm_id, arm.generations, cfg, arm.lineage_id)
+        final = self._run_arms(state, stage_key="stage1", arms=arms, parent=parent)
         for a, b in combinations(final, 2):
             pair = a + "-vs-" + b
             result = self._run_arena(candidate=final[a], reference=final[b],
@@ -325,7 +345,7 @@ class ExperimentRunnerV2:
             state["arenas"][pair] = {"evaluation_id": result.evaluation_id,
                                      "summary": dict(result.summary), "output_dir": str(result.output_dir)}
             _write_json(self.state_path, state)
-        report = {"sampling": "uniform positions; RNG seed + optimizer update; streams differ across batch sizes",
+        report = {"sampling": "run-owned replay sampling; RNG seed + optimizer update; frequency weighting without importance correction",
                   "selfplay_games": 0, "arms": {}, "arenas": state["arenas"]}
         for arm in self.config.arms:
             root = final[arm.arm_id].owner_root
@@ -337,7 +357,8 @@ class ExperimentRunnerV2:
             minutes = sum(row["training_minutes"] for row in iterations)
             report["arms"][arm.arm_id] = {"batch_size": arm.effective_config.training["batch_size"],
                 "total_training_minutes": minutes, "mean_training_minutes": minutes / len(iterations),
-                "iterations": iterations}
+                "iterations": iterations, "sampling": dict(getattr(arm.effective_config, "replay", {})).get("sampling", {"mode": "uniform"}),
+                "final_checkpoint": final[arm.arm_id].ref.to_dict()}
         baseline = min(report["arms"].values(), key=lambda row: row["batch_size"])
         for arm_report in report["arms"].values():
             arm_report["speedup_vs_smallest_batch"] = baseline["mean_training_minutes"] / arm_report["mean_training_minutes"]

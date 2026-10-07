@@ -39,7 +39,10 @@ SCHEMA = 'torus9-five-channel-ordinary-training-v1'
 
 
 class OrdinaryTrainer(AdaptationTrainer):
-    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, batch_size=None, device='cpu'):
+    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, batch_size=None, device='cpu', replay_sampling=None):
+        from .policy_surprise import sampling_setting
+        self.replay_sampling = sampling_setting(replay_sampling)
+        self.sampling_telemetry = None
         raw = torch.load(checkpoint, map_location='cpu', weights_only=False)
         meta = raw['metadata']
         assert_new_komi_training_checkpoint_metadata(meta)
@@ -152,9 +155,17 @@ class OrdinaryTrainer(AdaptationTrainer):
             rng = random.Random(self.seed + update)
             indices = []
             for _ in range(self.batch_size):
+                if (getattr(self, "replay_sampling", {}).get("mode") == "policy_surprise"
+                        and self.replay_sampling["weight"] != 0):
+                    if self.sampling_telemetry is None:
+                        raise ValueError("policy_surprise sampling requires verified historical cache")
+                    indices.append(self.sampling_telemetry.draw(rng, games))
+                    continue
                 index = rng.randrange(count)
                 game = bisect.bisect_right(cumulative, index)
                 indices.append((games[game], index - (cumulative[game - 1] if game else 0)))
+        if getattr(self, "sampling_telemetry", None) is not None:
+            self.sampling_telemetry.record(indices)
         sampled(indices, games)
         device = next(self.model.parameters()).device
         return {k: transfer(k, measured('stack.' + k, lambda: torch.stack([g[k][i] for g, i in indices])), device)
@@ -322,6 +333,10 @@ def load_replay(buckets, *, split):
 
 
 def validate_config(config):
+    from .policy_surprise import sampling_setting
+    setting = sampling_setting(config.replay.get('sampling'))
+    if setting['mode'] == 'policy_surprise' and not config.extensions.get('offline_ab_replay'):
+        raise ValueError('policy_surprise requires an offline experiment')
     if config.compatibility.get('input_channels') != 5:
         raise ValueError('Legacy 6-channel Torus9 training is retired; use a 5CH checkpoint')
     gradient_clip = config.training.get('gradient_clip', 1.0)
@@ -388,7 +403,7 @@ def run_generation(resolved):
     trainer = OrdinaryTrainer(parent.path, learning_rate=cfg.training['learning_rate'],
                                gradient_clip=cfg.training.get('gradient_clip', 1.0),
                                batch_size=cfg.training['batch_size'],
-                               seed=seed, device=device)
+                               seed=seed, device=device, replay_sampling=cfg.replay.get("sampling"))
     raw_parent = torch.load(parent.path, map_location='cpu', weights_only=False)
     if raw_parent['metadata'].get('ordinary_schema') == SCHEMA:
         buckets = raw_parent['replay_buckets']
@@ -486,6 +501,13 @@ def run_generation(resolved):
             raise ValueError('Validation leaked into training')
         rolling_path = root / 'replay' / f'rolling-after-{generation:02d}.jsonl'
         atomic_write_text(rolling_path, ''.join(json.dumps(b,sort_keys=True)+'\n' for b in buckets))
+        if cfg.extensions.get('policy_surprise_spec') is not None:
+            from .policy_surprise import load_cache, SamplingTelemetry
+            spec = cfg.to_dict()['extensions']['policy_surprise_spec']
+            cache_ref = cfg.to_dict()['extensions']['policy_surprise_cache']
+            evidence = load_cache(cache_ref, spec)
+            # Both arms measure the same historical surprises; uniform draws stay intact.
+            trainer.sampling_telemetry = SamplingTelemetry(games, evidence, cache_ref, spec['weight'], trainer.replay_sampling['mode'])
         updates = int(cfg.training['optimizer_steps_per_iteration'])
         metrics = []
         if device.startswith('cuda'):
@@ -525,6 +547,10 @@ def run_generation(resolved):
         training_path = root / 'training' / f'iter-{generation:02d}.json'
         mean_losses = {key: sum(row['losses'][key] for row in metrics) / updates
                        for key in metrics[0]['losses']}
+        if trainer.sampling_telemetry is not None:
+            if trainer.sampling_telemetry.draws != updates * trainer.batch_size:
+                raise ValueError('Replay sampling draw budget drift')
+            performance['sampling'] = trainer.sampling_telemetry.report()
         performance['mean_losses'] = mean_losses
         performance['mean_total_loss'] = sum(mean_losses.values())
         atomic_write_json(training_path, {'updates': metrics,'baseline_validation': baseline,'validation': result_validation, 'performance': performance})

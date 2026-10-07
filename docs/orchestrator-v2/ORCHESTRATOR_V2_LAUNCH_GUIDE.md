@@ -228,6 +228,38 @@ checkpoint. Mean total loss — сумма policy + WDL/value + ownership + scor
 minutes, среднее/общее время, ускорение относительно наименьшего batch, все арены.
 Ветки имеют отдельные lineage и не выбираются автоматически для production.
 
+### Opt-in historical Policy Surprise frequency sampling
+
+Only offline arms accept `replay_sampling`: `{"mode":"uniform"}` (the default)
+or `{"mode":"policy_surprise","weight":0.5}`. All other learner budgets and
+semantics inherit normally. No setting changes the existing uniform RNG path;
+weight zero also uses that exact path. Validation stays on its fixed sampler.
+There is no importance correction or per-sample loss scaling.
+
+The compiler resolves each training row's actor model hash and exact actor
+checkpoint SHA through the canonical historical parent graph. Missing or
+ambiguous actors fail closed. The experiment builds one derived, content-addressed
+cache before training; batches use it without model inference. Cache provenance
+includes source shards/checkpoint references, PyTorch/CUDA version, inference
+device/batch size, implementation SHA, algorithm and
+weight. Experiment state seals its SHA and each arm's effective config references
+that SHA. Resume verifies the same cache; it never overwrites immutable evidence.
+Historical shards and checkpoints remain references only. Row identity is shard
+SHA + game ID + learner row index (historical learner shards do not retain ply).
+
+KL uses historical raw logits, legal-mask log-softmax and float64 arithmetic;
+target probabilities are renormalized only for float32 rounding. Per-game
+frequency is `(1-weight) + weight*N*KL/sum(KL)`, or 1 if total KL is zero.
+Only learner-eligible rows participate. Both arms record replay and sampled
+surprise, top-decile share (exact ceil(10%*N), replay-order tie break), unique rows,
+source-generation counts, actual draws, frequency stats and cache identity.
+S50 should be listed before U64 so it is the Arena candidate.
+
+Concrete controlled job:
+`configs/operator/torus9-offline-policy-surprise-m255-g256-260-20261007-v1.json`.
+It performs five offline generations per arm followed by one 192-game Arena,
+then stops. Its seed is inherited identically from M255; no self-play runs.
+
 ## Отдельные арены и выбор победителя
 
 ```json
@@ -348,7 +380,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 07037ebd9a53bd9ec5991738f806e4dd36438e4cfc284896f5ebd18dd4750401 -->
+<!-- reviewed-interface-sha256: 52b449ecf2a8ec763783570c4b524d1fa4f0b7b53cc11def5d1d3e684fab093d -->
 
 ## B64 bounded performance audit
 

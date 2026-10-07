@@ -135,15 +135,22 @@ def test_legacy_rejected_before_driver_or_workers():
         _default_driver(resolved)
 
 
+@pytest.mark.parametrize('sampling', ['uniform', 'policy_surprise'])
 @pytest.mark.parametrize('tree_reuse', [False, True])
 @pytest.mark.parametrize('offline', [False, True])
-def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monkeypatch,tree_reuse,offline):
+def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monkeypatch,tree_reuse,offline,sampling):
+    if sampling == 'policy_surprise' and not offline:
+        pytest.skip('historical surprise is offline only')
     raw=torch.load(parent,weights_only=False)
     actor=raw['metadata']['model_hash']
+    actor_path=tmp_path/'historical-actor.pt'
+    save_torch(actor_path,raw)
+    actor_sha=file_sha256(actor_path)
     buckets=[]
     for i in range(6):
         p=tmp_path/f'old-{i}.pt'
         games=[game(f'old-{i}','train',actor)]
+        games[0]['actor_artifact']=actor_sha
         if i==0:
             games.append(game('heldout','validation',actor))
         save_torch(p,{'contract':FINGERPRINT,'actor_hash':actor,'games':games})
@@ -173,6 +180,16 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
                          'rolling_replay': {'path': str(rp), 'sha256': file_sha256(rp)}})
         payload = cfg.to_dict()
         payload['extensions']['offline_ab_replay'] = rows
+        if sampling == 'policy_surprise':
+            from gocube_golden import policy_surprise as ps
+            from gocube_golden.provenance import sha256_fingerprint
+            body={'algorithm':ps.ALGORITHM,'implementation_sha256':file_sha256(ps.__file__),
+                  'weight':.5, 'sources':{actor:{'path':str(actor_path),'checkpoint':{'sha256':actor_sha}}},
+                  'shards':[{**b['shards'][0],'generation':b['generation'],'actor_hashes':[actor]} for b in buckets]}
+            spec={**body,'fingerprint':sha256_fingerprint(body)}
+            cache=ps.build_cache(spec,tmp_path/'experiment-cache',device='cpu')
+            payload['extensions'].update(policy_surprise_spec=spec,policy_surprise_cache=cache)
+            payload['replay']['sampling']={'mode':'policy_surprise','weight':.5}
         cfg = EffectiveConfig.from_dict(payload)
     runs=tmp_path/'runs'
     root,resolved_cfg=Torus9ProductionLineage(runs).prepare(topology='torus9',lineage_id='test-ordinary',
@@ -210,6 +227,9 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     assert [b['generation'] for b in saved['replay_buckets']]==([0,1,2,3,4,200] if offline else [2,3,4,5,199,200])
     telemetry=json.loads((root/'training/iter-200.json').read_text())['performance']
     assert telemetry['processed_samples']==256
+    if sampling == 'policy_surprise':
+        assert telemetry['sampling']['sample_draws']==256
+        assert telemetry['sampling']['cache']==cache
     assert telemetry['training_minutes'] > 0
     train=ordinary.load_replay(saved['replay_buckets'],split='train')
     assert 'heldout' not in {g['game_id'] for g in train}
