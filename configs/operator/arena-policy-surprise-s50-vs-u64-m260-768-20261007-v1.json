@@ -1,0 +1,14 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "arena-policy-surprise-s50-vs-u64-m260-768-20261007-v1",
+  "arenas": [
+    {
+      "id": "s50-vs-u64-768",
+      "candidate": "torus9-offline-policy-surprise-m255-g256-260-20261007-v1-ab-sampling-S50/M260",
+      "reference": "torus9-offline-policy-surprise-m255-g256-260-20261007-v1-ab-sampling-U64/M260",
+      "games": 768,
+      "mcts_simulations": 64,
+      "master_seed": 2026100702
+    }
+  ]
+}

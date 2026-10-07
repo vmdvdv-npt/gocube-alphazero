@@ -1,0 +1,22 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "torus9-m233-vs-m229-diagnostic-g128-s64-20261003-v1",
+  "topology": "torus9",
+  "training": {
+    "iterations": 0
+  },
+  "arena": {
+    "every_iterations": 1,
+    "games": 128,
+    "mcts_simulations": 64
+  },
+  "arenas": [
+    {
+      "id": "m233-vs-m229-diagnostic",
+      "candidate": "torus9-m214-g768-s200-train1280-r3-arena1-20260930-v1/M233",
+      "reference": "torus9-m214-g768-s200-train1280-r3-arena1-20260930-v1/M229",
+      "games": 128,
+      "mcts_simulations": 64
+    }
+  ]
+}

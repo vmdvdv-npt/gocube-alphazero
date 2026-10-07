@@ -1,0 +1,26 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "torus9-m203-learner-recovery-20260929-v1",
+  "topology": "torus9",
+  "parent": "torus9-m138-5ch-lr5e5-block5-20260929-v1/M203",
+  "training": {
+    "iterations": 100,
+    "games_per_iteration": 384,
+    "mcts_simulations": 200,
+    "learning_rate": 0.0001,
+    "updates_per_iteration": 640,
+    "batch_size": 64,
+    "gradient_clip": 8.0,
+    "replay_generations": 6
+  },
+  "arena": {
+    "every_iterations": 1,
+    "games": 192,
+    "mcts_simulations": 200
+  },
+  "execution": {
+    "device": "cuda",
+    "workers": 16
+  },
+  "ab_tests": []
+}

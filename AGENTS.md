@@ -32,3 +32,7 @@ and mocked transports, never production games or unsolicited Telegram messages.
 
 Changes to these rules also require the user's explicit permission.
 AGENTS.md is an instruction, not a security boundary.
+
+For passive training duration, update/example throughput and GPU measurements,
+use the external [training efficiency monitor](docs/diagnostics/training-efficiency-monitor.md)
+(`tools/training_efficiency_monitor.py`); write its outputs outside the live run.
