@@ -348,4 +348,44 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: cd49f24f80897fb6dca353e5d8a1e803f2d34715662a6b32cbde9cf6b50212c9 -->
+<!-- reviewed-interface-sha256: 39d2a14f9bd43503f4b9c738a4666a560f334d285ebc3375641c4e491e3a9f6f -->
+
+## B64 bounded performance audit
+
+The explicit diagnostic exception is `production_entrypoint b64-perf-audit CONFIG`.
+It accepts `gocube-b64-perf-audit-v1` with `runs_root`, `resolved_experiment`
+(the saved offline B64/B128/B256 experiment spec), an exclusive `output` outside
+`runs_root`, `warmup` (32–64), and `updates` (128–256). See
+`configs/diagnostics/b64-perf-audit-20261007.json`. Run through the existing V2
+entrypoint; it owns the execution authority. It verifies and reads M255 and
+M256–M260 source references in place, measures the first historical B64 generation
+in memory, and creates no production checkpoint, lineage, self-play or Arena.
+Diagnostics run with the production Adam, sampler, FP32 losses and checks.
+The shared ordinary heartbeat uses durable writes and its 10-second pulse.
+Place output on the same filesystem as production heartbeat files; `/tmp` may
+be tmpfs and would invalidate the I/O comparison. The existing external efficiency
+monitor observes isolated diagnostic heartbeat files, with results outside its
+diagnostic run root. No lifecycle notifications are synthesized for this audit;
+production notification settings and delivery remain unchanged.
+
+For Nsight Systems on hosts where PyTorch CUPTI emits runtime calls without
+device activity, set optional `nsys_trace_only: true` in a second audit config
+with an exclusive output directory. It performs the same parity check and
+32-update warm-up, then 16 measured updates with NVTX spans and CUDA profiler
+capture-range markers. Use `nsys profile --trace=cuda,nvtx --sample=none
+--cpuctxsw=none --capture-range=cudaProfilerApi --capture-range-end=stop` around
+the V2 command. The entrypoint mints a signed training child permit; the measured
+`require_engine_execution` uses the same child authorization branch as production.
+
+Generate the paired Markdown/JSON analysis with:
+
+```sh
+.venv/bin/python -m gocube_golden.b64_perf_report /absolute/diagnostic/output \
+  --nsys-root /absolute/nsys-audit/output \
+  --nsys-sqlite /absolute/nsys-export.sqlite
+```
+
+Export SQLite using `nsys export --type=sqlite --output=FILE TRACE.nsys-rep`.
+Omit the Nsight arguments for a preliminary report; unavailable CUDA kernel
+activity is reported explicitly. The checked-in measured report is
+`docs/diagnostics/b64-performance-audit-20261007/REPORT.md` with `report.json`.

@@ -19,6 +19,9 @@ import uuid
 import time
 
 
+from .training_profile import span, measured
+
+
 _REAL_POPEN_TYPE = subprocess.Popen
 
 
@@ -30,7 +33,8 @@ def _fsync_dir(path: Path) -> None:
     descriptor: int | None = None
     try:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        os.fsync(descriptor)
+        with span('io.directory_fsync'):
+            os.fsync(descriptor)
     except OSError:
         pass
     finally:
@@ -43,18 +47,23 @@ def atomic_write_text(path: Path, text: str) -> None:
     # Heartbeat and progress can publish concurrently within one process.
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
-        with temporary.open("x", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        with span("io.open"):
+            handle = temporary.open("x", encoding="utf-8")
+        with handle:
+            with span("io.write_flush"):
+                handle.write(text)
+                handle.flush()
+            with span("io.file_fsync"):
+                os.fsync(handle.fileno())
+        with span("io.replace"):
+            os.replace(temporary, path)
         _fsync_dir(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
 
 def atomic_write_json(path: Path, payload: Mapping[str, object] | Sequence[object]) -> None:
-    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    atomic_write_text(path, measured("io.json", lambda: json.dumps(payload, indent=2, sort_keys=True) + "\n"))
 
 
 def read_json(path: Path) -> dict[str, object]:

@@ -1442,6 +1442,9 @@ def main(argv: list[str] | None = None) -> int:
     job.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     job.add_argument("--check", action="store_true", help="validate and show the resolved plan without writes or computation")
     job.set_defaults(kind="job")
+    audit = subparsers.add_parser("b64-perf-audit", help="bounded in-memory B64 diagnostic; no artifact publication")
+    audit.add_argument("config", type=Path)
+    audit.set_defaults(kind="b64-perf-audit")
     for name in ("continuous", "performance-tuning", "experiment", "komi-calibration", "workflow"):
         command = subparsers.add_parser(name, help=f"legacy-compatible V2 {name} JSON plan")
         command.add_argument("config", type=Path)
@@ -1479,7 +1482,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     payload = load_v2_config(args.config)
     result: object
-    if args.kind == "job":
+    if args.kind == "b64-perf-audit":
+        with _authority(mode="performance-tuning", topology="torus9", run_id="b64-perf-audit"):
+            with _child_execution_permit(action_type="training", topology="torus9",
+                                         run_id="b64-perf-audit", code_identity=_entrypoint_code_identity()):
+                subprocess.run([sys.executable, "-m", "gocube_golden.b64_perf_audit", str(args.config.resolve())], check=True)
+        result = {"output": payload["output"]}
+    elif args.kind == "job":
         result = launch_operator_job(payload, runs_root=args.runs_root, check_only=args.check)
     elif args.kind == "run":
         result = run_spec(payload, runs_root=args.runs_root)
