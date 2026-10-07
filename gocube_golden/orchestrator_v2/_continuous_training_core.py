@@ -247,6 +247,7 @@ class ContinuousTrainingConfig:
     generations: int | None
     arena_cadence: int
     arena_config: ArenaExecutionConfig | Mapping[str, object]
+    arena_enabled: bool = True
     arena_master_seed: int = DEFAULT_MASTER_SEED
     arena_startset: StartsetRef | Mapping[str, object] | None = None
     arena_profile: str = "torus9"
@@ -273,6 +274,8 @@ class ContinuousTrainingConfig:
         object.__setattr__(self, "lineage_id", _component(self.lineage_id, "lineage_id"))
         object.__setattr__(self, "effective_config", config)
         object.__setattr__(self, "arena_config", arena_config)
+        if type(self.arena_enabled) is not bool:
+            raise ValueError("arena_enabled must be a boolean")
         object.__setattr__(
             self,
             "self_play_concurrency_sweep",
@@ -737,14 +740,17 @@ class ContinuousTrainingRunnerV2:
             self._report(
                 "generation_committed",
                 f"M{current.generation} committed checkpoint {current.ref.sha256}; "
-                f"next Arena M{next_arena}",
+                f"next Arena {'disabled' if next_arena is None else 'M' + str(next_arena)}",
                 generation=current.generation,
                 checkpoint_sha256=current.ref.sha256,
                 next_arena_generation=next_arena,
             )
 
     def _ensure_runtime_layout(self) -> None:
-        for name in ("runtime", "control", "logs", "metrics", "arena"):
+        names = ["runtime", "control", "logs", "metrics"]
+        if self.config.arena_enabled:
+            names.append("arena")
+        for name in names:
             (self.lineage_root / name).mkdir(parents=True, exist_ok=True)
 
     def _persist_operator_metadata(self, parent: ResolvedCheckpointNode) -> None:
@@ -771,11 +777,13 @@ class ContinuousTrainingRunnerV2:
                 "games_per_iteration", self_play.get("games")
             ),
             "arena_every_generations": self.config.arena_cadence,
+            "arena_enabled": self.config.arena_enabled,
         }
         continuous = {
             "schema": CONTINUOUS_TRAINING_SCHEMA,
             "parent_checkpoint": parent.ref.to_dict(),
             "arena_cadence": self.config.arena_cadence,
+            "arena_enabled": self.config.arena_enabled,
             "arena_reference_gap": self.config.arena_reference_gap,
             "target_generation": self.config.target_generation,
         }
@@ -792,6 +800,8 @@ class ContinuousTrainingRunnerV2:
                 for key in ("parent_checkpoint", "arena_cadence", "arena_reference_gap"):
                     if previous.get(key) != continuous[key]:
                         raise RuntimeError(f"continuous lineage {key} changed during resume")
+                if previous.get("arena_enabled", True) != continuous["arena_enabled"]:
+                    raise RuntimeError("continuous lineage arena_enabled changed during resume")
                 previous_sweep = previous.get("self_play_concurrency_sweep")
                 current_sweep = continuous.get("self_play_concurrency_sweep")
                 if previous_sweep is not None and previous_sweep != current_sweep:
@@ -838,6 +848,7 @@ class ContinuousTrainingRunnerV2:
             "requested_generations": self.config.generations,
             "effective_config_fingerprint": self.config.effective_config.fingerprint,
             "arena_cadence": self.config.arena_cadence,
+            "arena_enabled": self.config.arena_enabled,
             "arena_reference_gap": self.config.arena_reference_gap,
             "arena_config_fingerprint": self._arena_config_fingerprint(),
             "arena_generations": [],
@@ -865,12 +876,14 @@ class ContinuousTrainingRunnerV2:
             "parent_checkpoint": parent.ref.to_dict(),
             "effective_config_fingerprint": self.config.effective_config.fingerprint,
             "arena_cadence": self.config.arena_cadence,
+            "arena_enabled": self.config.arena_enabled,
             "arena_reference_gap": self.config.arena_reference_gap,
             "arena_config_fingerprint": self._arena_config_fingerprint(),
             "target_generation": self.config.target_generation,
         }
         for key, value in expected.items():
-            if state.get(key) != value:
+            stored = state.get(key, True) if key == "arena_enabled" else state.get(key)
+            if stored != value:
                 raise RuntimeError(f"continuous state {key} changed during resume")
         configured_sweep = self.config.self_play_concurrency_sweep
         persisted_sweep = state.get("performance_sweep")
@@ -1169,10 +1182,14 @@ class ContinuousTrainingRunnerV2:
         return sha256_fingerprint(asdict(self.config.arena_config))
 
     def _arena_due(self, parent: ResolvedCheckpointNode, generation: int) -> bool:
+        if not self.config.arena_enabled:
+            return False
         distance = int(generation) - parent.generation
         return distance > 0 and distance % self.config.arena_cadence == 0
 
-    def _next_arena_generation(self, parent: ResolvedCheckpointNode, generation: int) -> int:
+    def _next_arena_generation(self, parent: ResolvedCheckpointNode, generation: int) -> int | None:
+        if not self.config.arena_enabled:
+            return None
         distance = max(0, int(generation) - parent.generation)
         next_distance = ((distance // self.config.arena_cadence) + 1) * self.config.arena_cadence
         return parent.generation + next_distance
@@ -1416,7 +1433,7 @@ class ContinuousTrainingRunnerV2:
             f"{replay.get('cap', '-')} positions; "
             f"self-play MCTS={self_play.get('mcts_simulations', self_play.get('simulations', '-'))} sims; "
             f"games/generation={self_play.get('games_per_iteration', self_play.get('games', '-'))}; "
-            f"Arena cadence=every {self.config.arena_cadence} generations; "
+            f"Arena={'every ' + str(self.config.arena_cadence) + ' generations' if self.config.arena_enabled else 'disabled'}; "
             f"execution={execution_commit[:12]}; initial={initial_commit[:12]}; "
             f"rollover={rollover}"
         )
@@ -1433,6 +1450,7 @@ class ContinuousTrainingRunnerV2:
                 "games_per_iteration", self_play.get("games")
             ),
             "arena_cadence": self.config.arena_cadence,
+            "arena_enabled": self.config.arena_enabled,
             "execution_code_commit": execution_commit,
             "initial_lineage_code_commit": initial_commit,
             "rollover": rollover,

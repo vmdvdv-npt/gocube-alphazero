@@ -152,7 +152,7 @@ def parse_job(value):
         value,
         {
             "schema", "run_id", "topology", "parent", "training", "arena",
-            "execution", "ab_tests", "arenas", "self_play", "winner_selection",
+            "execution", "offline_replay", "ab_tests", "arenas", "self_play", "winner_selection",
         },
         "job",
     )
@@ -198,7 +198,18 @@ def parse_job(value):
         else TRAINING_DEFAULTS
     )
     training = _training(raw.get("training", {}), defaults=training_defaults)
-    if "replay_sampling" in training:
+    single_offline = raw.get("offline_replay")
+    if single_offline is not None:
+        if raw.get("ab_tests", []):
+            raise ValueError("single-arm offline_replay cannot be combined with ab_tests")
+        if winner_selection is not None:
+            raise ValueError("single-arm offline_replay cannot be combined with winner_selection")
+        if training["iterations"] in (0, None):
+            raise ValueError("single-arm offline_replay requires finite positive training.iterations")
+        if not isinstance(single_offline, list) or len(single_offline) != training["iterations"]:
+            raise ValueError("offline_replay must specify one checkpoint per training iteration")
+        single_offline = [_selector(v, "offline_replay checkpoint") for v in single_offline]
+    if "replay_sampling" in training and single_offline is None:
         raise ValueError("replay_sampling must be an offline arm setting")
     if winner_selection is not None and training["iterations"] == 0:
         raise ValueError("winner_selection requires positive training iterations or null")
@@ -288,6 +299,7 @@ def parse_job(value):
         "parent": parent,
         "training": training,
         "arena": arena,
+        **({"offline_replay": single_offline} if single_offline is not None else {}),
         "execution": execution,
         "ab_tests": normalized_tests,
         "arenas": arenas,
@@ -576,7 +588,26 @@ def compile_job(value, *, runs_root=None, resolver=None):
             base = _base_config(parent)
             if base["compatibility"].get("input_channels") != 5:
                 raise ValueError("Simple jobs cannot launch retired 6-channel training")
-            main_config = _effective(base, job["training"], arena, job.get("self_play"))
+            offline = None
+            if job.get("offline_replay") is not None:
+                from .offline_replay import resolve_offline_replay
+                offline = resolve_offline_replay(
+                    job["offline_replay"], parent=parent, resolver=resolver
+                )
+                main_config = _offline_effective(
+                    base, job["training"], arena, offline, job.get("self_play")
+                )
+                sampling = job["training"].get("replay_sampling")
+                if sampling and sampling.get("mode") == "policy_surprise":
+                    from ..policy_surprise import resolve_spec
+                    main_config["extensions"]["policy_surprise_spec"] = resolve_spec(
+                        offline,
+                        parent=parent,
+                        resolver=resolver,
+                        weight=sampling["weight"],
+                    )
+            else:
+                main_config = _effective(base, job["training"], arena, job.get("self_play"))
             parent_ref = parent.ref.to_dict()
         if training_requested:
             config = {
@@ -586,6 +617,7 @@ def compile_job(value, *, runs_root=None, resolver=None):
                 "generations": job["training"]["iterations"],
                 "arena_cadence": arena["every_iterations"],
                 "arena_reference_gap": arena["every_iterations"],
+                "arena_enabled": job.get("offline_replay") is None,
                 "arena_config": _arena_execution(arena),
                 "arena_profile": _arena_profile(arena),
                 "arena_master_seed": ARENA_RUN_MASTER_SEED,

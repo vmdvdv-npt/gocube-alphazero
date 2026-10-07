@@ -183,6 +183,60 @@ def test_ab_only_uses_initial_parent(parent, tmp_path):
     assert steps[0]["config"]["parent"] == parent.ref.to_dict()
 
 
+def test_single_arm_offline_job_compiles_without_experiment_or_arena(parent, monkeypatch):
+    from gocube_golden.orchestrator_v2 import offline_replay
+    from gocube_golden import policy_surprise
+
+    raw = parameters()
+    raw["run_id"] = "single-offline"
+    raw["training"] = {
+        "iterations": 2,
+        "learning_rate": 2.5e-5,
+        "batch_size": 64,
+        "updates_per_iteration": 2560,
+        "gradient_clip": 8.0,
+        "replay_generations": 6,
+        "replay_sampling": {"mode": "policy_surprise", "weight": 0.5},
+    }
+    raw["ab_tests"] = []
+    raw["offline_replay"] = ["source/M199", "source/M200"]
+    schedule = [{"generation": g, "buckets": [{}] * 6,
+                 "fresh_bucket": {"generation": g, "shards": []},
+                 "source_checkpoint": {"checkpoint_id": f"M{g}"}}
+                for g in (199, 200)]
+    monkeypatch.setattr(offline_replay, "resolve_offline_replay", lambda *a, **kw: schedule)
+    monkeypatch.setattr(policy_surprise, "resolve_spec", lambda *a, **kw: {"fingerprint": "synthetic"})
+
+    normalized = job.parse_job(raw)
+    assert job.parse_job(normalized) == normalized
+    compiled = job.compile_job(raw, resolver=SimpleNamespace())
+    steps = compiled["workflow"]["steps"]
+    assert len(steps) == 1
+    assert steps[0]["action"] == "continuous_training"
+    config = steps[0]["config"]
+    assert config["lineage_id"] == "single-offline"
+    assert config["parent_checkpoint"] == parent.ref.to_dict()
+    assert config["arena_enabled"] is False
+    assert config["effective_config"]["extensions"]["offline_ab_replay"] == schedule
+    assert config["effective_config"]["extensions"]["policy_surprise_spec"] == {"fingerprint": "synthetic"}
+    assert all("single-offline" not in row["fresh_bucket"].get("path", "") for row in schedule)
+
+
+def test_single_arm_offline_rejects_multi_arm_and_invalid_budget():
+    raw = parameters()
+    raw["ab_tests"] = [{"id": "x", "iterations": 1, "A": {}, "B": {}}]
+    raw["offline_replay"] = ["source/M199"] * 5
+    with pytest.raises(ValueError, match="cannot be combined with ab_tests"):
+        job.parse_job(raw)
+
+    raw = parameters()
+    raw["training"]["iterations"] = 0
+    raw["ab_tests"] = []
+    raw["offline_replay"] = ["source/M199"]
+    with pytest.raises(ValueError, match="finite positive"):
+        job.parse_job(raw)
+
+
 def test_check_is_read_only_and_missing_telegram_prevents_launch(parent, tmp_path, monkeypatch):
     from gocube_golden.notifications import telegram
     monkeypatch.setattr(telegram, "load_config", lambda: None)

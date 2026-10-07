@@ -71,6 +71,36 @@ global gradient norm clipping learner-а. Если поле не указано,
 Неизвестные поля и неподдерживаемые значения — ошибка до старта, включая A/B.
 Полей для скриптов, команд, отключения уведомлений или смены кода нет.
 
+## Single-arm offline training
+
+Для одной независимой offline lineage укажите top-level `offline_replay` и
+конечный `training.iterations: N > 0`. Список должен содержать ровно N
+зарегистрированных source checkpoint-ов, начиная с поколения после `parent`.
+Pipeline продолжает parent optimizer state, использует historical replay по
+ссылкам и не запускает Arena автоматически:
+
+```json
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "offline-single-arm",
+  "parent": "source/M255",
+  "training": {
+    "iterations": 5,
+    "learning_rate": 0.000025,
+    "batch_size": 64,
+    "updates_per_iteration": 2560,
+    "gradient_clip": 8,
+    "replay_generations": 5,
+    "replay_sampling": {"mode": "policy_surprise", "weight": 0.5}
+  },
+  "offline_replay": ["source/M256", "source/M257", "source/M258", "source/M259", "source/M260"]
+}
+```
+
+Single-arm `offline_replay` нельзя сочетать с `ab_tests` или `winner_selection`.
+После завершения используйте отдельный arena-only job с `arenas[]`; multi-arm
+offline A/B/C workflow и его round-robin остаются без изменений.
+
 ## Переиспользование MCTS-дерева
 
 По умолчанию `tree_reuse` выключен: каждый ход получает новое дерево, как раньше.

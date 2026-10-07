@@ -54,6 +54,7 @@ Telegram config блокирует запуск. Не отправляйте т�
 | Только обычный A/B | `training.iterations: 0`, `ab_tests` с `A`/`B` | Да, в каждой ветке | Две независимые ветки и итоговая арена |
 | Offline A/B | `training.iterations: 0`, `offline_replay`, `A`/`B` | **Нет** | Обучение на историческом replay, арена финалов |
 | Offline A/B/C и больше | То же, `arms` с ≥2 именами | **Нет** | Все ветки и round-robin каждой пары |
+| Конечное single-arm offline training | `parent`, `training.iterations: N > 0`, top-level `offline_replay` | **Нет** | Одна независимая lineage; без автоматической Arena |
 | Только арены | `arenas`; training и ab_tests отсутствуют либо iterations=0 | **Нет** | Сравнение уже зарегистрированных checkpoint |
 | Выбор победителя → training | `winner_selection`, без `parent`/A/B; iterations>0 либо null | После выбора — да | Арена выбирает родителя новой lineage |
 | Явные дополнительные арены | `arenas` вместе с конечным training/A/B | По основному режиму | Дополнительные арены известных checkpoint после основных действий |
@@ -228,9 +229,42 @@ checkpoint. Mean total loss — сумма policy + WDL/value + ownership + scor
 minutes, среднее/общее время, ускорение относительно наименьшего batch, все арены.
 Ветки имеют отдельные lineage и не выбираются автоматически для production.
 
+### Single-arm offline training
+
+Для одной offline lineage используйте top-level `offline_replay` вместе с конечным
+`training.iterations`. Список должен содержать ровно один зарегистрированный source
+checkpoint на поколение и последовательно продолжать `parent`:
+
+```json
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "offline-single-arm-example",
+  "parent": "source/M255",
+  "training": {
+    "iterations": 5,
+    "learning_rate": 0.000025,
+    "batch_size": 64,
+    "updates_per_iteration": 2560,
+    "gradient_clip": 8,
+    "replay_generations": 5,
+    "replay_sampling": {"mode": "policy_surprise", "weight": 0.5}
+  },
+  "offline_replay": [
+    "source/M256", "source/M257", "source/M258", "source/M259", "source/M260"
+  ]
+}
+```
+
+Этот режим создаёт ровно одну новую lineage, продолжает parent optimizer state,
+использует historical replay по immutable references и не создаёт Arena или
+round-robin. Для evaluation после завершения используйте отдельный job с
+`arenas[]`. Single-arm `offline_replay` нельзя смешивать с `ab_tests` или
+`winner_selection`; multi-arm offline workflow выше сохраняет прежнее поведение.
+
 ### Opt-in historical Policy Surprise frequency sampling
 
-Only offline arms accept `replay_sampling`: `{"mode":"uniform"}` (the default)
+Only offline arms and single-arm offline jobs accept `replay_sampling`:
+`{"mode":"uniform"}` (the default)
 or `{"mode":"policy_surprise","weight":0.5}`. All other learner budgets and
 semantics inherit normally. No setting changes the existing uniform RNG path;
 weight zero also uses that exact path. Validation stays on its fixed sampler.
@@ -380,7 +414,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 52b449ecf2a8ec763783570c4b524d1fa4f0b7b53cc11def5d1d3e684fab093d -->
+<!-- reviewed-interface-sha256: 2cf888001849a269ad30862a9c4440c42b174f36f8eeef5b0ec2eaa5795f4301 -->
 
 ## B64 bounded performance audit
 

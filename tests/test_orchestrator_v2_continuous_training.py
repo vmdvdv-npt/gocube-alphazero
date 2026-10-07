@@ -228,6 +228,7 @@ def _runner(
     *,
     generations: int | None,
     cadence: int = 5,
+    arena_enabled: bool = True,
     effective_config: EffectiveConfig | None = None,
     notifier: object | None = None,
     self_play_concurrency_sweep=None,
@@ -245,6 +246,7 @@ def _runner(
         effective_config=config,
         generations=generations,
         arena_cadence=cadence,
+        arena_enabled=arena_enabled,
         arena_config=_arena_config(),
         resolver=resolver,  # type: ignore[arg-type]
         lineage_factory=lineage,  # type: ignore[arg-type]
@@ -365,6 +367,23 @@ def test_parent_checkpoint_is_referenced_but_not_copied(tmp_path: Path) -> None:
     assert manifest["parent_checkpoint"] == parent.ref.to_dict()
     state = json.loads(runner.state_path.read_text())
     assert state["parent_checkpoint"] == parent.ref.to_dict()
+
+
+def test_offline_single_lineage_runs_without_arena_or_arena_directory(tmp_path: Path) -> None:
+    runner, train, arena, _resolver, parent = _runner(
+        tmp_path, generations=1, arena_enabled=False
+    )
+
+    result = runner.run()
+
+    assert result.state == "COMPLETED"
+    assert result.arenas == ()
+    assert arena.requests == []
+    assert train.parents == [parent.ref]
+    assert not (runner.lineage_root / "arena").exists()
+    state = json.loads(runner.state_path.read_text())
+    assert state["arena_enabled"] is False
+    assert state["arena_generations"] == []
 
 
 def test_cross_lineage_arena_uses_canonical_evaluation_scope(tmp_path: Path) -> None:

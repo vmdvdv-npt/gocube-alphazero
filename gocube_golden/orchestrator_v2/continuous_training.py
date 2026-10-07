@@ -35,6 +35,7 @@ class ContinuousTrainingConfig:
     generations: int | None
     arena_cadence: int
     arena_config: ArenaExecutionConfig | Mapping[str, object]
+    arena_enabled: bool = True
     arena_master_seed: int = DEFAULT_MASTER_SEED
     arena_startset: StartsetRef | Mapping[str, object] | None = None
     arena_profile: str | None = None
@@ -60,6 +61,8 @@ class ContinuousTrainingConfig:
         object.__setattr__(self, "lineage_id", _core._component(self.lineage_id, "lineage_id"))
         object.__setattr__(self, "effective_config", config)
         object.__setattr__(self, "arena_config", arena_config)
+        if type(self.arena_enabled) is not bool:
+            raise ValueError("arena_enabled must be a boolean")
         object.__setattr__(self, "self_play_concurrency_sweep", _core._concurrency_sweep(self.self_play_concurrency_sweep, config, parent.generation))
         profile = self.execution_profile
         if profile is not None and not isinstance(profile, SelectedProfile):
@@ -136,6 +139,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         generations: int | None = None,
         arena_cadence: int | None = None,
         arena_config: ArenaExecutionConfig | Mapping[str, object] | None = None,
+        arena_enabled: bool = True,
         arena_master_seed: int = DEFAULT_MASTER_SEED,
         arena_startset: StartsetRef | Mapping[str, object] | None = None,
         arena_profile: str | None = None,
@@ -169,6 +173,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
                 generations=generations,
                 arena_cadence=arena_cadence,
                 arena_config=arena_config,
+                arena_enabled=arena_enabled,
                 arena_master_seed=arena_master_seed,
                 arena_startset=arena_startset,
                 arena_profile=arena_profile,
@@ -297,6 +302,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             network=network,
             effective_config=effective,
             arena_cadence=self.config.arena_cadence,
+            arena_enabled=self.config.arena_enabled,
             arena_config=self.config.arena_config,
         )
         details = {
@@ -306,6 +312,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             "lineage_id": self.config.lineage_id,
             "resolved_effective_config": effective.to_dict(),
             "arena_cadence": self.config.arena_cadence,
+            "arena_enabled": self.config.arena_enabled,
         }
         self._report("started", message, **details)
         serialized = effective.to_dict()
@@ -317,7 +324,8 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             "replay": serialized["replay"],
             "execution": serialized["execution"],
             "arena": {**serialized["arena"], "games": self.config.arena_config.games,
-                      "every_iterations": self.config.arena_cadence},
+                      "every_iterations": self.config.arena_cadence,
+                      "enabled": self.config.arena_enabled},
             "stop_after_iterations": self.config.generations,
         })
 

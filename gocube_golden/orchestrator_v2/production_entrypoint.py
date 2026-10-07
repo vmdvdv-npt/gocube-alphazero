@@ -169,6 +169,7 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
         generations=None if raw.get("generations") is None else int(raw["generations"]),
         arena_cadence=int(raw["arena_cadence"]),
         arena_config=raw["arena_config"],  # type: ignore[arg-type]
+        arena_enabled=raw.get("arena_enabled", True),  # type: ignore[arg-type]
         arena_master_seed=int(raw.get("arena_master_seed", DEFAULT_MASTER_SEED)),
         arena_startset=raw.get("arena_startset"),  # type: ignore[arg-type]
         arena_profile=None if raw.get("arena_profile") is None else str(raw["arena_profile"]),

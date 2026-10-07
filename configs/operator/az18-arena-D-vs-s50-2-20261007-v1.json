@@ -1,0 +1,14 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "az18-arena-D-vs-s50-2-20261007-v1",
+  "arena": {"games": 192, "mcts_simulations": 64, "tree_reuse": true},
+  "arenas": [{
+    "id": "D-vs-S50-2",
+    "candidate": "az18-offline-lr-D-2e-4-20261007-v1/M260",
+    "reference": "torus9-offline-policy-surprise-m255-g256-260-seed2-r246-20261007-v1-ab-sampling-seed2-S50-2/M260",
+    "games": 192,
+    "mcts_simulations": 64,
+    "master_seed": 2026100702,
+    "tree_reuse": true
+  }]
+}
