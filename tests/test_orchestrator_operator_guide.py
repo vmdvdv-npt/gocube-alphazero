@@ -61,3 +61,15 @@ def test_complete_json_examples_use_supported_operator_parameters():
     assert set(offline['ab_tests'][0]['arms']) == {'B64', 'B128', 'B256'}
     assert {arm['batch_size'] * arm['updates_per_iteration']
             for arm in offline['ab_tests'][0]['arms'].values()} == {163840}
+
+
+def test_uncommitted_guide_is_included_in_launch_cleanliness_check(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    def dirty_status(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(stdout=' M ' + guide.GUIDE_PATH)
+    monkeypatch.setattr(entry.subprocess, 'run', dirty_status)
+    with pytest.raises(ValueError, match='launch guide'):
+        entry._require_committed_job_code()
+    assert guide.GUIDE_PATH in calls[0]

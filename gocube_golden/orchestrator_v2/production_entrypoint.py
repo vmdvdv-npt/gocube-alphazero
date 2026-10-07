@@ -1229,12 +1229,14 @@ def _require_operator_workflow_controller(payload: Mapping[str, object]) -> Work
 
 
 def _require_committed_job_code() -> None:
+    from .operator_guide import GUIDE_PATH
+
     dirty = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all", "--", "gocube_golden", "tools"],
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", "gocube_golden", "tools", GUIDE_PATH],
         cwd=_repo_root(), check=True, capture_output=True, text=True,
     ).stdout.strip()
     if dirty:
-        raise ValueError("Operator jobs require committed implementation code; commit/review code changes before launching")
+        raise ValueError("Operator jobs require committed implementation code and launch guide; commit/review changes before launching")
 
 
 def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path | None = None,
