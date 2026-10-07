@@ -130,7 +130,7 @@ def validate_spec(spec):
         raise ValueError('Policy surprise cache provenance mismatch')
 
 
-def build_cache(spec, root, *, device):
+def build_cache(spec, root, *, device, progress=None):
     validate_spec(spec)
     if (spec.get('torch_version', torch.__version__) != torch.__version__ or
             spec.get('torch_cuda_version', torch.version.cuda) != torch.version.cuda or
@@ -139,6 +139,7 @@ def build_cache(spec, root, *, device):
     rows, seen = {}, set()
     torch.set_num_threads(1)
     # One model at a time; shard grouping gives bounded memory and batched inference.
+    completed_batches = 0
     for actor, source in spec['sources'].items():
         if file_sha256(source['path']) != source['checkpoint']['sha256']:
             raise ValueError('Historical actor checkpoint SHA mismatch')
@@ -164,6 +165,9 @@ def build_cache(spec, root, *, device):
                     logits, _ = model(observation[offset:offset+256].to(device))
                     parts.append(policy_kl(logits, targets[offset:offset+256].to(device),
                                            masks[offset:offset+256].to(device)))
+                    completed_batches += 1
+                    if progress is not None:
+                        progress("policy-surprise", completed_batches, completed_batches + 1)
                 all_surprises = torch.cat(parts)
                 offset = 0
                 for game in selected:

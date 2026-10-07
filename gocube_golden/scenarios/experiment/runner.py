@@ -13,7 +13,7 @@ markers, or run Arena games.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import logging
 from pathlib import Path
@@ -295,6 +295,8 @@ class ExperimentRunnerV2:
         """Independent offline variants and diagnostic round-robin; never select a parent."""
         from itertools import combinations
         parent = self.resolver.checkpoint(self.config.parent)
+        reference = (self.resolver.checkpoint(self.config.offline_reference)
+                     if self.config.offline_reference is not None else None)
         if self.state_path.exists():
             state = dict(_read_json(self.state_path))
             if state.get("config_fingerprint") != self.config.fingerprint:
@@ -312,16 +314,25 @@ class ExperimentRunnerV2:
                 self.resolver.checkpoint(checkpoint)
             return state
         self._notify_operator("EXPERIMENT_STARTED", "Offline replay experiment started; self-play disabled.",
-                              key_suffix="offline-started")
+                              key_suffix="offline-started",
+                              payload={"execution_mode": "offline", "selfplay_games": 0,
+                                       "planned_arms": len(self.config.arms),
+                                       "planned_arenas": (len(self.config.arms) if reference is not None
+                                                          else len(self.config.arms) * (len(self.config.arms) - 1) // 2),
+                                       "arena_games": self.config.arena_config.games,
+                                       "arena_profile": self.config.arena_profile,
+                                       "reference": reference.ref.to_dict() if reference is not None else None})
         arms = {a.arm_id: a for a in self.config.arms}
         spec = getattr(self.config.arms[0].effective_config, 'extensions', {}).get('policy_surprise_spec')
         if spec is not None:
-            from ...policy_surprise import build_cache, load_cache
+            from ...policy_surprise import load_cache
             spec = self.config.arms[0].effective_config.to_dict()['extensions']['policy_surprise_spec']
             cache = state.get('policy_surprise_cache')
             if cache is None:
-                cache = build_cache(spec, self.experiment_root / 'artifacts' / 'policy-surprise',
-                                    device=self.config.arms[0].effective_config.execution['device'])
+                cache = self.train_one.prepare_replay_cache(
+                    spec=spec, experiment_root=self.experiment_root,
+                    experiment_id=self.config.experiment_id,
+                    device=self.config.arms[0].effective_config.execution['device'])
                 state['policy_surprise_cache'] = cache
                 _write_json(self.state_path, state)
             load_cache(cache, spec)
@@ -331,9 +342,12 @@ class ExperimentRunnerV2:
                 cfg['extensions']['policy_surprise_cache'] = cache
                 arms[arm.arm_id] = ExperimentArmConfig(arm.arm_id, arm.generations, cfg, arm.lineage_id)
         final = self._run_arms(state, stage_key="stage1", arms=arms, parent=parent)
-        for a, b in combinations(final, 2):
+        comparisons = ([(a, "reference", final[a], reference) for a in final]
+                       if reference is not None else
+                       [(a, b, final[a], final[b]) for a, b in combinations(final, 2)])
+        for a, b, candidate, opponent in comparisons:
             pair = a + "-vs-" + b
-            result = self._run_arena(candidate=final[a], reference=final[b],
+            result = self._run_arena(candidate=candidate, reference=opponent,
                 arena_config=self.config.arena_config, arena_master_seed=self.config.arena_master_seed,
                 arena_startset=self.config.arena_startset, arena_profile=self.config.arena_profile,
                 arena_scientific_contract=self.config.arena_scientific_contract,
@@ -341,12 +355,16 @@ class ExperimentRunnerV2:
                 arena_workload={**self.config.arena_workload, "paired_starts": True, "color_swap": True},
                 candidate_label=a, reference_label=b, comparison=self.config.experiment_id + ":" + pair)
             if result.validity != "VALID":
-                raise ExperimentRunnerError("Invalid offline round-robin Arena: " + pair)
-            state["arenas"][pair] = {"evaluation_id": result.evaluation_id,
-                                     "summary": dict(result.summary), "output_dir": str(result.output_dir)}
+                raise ExperimentRunnerError("Invalid offline Arena: " + pair)
+            self._validate_arena_result(result, candidate, opponent, 1)
+            state["arenas"][pair] = self._arena_state(result)
             _write_json(self.state_path, state)
         report = {"sampling": "run-owned replay sampling; RNG seed + optimizer update; frequency weighting without importance correction",
-                  "selfplay_games": 0, "arms": {}, "arenas": state["arenas"]}
+                  "selfplay_games": 0, "arms": {}, "arenas": state["arenas"],
+                  "reference": reference.ref.to_dict() if reference is not None else None,
+                  "arena_games": self.config.arena_config.games,
+                  "arena_master_seed": self.config.arena_master_seed,
+                  "arena_profile": self.config.arena_profile}
         for arm in self.config.arms:
             root = final[arm.arm_id].owner_root
             iterations = []
@@ -360,6 +378,9 @@ class ExperimentRunnerV2:
                       if hasattr(arm.effective_config, "to_dict")
                       else dict(getattr(arm.effective_config, "replay", {})))
             report["arms"][arm.arm_id] = {"batch_size": arm.effective_config.training["batch_size"],
+                "learning_rate": arm.effective_config.training["learning_rate"],
+                "optimizer_steps": arm.effective_config.training.get("optimizer_steps"),
+                "training_master_seed": arm.effective_config.execution.get("training_master_seed"),
                 "total_training_minutes": minutes, "mean_training_minutes": minutes / len(iterations),
                 "iterations": iterations, "sampling": replay.get("sampling", {"mode": "uniform"}),
                 "final_checkpoint": final[arm.arm_id].ref.to_dict()}
@@ -371,8 +392,10 @@ class ExperimentRunnerV2:
         state["report_path"] = str(self.experiment_root / "report.json")
         state["final_checkpoints"] = {a: node.ref.to_dict() for a, node in final.items()}
         _write_json(self.state_path, state)
-        self._notify_operator("EXPERIMENT_COMPLETED", "Offline replay experiment and round-robin completed.",
-                              key_suffix="offline-completed")
+        self._notify_operator("EXPERIMENT_COMPLETED", "Offline replay experiment and final Arenas completed.",
+                              key_suffix="offline-completed",
+                              payload={"report_path": state["report_path"], "completed_arms": len(final),
+                                       "completed_arenas": len(state["arenas"]), "selfplay_games": 0})
         return state
 
     def _run_arms(
@@ -431,8 +454,25 @@ class ExperimentRunnerV2:
                         f"arm {arm.arm_id} lineage resolved a different effective config"
                     )
                 output_lineage = OutputLineage(self.config.topology, lineage_id, root)
-                checkpoint = parent
-                for _ in range(arm.generations):
+                offline = bool(arm.effective_config.extensions.get("offline_ab_replay"))
+                if offline:
+                    serialized = arm.effective_config.to_dict()
+                    self._notify_operator(
+                        "TRAINING_STARTED", f"Offline arm {arm_id} started; no self-play.",
+                        key_suffix=f"arm-started:{stage_key}:{arm_id}",
+                        payload={"lineage_id": lineage_id, "parent": parent.ref.to_dict(),
+                                 "execution_mode": "offline", "self_play": {},
+                                 "training": serialized["training"], "replay": serialized["replay"],
+                                 "compatibility": serialized["compatibility"],
+                                 "arena": {"enabled": False}, "stop_after_iterations": arm.generations})
+                raw_current = raw_record.get("current_checkpoint") if offline else None
+                checkpoint = self.resolver.checkpoint(raw_current) if raw_current else parent
+                if raw_current:
+                    completed = checkpoint.generation - parent.generation
+                    if completed < 1 or completed > arm.generations:
+                        raise ExperimentRunnerError(f"arm {arm_id} persisted generation exceeds budget")
+                    self._validate_final(replace(arm, generations=completed), parent, checkpoint)
+                for _ in range(parent.generation + arm.generations - checkpoint.generation):
                     previous = checkpoint
                     next_generation = previous.generation + 1
                     try:
@@ -466,6 +506,16 @@ class ExperimentRunnerV2:
                         raise ExperimentRunnerError(
                             f"arm {arm.arm_id} train_one returned a child with the wrong parent"
                         )
+                    if offline:
+                        raw_record["current_checkpoint"] = checkpoint.ref.to_dict()
+                        state["updated_at"] = self._now()
+                        _write_json(self.state_path, state)
+                        self._notify_operator(
+                            "GENERATION_COMMITTED", f"Offline arm {arm_id}: M{checkpoint.generation} committed.",
+                            key_suffix=f"generation:{arm_id}:{checkpoint.ref.sha256}",
+                            payload={"lineage_id": lineage_id, "arm_id": arm_id,
+                                     "generation": checkpoint.generation,
+                                     "checkpoint": checkpoint.ref.to_dict(), "selfplay_games": 0})
                 self._validate_final(arm, parent, checkpoint)
                 raw_record["final_checkpoint"] = checkpoint.ref.to_dict()
                 state["updated_at"] = self._now()
@@ -473,7 +523,7 @@ class ExperimentRunnerV2:
             self._validate_final(arm, parent, checkpoint)
             final[arm_id] = checkpoint
             event = (
-                "GENERATION_COMMITTED"
+                "EXPERIMENT_STAGE_DECIDED"
                 if arm.effective_config.extensions.get("offline_ab_replay")
                 else (f"{arm_id}_COMPLETED" if stage_key == "stage1"
                       else f"STAGE2_{arm_id.upper()}_COMPLETED")
@@ -1160,7 +1210,7 @@ class ExperimentRunnerV2:
 
         return datetime.now(timezone.utc).isoformat()
 
-    def _notify_operator(self, event: str, message: str, *, key_suffix: str) -> None:
+    def _notify_operator(self, event: str, message: str, *, key_suffix: str, payload: Mapping[str, object] | None = None) -> None:
         """Report an injected operator event; observability stays fail-open."""
         if not getattr(self._event_sink, "structured", False) and self._notifier is None:
             return
@@ -1173,7 +1223,7 @@ class ExperimentRunnerV2:
                     owner_id=self.config.experiment_id,
                     action_id=f"{self.config.experiment_id}:{key_suffix}",
                     message=message,
-                    payload={"experiment_id": self.config.experiment_id},
+                    payload={"experiment_id": self.config.experiment_id, **dict(payload or {})},
                     correlation_id=self.config.experiment_id,
                 )
             )

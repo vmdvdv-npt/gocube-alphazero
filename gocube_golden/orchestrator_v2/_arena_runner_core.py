@@ -152,7 +152,9 @@ class ArenaRunner:
         engine: Callable[..., Mapping[str, object]] | None = None,
         *,
         supervisor_policy: SupervisorPolicy | None = None,
+        runs_root: str | Path | None = None,
     ) -> None:
+        self.runs_root = Path(runs_root).resolve() if runs_root is not None else None
         self.engine = engine or production_arena
         self._repo_root = Path(__file__).resolve().parents[2]
         self._runtime_manager = ImmutableRuntimeManager(self._repo_root)
@@ -479,7 +481,9 @@ class ArenaRunner:
                 else requested_output / run_id
             )
         else:
-            output = evaluation_dir(request.candidate.topology, run_id).resolve()
+            output = ((self.runs_root / request.candidate.topology / "evaluations" / run_id)
+                      if self.runs_root is not None else
+                      evaluation_dir(request.candidate.topology, run_id)).resolve()
 
         reclaimed_output = False
         supervised_runtime = output / "runtime"

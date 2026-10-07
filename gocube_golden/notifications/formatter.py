@@ -51,6 +51,9 @@ def _format_arena(event: OperatorEvent) -> str:
     _line(lines, "Reference", _ref(payload.get("reference")))
     _line(lines, "Candidate lineage", payload.get("candidate_lineage"))
     _line(lines, "Reference lineage", payload.get("reference_lineage"))
+    _line(lines, "Profile", payload.get("profile"))
+    _line(lines, "MCTS sims", payload.get("simulations"))
+    _line(lines, "Seed", payload.get("seed"))
     _line(lines, "Validity", payload.get("validity"))
     _line(lines, "Execution commit", event.execution_code_commit)
     _line(lines, "Report", payload.get("evaluation_report", payload.get("report_ref")))
@@ -79,12 +82,14 @@ def format_event(event: OperatorEvent, *, max_chars: int = DEFAULT_MESSAGE_BUDGE
         payload = event.payload
         arena = dict(payload.get("arena", {}))
         config = SimpleNamespace(**{k: payload.get(k, {}) for k in (
-            "self_play", "training", "replay", "execution", "arena", "compatibility")})
+            "self_play", "training", "replay", "execution", "arena", "compatibility", "extensions")})
         text = format_training_started(
-            topology=event.topology, lineage_id=event.owner_id,
+            topology=event.topology, lineage_id=payload.get("lineage_id", event.owner_id),
             parent_label=_ref(payload.get("parent")) or "unknown",
             network=payload.get("network"), effective_config=config,
-            arena_cadence=int(arena["every_iterations"]),
+            arena_cadence=int(arena["every_iterations"]) if arena.get("every_iterations") is not None else None,
+            arena_enabled=arena.get("enabled", True),
+            execution_mode=payload.get("execution_mode", "online"),
             arena_config=SimpleNamespace(games=arena.get("games")))
         budget = payload.get("stop_after_iterations")
         text += "\nStop: " + (f"after {budget} iterations" if budget is not None else "operator request")

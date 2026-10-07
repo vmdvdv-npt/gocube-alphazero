@@ -263,9 +263,14 @@ def parse_job(value):
                 raise ValueError("replay_sampling is supported only for offline experiments")
         test_arena = _object(
             item.get("arena", {}),
-            {"games", "mcts_simulations", "tree_reuse", "master_seed"},
+            {"games", "mcts_simulations", "tree_reuse", "master_seed", "reference"},
             "ab_test.arena",
         )
+        arena_reference = test_arena.pop("reference", None)
+        if arena_reference is not None:
+            if offline is None:
+                raise ValueError("ab_test.arena.reference is supported only for offline experiments")
+            arena_reference = _selector(arena_reference, "ab_test.arena.reference")
         arena_master_seed = None
         if "master_seed" in test_arena:
             arena_master_seed = _integer(
@@ -277,6 +282,8 @@ def parse_job(value):
         checked_arena.pop("every_iterations")
         if arena_master_seed is not None:
             checked_arena["master_seed"] = arena_master_seed
+        if arena_reference is not None:
+            checked_arena["reference"] = arena_reference
         normalized_test = {
             "id": name,
             "iterations": iterations,
@@ -684,6 +691,10 @@ def compile_job(value, *, runs_root=None, resolver=None):
                     "winner_rule": "candidate_if_wins_gt_losses_else_reference",
                 },
             }
+            if test_arena.get("reference") is not None:
+                reference = resolve_checkpoint(test_arena["reference"], resolver=resolver)
+                _require_five_channel_checkpoint(reference, "Offline Arena reference")
+                config["offline_reference"] = reference.ref.to_dict()
             if surprise_spec is not None:
                 for arm in config["arms"]:
                     arm["config"]["extensions"]["policy_surprise_spec"] = surprise_spec
@@ -694,6 +705,8 @@ def compile_job(value, *, runs_root=None, resolver=None):
                 {
                     "step_id": step_id,
                     "action": "experiment",
+                    **({"failure_policy": {"on_technical_failure": "retry", "max_retries": 2}}
+                       if offline is not None else {}),
                     "dependencies": [previous] if previous else [],
                     "config": config,
                 }

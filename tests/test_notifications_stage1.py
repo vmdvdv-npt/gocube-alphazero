@@ -420,3 +420,30 @@ def test_telegram_request_bolds_sections_and_iterations_and_escapes_values():
     transport.send("ARENA STARTED\nCandidate: M202\nReference: M201")
     assert "Candidate: <b>M202</b>" in bodies[1]["text"]
     assert "Reference: <b>M201</b>" in bodies[1]["text"]
+
+
+def test_offline_training_message_hides_inherited_selfplay_and_disabled_arena():
+    event = OperatorEvent.create('TRAINING_STARTED', topology='torus9', owner_type='experiment',
+        owner_id='abcd', action_id='abcd:A', payload={
+            'lineage_id': 'abcd-A', 'execution_mode': 'offline', 'parent': 'parent/M255',
+            'self_play': {'games_per_iteration': 1536, 'search_mode': 'pcr',
+                          'pcr': {'cheap_simulations': 100, 'full_simulations': 400, 'full_probability': .33}},
+            'training': {'learning_rate': 2.5e-5, 'batch_size': 64, 'optimizer_steps': 2560},
+            'replay': {'generations': 5}, 'arena': {'enabled': False, 'every_iterations': 5, 'games': 192},
+            'stop_after_iterations': 5})
+    text = format_event(event)
+    assert 'Lineage: abcd-A' in text and 'Mode: offline replay' in text
+    assert 'Disabled — 0 new games' in text
+    assert 'Periodic Arena disabled' in text
+    assert 'LR=2.5e-05' in text and 'Batch: 64' in text and 'Steps: 2560' in text
+    assert 'games/generation' not in text and 'PCR' not in text and 'every 5' not in text
+    assert 'Games: 192' not in text
+
+
+def test_training_formatter_respects_disabled_arena_without_offline_mode():
+    event = OperatorEvent.create('TRAINING_STARTED', topology='torus9', owner_type='lineage',
+        owner_id='online', action_id='start', payload={'training': {'batch_size': 64},
+        'self_play': {'games_per_iteration': 1536}, 'arena': {'enabled': False}})
+    text = format_event(event)
+    assert 'games/generation=1536' in text
+    assert 'Arena cadence' not in text

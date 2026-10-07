@@ -122,6 +122,10 @@ class ProductionTrainOne:
         self.supervisor_policy = supervisor_policy
         self.runtime_manager = ImmutableRuntimeManager(self.repo_root)
 
+    def prepare_replay_cache(self, **kwargs):
+        from .replay_preparation import prepare_replay_cache
+        return prepare_replay_cache(self, **kwargs)
+
     def __call__(self, *, parent: ResolvedCheckpointNode, config: ResolvedEffectiveConfig, output_lineage: OutputLineage, execution_overrides: Mapping[str, object] | None = None, acknowledge_stopped_execution: bool = False, action_id: str | None = None, scientific_contract_fingerprint: str | None = None) -> ResolvedCheckpointNode:
         from .execution_permit import require_engine_execution
         require_engine_execution("gocube_golden.orchestrator_v2.ProductionTrainOne", action="training")

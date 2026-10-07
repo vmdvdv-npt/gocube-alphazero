@@ -630,3 +630,19 @@ def write_block_report(result):
     if rows[-1].get('search_mode') == 'pcr':
         lines[2:2] = [search_description(rows[-1]), '']
     atomic_write_text(root / 'reports' / 'block-report.md', '\n'.join(lines)+'\n')
+
+
+def prepare_policy_surprise_cache(request):
+    """Training-adapter preparation executed only by the supervised worker."""
+    from .orchestrator_v2.execution_permit import require_engine_execution
+    from .policy_surprise import build_cache
+    require_engine_execution('Policy Surprise preparation', action='training')
+    heartbeat = TrainingHeartbeat(request['heartbeat'], 0)
+    heartbeat.start()
+    try:
+        cache = build_cache(request['spec'], request['cache_root'], device=request['device'],
+                            progress=heartbeat.mark)
+        heartbeat.mark('complete', 1, 1)
+        return cache
+    finally:
+        heartbeat.close()

@@ -953,3 +953,96 @@ def test_experiment_runner_v2_migrates_legacy_v2_stopped_state_without_reexecuti
     assert migrated["config_fingerprint"] == config.fingerprint
     assert migrated["legacy_migration"]["from_version"] == 2
     assert migrated["stage1"]["winner"]["winner_checkpoint"] == initial.final_checkpoints["A"].ref.to_dict()
+
+
+@pytest.mark.parametrize('fixed_reference', [True, False])
+def test_offline_abcd_resume_delegates_generations_and_arenas(tmp_path, monkeypatch, fixed_reference):
+    from gocube_golden.notifications import RecordingEventSink, format_event
+    from gocube_golden import policy_surprise
+    parent = _make_parent(tmp_path)
+    resolver = ArtifactResolver(tmp_path / 'runs')
+    sink = RecordingEventSink()
+
+    class OfflineTraining(SyntheticTrainOne):
+        fail = True
+        generations = []
+        preparations = 0
+
+        def prepare_replay_cache(self, **kwargs):
+            self.preparations += 1
+            assert kwargs['spec'] == {'fingerprint': 'synthetic'}
+            return {'fingerprint': 'synthetic', 'sha256': 'sha256:' + 'c' * 64}
+
+        def __call__(self, **kwargs):
+            generation = kwargs['parent'].generation + 1
+            if self.fail and self.active_arm.arm_id == 'B' and generation == 2:
+                self.fail = False
+                raise RuntimeError('injected generation failure')
+            assert kwargs['config'].config.extensions['policy_surprise_cache']['fingerprint'] == 'synthetic'
+            result = super().__call__(**kwargs)
+            self.generations.append((self.active_arm.arm_id, generation))
+            path = result.owner_root / 'training' / f'iter-{generation:02d}.json'
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(json.dumps({'performance': {'training_minutes': 1.0}, 'validation': {'total_loss': .5}}))
+            return result
+
+    training = OfflineTraining(tmp_path, resolver)
+    monkeypatch.setattr(policy_surprise, 'load_cache', lambda *a, **kw: {})
+    monkeypatch.setattr(policy_surprise, 'build_cache', lambda *a, **kw: pytest.fail('controller must not infer'))
+    configs = []
+    for name, lr in zip('ABCD', (2.5e-5, 5e-5, 1e-4, 2e-4)):
+        config = _config(learning_rate=lr, games=1536, steps=2560, sims=199).to_dict()
+        config['training']['batch_size'] = 64
+        config['execution']['device'] = 'cpu'
+        config['extensions'] = {'offline_ab_replay': [{'generation': 1}, {'generation': 2}],
+                                'policy_surprise_spec': {'fingerprint': 'synthetic'}}
+        configs.append(ExperimentArmConfig(name, 2, config, lineage_id='abcd-' + name))
+    plan = ExperimentConfig(experiment_id='abcd', topology='torus9', parent=parent.ref, arms=configs,
+        offline_reference=parent.ref if fixed_reference else None,
+        arena_config=ArenaExecutionConfig(games=4, workers=1, games_per_worker=2,
+            inference_batch_rows=2, device='cpu', strict_production=False,
+            min_mean_inference_batch_rows=0, min_effective_cpu_cores=0, early_gate_enabled=False),
+        arena_master_seed=17)
+    assert ExperimentConfig.from_dict(plan.to_dict()).fingerprint == plan.fingerprint
+    engine_calls = []
+    fail_arena = [True]
+    def arena_engine(**kwargs):
+        if len(engine_calls) == 2 and fail_arena[0]:
+            fail_arena[0] = False
+            raise RuntimeError('injected Arena failure')
+        engine_calls.append(kwargs)
+        output = kwargs['output_dir']
+        output.mkdir(parents=True, exist_ok=True)
+        summary = {'games': 4, 'W/L/D': [2, 2, 0],
+                   'telemetry': {'technical_games': 0, 'performance_status': 'HEALTHY', 'performance_failures': []}}
+        (output / 'summary.json').write_text(json.dumps(summary))
+        (output / 'manifest.json').write_text(json.dumps({'run_id': str(kwargs['run_id'])}))
+        return summary
+    monkeypatch.setattr('gocube_golden.orchestrator_v2.arena_runner.evaluation_dir',
+                        lambda topology, evaluation_id: tmp_path / 'evaluations' / evaluation_id)
+    runner = ExperimentRunnerV2(plan, resolver=resolver, lineage_factory=training, train_one=training,
+        arena_runner=ArenaRunner(engine=arena_engine, runs_root=tmp_path / 'runs'), experiment_root=tmp_path / 'experiment', event_sink=sink)
+    with pytest.raises(RuntimeError, match='generation failure'):
+        runner.run()
+    assert training.generations == [('A', 1), ('A', 2), ('B', 1)]
+    with pytest.raises(RuntimeError, match='Arena failure'):
+        runner.run()
+    assert training.generations == [(a, g) for a in 'ABCD' for g in (1, 2)]
+    state = runner.run()
+    expected_arenas = 4 if fixed_reference else 6
+    assert state['state'] == 'STOPPED' and len(state['arenas']) == expected_arenas
+    assert len(engine_calls) == expected_arenas and training.preparations == 1
+    assert all(call['output_dir'].parent == tmp_path / 'runs' / 'torus9' / 'evaluations'
+               for call in engine_calls)
+    assert len(state['final_checkpoints']) == 4
+    assert runner.run() == state
+    assert len(engine_calls) == expected_arenas and len(training.generations) == 8
+    report = json.loads((tmp_path / 'experiment' / 'report.json').read_text())
+    assert report['selfplay_games'] == 0
+    assert set(report['arms']) == set('ABCD')
+    assert all(row['final_checkpoint']['generation'] == 2 for row in report['arms'].values())
+    starts = [e for e in sink.events if e.event_type == 'TRAINING_STARTED']
+    assert {e.payload['lineage_id'] for e in starts} == {'abcd-' + a for a in 'ABCD'}
+    assert all('games/generation' not in format_event(e) and 'every 5' not in format_event(e) for e in starts)
+    committed = [e for e in sink.events if e.event_type == 'GENERATION_COMMITTED']
+    assert len(committed) == 8

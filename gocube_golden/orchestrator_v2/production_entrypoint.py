@@ -850,7 +850,7 @@ def run_experiment_from_config(payload: Mapping[str, object], *, runs_root: str 
     experiment_root = runner_kwargs.get("experiment_root")
     root = Path(experiment_root).resolve() if experiment_root is not None else resolver.runs_root / config.topology / "experiments" / config.experiment_id
     notifier = TelegramNotifier(_notification_paths(root))
-    arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2(notifier=notifier)
+    arena_runner = runner_kwargs.pop("arena_runner", None) or ArenaRunnerV2(notifier=notifier, runs_root=resolver.runs_root)
     try:
         with _authority(mode="experiment", topology=config.topology, run_id=config.experiment_id):
             runner = ExperimentRunnerV2(config, arena_runner=arena_runner, resolver=resolver, notifier=notifier, **runner_kwargs)

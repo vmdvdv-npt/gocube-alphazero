@@ -139,3 +139,19 @@ def test_validation_does_not_use_weighted_batch(parent,monkeypatch):
     trainer.batch = lambda *args: pytest.fail('training sampler used for validation')
     raw = torch.load(parent, weights_only=False)
     trainer.evaluate([game('validation','validation',raw['metadata']['model_hash'])], batches=1)
+
+
+def test_training_adapter_prepares_cache_with_durable_progress(parent, tmp_path):
+    from gocube_golden.orchestrator_v2.execution_permit import _production_authority
+    from gocube_golden.torus9_five_channel_training import prepare_policy_surprise_cache
+    import json
+    spec, shard = make_spec(parent, tmp_path)
+    before = (file_sha256(parent), file_sha256(shard))
+    request = {'spec': spec, 'device': 'cpu', 'cache_root': str(tmp_path / 'cache'),
+               'heartbeat': str(tmp_path / 'heartbeat.json')}
+    with _production_authority(mode='experiment', topology='torus9', run_id='test', code_identity='test'):
+        cache = prepare_policy_surprise_cache(request)
+    assert load_cache(cache, spec)
+    heartbeat = json.loads((tmp_path / 'heartbeat.json').read_text())
+    assert heartbeat['phase'] == 'complete' and heartbeat['done'] == heartbeat['total'] == 1
+    assert before == (file_sha256(parent), file_sha256(shard))

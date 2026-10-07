@@ -17,7 +17,7 @@ def _line(lines: list[str], label: str, value: object | None, suffix: str = "") 
         lines.append(f"{label}: {value}{suffix}")
 
 
-def format_training_started(*, topology: str, lineage_id: str, parent_label: str, network: object | None, effective_config: object, arena_cadence: int, arena_config: object) -> str:
+def format_training_started(*, topology: str, lineage_id: str, parent_label: str, network: object | None, effective_config: object, arena_cadence: int | None, arena_config: object, arena_enabled: bool = True, execution_mode: str = "online") -> str:
     self_play = getattr(effective_config, "self_play", {})
     training = getattr(effective_config, "training", {})
     replay = getattr(effective_config, "replay", {})
@@ -43,12 +43,17 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     _line(lines, "Parent", parent_label)
     _line(lines, "Network", network)
     _line(lines, "Komi", _pick(self_play, "komi"))
+    offline = execution_mode == "offline" or bool(getattr(effective_config, "extensions", {}).get("offline_ab_replay"))
+    _line(lines, "Mode", "offline replay" if offline else "online training")
     lines.extend(["", "Self-play:"])
-    if games is not None:
-        lines.append(f"games/generation={games}")
-    if selfplay_sims is not None or self_play.get('search_mode') == 'pcr':
-        lines.append(search_description(self_play))
-    _line(lines, "Contexts", contexts)
+    if offline:
+        lines.append("Disabled — 0 new games")
+    else:
+        if games is not None:
+            lines.append(f"games/generation={games}")
+        if selfplay_sims is not None or self_play.get('search_mode') == 'pcr':
+            lines.append(search_description(self_play))
+        _line(lines, "Contexts", contexts)
     lines.extend(["", "Training:"])
     if lr is not None:
         lines.append(f"LR={lr}")
@@ -56,13 +61,19 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     _line(lines, "Batch", batch)
     _line(lines, "Gradient clip", gradient_clip)
     lines.extend(["", "Replay:"])
-    if replay_generations is not None or replay_cap is not None:
+    if offline:
+        lines.append("Historical replay manifests (no new self-play)")
+    elif replay_generations is not None or replay_cap is not None:
         cap_text = "no position cap" if replay_cap is None else f"{replay_cap} positions"
         lines.append(f"replay={replay_generations} generations / {cap_text}")
     lines.extend(["", "Arena:"])
-    lines.append(f"Arena cadence=every {arena_cadence} generations")
-    _line(lines, "Games", getattr(arena_config, "games", None))
-    _line(lines, "MCTS", arena_sims, " sims")
+    if not arena_enabled:
+        lines.append("Periodic Arena disabled; final comparisons belong to the experiment")
+    else:
+        if arena_cadence is not None:
+            lines.append(f"Arena cadence=every {arena_cadence} generations")
+        _line(lines, "Games", getattr(arena_config, "games", None))
+        _line(lines, "MCTS", arena_sims, " sims")
     return "\n".join(lines).rstrip()
 
 

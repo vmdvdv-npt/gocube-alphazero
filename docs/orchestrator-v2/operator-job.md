@@ -312,3 +312,24 @@ peak VRAM. Время измеряет optimizer loop с синхронизац�
 Sampler сохранён: `random.Random(training_seed + ordinary_update)` на каждый
 update. При разных batch/числе updates одинаковый seed не означает одинаковый
 поток sample IDs. Распределение остаётся uniform-over-positions с replacement.
+
+
+### Offline variants against one registered reference
+
+Use `ab_tests[].arms` for two or more offline variants, and set
+`ab_tests[].arena.reference` to a registered `lineage/checkpoint_id` to evaluate
+**each final against that reference**. The default without reference remains
+round-robin. Reference is resolved and SHA-pinned at `job --check`; it is rejected
+for online A/B. All comparisons use the same games, simulations, seed, paired
+starts, color swaps and optional tree reuse. The reference is never trained.
+
+The complete four-LR job is
+`configs/operator/az18-offline-lr-abcd-20261008-v3.json`: five historical replay
+iterations per arm from M255, then four 512-game, 64-simulation Arenas against
+S50-2/M260. Run it with the normal `production_entrypoint job FILE --check`, then
+`production_entrypoint job FILE`, specifying the actual `--runs-root` for both.
+No separate arm launches or manual Arena jobs are needed. Repeat the same command
+with the same JSON to resume. Completed generations and Arenas are reused.
+Training, replay-cache inference and Arena games run in supervised workers;
+Telegram events describe the actual offline execution rather than inherited
+self-play settings. See the launch guide for the full configuration and paths.
