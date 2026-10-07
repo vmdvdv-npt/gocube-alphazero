@@ -215,13 +215,22 @@ def parse_job(value):
         raise ValueError("ab_tests must be a list")
     normalized_tests, names = [], set()
     for test in tests:
-        item = _object(test, {"id", "iterations", "A", "B", "arena", "arms", "offline_replay"}, "ab_test")
+        item = _object(
+            test,
+            {"id", "iterations", "A", "B", "arena", "arms", "offline_replay", "training_seed"},
+            "ab_test",
+        )
         name = _name(item.get("id"), "ab_test.id")
         if name in names:
             raise ValueError("Duplicate A/B test id")
         names.add(name)
         iterations = _integer(item.get("iterations"), "ab_test.iterations")
         offline = item.get("offline_replay")
+        training_seed = None
+        if "training_seed" in item:
+            if offline is None:
+                raise ValueError("ab_test.training_seed is supported only for offline A/B tests")
+            training_seed = _integer(item["training_seed"], "ab_test.training_seed", minimum=0)
         arm_values = item.get("arms")
         if arm_values is not None:
             if offline is None or "A" in item or "B" in item:
@@ -253,14 +262,30 @@ def parse_job(value):
             if "replay_sampling" in arm and offline is None:
                 raise ValueError("replay_sampling is supported only for offline experiments")
         test_arena = _object(
-            item.get("arena", {}), {"games", "mcts_simulations", "tree_reuse"}, "ab_test.arena"
+            item.get("arena", {}),
+            {"games", "mcts_simulations", "tree_reuse", "master_seed"},
+            "ab_test.arena",
         )
+        arena_master_seed = None
+        if "master_seed" in test_arena:
+            arena_master_seed = _integer(
+                test_arena.pop("master_seed"),
+                "ab_test.arena.master_seed",
+                minimum=0,
+            )
         checked_arena = _arena(test_arena, defaults=arena)
         checked_arena.pop("every_iterations")
-        normalized_tests.append(
-            {"id": name, "iterations": iterations, "arena": checked_arena,
-             **({"offline_replay": offline, "arms": arms} if offline is not None else arms)}
-        )
+        if arena_master_seed is not None:
+            checked_arena["master_seed"] = arena_master_seed
+        normalized_test = {
+            "id": name,
+            "iterations": iterations,
+            "arena": checked_arena,
+            **({"offline_replay": offline, "arms": arms} if offline is not None else arms),
+        }
+        if training_seed is not None:
+            normalized_test["training_seed"] = training_seed
+        normalized_tests.append(normalized_test)
 
     if training["iterations"] is None and normalized_tests:
         raise ValueError("Unbounded training cannot be followed by A/B tests")
@@ -463,12 +488,14 @@ def _effective(base, training, arena, self_play=None, offline=None):
     return result.to_dict()
 
 
-def _offline_effective(base, training, arena, offline, self_play=None):
+def _offline_effective(base, training, arena, offline, self_play=None, training_seed=None):
     cfg = _effective(base, training, arena, self_play, offline=offline)
     if offline is not None:
         if any(len(row["buckets"]) != training["replay_generations"] for row in offline):
             raise ValueError("offline replay window differs from requested replay_generations")
         cfg["extensions"]["offline_ab_replay"] = offline
+    if training_seed is not None:
+        cfg["execution"]["training_master_seed"] = training_seed
     return cfg
 
 
@@ -636,14 +663,21 @@ def compile_job(value, *, runs_root=None, resolver=None):
                         "arm_id": arm,
                         "generations": test["iterations"],
                         "lineage_id": job["run_id"] + "-" + step_id + "-" + arm,
-                        "config": _offline_effective(base, test.get("arms", test)[arm], test_arena, offline, job.get("self_play")),
+                        "config": _offline_effective(
+                            base,
+                            test.get("arms", test)[arm],
+                            test_arena,
+                            offline,
+                            job.get("self_play"),
+                            training_seed=test.get("training_seed"),
+                        ),
                     }
                     for arm in test.get("arms", {"A": {}, "B": {}})
                 ],
                 "arena": {
                     "config": _arena_execution(test_arena),
                     "profile": _arena_profile(test_arena),
-                    "master_seed": ARENA_RUN_MASTER_SEED,
+                    "master_seed": test_arena.get("master_seed", ARENA_RUN_MASTER_SEED),
                     "winner_rule": "candidate_if_wins_gt_losses_else_reference",
                 },
             }

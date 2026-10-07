@@ -55,12 +55,20 @@ def test_complete_json_examples_use_supported_operator_parameters():
         payload = json.loads(example)
         if payload.get('schema') == operator_job.SCHEMA:
             parsed_jobs.append(operator_job.parse_job(payload))
-    assert len(parsed_jobs) == 5
+    assert len(parsed_jobs) == 6
     offline = next(job for job in parsed_jobs if job['run_id'] == 'offline-batch-example')
     assert offline['training']['iterations'] == 0
     assert set(offline['ab_tests'][0]['arms']) == {'B64', 'B128', 'B256'}
     assert {arm['batch_size'] * arm['updates_per_iteration']
             for arm in offline['ab_tests'][0]['arms'].values()} == {163840}
+    replicate = next(
+        job for job in parsed_jobs
+        if job['run_id'] == 'torus9-offline-policy-surprise-seed2-example'
+    )
+    test = replicate['ab_tests'][0]
+    assert test['training_seed'] == 2026092702
+    assert test['arena']['master_seed'] == 2026100703
+    assert set(test['arms']) == {'S50-2', 'U64-2'}
 
 
 def test_uncommitted_guide_is_included_in_launch_cleanliness_check(monkeypatch):
