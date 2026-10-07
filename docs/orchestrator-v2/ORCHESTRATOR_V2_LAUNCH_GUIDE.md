@@ -263,10 +263,12 @@ then stops. Its seed is inherited identically from M255; no self-play runs.
 For an independent offline replicate, `ab_tests[].training_seed` may set one
 integer seed (≥0) shared by every arm in that test. It is written to each arm's
 `effective_config.execution.training_master_seed`; it controls learner sampling
-RNG and does not reset or replace the parent checkpoint's Adam state. It is
-accepted only when that A/B test has `offline_replay`. If omitted, every arm
-continues to inherit the parent's learner seed. Per-arm training seeds are not
-supported.
+RNG and does not reset or replace the parent checkpoint's Adam state. At the
+first candidate generation, this explicit override may differ from the seed
+saved in the parent checkpoint; the new checkpoint records the selected seed,
+which must match for later generations and resumes. It is accepted only when
+that A/B test has `offline_replay`. If omitted, every arm continues to inherit
+the parent's learner seed. Per-arm training seeds are not supported.
 
 `ab_tests[].arena.master_seed` optionally selects the embedded final Arena
 startset seed (integer ≥0). It does not change paired starts, color swap, or
@@ -437,7 +439,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 8be740d05a1b7abbe9663e480e6e711c338c33cc358f9d736d26b14e13686cf4 -->
+<!-- reviewed-interface-sha256: 9afdc0f3fb940b00d0c12cdf4fb2489392ede365d5621c2a7baa6f29abf1d1fe -->
 
 ## B64 bounded performance audit
 

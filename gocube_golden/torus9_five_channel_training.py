@@ -39,10 +39,12 @@ SCHEMA = 'torus9-five-channel-ordinary-training-v1'
 
 
 class OrdinaryTrainer(AdaptationTrainer):
-    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, batch_size=None, device='cpu', replay_sampling=None):
+    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, batch_size=None, device='cpu', replay_sampling=None, allow_seed_change=False):
         from .policy_surprise import sampling_setting
         self.replay_sampling = sampling_setting(replay_sampling)
         self.sampling_telemetry = None
+        if type(allow_seed_change) is not bool:
+            raise ValueError('allow_seed_change must be a boolean')
         raw = torch.load(checkpoint, map_location='cpu', weights_only=False)
         meta = raw['metadata']
         assert_new_komi_training_checkpoint_metadata(meta)
@@ -79,7 +81,7 @@ class OrdinaryTrainer(AdaptationTrainer):
         self.update = int(raw.get('ordinary_update', 0))
         if meta.get('ordinary_schema') == SCHEMA:
             self.clock_origin = raw['clock_origin']
-            if int(raw['seed']) != int(seed):
+            if int(raw['seed']) != int(seed) and not allow_seed_change:
                 raise ValueError('Training seed changed across resume')
         else:
             if int(raw.get('update', -1)) != 2400:
@@ -400,10 +402,16 @@ def run_generation(resolved):
     seed = int(cfg.execution['training_master_seed'])
     device = str(cfg.execution['device'])
     torch.set_num_threads(1)
+    offline_seed_override = cfg.extensions.get('offline_training_seed_override') is True
+    offline_rows = cfg.extensions.get('offline_ab_replay', ())
+    first_offline_generation = min((int(row['generation']) for row in offline_rows), default=None)
+    # Only the first candidate starts from a checkpoint saved with the old seed.
+    allow_seed_change = offline_seed_override and generation == first_offline_generation
     trainer = OrdinaryTrainer(parent.path, learning_rate=cfg.training['learning_rate'],
                                gradient_clip=cfg.training.get('gradient_clip', 1.0),
                                batch_size=cfg.training['batch_size'],
-                               seed=seed, device=device, replay_sampling=cfg.replay.get("sampling"))
+                               seed=seed, device=device, replay_sampling=cfg.replay.get("sampling"),
+                               allow_seed_change=allow_seed_change)
     raw_parent = torch.load(parent.path, map_location='cpu', weights_only=False)
     if raw_parent['metadata'].get('ordinary_schema') == SCHEMA:
         buckets = raw_parent['replay_buckets']

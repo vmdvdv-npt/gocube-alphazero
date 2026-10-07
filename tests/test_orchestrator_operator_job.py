@@ -390,6 +390,8 @@ def test_offline_ab_training_seed_is_shared_by_all_arms_and_arena_seed_reaches_e
     assert compiled['parent'] == parent.ref.to_dict()
     assert arms['S50']['execution']['training_master_seed'] == 2026092702
     assert arms['U64']['execution']['training_master_seed'] == 2026092702
+    assert arms['S50']['extensions']['offline_training_seed_override'] is True
+    assert arms['U64']['extensions']['offline_training_seed_override'] is True
     assert arms['S50']['execution']['training_master_seed'] == arms['U64']['execution']['training_master_seed']
     assert arms['S50']['replay']['sampling'] == {'mode': 'policy_surprise', 'weight': .5}
     assert 'sampling' not in arms['U64']['replay']
@@ -417,6 +419,7 @@ def test_offline_ab_without_new_seeds_keeps_parent_seed_and_legacy_arena_default
         2026092701,
         2026092701,
     ]
+    assert all('offline_training_seed_override' not in arm['config']['extensions'] for arm in compiled['arms'])
     assert compiled['arena']['master_seed'] == job.ARENA_RUN_MASTER_SEED
     assert 'training_seed' not in job.parse_job(raw)['ab_tests'][0]
 
