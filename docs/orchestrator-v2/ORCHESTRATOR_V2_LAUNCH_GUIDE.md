@@ -228,6 +228,8 @@ checkpoint. Mean total loss — сумма policy + WDL/value + ownership + scor
 в replay. Итог `experiments/<run_id>-ab-<test_id>/report.json`: поколения, losses,
 minutes, среднее/общее время, ускорение относительно наименьшего batch, все арены.
 Ветки имеют отдельные lineage и не выбираются автоматически для production.
+Поле `arms.<arm>.optimizer_steps` в отчёте — число обновлений **на итерацию**
+(`training.updates_per_iteration` в operator JSON), а не сумма по всем поколениям.
 
 ### Offline A/B/C/D с общей reference: четыре прогона и четыре арены
 
@@ -485,7 +487,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 363f21c77c960f9f8d72a6afdc6ce0a833a61e9aa6b33e9c62f003ac9896a516 -->
+<!-- reviewed-interface-sha256: cddf1f58f36318f90ee13c2fb4d12e93b681f2a631dba8be48270b340e79dfd5 -->
 
 ## B64 bounded performance audit
 
