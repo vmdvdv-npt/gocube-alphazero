@@ -28,8 +28,11 @@ class CubeArenaSearchConfig:
     fpu: float
     watchdog: int
     deterministic_tie_break: bool = True
+    tree_reuse: bool = False
 
     def validate(self) -> None:
+        if type(self.tree_reuse) is not bool:
+            raise ValueError("Cube Arena tree_reuse must be a boolean")
         if isinstance(self.simulations, bool) or not isinstance(self.simulations, int) or self.simulations <= 0:
             raise ValueError("Cube Arena simulations must be a positive integer")
         if not math.isfinite(float(self.cpuct)) or float(self.cpuct) <= 0.0:
@@ -49,6 +52,7 @@ class CubeArenaSearchConfig:
             cpuct=float(self.cpuct),
             fpu=float(self.fpu),
             deterministic_tie_break=True,
+            tree_reuse=self.tree_reuse,
         )
 
     def identity_payload(self) -> dict[str, object]:
@@ -70,6 +74,7 @@ class CubeArenaSearchConfig:
             "empty_board_control_pair": True,
             "deterministic_tie_break": True,
             "technical_fail_closed": True,
+            **({"tree_reuse": True} if self.tree_reuse else {}),
         }
 
     @property

@@ -248,6 +248,7 @@ class Torus9ArenaProfile:
         fpu: float = 0.0,
         watchdog: int = TORUS9_ARENA_MOVE_LIMIT,
         five_channel: bool = False,
+        tree_reuse: bool = False,
     ) -> None:
         if not isinstance(komi, (int, float)) or isinstance(komi, bool) or float(komi) not in TORUS9_ALLOWED_KOMI:
             raise ValueError("Torus9 Arena komi must be one of 0.5, 1.5, 2.5, 3.5, or 4.5")
@@ -264,6 +265,9 @@ class Torus9ArenaProfile:
         self.simulations = int(simulations)
         self.cpuct = float(cpuct)
         self.fpu = float(fpu)
+        if type(tree_reuse) is not bool:
+            raise ValueError("Torus9 Arena tree_reuse must be a boolean")
+        self.tree_reuse = tree_reuse
         self.watchdog = int(watchdog)
         self._five_channel = bool(five_channel)
         self.observation_shape = (5 if self._five_channel else 6, TORUS9_POINT_COUNT)
@@ -521,6 +525,7 @@ class Torus9ArenaProfile:
                 cpuct=self.cpuct,
                 fpu=self.fpu,
                 deterministic_tie_break=True,
+                tree_reuse=self.tree_reuse,
             ),
             search_adapter=search_adapter,
             make_game=_make_game,
@@ -628,6 +633,7 @@ class Torus9ArenaProfile:
             "paired_starts_color_swap": True,
             "deterministic_tie_break": True,
             "technical_fail_closed": True,
+            **({"tree_reuse": True} if self.tree_reuse else {}),
             "input_channels": 5 if self._five_channel else 6,
             "komi_observation_channel": not self._five_channel,
         }

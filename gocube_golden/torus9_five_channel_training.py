@@ -7,6 +7,8 @@ komi=1.5 target contract and retains whole-generation buckets.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 import gzip
 import hashlib
 import json
@@ -18,6 +20,9 @@ import threading
 import time
 
 import torch
+from .ordinary_adam import OrdinaryAdam
+
+from .training_profile import span, measured, sampled, transfer
 
 from .artifact_graph import ArtifactRef, CheckpointRef, publish_checkpoint_graph
 from .neural import model_hash
@@ -34,7 +39,10 @@ SCHEMA = 'torus9-five-channel-ordinary-training-v1'
 
 
 class OrdinaryTrainer(AdaptationTrainer):
-    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, device='cpu'):
+    def __init__(self, checkpoint, *, learning_rate, seed, gradient_clip=None, batch_size=None, device='cpu', replay_sampling=None):
+        from .policy_surprise import sampling_setting
+        self.replay_sampling = sampling_setting(replay_sampling)
+        self.sampling_telemetry = None
         raw = torch.load(checkpoint, map_location='cpu', weights_only=False)
         meta = raw['metadata']
         assert_new_komi_training_checkpoint_metadata(meta)
@@ -48,7 +56,7 @@ class OrdinaryTrainer(AdaptationTrainer):
         groups = raw['optimizer_state_dict']['param_groups']
         if [g.get('name') for g in groups] != names or any(len(g['params']) != 1 for g in groups):
             raise ValueError('Named Adam group order mismatch')
-        self.optimizer = torch.optim.Adam([
+        self.optimizer = OrdinaryAdam([
             {'params': [p], 'name': n} for n, p in self.model.named_parameters()])
         self.optimizer.load_state_dict(raw['optimizer_state_dict'])
         self.learning_rate = float(learning_rate)
@@ -59,6 +67,10 @@ class OrdinaryTrainer(AdaptationTrainer):
                 not math.isfinite(configured_clip) or configured_clip <= 0):
             raise ValueError('Invalid gradient clip')
         self.gradient_clip = float(configured_clip)
+        configured_batch = meta.get('batch_size', 64) if batch_size is None else batch_size
+        if type(configured_batch) is not int or configured_batch <= 0:
+            raise ValueError('batch_size must be a positive integer')
+        self.batch_size = configured_batch
         for group in self.optimizer.param_groups:
             group['lr'] = self.learning_rate
             if group['weight_decay'] != 0:
@@ -79,32 +91,84 @@ class OrdinaryTrainer(AdaptationTrainer):
         self.validate_clocks()
 
     def validate_clocks(self):
+        # Adam clocks remain CPU scalars; inspect all structural constraints before
+        # packing the read-only moment tensors. The detailed path preserves the
+        # original first-error order and messages if anything is invalid.
+        moments, variances = [], []
+        device = next(self.model.parameters()).device
         for n, p in self.model.named_parameters():
             state = self.optimizer.state[p]
-            if int(state['step']) != self.clock_origin[n] + self.update:
+            with span('validate.step'):
+                try:
+                    clock = int(state['step'])
+                except (KeyError, TypeError, ValueError, OverflowError, RuntimeError):
+                    return self._validate_clocks_detailed()
+                if clock != self.clock_origin[n] + self.update:
+                    return self._validate_clocks_detailed()
+            for key, collection in (('exp_avg', moments), ('exp_avg_sq', variances)):
+                if key not in state or not isinstance(state[key], torch.Tensor):
+                    return self._validate_clocks_detailed()
+                value = state[key]
+                if value.shape != p.shape or value.device != device or value.layout != torch.strided or value.is_complex():
+                    return self._validate_clocks_detailed()
+                collection.append(value)
+        with torch.no_grad():
+            with span('validate.pack'):
+                average = torch.cat([value.reshape(-1) for value in moments])
+                variance = torch.cat([value.reshape(-1) for value in variances])
+            with span('validate.exp_avg'):
+                average_finite = torch.isfinite(average).all()
+            with span('validate.exp_avg_sq'):
+                variance_finite = torch.isfinite(variance).all()
+            with span('validate.negative'):
+                variance_negative = (variance < 0).any()
+            with span('validate.scalar_sync'):
+                valid_average, valid_variance, negative = torch.stack(
+                    (average_finite, variance_finite, variance_negative)).cpu().tolist()
+        if not valid_average or not valid_variance or negative:
+            self._validate_clocks_detailed()
+
+    def _validate_clocks_detailed(self):
+        for n, p in self.model.named_parameters():
+            state = self.optimizer.state[p]
+            if measured('validate.step', lambda: int(state['step']) != self.clock_origin[n] + self.update):
                 raise ValueError('Adam clock mismatch: ' + n)
             for key in ('exp_avg', 'exp_avg_sq'):
-                if state[key].shape != p.shape or not torch.isfinite(state[key]).all():
+                if measured('validate.' + key, lambda: state[key].shape != p.shape or not torch.isfinite(state[key]).all()):
                     raise ValueError('Invalid Adam state: ' + n)
-            if (state['exp_avg_sq'] < 0).any():
+            if measured('validate.negative', lambda: bool((state['exp_avg_sq'] < 0).any())):
                 raise ValueError('Negative Adam variance')
 
     def batch(self, games, update):
         # Ordinary replay sampling is uniform over positions, without the
         # adaptation-only game/phase stratification.
-        import bisect
-        cumulative, count = [], 0
-        for g in games:
-            count += len(g['score'])
-            cumulative.append(count)
-        rng = random.Random(self.seed + update)
-        indices = []
-        for _ in range(64):
-            index = rng.randrange(count)
-            game = bisect.bisect_right(cumulative, index)
-            indices.append((games[game], index - (cumulative[game - 1] if game else 0)))
+        with span('batch.sampling'):
+            import bisect
+            if isinstance(games, OrdinaryReplayWindow):
+                cumulative, count = games.cumulative, games.positions
+            else:
+                # Mutable caller-owned sequences retain the uncached sampler.
+                cumulative, count = [], 0
+                for g in games:
+                    count += len(g['score'])
+                    cumulative.append(count)
+            rng = random.Random(self.seed + update)
+            indices = []
+            for _ in range(self.batch_size):
+                if (getattr(self, "replay_sampling", {}).get("mode") == "policy_surprise"
+                        and self.replay_sampling["weight"] != 0):
+                    if self.sampling_telemetry is None:
+                        raise ValueError("policy_surprise sampling requires verified historical cache")
+                    indices.append(self.sampling_telemetry.draw(rng, games))
+                    continue
+                index = rng.randrange(count)
+                game = bisect.bisect_right(cumulative, index)
+                indices.append((games[game], index - (cumulative[game - 1] if game else 0)))
+        if getattr(self, "sampling_telemetry", None) is not None:
+            self.sampling_telemetry.record(indices)
+        sampled(indices, games)
         device = next(self.model.parameters()).device
-        return {k: torch.stack([g[k][i] for g, i in indices]).to(device)
+        return {k: transfer(k, measured('stack.' + k, lambda: torch.stack([g[k][i] for g, i in indices])), device)
                 for k in ('observation', 'pi', 'z', 'ownership', 'score')}
 
     def evaluate(self, games, batches=32):
@@ -120,25 +184,41 @@ class OrdinaryTrainer(AdaptationTrainer):
 
     def step(self, games):
         from .orchestrator_v2.execution_permit import require_engine_execution
-        require_engine_execution(__name__, action='training', topology='torus9')
-        self.validate_clocks()
-        self.model.train()
-        self.optimizer.zero_grad(set_to_none=True)
-        losses, _ = self.losses(self.batch(games, self.update + 1))
-        total = sum(losses.values())
-        if not torch.isfinite(total):
-            raise FloatingPointError('Nonfinite ordinary loss')
-        total.backward()
-        grad = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip, error_if_nonfinite=True)
-        self.optimizer.step()
+        with span('execution_permit'):
+            require_engine_execution(__name__, action='training', topology='torus9')
+        with span('validate.pre'):
+            self.validate_clocks()
+        with span('model.train'):
+            self.model.train()
+        with span('zero_grad'):
+            self.optimizer.zero_grad(set_to_none=True)
+        with span('batch_and_losses'):
+            losses, _ = self.losses(self.batch(games, self.update + 1))
+        with span('loss.sum'):
+            total = sum(losses.values())
+        with span('loss.finite'):
+            if not torch.isfinite(total):
+                raise FloatingPointError('Nonfinite ordinary loss')
+        with span('backward'):
+            total.backward()
+        with span('grad_clip'):
+            grad = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip, error_if_nonfinite=True)
+        with span('adam'):
+            self.optimizer.step()
         self.update += 1
-        self.validate_clocks()
-        if any(not torch.isfinite(p).all() for p in self.model.parameters()):
-            raise FloatingPointError('Nonfinite ordinary weights')
-        return {'update': self.update, 'losses': {k: float(v.detach()) for k,v in losses.items()},
-                'grad_norm_before_clip': float(grad), 'learning_rate': self.learning_rate,
-                'gradient_clip': self.gradient_clip,
-                'l2_sp_coefficient': 0.}
+        with span('validate.post'):
+            self.validate_clocks()
+        with span('weights.finite'):
+            with torch.no_grad():
+                weights = torch.cat([p.reshape(-1) for p in self.model.parameters()])
+                if not torch.isfinite(weights).all():
+                    raise FloatingPointError('Nonfinite ordinary weights')
+        with span('scalar.telemetry'):
+            scalars = torch.stack([v.detach() for v in losses.values()] + [grad.detach()]).cpu().tolist()
+            return {'update': self.update, 'losses': dict(zip(losses, map(float, scalars[:-1]))),
+                    'grad_norm_before_clip': float(scalars[-1]), 'learning_rate': self.learning_rate,
+                    'gradient_clip': self.gradient_clip, 'batch_size': self.batch_size,
+                    'l2_sp_coefficient': 0.}
 
     def save(self, path, *, config_hash, parent, replay_buckets):
         self.validate_clocks()
@@ -148,11 +228,83 @@ class OrdinaryTrainer(AdaptationTrainer):
                 'target_fingerprint': FINGERPRINT, 'ordinary_schema': SCHEMA,
                 'ordinary_update': self.update, 'config_hash': config_hash,
                 'parent_checkpoint': parent, 'learning_rate': self.learning_rate,
-                'gradient_clip': self.gradient_clip}
+                'gradient_clip': self.gradient_clip, 'batch_size': self.batch_size}
         save_torch(path, {'metadata': meta, 'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(), 'ordinary_update': self.update,
             'clock_origin': self.clock_origin, 'seed': self.seed, 'replay_buckets': replay_buckets})
         atomic_write_json(path.with_suffix('.metadata.json'), {**meta, 'artifact_sha256': file_sha256(path)})
+
+
+class TrainingHeartbeat:
+    """The ordinary driver's durable heartbeat, shared with the diagnostic loop."""
+    def __init__(self, path, generation, collector=None):
+        self.path, self.generation = Path(path), generation
+        self.progress = {'phase': 'prepare', 'done': 0, 'total': 1, 'progress_at': time.time()}
+        self.lock, self.stop = threading.Lock(), threading.Event()
+        self.collector = collector
+        self.pulse_writes = 0
+
+    def beat(self):
+        with span('heartbeat'):
+            with self.lock:
+                payload = dict(self.progress)
+            payload.update(liveness_at=time.time(), generation=self.generation,
+                           progress_token=f"{payload['phase']}:{payload['done']}")
+            atomic_write_json(self.path, payload)
+
+    def mark(self, phase, done, total):
+        with span('mark'):
+            with self.lock:
+                self.progress.update(phase=phase, done=done, total=total, progress_at=time.time())
+            self.beat()
+
+    def pulse(self):
+        from contextlib import nullcontext
+        with self.collector.activate() if self.collector is not None else nullcontext():
+            while not self.stop.wait(10):
+                self.beat()
+                self.pulse_writes += 1
+
+    def start(self):
+        self.beat()
+        self.thread = threading.Thread(target=self.pulse, daemon=True)
+        self.thread.start()
+
+    def close(self):
+        self.stop.set()
+        self.thread.join(timeout=15)
+
+
+@dataclass(frozen=True)
+class OrdinaryReplayWindow(Sequence):
+    """Read-only generation window; cache lengths without copying replay tensors.
+
+    Loaded games and their targets are immutable for the lifetime of a window.
+    Changing a window requires constructing a new one. Mutable sequences passed
+    directly to batch() continue to rebuild offsets on every call.
+    """
+    games: tuple
+    cumulative: tuple
+    positions: int
+
+    @classmethod
+    def from_games(cls, games):
+        games = tuple(games)
+        cumulative, count = [], 0
+        for game in games:
+            count += len(game['score'])
+            cumulative.append(count)
+        return cls(games, tuple(cumulative), count)
+
+    def __len__(self):
+        return len(self.games)
+
+    def __getitem__(self, index):
+        return self.games[index]
+
+    def __deepcopy__(self, memo):
+        # Immutable window, shared target references; never duplicate replay data.
+        return self
 
 
 def load_replay(buckets, *, split):
@@ -177,17 +329,24 @@ def load_replay(buckets, *, split):
                 games.append(game)
     if not games:
         raise ValueError('Empty replay split: ' + split)
-    return games
+    return OrdinaryReplayWindow.from_games(games)
 
 
 def validate_config(config):
+    from .policy_surprise import sampling_setting
+    setting = sampling_setting(config.replay.get('sampling'))
+    if setting['mode'] == 'policy_surprise' and not config.extensions.get('offline_ab_replay'):
+        raise ValueError('policy_surprise requires an offline experiment')
     if config.compatibility.get('input_channels') != 5:
         raise ValueError('Legacy 6-channel Torus9 training is retired; use a 5CH checkpoint')
     gradient_clip = config.training.get('gradient_clip', 1.0)
     if (type(gradient_clip) not in (float, int) or
             not math.isfinite(gradient_clip) or gradient_clip <= 0):
         raise ValueError('gradient_clip must be a finite positive number')
-    expected = {'batch_size': 64, 'optimizer': 'Adam', 'weight_decay': 0.0,
+    batch_size = config.training.get('batch_size')
+    if type(batch_size) is not int or batch_size <= 0:
+        raise ValueError('batch_size must be a positive integer')
+    expected = {'optimizer': 'Adam', 'weight_decay': 0.0,
                 'l2_sp': False}
     if any(config.training.get(k) != v for k,v in expected.items()):
         raise ValueError('Unsupported ordinary training contract')
@@ -196,6 +355,8 @@ def validate_config(config):
     if int(config.replay['generations']) <= 0:
         raise ValueError('Replay window must be positive')
     caps = resolve_search_mode(config.self_play)
+    if type(config.self_play.get('tree_reuse', False)) is not bool:
+        raise ValueError('self_play.tree_reuse must be a boolean')
     if caps is None:
         value = config.self_play.get('mcts_simulations')
         if type(value) is not int or value <= 0:
@@ -230,6 +391,8 @@ def run_generation(resolved):
     if resolved.execution_overrides:
         raise ValueError('5CH execution overrides are not supported')
     caps = resolve_search_mode(cfg.self_play)
+    from .orchestrator_v2.offline_replay import iteration_input
+    offline = iteration_input(cfg, resolved.generation)
     root, generation = resolved.output_lineage.root, resolved.generation
     parent = resolved.parent_checkpoint
     if file_sha256(parent.path) != parent.ref.sha256:
@@ -239,7 +402,8 @@ def run_generation(resolved):
     torch.set_num_threads(1)
     trainer = OrdinaryTrainer(parent.path, learning_rate=cfg.training['learning_rate'],
                                gradient_clip=cfg.training.get('gradient_clip', 1.0),
-                               seed=seed, device=device)
+                               batch_size=cfg.training['batch_size'],
+                               seed=seed, device=device, replay_sampling=cfg.replay.get("sampling"))
     raw_parent = torch.load(parent.path, map_location='cpu', weights_only=False)
     if raw_parent['metadata'].get('ordinary_schema') == SCHEMA:
         buckets = raw_parent['replay_buckets']
@@ -257,102 +421,112 @@ def run_generation(resolved):
     del inherited, raw_parent
     baseline = trainer.evaluate(validation)
     heartbeat = Path(os.environ.get('AZ_DRIVER_HEARTBEAT_PATH', root / 'runtime' / 'heartbeats' / f'generation-{generation:04d}.json'))
-    progress = {'phase': 'prepare', 'done': 0, 'total': 1, 'progress_at': time.time()}
-    lock, stop = threading.Lock(), threading.Event()
-
-    def beat():
-        with lock:
-            payload = dict(progress)
-        payload.update(liveness_at=time.time(), generation=generation,
-                       progress_token=f"{payload['phase']}:{payload['done']}")
-        atomic_write_json(heartbeat, payload)
-
-    def mark(phase, done, total):
-        with lock:
-            progress.update(phase=phase, done=done, total=total, progress_at=time.time())
-        beat()
-
-    def pulse():
-        while not stop.wait(10):
-            beat()
-
-    beat()
-    thread = threading.Thread(target=pulse, daemon=True)
-    thread.start()
+    heartbeat_writer = TrainingHeartbeat(heartbeat, generation)
+    mark = heartbeat_writer.mark
+    heartbeat_writer.start()
     try:
         fresh_shards = []
         shard_telemetry = []
         games_count = int(cfg.self_play['games_per_iteration'])
-        for offset in range(0, games_count, 128):
-            number = min(128, games_count-offset)
-            path = root / 'replay' / f'g{generation:04d}-{offset:04d}.pt'
-            identity_path = path.with_suffix('.identity.json')
-            expected = {'parent': parent.ref.to_dict(), 'config': cfg.fingerprint,
-                        'generation': generation, 'offset': offset, 'games': number}
-            if identity_path.exists():
-                saved = json.loads(identity_path.read_text())
-                if saved['request'] != expected or file_sha256(path) != saved['shard']['sha']:
-                    raise ValueError('Saved self-play shard identity mismatch')
-                fresh_shards.append(saved['shard'])
-                if caps is not None:
-                    shard_telemetry.append(saved['pcr_telemetry'])
-                continue
-            mark('selfplay', offset, games_count)
-            ids = [f'{root.name}-g{generation:04d}-game-{i:04d}' for i in range(offset,offset+number)]
-            result = selfplay(trainer.model, checkpoint=parent.path, run_id=root.name, ids=ids,
-                seed=int(cfg.execution['selfplay_master_seed']), device=device,
-                workers=int(cfg.execution['workers']), simulations=caps.full_simulations if caps else int(cfg.self_play['mcts_simulations']),
-                **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {}),
-                progress=lambda d,n: mark('selfplay',offset+d,games_count))
-            raw_path = path.with_suffix('.games.jsonl.gz')
-            raw_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = raw_path.with_suffix('.tmp')
-            with gzip.open(temporary, 'wt', encoding='utf-8') as stream:
-                for game in result.records:
-                    stream.write(json.dumps(game.to_dict())+'\n')
-            os.replace(temporary,raw_path)
-            games = []
-            for i, record in enumerate(result.records):
-                mark('target-build', offset+i,games_count)
-                game = game_targets(record)
-                if game is None:
+        if offline is None:
+            for offset in range(0, games_count, 128):
+                number = min(128, games_count-offset)
+                path = root / 'replay' / f'g{generation:04d}-{offset:04d}.pt'
+                identity_path = path.with_suffix('.identity.json')
+                expected = {'parent': parent.ref.to_dict(), 'config': cfg.fingerprint,
+                            'generation': generation, 'offset': offset, 'games': number}
+                if identity_path.exists():
+                    saved = json.loads(identity_path.read_text())
+                    if saved['request'] != expected or file_sha256(path) != saved['shard']['sha']:
+                        raise ValueError('Saved self-play shard identity mismatch')
+                    fresh_shards.append(saved['shard'])
+                    if caps is not None:
+                        shard_telemetry.append(saved['pcr_telemetry'])
                     continue
-                game['split'] = 'train'
-                validate_game(game)
-                games.append(game)
-            if len(result.records) != number:
-                raise ValueError('Incomplete self-play batch')
-            save_torch(path, {'contract': FINGERPRINT, 'actor_hash': model_hash(trainer.model),
-                'games': games, 'raw_games_sha': file_sha256(raw_path), 'generation': generation,
-                'selfplay_simulations': None if caps else cfg.self_play['mcts_simulations'],
-                **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {})})
-            shard = {'path': str(path), 'sha': file_sha256(path), 'games': number}
-            telemetry = dict(result.telemetry)
-            pcr_telemetry = position_telemetry(result.records, caps) if caps else {}
-            if caps:
-                if pcr_telemetry['training_positions'] != sum(len(g['score']) for g in games):
-                    raise ValueError('PCR learner position count drift')
-                shard_telemetry.append(pcr_telemetry)
-            telemetry.update(pcr_telemetry)
-            atomic_write_json(path.with_suffix('.telemetry.json'), telemetry)
-            atomic_write_json(identity_path, {'request': expected, 'shard': shard,
-                **({'pcr_telemetry': pcr_telemetry} if caps else {})})
-            fresh_shards.append(shard)
-            del result, games
+                mark('selfplay', offset, games_count)
+                ids = [f'{root.name}-g{generation:04d}-game-{i:04d}' for i in range(offset,offset+number)]
+                result = selfplay(trainer.model, checkpoint=parent.path, run_id=root.name, ids=ids,
+                    seed=int(cfg.execution['selfplay_master_seed']), device=device,
+                    workers=int(cfg.execution['workers']), simulations=caps.full_simulations if caps else int(cfg.self_play['mcts_simulations']),
+                    **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {}),
+                    **({'tree_reuse': True} if cfg.self_play.get('tree_reuse', False) else {}),
+                    progress=lambda d,n: mark('selfplay',offset+d,games_count))
+                raw_path = path.with_suffix('.games.jsonl.gz')
+                raw_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = raw_path.with_suffix('.tmp')
+                with gzip.open(temporary, 'wt', encoding='utf-8') as stream:
+                    for game in result.records:
+                        stream.write(json.dumps(game.to_dict())+'\n')
+                os.replace(temporary,raw_path)
+                games = []
+                for i, record in enumerate(result.records):
+                    mark('target-build', offset+i,games_count)
+                    game = game_targets(record)
+                    if game is None:
+                        continue
+                    game['split'] = 'train'
+                    validate_game(game)
+                    games.append(game)
+                if len(result.records) != number:
+                    raise ValueError('Incomplete self-play batch')
+                save_torch(path, {'contract': FINGERPRINT, 'actor_hash': model_hash(trainer.model),
+                    'games': games, 'raw_games_sha': file_sha256(raw_path), 'generation': generation,
+                    'selfplay_simulations': None if caps else cfg.self_play['mcts_simulations'],
+                    **({'search_mode': 'pcr', 'pcr': dict(cfg.self_play['pcr'])} if caps else {})})
+                shard = {'path': str(path), 'sha': file_sha256(path), 'games': number}
+                telemetry = dict(result.telemetry)
+                pcr_telemetry = position_telemetry(result.records, caps) if caps else {}
+                if caps:
+                    if pcr_telemetry['training_positions'] != sum(len(g['score']) for g in games):
+                        raise ValueError('PCR learner position count drift')
+                    shard_telemetry.append(pcr_telemetry)
+                telemetry.update(pcr_telemetry)
+                atomic_write_json(path.with_suffix('.telemetry.json'), telemetry)
+                atomic_write_json(identity_path, {'request': expected, 'shard': shard,
+                    **({'pcr_telemetry': pcr_telemetry} if caps else {})})
+                fresh_shards.append(shard)
+                del result, games
+        else:
+            # Offline experiment inputs are immutable external references. No
+            # self-play adapter is called and no source artifact is rewritten.
+            fresh_shards = list(offline['fresh_bucket']['shards'])
+            games_count = 0
         fresh_path = root / 'replay' / f'iter-{generation:02d}-fresh.json'
         fresh_bucket = {'generation': generation, 'shards': fresh_shards}
         atomic_write_json(fresh_path, fresh_bucket)
-        buckets = (list(buckets)+[fresh_bucket])[-int(cfg.replay['generations']):]
+        buckets = (offline['buckets'] if offline is not None else
+                   (list(buckets)+[fresh_bucket])[-int(cfg.replay['generations']):])
         games = load_replay(buckets,split='train')
         if {g['game_id'] for g in games} & {g['game_id'] for g in validation}:
             raise ValueError('Validation leaked into training')
         rolling_path = root / 'replay' / f'rolling-after-{generation:02d}.jsonl'
         atomic_write_text(rolling_path, ''.join(json.dumps(b,sort_keys=True)+'\n' for b in buckets))
+        if cfg.extensions.get('policy_surprise_spec') is not None:
+            from .policy_surprise import load_cache, SamplingTelemetry
+            spec = cfg.to_dict()['extensions']['policy_surprise_spec']
+            cache_ref = cfg.to_dict()['extensions']['policy_surprise_cache']
+            evidence = load_cache(cache_ref, spec)
+            # Both arms measure the same historical surprises; uniform draws stay intact.
+            trainer.sampling_telemetry = SamplingTelemetry(games, evidence, cache_ref, spec['weight'], trainer.replay_sampling['mode'])
         updates = int(cfg.training['optimizer_steps_per_iteration'])
         metrics = []
+        if device.startswith('cuda'):
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+        training_started = time.perf_counter()
         for i in range(updates):
             metrics.append(trainer.step(games))
             mark('training',i+1,updates)
+        if device.startswith('cuda'):
+            torch.cuda.synchronize()
+        training_wall = time.perf_counter() - training_started
+        performance = {'training_wall_time_sec': training_wall,
+                       'training_minutes': training_wall / 60,
+                       'optimizer_updates_per_sec': updates / training_wall,
+                       'samples_per_sec': updates * trainer.batch_size / training_wall,
+                       'processed_samples': updates * trainer.batch_size,
+                       'peak_allocated_vram_bytes': torch.cuda.max_memory_allocated() if device.startswith('cuda') else None,
+                       'peak_reserved_vram_bytes': torch.cuda.max_memory_reserved() if device.startswith('cuda') else None}
         result_validation = trainer.evaluate(validation)
         if not all(math.isfinite(v) for v in result_validation.values()):
             raise FloatingPointError('Nonfinite validation')
@@ -361,6 +535,7 @@ def run_generation(resolved):
                      parent=parent.ref.to_dict(), replay_buckets=buckets)
         reloaded = OrdinaryTrainer(checkpoint_path, learning_rate=cfg.training['learning_rate'],
                                    gradient_clip=cfg.training.get('gradient_clip', 1.0),
+                                   batch_size=cfg.training['batch_size'],
                                    seed=seed, device='cpu')
         if model_hash(reloaded.model) != model_hash(trainer.model):
             raise ValueError('Checkpoint reload changed model')
@@ -370,13 +545,22 @@ def run_generation(resolved):
                 if not torch.equal(trainer.optimizer.state[p][key].cpu(),reloaded.optimizer.state[q][key].cpu()):
                     raise ValueError('Checkpoint reload changed Adam state')
         training_path = root / 'training' / f'iter-{generation:02d}.json'
-        atomic_write_json(training_path, {'updates': metrics,'baseline_validation': baseline,'validation': result_validation})
+        mean_losses = {key: sum(row['losses'][key] for row in metrics) / updates
+                       for key in metrics[0]['losses']}
+        if trainer.sampling_telemetry is not None:
+            if trainer.sampling_telemetry.draws != updates * trainer.batch_size:
+                raise ValueError('Replay sampling draw budget drift')
+            performance['sampling'] = trainer.sampling_telemetry.report()
+        performance['mean_losses'] = mean_losses
+        performance['mean_total_loss'] = sum(mean_losses.values())
+        atomic_write_json(training_path, {'updates': metrics,'baseline_validation': baseline,'validation': result_validation, 'performance': performance})
         summary_path = root / f'iter-{generation:02d}-summary.json'
         summary = {'status':'COMPLETED','generation':generation,'games':games_count,'updates':updates,
                    'learning_rate':cfg.training['learning_rate'],'replay_generations':len(buckets),
                    'replay_positions':sum(len(g['score']) for g in games),
                    'validation':result_validation,'checkpoint_reload_verified':True}
-        if caps:
+        summary.update(performance, offline_replay=offline is not None)
+        if caps and offline is None:
             counts = {key: sum(t[key] for t in shard_telemetry) for key in (
                 'pcr_full_positions', 'pcr_cheap_positions', 'training_positions', 'raw_positions')}
             summary.update(counts, search_mode='pcr', pcr=dict(cfg.self_play['pcr']),
@@ -390,7 +574,7 @@ def run_generation(resolved):
         identities = {k:{'path':p.relative_to(root).as_posix(),'sha256':file_sha256(p),'size_bytes':p.stat().st_size}
                       for k,p in paths.items()}
         # Publish every payload used by the fresh replay ledger in the catalog.
-        for index, shard in enumerate(fresh_shards):
+        for index, shard in enumerate(fresh_shards if offline is None else []):
             p = Path(shard['path'])
             identities[f'replay_shard_{index}'] = {'path':p.relative_to(root).as_posix(),'sha256':shard['sha'],'size_bytes':p.stat().st_size}
         marker = {'generation':generation,'lineage_id':root.name,
@@ -409,8 +593,7 @@ def run_generation(resolved):
         mark('committed',updates,updates)
         return GenerationExecutionResult(generation,True,checkpoint_ref,marker_ref,fresh_ref)
     finally:
-        stop.set()
-        thread.join(timeout=15)
+        heartbeat_writer.close()
 
 
 def write_block_report(result):

@@ -38,6 +38,7 @@ def _cube_arena_search(config: EffectiveConfig):
         cpuct=float(_required(arena, ("cpuct",), "Cube Arena cpuct")),
         fpu=float(_required(arena, ("fpu",), "Cube Arena fpu")),
         watchdog=int(_required(arena, ("watchdog", "technical_move_limit"), "Cube Arena watchdog")),
+        tree_reuse=arena.get("tree_reuse", False),
     )
 
 
@@ -62,6 +63,11 @@ def _torus_profile_id(config: EffectiveConfig) -> str:
     )
     if channels == 5:
         profile += "|5ch"
+    reuse = arena.get("tree_reuse", False)
+    if type(reuse) is not bool:
+        raise ValueError("arena.tree_reuse must be a boolean")
+    if reuse:
+        profile += "|tree_reuse=true"
     return profile
 
 

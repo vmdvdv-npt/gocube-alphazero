@@ -149,6 +149,7 @@ class CubeSelfPlaySearchContract:
     resign: bool = False
     technical_move_limit: int = CUBE_STAGE5_SMOKE_TECHNICAL_MOVE_LIMIT
     komi: float = 0.5
+    tree_reuse: bool = False
 
     @property
     def temperature_until_ply(self) -> int:
@@ -191,6 +192,7 @@ class CubeSelfPlaySearchContract:
             cpuct=float(self.cpuct),
             fpu=float(self.fpu),
             deterministic_tie_break=True,
+            tree_reuse=self.tree_reuse,
         )
 
     @property
@@ -215,9 +217,12 @@ class CubeSelfPlaySearchContract:
             "resign": bool(self.resign),
             "technical_move_limit": int(self.technical_move_limit),
             "komi": float(self.komi),
+            **({"tree_reuse": True} if self.tree_reuse else {}),
         }
 
     def validate(self, *, canonical: bool = True) -> None:
+        if type(self.tree_reuse) is not bool:
+            raise ValueError("Cube self-play tree_reuse must be a boolean")
         del canonical  # simulations are intentionally run-owned in Stage 5.
         if self.contract_id != CUBE_SELFPLAY_CONTRACT_ID:
             raise ValueError("Cube self-play contract id drift")

@@ -57,10 +57,89 @@ def test_gradient_clip_is_normalized_and_compiled_into_effective_config(parent):
     assert config["training"]["optimizer"] == "Adam"
 
 
+@pytest.mark.parametrize("seed", [0, 2026100501])
+@pytest.mark.parametrize("mode", ["fixed", "pcr"])
+def test_selfplay_seed_reaches_every_training_arm_without_changing_learner_seed(parent, seed, mode):
+    inherited = parent.effective_config.config.to_dict()
+    inherited['execution'].update(selfplay_master_seed=2026092901, training_master_seed=2026092701)
+    parent.effective_config.config = EffectiveConfig.from_dict(inherited)
+    raw = parameters()
+    raw['self_play'] = {'master_seed': seed, 'search_mode': mode}
+    if mode == 'pcr':
+        raw['self_play']['pcr'] = {'cheap_simulations': 100, 'full_simulations': 500,
+                                 'full_probability': 0.25}
+    normalized = job.parse_job(raw)
+    assert job.parse_job(normalized) == normalized
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    configs = [steps[0]['config']['effective_config']]
+    configs.extend(arm['config'] for arm in steps[1]['config']['arms'])
+    for config in configs:
+        assert config['execution']['selfplay_master_seed'] == seed
+        assert config['execution']['training_master_seed'] == 2026092701
+        assert 'master_seed' not in config['self_play']
+    assert raw['self_play']['master_seed'] == seed
+    assert parent.effective_config.config.execution['selfplay_master_seed'] == 2026092901
+
+
+def test_omitted_selfplay_seed_preserves_parent_seed_and_explicit_seed_changes_fingerprint(parent):
+    inherited = parent.effective_config.config.to_dict()
+    inherited['execution']['selfplay_master_seed'] = 123
+    parent.effective_config.config = EffectiveConfig.from_dict(inherited)
+    raw = parameters()
+    old = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps'][0]['config']['effective_config']
+    raw['self_play'] = {'master_seed': 456}
+    new = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps'][0]['config']['effective_config']
+    assert old['execution']['selfplay_master_seed'] == 123
+    assert new['execution']['selfplay_master_seed'] == 456
+    assert EffectiveConfig.from_dict(old).fingerprint != EffectiveConfig.from_dict(new).fingerprint
+
+
+@pytest.mark.parametrize('seed', [True, False, -1, 1.5, '2026100501', None, float('nan')])
+def test_invalid_selfplay_seed_rejected_before_parent_resolution(monkeypatch, seed):
+    monkeypatch.setattr(job, 'resolve_parent', lambda *a, **kw: pytest.fail('resolved invalid seed'))
+    raw = parameters()
+    raw['self_play'] = {'master_seed': seed}
+    with pytest.raises(ValueError, match='self_play.master_seed'):
+        job.compile_job(raw)
+
+
+def test_null_iterations_compiles_as_unbounded_continuation(parent, tmp_path):
+    raw = parameters()
+    raw["training"] = {"iterations": None, "games_per_iteration": 768,
+                       "updates_per_iteration": 1280, "batch_size": 64,
+                       "learning_rate": 1e-4, "replay_generations": 3}
+    raw["ab_tests"] = []
+    raw["arena"] = {"every_iterations": 1, "games": 192,
+                    "mcts_simulations": 200}
+
+    normalized = job.parse_job(raw)
+    assert normalized["training"]["iterations"] is None
+
+    compiled = job.compile_job(raw, runs_root=tmp_path)
+    step = compiled["workflow"]["steps"][0]
+    assert step["action"] == "continuous_training"
+    assert step["config"]["generations"] is None
+    assert step["config"]["arena_cadence"] == 1
+
+
+def test_null_iterations_still_requires_training_parent():
+    raw = {"schema": job.SCHEMA, "run_id": "unbounded-no-parent",
+           "training": {"iterations": None}, "ab_tests": []}
+    with pytest.raises(ValueError, match="parent"):
+        job.parse_job(raw)
+
+
+def test_unbounded_training_cannot_be_followed_by_ab_tests():
+    raw = parameters()
+    raw["training"]["iterations"] = None
+    with pytest.raises(ValueError, match="cannot be followed by A/B"):
+        job.parse_job(raw)
+
+
 @pytest.mark.parametrize("patch", [
     {"notifications": False}, {"command": "arbitrary executable"},
     {"parent": "../../checkpoint"}, {"training": {"learning_rate": float("nan")}},
-    {"training": {"iterations": True}}, {"training": {"batch_size": 32}},
+    {"training": {"iterations": True}}, {"training": {"batch_size": 0}},
     {"training": {"gradient_clip": 0}}, {"training": {"gradient_clip": float("nan")}},
     {"arena": {"games": 193}}, {"execution": {"workers": 1}},
     {"ab_tests": [{"id": "test", "iterations": 1, "A": {}, "B": {}, "arena": {"every_iterations": 2}}]},
@@ -110,6 +189,7 @@ def test_check_is_read_only_and_missing_telegram_prevents_launch(parent, tmp_pat
     monkeypatch.setattr(entry, "_launch_durable_workflow_controller", lambda *a, **kw: pytest.fail("launched"))
     result = entry.launch_operator_job(parameters(), runs_root=tmp_path, check_only=True)
     assert result["state"] == "VALIDATED" and not result["telegram_configured"]
+    assert result["operator_guide"]["repository_path"].endswith("ORCHESTRATOR_V2_LAUNCH_GUIDE.md")
     assert list(tmp_path.iterdir()) == []
     with pytest.raises(ValueError, match="Telegram is not configured"):
         entry.launch_operator_job(parameters(), runs_root=tmp_path)
@@ -129,9 +209,13 @@ def test_launch_pins_runtime_and_rejects_parameter_drift(parent, tmp_path, monke
     monkeypatch.setattr(entry, "_launch_durable_workflow_controller",
         lambda path, **kw: launches.append((path, kw, json.loads(os.environ[PERMIT_ENV]))) or {"state": "STARTED"})
     entry.launch_operator_job(parameters(), runs_root=tmp_path)
+    guide_path = tmp_path / "torus9/orchestration/jobs/five-iterations/operator-guide.json"
+    initial_guide = guide_path.read_bytes()
+    assert json.loads(initial_guide)["sha256"]
     monkeypatch.setattr(entry, "_entrypoint_code_identity", lambda: "commit-two")
     entry.launch_operator_job(parameters(), runs_root=tmp_path)
     assert pins == ["commit-one", "commit-one"]
+    assert guide_path.read_bytes() == initial_guide
     assert launches[1][1]["runtime"] == "commit-one"
     assert launches[1][2]["action_type"] == "workflow-controller"
     assert launches[1][2]["run_id"] == "five-iterations"
@@ -139,6 +223,10 @@ def test_launch_pins_runtime_and_rejects_parameter_drift(parent, tmp_path, monke
     altered["training"]["learning_rate"] = 1e-5
     with pytest.raises(ValueError, match="different parameters"):
         entry.launch_operator_job(altered, runs_root=tmp_path)
+    reseeded = copy.deepcopy(parameters())
+    reseeded['self_play'] = {'master_seed': 2026100501}
+    with pytest.raises(ValueError, match="different parameters"):
+        entry.launch_operator_job(reseeded, runs_root=tmp_path)
     assert len(launches) == 2
 
 
@@ -217,3 +305,87 @@ def test_controller_uses_pinned_working_directory_and_environment(tmp_path, monk
     assert PERMIT_KEY_ENV in calls[0][1]["env"]
     assert len(calls[0][1]["pass_fds"]) == 1
     assert "--startup-ready-fd" in calls[0][0]
+
+
+@pytest.mark.parametrize("batch_size", [32, 64, 128])
+def test_batch_size_reaches_effective_config(parent, batch_size):
+    raw = parameters()
+    raw["training"]["batch_size"] = batch_size
+    compiled = job.compile_job(raw, runs_root=".")
+    config = compiled["workflow"]["steps"][0]["config"]["effective_config"]
+    assert config["training"]["batch_size"] == batch_size
+
+
+def test_offline_named_arms_are_stable_and_experiment_only(parent, monkeypatch):
+    from gocube_golden.orchestrator_v2 import offline_replay
+    raw = parameters()
+    raw['training']['iterations'] = 0
+    raw['ab_tests'] = [{'id': 'batch', 'iterations': 2,
+        'offline_replay': ['source/M199', 'source/M200'],
+        'arms': {f'B{b}': {'batch_size': b, 'updates_per_iteration': 256 // b}
+                 for b in (64, 128, 256)}}]
+    normalized = job.parse_job(raw)
+    assert job.parse_job(normalized) == normalized
+    replay = [{'generation': g, 'buckets': [{}] * 6} for g in (199, 200)]
+    monkeypatch.setattr(offline_replay, 'resolve_offline_replay', lambda *a, **kw: replay)
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    assert len(steps) == 1 and steps[0]['action'] == 'experiment'
+    arms = steps[0]['config']['arms']
+    assert [a['arm_id'] for a in arms] == ['B64', 'B128', 'B256']
+    assert all(a['config']['extensions']['offline_ab_replay'] == replay for a in arms)
+    raw['training']['iterations'] = 1
+    with pytest.raises(ValueError, match='iterations=0'):
+        job.parse_job(raw)
+    raw['training'] = {'offline_replay': ['source/M199']}
+    with pytest.raises(ValueError, match='unknown fields'):
+        job.parse_job(raw)
+
+
+def test_ordinary_job_from_offline_checkpoint_does_not_inherit_offline_mode(parent):
+    config = parent.effective_config.config.to_dict()
+    config['extensions']['offline_ab_replay'] = [{'generation': 199, 'buckets': []}]
+    parent.effective_config.config = EffectiveConfig.from_dict(config)
+    raw = parameters()
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    assert 'offline_ab_replay' not in steps[0]['config']['effective_config']['extensions']
+    assert all('offline_ab_replay' not in arm['config']['extensions']
+               for arm in steps[1]['config']['arms'])
+
+
+def test_policy_surprise_compile_only_sampling_differs(parent, monkeypatch):
+    from gocube_golden.orchestrator_v2 import offline_replay
+    from gocube_golden import policy_surprise
+    raw = parameters(); raw['training']['iterations'] = 0
+    raw['ab_tests'] = [{'id':'sampling', 'iterations':2,
+        'offline_replay':['source/M199','source/M200'],
+        'arms':{'S50':{'replay_sampling':{'mode':'policy_surprise','weight':.5}},'U64':{}}}]
+    replay = [{'generation':g,'buckets':[{}]*6} for g in (199,200)]
+    monkeypatch.setattr(offline_replay,'resolve_offline_replay',lambda *a, **kw:replay)
+    monkeypatch.setattr(policy_surprise,'resolve_spec',lambda *a, **kw:{'fingerprint':'synthetic'})
+    arms = job.compile_job(raw,resolver=SimpleNamespace())['workflow']['steps'][0]['config']['arms']
+    assert [a['arm_id'] for a in arms] == ['S50','U64']
+    a,b = [arm['config'] for arm in arms]
+    assert a['replay'].pop('sampling') == {'mode':'policy_surprise','weight':.5}
+    assert a == b
+    assert job.parse_job(job.parse_job(raw)) == job.parse_job(raw)
+
+
+@pytest.mark.parametrize('setting', [{}, {'mode':'unknown'}, {'mode':'uniform','weight':.5},
+                                       {'mode':'policy_surprise','weight':float('nan')}])
+def test_invalid_replay_sampling_rejected(setting):
+    raw = parameters(); raw['training']['iterations']=0
+    raw['ab_tests']=[{'id':'sampling','iterations':1,'offline_replay':['source/M199'],
+                     'arms':{'S50':{'replay_sampling':setting},'U64':{}}}]
+    with pytest.raises(ValueError):
+        job.parse_job(raw)
+
+
+def test_new_ordinary_job_drops_inherited_sampling_and_cache(parent):
+    cfg=parent.effective_config.config.to_dict()
+    cfg['replay']['sampling']={'mode':'policy_surprise','weight':.5}
+    cfg['extensions'].update(offline_ab_replay=[{}],policy_surprise_spec={},policy_surprise_cache={})
+    parent.effective_config.config=EffectiveConfig.from_dict(cfg)
+    steps=job.compile_job(parameters(),resolver=SimpleNamespace())['workflow']['steps']
+    result=steps[0]['config']['effective_config']
+    assert 'sampling' not in result['replay']
+    assert not set(('offline_ab_replay','policy_surprise_spec','policy_surprise_cache')) & result['extensions'].keys()

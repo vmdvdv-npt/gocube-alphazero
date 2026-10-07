@@ -1,3 +1,5 @@
+Полное руководство по режимам и запуску: [ORCHESTRATOR_V2_LAUNCH_GUIDE.md](ORCHESTRATOR_V2_LAUNCH_GUIDE.md). Перед запуском прочитайте его для используемого code pin.
+
 # Запуск только из файла параметров
 
 Операторский вход V2 — `production_entrypoint job job.json`. Он проверяет простой
@@ -51,18 +53,90 @@ python -m gocube_golden.orchestrator_v2.production_entrypoint job job.json
 Для пяти итераций и арены в конце укажите оба значения равными пяти.
 Арена диагностическая: не выбирает автоматически новый режим обучения.
 
+Для непрерывного продолжения до штатного operator stop задайте
+`"iterations": null`. Job остаётся detached, а runner продолжает training и
+Arena по указанному cadence; `0` по-прежнему означает отсутствие training.
+Значение `null` нельзя использовать вместе с A/B тестами в том же job: такой
+training не завершится, чтобы передать им управление.
+
 `parent` — точное имя в графе артефактов, не путь к произвольному файлу.
 Поддерживаются обычные Torus9 5CH чекпойнты и завершённая адаптация update-2400
 с коми 1.5. Шестиканальные модели отклоняются. Коми, архитектура, состояние Adam,
 валидация и исходный replay наследуются проверяемым способом; Adam не сбрасывается.
-Текущий backend требует batch 64 и CUDA/16 workers (4 игры на worker).
+`training.batch_size` — положительное целое число позиций на optimizer step
+(по умолчанию 64). Backend требует CUDA/16 workers (4 игры на worker).
 Replay — последние N поколений без ограничения числа позиций.
 `training.gradient_clip` — положительное конечное число; значение передаётся в
 global gradient norm clipping learner-а. Если поле не указано, используется 1.0.
 Неизвестные поля и неподдерживаемые значения — ошибка до старта, включая A/B.
 Полей для скриптов, команд, отключения уведомлений или смены кода нет.
 
+## Переиспользование MCTS-дерева
+
+По умолчанию `tree_reuse` выключен: каждый ход получает новое дерево, как раньше.
+Для явного включения добавьте `"tree_reuse": true` в `self_play` и/или `arena`:
+
+```json
+"self_play": {"tree_reuse": true},
+"arena": {"every_iterations": 5, "games": 192, "mcts_simulations": 128, "tree_reuse": true}
+```
+
+Поле принимает только JSON boolean. Его можно задавать также в отдельных
+`arenas[]`, `winner_selection` и `ab_tests[].arena`; они наследуют значение
+из `arena`, если собственного значения нет. Новый job не наследует включённый
+reuse self-play от родителя: требуется явное включение в `self_play`.
+
+После каждого фактически сыгранного действия сохраняется соответствующее
+поддерево с visits/Q, priors и expanded nodes. Проверяется полный state key,
+включая superko history; отсутствие child или несовпадение состояния приводит
+к новому дереву. В self-play используется фактически sampled action. В Arena
+каждая партия хранит отдельные деревья кандидата и reference; оба продвигаются
+после каждого хода, включая ход противника. Между партиями деревья не передаются.
+Dirichlet noise обновляется на каждом self-play root из исходного neural policy,
+без повторного смешивания уже зашумлённых priors.
+
+Simulation cap остаётся числом **новых** симуляций за ход. При ON root visits
+и policy target учитывают также накопленные симуляции поддерева, поэтому сумма
+root visits может превышать cap текущего хода (включая PCR). Режим входит в
+search fingerprint, effective config, self-play contract identity и telemetry;
+исторические OFF search fingerprints сохраняются.
+
+Для внутренних V2 effective configs используются `self_play.tree_reuse` и
+`arena.tree_reuse`; Arena profile ID при ON содержит `|tree_reuse=true`.
+Это относится также к Cube V2, использующему общий Golden PUCT.
+Для отдельного synchronous search используйте `SearchSettings(tree_reuse=True)`
+и вызывайте `advance_root(action, resulting_state)` после каждого реального хода;
+при новой партии вызывайте `reset_tree()` или создавайте новый searcher.
+Cooperative sessions одной партии получают один `SearchTree`, отдельный для
+каждой модели. Изменение режима оформляется новым job; работающий запуск не меняется.
+
 ## Playout Cap Randomization (PCR)
+
+### Seed self-play
+
+В объекте `self_play` можно задать `"master_seed": 2026100501` — целое
+неотрицательное число (включая 0; boolean, дроби и `null` отклоняются).
+Поле работает и с fixed, и с PCR, например:
+
+```json
+"self_play": {
+  "master_seed": 2026100501,
+  "search_mode": "pcr",
+  "pcr": {
+    "cheap_simulations": 100,
+    "full_simulations": 500,
+    "full_probability": 0.25
+  }
+}
+```
+
+Операторский seed записывается как `execution.selfplay_master_seed` в effective
+config и передаётся существующему self-play adapter. Он определяет seed партий,
+root noise и PCR full/cheap sampling. Если поле отсутствует, наследуется seed
+self-play родителя. Seed learner-а и состояние Adam сохраняются; seed арены
+этим полем не меняется. Поле применяется к основному обучению, A/B arms и обоим
+вариантам `winner_selection`. Seed входит в fingerprint и shard identity;
+изменение seed требует нового `run_id`, а не правки уже работающего запуска.
 
 Готовый пример без запуска: `configs/operator/torus9-pcr-100-500.json`.
 В простом операторском JSON добавьте отдельный объект:
@@ -106,6 +180,39 @@ Raw и новый replay сохраняются в существующем line
 Доля full в маленьком shard может отличаться от заданной вероятности.
 
 ## A/B
+
+### Автоматическое продолжение от победителя двух готовых чекпойнтов
+
+Вместо `parent` задайте `winner_selection`. Например:
+
+```json
+"winner_selection": {
+  "candidate": "source-lineage/M249",
+  "reference": "source-lineage/M246",
+  "games": 192,
+  "mcts_simulations": 200
+}
+```
+
+Сначала штатный workflow V2 проводит эту арену, сохраняет выбор победителя,
+затем запускает обычный continuous runner в новой линии с именем `run_id`.
+Остальные `training`, `self_play` и `arena` задают параметры продолжения.
+Бюджет `winner_selection.mcts_simulations` относится только к первой арене:
+например, `arena.mcts_simulations: 64` оставляет последующие арены по 64 sims.
+При победе M246 новые поколения начинаются с M247; при победе M249 — с M250.
+Старая линия и её чекпойнты сохраняются. Adam и исходный replay наследуются
+от выбранного родителя; обе возможные конфигурации проверяются до старта арены.
+
+Выбирается сторона с большим числом побед. Ничья, невалидный результат,
+технические партии, неполный набор игр или несовпадение identity останавливают
+workflow в `STOPPED`, без запуска обучения. Дальнейшее решение принимает
+оператор новым job. Выбор и SHA чекпойнта сохраняются в состоянии шага `winner`;
+возобновление прерванного обучения не повторяет завершённую арену и выбор.
+
+`training.iterations` должен быть положительным числом или `null` для работы
+до мягкой остановки. `parent` и `ab_tests` вместе с `winner_selection` запрещены.
+Обычные A/B-тесты параметров ниже сохраняют прежнее поведение.
+Готовый пример: `configs/operator/torus9-arena-winner-continuation.json`.
 
 Добавьте, например:
 
@@ -163,3 +270,45 @@ Telegram берётся из стандартного `~/.config/gocube-alphazer
 `AGENTS.md` — инструкция агенту, не разграничение прав ОС. Правило запрещает
 агенту менять реализацию без отдельного разрешения, но не блокирует запись в
 файлы технически. Защита GitHub и CODEOWNERS по просьбе пользователя не добавляются.
+
+## Offline A/B и A/B/C на существующем replay
+
+Только в `ab_tests` доступно поле `offline_replay`: список зарегистрированных
+checkpoint selectors, чьи fresh/rolling replay-манифесты являются входами каждой
+iteration. Checkpoints должны образовывать последовательную цепочку от `parent`.
+`training.iterations` должен быть 0; обычное обучение эту опцию не принимает.
+Новые self-play игры не генерируются. SHA манифестов и shards проверяются до
+старта и при чтении. Исторические окна replay используются целиком, включая
+предшествующие поколения, а не только fresh data.
+
+Для offline теста можно указать `arms` с двумя или более именованными ветками
+вместо `A`/`B`. Все ветки стартуют от одного parent с Adam state, после обучения
+выполняется полный round-robin с одинаковыми arena settings, seed, paired starts
+и color swap. Арены диагностические; победитель не продолжает production.
+
+```json
+"training": {"iterations": 0, "learning_rate": 0.000025,
+             "gradient_clip": 8.0, "replay_generations": 5},
+"ab_tests": [{
+  "id": "batch", "iterations": 5,
+  "offline_replay": ["source/M256", "source/M257", "source/M258", "source/M259", "source/M260"],
+  "arms": {
+    "B64": {"batch_size": 64, "updates_per_iteration": 2560},
+    "B128": {"batch_size": 128, "updates_per_iteration": 1280},
+    "B256": {"batch_size": 256, "updates_per_iteration": 640}
+  },
+  "arena": {"games": 192, "mcts_simulations": 64, "tree_reuse": true}
+}]
+```
+
+Используйте реальные selectors: поколения могут относиться к разным lineage.
+В `runs/torus9/experiments/<experiment_id>/state.json` сохраняются результаты
+всех пар и ссылки на независимые output lineages. Production parent и replay
+не копируются и не изменяются. Метрики каждой iteration содержат losses,
+validation, wall time/минуты, optimizer updates/sec, samples/sec и CUDA allocator
+peak VRAM. Время измеряет optimizer loop с синхронизацией CUDA, включая
+публикацию progress, без replay loading, validation и checkpoint I/O.
+
+Sampler сохранён: `random.Random(training_seed + ordinary_update)` на каждый
+update. При разных batch/числе updates одинаковый seed не означает одинаковый
+поток sample IDs. Распределение остаётся uniform-over-positions с replacement.

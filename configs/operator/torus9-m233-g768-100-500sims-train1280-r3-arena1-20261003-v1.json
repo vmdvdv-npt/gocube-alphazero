@@ -1,0 +1,34 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "torus9-m233-g768-100-500sims-train1280-r3-arena1-20261003-v1",
+  "topology": "torus9",
+  "parent": "torus9-m214-g768-s200-train1280-r3-arena1-20260930-v1/M233",
+  "training": {
+    "iterations": null,
+    "games_per_iteration": 768,
+    "mcts_simulations": 200,
+    "learning_rate": 0.0001,
+    "updates_per_iteration": 1280,
+    "batch_size": 64,
+    "gradient_clip": 8.0,
+    "replay_generations": 3
+  },
+  "arena": {
+    "every_iterations": 1,
+    "games": 192,
+    "mcts_simulations": 64
+  },
+  "execution": {
+    "device": "cuda",
+    "workers": 16
+  },
+  "ab_tests": [],
+  "self_play": {
+    "search_mode": "pcr",
+    "pcr": {
+      "cheap_simulations": 100,
+      "full_simulations": 500,
+      "full_probability": 0.25
+    }
+  }
+}

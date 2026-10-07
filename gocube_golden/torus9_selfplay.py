@@ -45,7 +45,10 @@ from .torus9_contract import (
     load_torus9_current_profile,
 )
 from . import torus9_monolith as _t9
-from .search import SearchEvaluationRequest, SequentialPUCTSession
+from .search import (
+    SearchEvaluationRequest, SearchTree, SequentialPUCTSession,
+    search_implementation_fingerprint, search_semantics,
+)
 
 
 torch = _t9.torch
@@ -104,6 +107,7 @@ class _Torus9CooperativeGame:
         self.technical: str | None = None
         self.error: str | None = None
         self._session: SequentialPUCTSession | None = None
+        self._tree = SearchTree(context.contract.tree_reuse)
         self._root_noise: _t9.Torus9RootNoiseEvaluator | None = None
         self._nn_evaluations = 0
         self._search_mode = 'fixed'
@@ -155,6 +159,7 @@ class _Torus9CooperativeGame:
             adapter=_t9.GoldenSearchAdapter(),
             seed=search_seed,
             evaluation_transform=self._root_noise.transform if self._root_noise is not None else None,
+            tree=self._tree,
         )
 
     def advance(self) -> InferenceNeed | GameFinished:
@@ -202,6 +207,7 @@ class _Torus9CooperativeGame:
                     self.technical = "ERROR_ILLEGAL_PLAYER_ACTION"
                     self.error = f"{type(exc).__name__}: {exc}"
                     return GameFinished(self._finish())
+                self._tree.advance(action, self.state)
                 self._session = None
                 self._root_noise = None
                 if self.state.is_terminal:
@@ -469,6 +475,11 @@ def run_torus9_selfplay_games(
         max_batch_rows=int(raw_telemetry.get("max_inference_batch_rows", 0)),
     )
     raw_telemetry.update(reference_fields)
+    raw_telemetry.update(
+        tree_reuse=contract.tree_reuse,
+        search_semantics=search_semantics(contract.tree_reuse),
+        search_implementation_fingerprint=search_implementation_fingerprint(contract.tree_reuse),
+    )
     raw_telemetry["performance_reference"] = performance_reference
 
     compatibility_inference = {
@@ -496,6 +507,10 @@ def run_torus9_selfplay_games(
     }
     if inference_telemetry is not None:
         inference_telemetry.update(compatibility_inference)
+        inference_telemetry.update(
+            tree_reuse=contract.tree_reuse,
+            search_implementation_fingerprint=search_implementation_fingerprint(contract.tree_reuse),
+        )
         inference_telemetry["performance_reference"] = performance_reference
     if execution_activity is not None:
         execution_activity.update(compatibility_execution)

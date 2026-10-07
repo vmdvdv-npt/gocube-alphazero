@@ -212,6 +212,7 @@ _ARENA_SEARCH_FIELDS = frozenset(
         "mcts_simulations",
         "cpuct",
         "fpu",
+        "tree_reuse",
         "watchdog",
         "technical_move_limit",
         "komi",
@@ -281,6 +282,8 @@ def _arena_search(raw: Mapping[str, object], config: ArenaExecutionConfig) -> di
             values[key] = nested[key]
         elif key in raw:
             values[key] = raw[key]
+    if type(values.get("tree_reuse", False)) is not bool:
+        raise ValueError("Arena search.tree_reuse must be a boolean")
     if "simulations" not in values and "mcts_simulations" in values:
         values["simulations"] = values.pop("mcts_simulations")
     elif "simulations" in values and "mcts_simulations" in values:
@@ -355,9 +358,13 @@ def _torus_profile_with_search(profile: str, search: Mapping[str, object]) -> st
         )
     )
     channel_suffix = "|5ch" if getattr(parsed, "observation_shape", (6,))[0] == 5 else ""
+    reuse = search.get("tree_reuse", getattr(parsed, "tree_reuse", False))
+    if type(reuse) is not bool:
+        raise ValueError("Arena search.tree_reuse must be a boolean")
+    reuse_suffix = "|tree_reuse=true" if reuse else ""
     return (
         f"torus9|komi={komi:g}|simulations={simulations}"
-        f"|cpuct={cpuct:g}|fpu={fpu:g}|watchdog={watchdog}{channel_suffix}"
+        f"|cpuct={cpuct:g}|fpu={fpu:g}|watchdog={watchdog}{channel_suffix}{reuse_suffix}"
     )
 
 
@@ -414,6 +421,7 @@ def _standalone_arena_request(raw: Mapping[str, object], resolver: ArtifactResol
             fpu=float(search.get("fpu", defaults.fpu)),
             watchdog=int(search.get("watchdog", defaults.watchdog)),
             deterministic_tie_break=True,
+            tree_reuse=search.get("tree_reuse", defaults.tree_reuse),
         )
         profile = type(default_profile)(
             size=int(getattr(default_profile, "size")),
@@ -1221,12 +1229,14 @@ def _require_operator_workflow_controller(payload: Mapping[str, object]) -> Work
 
 
 def _require_committed_job_code() -> None:
+    from .operator_guide import GUIDE_PATH
+
     dirty = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all", "--", "gocube_golden", "tools"],
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", "gocube_golden", "tools", GUIDE_PATH],
         cwd=_repo_root(), check=True, capture_output=True, text=True,
     ).stdout.strip()
     if dirty:
-        raise ValueError("Operator jobs require committed implementation code; commit/review code changes before launching")
+        raise ValueError("Operator jobs require committed implementation code and launch guide; commit/review changes before launching")
 
 
 def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path | None = None,
@@ -1236,12 +1246,15 @@ def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path 
     from .immutable_runtime import ImmutableRuntimeManager
     from ..notifications.telegram import load_config
 
+    from .operator_guide import announce_guide
+
+    guide = announce_guide()
     normalized = parse_job(payload)
     root = Path(runs_root or RUNS_ROOT).resolve()
     resolved = compile_job(payload, runs_root=root)
     configured = load_config() is not None
     if check_only:
-        return {"state": "VALIDATED", "telegram_configured": configured,
+        return {"state": "VALIDATED", "operator_guide": guide, "telegram_configured": configured,
                 "parameters": normalized, "resolved": resolved}
     if not configured:
         raise ValueError("Telegram is not configured. Configure the standard telegram.env before launching; "
@@ -1262,6 +1275,7 @@ def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path 
                 raise ValueError(f"Operator job {normalized['run_id']!r} already has different parameters; use a new run_id")
         commit = _entrypoint_code_identity()
         pin_path = plan_root / "execution-commit.json"
+        new_registration = not pin_path.exists()
         if pin_path.exists():
             commit = str(load_v2_config(pin_path)["commit"])
         runtime = ImmutableRuntimeManager(_repo_root()).ensure(commit)
@@ -1270,6 +1284,8 @@ def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path 
             path = plan_root / name
             if not path.exists():
                 atomic_write_text(path, canonical_json(value) + "\n")
+        if new_registration:
+            atomic_write_text(plan_root / "operator-guide.json", canonical_json(guide) + "\n")
         resolved_spec = _workflow_spec_from_payload(resolved)
         with _authority(
             mode="workflow",
@@ -1404,8 +1420,13 @@ def drain_notifications(root: str | Path, *, timeout: float = 7.0) -> dict[str, 
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    from .operator_guide import GUIDE_PATH, announce_guide, read_guide
+
+    parser = argparse.ArgumentParser(description=__doc__,
+        epilog=f"Read {GUIDE_PATH} before launching. Show it with: production_entrypoint guide")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    guide = subparsers.add_parser("guide", help="show the versioned guide to all supported V2 modes")
+    guide.set_defaults(kind="guide")
     telegram = subparsers.add_parser("telegram-test", help="send one explicit transport test")
     telegram.set_defaults(kind="telegram")
     drain = subparsers.add_parser("notifications-drain", help="retry one saved notification root")
@@ -1421,6 +1442,9 @@ def main(argv: list[str] | None = None) -> int:
     job.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     job.add_argument("--check", action="store_true", help="validate and show the resolved plan without writes or computation")
     job.set_defaults(kind="job")
+    audit = subparsers.add_parser("b64-perf-audit", help="bounded in-memory B64 diagnostic; no artifact publication")
+    audit.add_argument("config", type=Path)
+    audit.set_defaults(kind="b64-perf-audit")
     for name in ("continuous", "performance-tuning", "experiment", "komi-calibration", "workflow"):
         command = subparsers.add_parser(name, help=f"legacy-compatible V2 {name} JSON plan")
         command.add_argument("config", type=Path)
@@ -1431,6 +1455,11 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--startup-ready-fd", type=int, help=argparse.SUPPRESS)
         command.set_defaults(kind=name)
     args = parser.parse_args(argv)
+    if args.kind == "guide":
+        print(read_guide())
+        return 0
+    if args.kind != "job":
+        announce_guide()
     if args.kind == "telegram":
         try:
             telegram_test()
@@ -1453,7 +1482,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     payload = load_v2_config(args.config)
     result: object
-    if args.kind == "job":
+    if args.kind == "b64-perf-audit":
+        with _authority(mode="performance-tuning", topology="torus9", run_id="b64-perf-audit"):
+            with _child_execution_permit(action_type="training", topology="torus9",
+                                         run_id="b64-perf-audit", code_identity=_entrypoint_code_identity()):
+                subprocess.run([sys.executable, "-m", "gocube_golden.b64_perf_audit", str(args.config.resolve())], check=True)
+        result = {"output": payload["output"]}
+    elif args.kind == "job":
         result = launch_operator_job(payload, runs_root=args.runs_root, check_only=args.check)
     elif args.kind == "run":
         result = run_spec(payload, runs_root=args.runs_root)

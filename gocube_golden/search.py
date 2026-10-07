@@ -34,6 +34,19 @@ SEARCH_IMPLEMENTATION_FINGERPRINT = "sha256:" + hashlib.sha256(
 ).hexdigest()
 
 
+def search_semantics(tree_reuse: bool = False) -> dict[str, object]:
+    """Effective semantics; the module-level constants describe default OFF."""
+    if type(tree_reuse) is not bool:
+        raise ValueError("tree_reuse must be a boolean")
+    return {**SEARCH_SEMANTICS, "tree_reuse": tree_reuse}
+
+
+def search_implementation_fingerprint(tree_reuse: bool = False) -> str:
+    return "sha256:" + hashlib.sha256(
+        json.dumps(search_semantics(tree_reuse), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 class SearchError(RuntimeError):
     pass
 
@@ -107,6 +120,45 @@ class _Node:
     expanded: bool = False
     edges: dict[int | str, _Edge] = field(default_factory=dict)
     legal_context: LegalActionContext | None = None
+    evaluation: Evaluation | None = None
+
+
+class SearchTree:
+    """One game and one evaluator's tree. Call reset when starting a new game.
+
+    Only explicit real actions advance the root. No descendant lookup or
+    transposition matching can accidentally reuse another game's position.
+    """
+
+    def __init__(self, tree_reuse: bool = False) -> None:
+        search_semantics(tree_reuse)  # Strict boolean validation.
+        self.tree_reuse = tree_reuse
+        self.root: _Node | None = None
+
+    def reset(self) -> None:
+        self.root = None
+
+    def prepare_root(self, state: SearchPosition) -> _Node:
+        if not self.tree_reuse:
+            self.reset()
+            return _Node(state)
+        if self.root is None or self.root.state.state_key != state.state_key:
+            self.root = _Node(state)
+        return self.root
+
+    def advance(self, action: int | str, state: SearchPosition) -> bool:
+        """Reroot after a real move, checking the complete rules/history key.
+
+        Missing children or mismatched states fall back to an unexpanded root.
+        The boolean reports whether an existing subtree was retained.
+        """
+        edge = self.root.edges.get(action) if self.root is not None else None
+        child = edge.child if edge is not None else None
+        if self.tree_reuse and child is not None and child.state.state_key == state.state_key:
+            self.root = child
+            return True
+        self.root = _Node(state) if self.tree_reuse else None
+        return False
 
 
 @dataclass(frozen=True)
@@ -220,10 +272,14 @@ class _PUCTCore:
         *,
         adapter: SearchAdapter | None = None,
         trace: list[dict[str, object]] | None = None,
+        tree: SearchTree | None = None,
     ) -> None:
         self.settings = settings or SearchSettings()
         self.adapter: SearchAdapter = adapter or GoldenSearchAdapter()
         self.trace = trace
+        self.tree = tree if tree is not None else SearchTree(self.settings.tree_reuse)
+        if self.tree.tree_reuse != self.settings.tree_reuse:
+            raise ValueError("Search settings and tree reuse mode must match")
         self._evaluator: Evaluator | None = None
         self._evaluator_calls = 0
         self._rng = random.Random(0)
@@ -235,9 +291,16 @@ class _PUCTCore:
         increment("leaf_expansions")
         return context
 
-    def _expand(self, node: _Node, evaluation: Evaluation, context: LegalActionContext) -> float:
+    def _expand(
+        self, node: _Node, evaluation: Evaluation, context: LegalActionContext,
+        transform: Callable[[Evaluation, SearchPosition, LegalActionContext], Evaluation] | None = None,
+    ) -> float:
         if self.adapter.is_terminal(node.state):
             return self.adapter.terminal_utility(node.state)
+        if self.settings.tree_reuse:
+            node.evaluation = evaluation
+        if transform is not None:
+            evaluation = transform(evaluation, node.state, context)
         utility = wdl_to_side_to_move_utility(evaluation.wdl)
         legal = context.actions
         if not legal:
@@ -253,6 +316,12 @@ class _PUCTCore:
                 "legal_actions": legal,
             })
         return utility
+
+    def advance_root(self, action: int | str, state: SearchPosition) -> bool:
+        return self.tree.advance(action, state)
+
+    def reset_tree(self) -> None:
+        self.tree.reset()
 
     def _evaluate_and_expand(self, node: _Node) -> float:
         context = self._prepare_leaf(node)
@@ -359,6 +428,7 @@ class _PUCTCore:
             evaluator_calls=evaluator_calls,
             root_q=root_q,
             legal_action_mask=root.legal_context.action_mask,
+            implementation_fingerprint=search_implementation_fingerprint(self.settings.tree_reuse),
         )
 
     def search(
@@ -375,8 +445,9 @@ class _PUCTCore:
         self._evaluator = evaluator
         self._evaluator_calls = 0
         self._rng = random.Random(int(seed))
-        root = _Node(state)
-        self._evaluate_and_expand(root)
+        root = self.tree.prepare_root(state)
+        if not root.expanded:
+            self._evaluate_and_expand(root)
         for _ in range(self.settings.simulations):
             increment("simulations")
             self._simulate(root)
@@ -420,16 +491,20 @@ class SequentialPUCTSession(_PUCTCore):
         seed: int = 0,
         trace: list[dict[str, object]] | None = None,
         evaluation_transform: Callable[[Evaluation, SearchPosition, LegalActionContext], Evaluation] | None = None,
+        tree: SearchTree | None = None,
     ) -> None:
         if state.is_terminal:
             raise SearchError("Search cannot be started from a terminal Golden state")
-        super().__init__(settings, adapter=adapter, trace=trace)
+        super().__init__(settings, adapter=adapter, trace=trace, tree=tree)
         self._seed = int(seed)
         self._transform = evaluation_transform
         self._pending: SearchEvaluationRequest | None = None
         self._result: SearchResult | None = None
         self._generator = self._run(state)
-        self._read_yield(next(self._generator))
+        try:
+            self._read_yield(next(self._generator))
+        except StopIteration as stopped:
+            self._read_yield(stopped.value)
 
     @property
     def result(self) -> SearchResult | None:
@@ -444,15 +519,26 @@ class SequentialPUCTSession(_PUCTCore):
         increment("searches")
         rng = random.Random(self._seed)
         self._rng = rng
-        root = _Node(state)
-        root_context = self._prepare_leaf(root)
-        if root_context is None:
-            raise SearchError("Search cannot be started from a terminal Golden state")
-        evaluation = yield SearchEvaluationRequest(state, root_context)
-        if self._transform is not None:
-            evaluation = self._transform(evaluation, state, root_context)
-        self._expand(root, evaluation, root_context)
-        evaluator_calls = 1
+        root = self.tree.prepare_root(state)
+        evaluator_calls = 0
+        if not root.expanded:
+            root_context = self._prepare_leaf(root)
+            if root_context is None:
+                raise SearchError("Search cannot be started from a terminal Golden state")
+            evaluation = yield SearchEvaluationRequest(state, root_context)
+            self._expand(root, evaluation, root_context, self._transform)
+            evaluator_calls += 1
+        else:
+            # Fresh root noise uses the original neural policy, never an
+            # already noisy prior. Keep all visits/Q/children/expansions.
+            if root.evaluation is None or root.legal_context is None:
+                raise SearchError("Reused root lacks its evaluation/context")
+            evaluation = root.evaluation
+            if self._transform is not None:
+                evaluation = self._transform(evaluation, state, root.legal_context)
+            priors = _policy_for_legal(evaluation, state, root.legal_context.actions, self.adapter)
+            for action, edge in root.edges.items():
+                edge.prior = priors[action]
         for _ in range(self.settings.simulations):
             increment("simulations")
             path, leaf = self._traverse(root)
@@ -461,9 +547,7 @@ class SequentialPUCTSession(_PUCTCore):
                 utility = self.adapter.terminal_utility(leaf.state)
             else:
                 evaluation = yield SearchEvaluationRequest(leaf.state, context)
-                if self._transform is not None:
-                    evaluation = self._transform(evaluation, leaf.state, context)
-                utility = self._expand(leaf, evaluation, context)
+                utility = self._expand(leaf, evaluation, context, self._transform)
                 evaluator_calls += 1
             self._backup(path, utility)
         if state.state_key != before:

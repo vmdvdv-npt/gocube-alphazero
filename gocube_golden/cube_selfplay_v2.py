@@ -58,7 +58,7 @@ from .inference import BatchedPolicyWDLInferenceOwner
 from .provenance import CodeIdentity, capture_code_identity, derive_seed
 from .rules import IllegalMoveError, LegalActionContext, apply_action, prepare_legal_actions
 from .scoring import score_terminal
-from .search import Evaluation, SearchError, SearchEvaluationRequest, SearchResult, SequentialPUCTSession
+from .search import Evaluation, SearchError, SearchEvaluationRequest, SearchResult, SearchTree, SequentialPUCTSession
 from .selfplay_engine import (
     CooperativeSelfPlayAdapter,
     GameFinished,
@@ -343,6 +343,7 @@ class _CubeCooperativeGame:
         self.neutral_points: int | None = None
         self.margin_black: float | None = None
         self._session: SequentialPUCTSession | None = None
+        self._tree = SearchTree(context.contract.tree_reuse)
         self._nn_evaluations = 0
 
     @staticmethod
@@ -431,6 +432,7 @@ class _CubeCooperativeGame:
             adapter=self.search_adapter,
             seed=search_seed,
             evaluation_transform=transform,
+            tree=self._tree,
         )
 
     def advance(self) -> InferenceNeed | GameFinished:
@@ -472,6 +474,7 @@ class _CubeCooperativeGame:
                 )
                 self.trace.append(canonical_action)
                 self.position = self.search_adapter.apply_action(self.position, internal_action)
+                self._tree.advance(internal_action, self.position)
                 self._session = None
                 if self.position.is_terminal:
                     self._mark_formal_terminal()

@@ -63,11 +63,25 @@ def _integer(value, label, minimum=1):
     return value
 
 
+def _tree_reuse(value, label):
+    if type(value) is not bool:
+        raise ValueError(f"{label} must be a boolean")
+    return value
+
+
 def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
-    allowed = set(TRAINING_DEFAULTS) - (set() if allow_iterations else {"iterations"})
+    allowed = (set(TRAINING_DEFAULTS) | {"replay_sampling"}) - (set() if allow_iterations else {"iterations"})
     result = {**defaults, **_object(value, allowed, "training")}
     for key, number in result.items():
-        if key == "learning_rate":
+        if key == "replay_sampling":
+            from ..policy_surprise import sampling_setting
+            result[key] = sampling_setting(number)
+            continue
+        if key == "iterations" and number is None:
+            # The public operator job uses JSON null for the V2 continuous
+            # runner's existing unbounded generation budget.
+            continue
+        elif key == "learning_rate":
             if type(number) not in (float, int) or not math.isfinite(number) or number <= 0:
                 raise ValueError("learning_rate must be a finite positive number")
         elif key == "gradient_clip":
@@ -75,14 +89,15 @@ def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
                 raise ValueError("gradient_clip must be a finite positive number")
         else:
             _integer(number, key, minimum=0 if key == "iterations" else 1)
-    if result["batch_size"] != 64:
-        raise ValueError("Current Torus9 5CH driver supports batch_size=64 only")
     return result
 
 
 def _arena(value, *, defaults=ARENA_DEFAULTS):
-    result = {**defaults, **_object(value, ARENA_DEFAULTS, "arena")}
+    result = {**defaults, **_object(value, {*ARENA_DEFAULTS, "tree_reuse"}, "arena")}
     for key, number in result.items():
+        if key == "tree_reuse":
+            _tree_reuse(number, "arena.tree_reuse")
+            continue
         _integer(number, "arena." + key)
     if result["games"] % 2 or result["games"] < 64:
         raise ValueError("Production arena requires an even games count >= 64")
@@ -96,7 +111,7 @@ def _arena_runs(value, *, defaults):
         raise ValueError("arenas must be a list")
     normalized = []
     names = set()
-    allowed = {"id", "candidate", "reference", "games", "mcts_simulations", "master_seed"}
+    allowed = {"id", "candidate", "reference", "games", "mcts_simulations", "master_seed", "tree_reuse"}
     for index, raw_item in enumerate(value):
         item = _object(raw_item, allowed, f"arenas[{index}]")
         arena_id = _name(item.get("id"), f"arenas[{index}].id")
@@ -117,6 +132,7 @@ def _arena_runs(value, *, defaults):
             f"arenas[{index}].master_seed",
             minimum=0,
         )
+        reuse = _tree_reuse(item.get("tree_reuse", defaults.get("tree_reuse", False)), f"arenas[{index}].tree_reuse")
         normalized.append(
             {
                 "id": arena_id,
@@ -125,6 +141,7 @@ def _arena_runs(value, *, defaults):
                 "games": games,
                 "mcts_simulations": simulations,
                 "master_seed": seed,
+                **({"tree_reuse": reuse} if "tree_reuse" in item or "tree_reuse" in defaults else {}),
             }
         )
     return normalized
@@ -135,7 +152,7 @@ def parse_job(value):
         value,
         {
             "schema", "run_id", "topology", "parent", "training", "arena",
-            "execution", "ab_tests", "arenas", "self_play",
+            "execution", "ab_tests", "arenas", "self_play", "winner_selection",
         },
         "job",
     )
@@ -150,10 +167,27 @@ def parse_job(value):
 
     self_play = None
     if 'self_play' in raw:
-        self_play = _object(raw['self_play'], {'search_mode', 'pcr'}, 'self_play')
+        self_play = _object(raw['self_play'], {'search_mode', 'pcr', 'master_seed', 'tree_reuse'}, 'self_play')
+        if 'tree_reuse' in self_play:
+            _tree_reuse(self_play['tree_reuse'], 'self_play.tree_reuse')
+        if 'master_seed' in self_play:
+            _integer(self_play['master_seed'], 'self_play.master_seed', minimum=0)
         resolve_search_mode(self_play)
     arena = _arena(raw.get("arena", {}))
     arenas = _arena_runs(raw.get("arenas", []), defaults=arena)
+    winner_selection = None
+    if raw.get("winner_selection") is not None:
+        selection = _object(raw["winner_selection"],
+                            {"candidate", "reference", "games", "mcts_simulations", "master_seed", "tree_reuse"},
+                            "winner_selection")
+        winner_selection = _arena_runs(
+            [{"id": "winner-selection", **selection}], defaults=arena)[0]
+        if winner_selection["candidate"] == winner_selection["reference"]:
+            raise ValueError("winner_selection must compare two distinct checkpoints")
+        if raw.get("parent") is not None:
+            raise ValueError("winner_selection replaces parent; do not specify both")
+        if raw.get("ab_tests"):
+            raise ValueError("winner_selection cannot be combined with ab_tests")
 
     # Arena-only jobs must not accidentally inherit the historical five-iteration
     # training default merely because the training section was omitted.
@@ -164,6 +198,10 @@ def parse_job(value):
         else TRAINING_DEFAULTS
     )
     training = _training(raw.get("training", {}), defaults=training_defaults)
+    if "replay_sampling" in training:
+        raise ValueError("replay_sampling must be an offline arm setting")
+    if winner_selection is not None and training["iterations"] == 0:
+        raise ValueError("winner_selection requires positive training iterations or null")
 
     execution = {
         **EXECUTION_DEFAULTS,
@@ -177,46 +215,72 @@ def parse_job(value):
         raise ValueError("ab_tests must be a list")
     normalized_tests, names = [], set()
     for test in tests:
-        item = _object(test, {"id", "iterations", "A", "B", "arena"}, "ab_test")
+        item = _object(test, {"id", "iterations", "A", "B", "arena", "arms", "offline_replay"}, "ab_test")
         name = _name(item.get("id"), "ab_test.id")
         if name in names:
             raise ValueError("Duplicate A/B test id")
         names.add(name)
         iterations = _integer(item.get("iterations"), "ab_test.iterations")
-        if "A" not in item or "B" not in item:
+        offline = item.get("offline_replay")
+        arm_values = item.get("arms")
+        if arm_values is not None:
+            if offline is None or "A" in item or "B" in item:
+                raise ValueError("named arms are supported only for offline A/B tests")
+            if not isinstance(arm_values, dict) or len(arm_values) < 2:
+                raise ValueError("offline arms must contain at least two variants")
+            for arm_name in arm_values:
+                _name(arm_name, "offline arm id")
+        else:
+            arm_values = {arm: item.get(arm) for arm in ("A", "B")}
+        if offline is not None:
+            if training["iterations"] != 0:
+                raise ValueError("offline A/B tests require training.iterations=0")
+            if not isinstance(offline, list) or len(offline) != iterations:
+                raise ValueError("offline_replay must specify one checkpoint per iteration")
+            offline = [_selector(v, "offline_replay checkpoint") for v in offline]
+        if arm_values is None or any(v is None for v in arm_values.values()):
             raise ValueError("Every A/B test must specify A and B training overrides")
         arms = {
             arm: _training(
-                item[arm],
+                arm_values[arm],
                 defaults={**training, "iterations": iterations},
                 allow_iterations=False,
             )
-            for arm in ("A", "B")
+            for arm in arm_values
         }
         for arm in arms.values():
             arm.pop("iterations")
+            if "replay_sampling" in arm and offline is None:
+                raise ValueError("replay_sampling is supported only for offline experiments")
         test_arena = _object(
-            item.get("arena", {}), {"games", "mcts_simulations"}, "ab_test.arena"
+            item.get("arena", {}), {"games", "mcts_simulations", "tree_reuse"}, "ab_test.arena"
         )
         checked_arena = _arena(test_arena, defaults=arena)
         checked_arena.pop("every_iterations")
         normalized_tests.append(
-            {"id": name, "iterations": iterations, **arms, "arena": checked_arena}
+            {"id": name, "iterations": iterations, "arena": checked_arena,
+             **({"offline_replay": offline, "arms": arms} if offline is not None else arms)}
         )
 
+    if training["iterations"] is None and normalized_tests:
+        raise ValueError("Unbounded training cannot be followed by A/B tests")
+
     parent = raw.get("parent")
-    needs_parent = training["iterations"] > 0 or bool(normalized_tests)
-    if needs_parent:
+    training_requested = training["iterations"] != 0
+    needs_parent = training_requested or bool(normalized_tests)
+    if needs_parent and winner_selection is None:
         parent = _selector(parent, "parent")
     elif parent is not None:
         parent = _selector(parent, "parent")
 
-    if training["iterations"] == 0 and not normalized_tests and not arenas:
+    if not training_requested and not normalized_tests and not arenas:
         raise ValueError(
             "Job has no work: specify training iterations, A/B tests, or arenas"
         )
 
     return {
+        **({"winner_selection": {k: v for k, v in winner_selection.items() if k != "id"}}
+           if winner_selection is not None else {}),
         **({"self_play": self_play} if self_play is not None else {}),
         "schema": SCHEMA,
         "run_id": raw["run_id"],
@@ -269,7 +333,12 @@ def _base_config(parent):
     """Inherit ordinary config, or bind the completed adaptation's replay."""
     effective = parent.effective_config.config
     if effective.extensions.get("training_driver") == DRIVER:
-        return effective.to_dict()
+        config = effective.to_dict()
+        # Offline replay is an experiment input, never an inherited training mode.
+        for key in ("offline_ab_replay", "policy_surprise_spec", "policy_surprise_cache"):
+            config["extensions"].pop(key, None)
+        config["replay"].pop("sampling", None)
+        return config
     root = parent.owner_root
     metadata_path = parent.path.with_suffix(".metadata.json")
     meta = json.loads(metadata_path.read_text())
@@ -345,13 +414,20 @@ def _base_config(parent):
     ).to_dict()
 
 
-def _effective(base, training, arena, self_play=None):
+def _effective(base, training, arena, self_play=None, offline=None):
     cfg = copy.deepcopy(base)
     # A new job defaults to fixed even when its parent used PCR.
     cfg['self_play'].pop('pcr', None)
     cfg['self_play'].pop('search_mode', None)
+    # Reuse always requires explicit opt-in for the new job.
+    cfg['self_play'].pop('tree_reuse', None)
     if self_play is not None:
-        cfg['self_play'].update(copy.deepcopy(self_play))
+        settings = copy.deepcopy(self_play)
+        if 'master_seed' in settings:
+            # The engine already owns this seed in the execution contract.
+            # Keep the learner seed and inherited Adam state unchanged.
+            cfg['execution']['selfplay_master_seed'] = settings.pop('master_seed')
+        cfg['self_play'].update(settings)
     cfg["self_play"].update(
         games_per_iteration=training["games_per_iteration"],
         mcts_simulations=training["mcts_simulations"],
@@ -362,6 +438,9 @@ def _effective(base, training, arena, self_play=None):
         optimizer_steps_per_iteration=training["updates_per_iteration"],
         gradient_clip=training["gradient_clip"],
     )
+    cfg["replay"].pop("sampling", None)
+    if "replay_sampling" in training:
+        cfg["replay"]["sampling"] = training["replay_sampling"]
     cfg["replay"].update(generations=training["replay_generations"], cap=None)
     cfg["execution"].update(EXECUTION_DEFAULTS)
     cfg["arena"] = {
@@ -375,10 +454,22 @@ def _effective(base, training, arena, self_play=None):
         "watchdog": 1000,
         "diagnostic_only": True,
         "gating": False,
+        **({"tree_reuse": arena["tree_reuse"]} if "tree_reuse" in arena else {}),
     }
+    if offline is not None:
+        cfg["extensions"]["offline_ab_replay"] = offline
     result = EffectiveConfig.from_dict(cfg)
     validate_config(result)
     return result.to_dict()
+
+
+def _offline_effective(base, training, arena, offline, self_play=None):
+    cfg = _effective(base, training, arena, self_play, offline=offline)
+    if offline is not None:
+        if any(len(row["buckets"]) != training["replay_generations"] for row in offline):
+            raise ValueError("offline replay window differs from requested replay_generations")
+        cfg["extensions"]["offline_ab_replay"] = offline
+    return cfg
 
 
 def _arena_execution(arena):
@@ -401,6 +492,7 @@ def _arena_profile(arena):
     return (
         f"torus9|komi=1.5|simulations={arena['mcts_simulations']}"
         "|cpuct=1.25|fpu=0|watchdog=1000|5ch"
+        + ("|tree_reuse=true" if arena.get("tree_reuse", False) else "")
     )
 
 
@@ -408,6 +500,7 @@ def _arena_step(job, item, candidate, reference, previous):
     arena = {
         "games": item["games"],
         "mcts_simulations": item["mcts_simulations"],
+        **({"tree_reuse": item["tree_reuse"]} if "tree_reuse" in item else {}),
     }
     step_id = "arena-" + item["id"]
     config = {
@@ -445,16 +538,47 @@ def compile_job(value, *, runs_root=None, resolver=None):
 
     parent = None
     base = None
-    if job["training"]["iterations"] > 0 or job["ab_tests"]:
-        parent = resolve_parent(job["parent"], resolver=resolver)
-        base = _base_config(parent)
-        if base["compatibility"].get("input_channels") != 5:
-            raise ValueError("Simple jobs cannot launch retired 6-channel training")
-
+    selection = job.get("winner_selection")
+    if selection is not None:
+        item = {"id": "winner-selection", **selection}
+        candidates = {}
+        for role in ("candidate", "reference"):
+            node = resolve_checkpoint(item[role], resolver=resolver)
+            _require_five_channel_checkpoint(node, "Winner selection " + role)
+            candidates[role] = node
+        step = _arena_step(job, item, candidates["candidate"], candidates["reference"], None)
+        steps.append(step)
+        choices = {}
+        for role, node in candidates.items():
+            effective = _effective(_base_config(node), job["training"], job["arena"], job.get("self_play"))
+            choices[role] = {"checkpoint": node.ref.to_dict(), "effective_config": effective}
+            ContinuousTrainingConfig(
+                parent_checkpoint=node.ref.to_dict(), lineage_id=job["run_id"],
+                effective_config=effective, generations=job["training"]["iterations"],
+                arena_cadence=job["arena"]["every_iterations"],
+                arena_config=_arena_execution(job["arena"]),
+                arena_profile=_arena_profile(job["arena"]),
+            )
+        steps.append({"step_id": "winner", "action": "select",
+                      "dependencies": [step["step_id"]], "config": {
+                          "rule": "arena-winner",
+                          "arena_result": {"$ref": step["step_id"] + ".outputs"},
+                          "expected_games": item["games"], "candidates": choices}})
+        previous = "winner"
+    training_requested = job["training"]["iterations"] != 0
+    if training_requested or job["ab_tests"]:
         arena = job["arena"]
-        main_config = _effective(base, job["training"], arena, job.get("self_play"))
-        parent_ref = parent.ref.to_dict()
-        if job["training"]["iterations"]:
+        if selection is not None:
+            main_config = {"$ref": "winner.outputs.selected_effective_config"}
+            parent_ref = {"$ref": "winner.outputs.selected"}
+        else:
+            parent = resolve_parent(job["parent"], resolver=resolver)
+            base = _base_config(parent)
+            if base["compatibility"].get("input_channels") != 5:
+                raise ValueError("Simple jobs cannot launch retired 6-channel training")
+            main_config = _effective(base, job["training"], arena, job.get("self_play"))
+            parent_ref = parent.ref.to_dict()
+        if training_requested:
             config = {
                 "parent_checkpoint": parent_ref,
                 "lineage_id": job["run_id"],
@@ -472,11 +596,13 @@ def compile_job(value, *, runs_root=None, resolver=None):
                     "color_swap": True,
                 },
             }
-            ContinuousTrainingConfig(**config)
+            if selection is None:
+                ContinuousTrainingConfig(**config)
             steps.append(
                 {
                     "step_id": "training",
                     "action": "continuous_training",
+                    **({"dependencies": [previous]} if previous else {}),
                     "config": config,
                 }
             )
@@ -489,6 +615,18 @@ def compile_job(value, *, runs_root=None, resolver=None):
                 **test["arena"],
                 "every_iterations": test["iterations"],
             }
+            offline = None
+            if "offline_replay" in test:
+                from .offline_replay import resolve_offline_replay
+                offline = resolve_offline_replay(test["offline_replay"], parent=parent, resolver=resolver)
+            surprise_spec = None
+            weights = {arm["replay_sampling"]["weight"] for arm in test.get("arms", {key:test[key] for key in ("A", "B") if key in test}).values()
+                       if arm.get("replay_sampling", {}).get("mode") == "policy_surprise"}
+            if weights:
+                if len(weights) != 1:
+                    raise ValueError("One historical surprise weight per experiment is supported")
+                from ..policy_surprise import resolve_spec
+                surprise_spec = resolve_spec(offline, parent=parent, resolver=resolver, weight=next(iter(weights)))
             config = {
                 "experiment_id": job["run_id"] + "-" + step_id,
                 "topology": "torus9",
@@ -498,9 +636,9 @@ def compile_job(value, *, runs_root=None, resolver=None):
                         "arm_id": arm,
                         "generations": test["iterations"],
                         "lineage_id": job["run_id"] + "-" + step_id + "-" + arm,
-                        "config": _effective(base, test[arm], test_arena, job.get("self_play")),
+                        "config": _offline_effective(base, test.get("arms", test)[arm], test_arena, offline, job.get("self_play")),
                     }
-                    for arm in ("A", "B")
+                    for arm in test.get("arms", {"A": {}, "B": {}})
                 ],
                 "arena": {
                     "config": _arena_execution(test_arena),
@@ -509,6 +647,9 @@ def compile_job(value, *, runs_root=None, resolver=None):
                     "winner_rule": "candidate_if_wins_gt_losses_else_reference",
                 },
             }
+            if surprise_spec is not None:
+                for arm in config["arms"]:
+                    arm["config"]["extensions"]["policy_surprise_spec"] = surprise_spec
             # Validate all concrete budgets/contracts before training. Only the
             # future checkpoint identity is replaced here, never an arm setting.
             ExperimentConfig.from_dict({**config, "parent": parent.ref.to_dict()})

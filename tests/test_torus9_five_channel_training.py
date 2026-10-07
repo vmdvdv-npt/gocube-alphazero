@@ -20,6 +20,41 @@ from gocube_golden.provenance import file_sha256
 from gocube_golden.torus9_adaptation import AdaptationModel, FINGERPRINT, activation, save_torch
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
+@pytest.mark.parametrize('failure', ['gradients', 'weights'])
+def test_batched_adam_nonfinite_error_contract(parent, failure):
+    from gocube_golden.b64_speedup_comparison import fingerprint
+    errors, states = [], []
+    for baseline in (True, False):
+        trainer = ordinary.OrdinaryTrainer(parent, learning_rate=2.5e-5,
+                                           seed=91, gradient_clip=8, device='cuda')
+        if baseline:
+            optimizer = torch.optim.Adam(trainer.optimizer.param_groups)
+            optimizer.load_state_dict(trainer.optimizer.state_dict())
+            trainer.optimizer = optimizer
+        parameter = next(trainer.model.parameters())
+        if failure == 'gradients':
+            handle = parameter.register_hook(lambda grad: torch.full_like(grad, float('inf')))
+        else:
+            def corrupt(optimizer, args, kwargs):
+                with torch.no_grad():
+                    parameter.flatten()[0] = float('inf')
+            handle = trainer.optimizer.register_step_post_hook(corrupt)
+        try:
+            with _test_authority():
+                trainer.step([game('synthetic', 'train', model_hash(trainer.model))])
+        except (RuntimeError, FloatingPointError) as error:
+            errors.append((type(error), str(error)))
+        else:
+            pytest.fail('nonfinite update accepted')
+        finally:
+            handle.remove()
+        states.append(fingerprint(trainer))
+    assert errors[0] == errors[1]
+    assert states[0] == states[1]
+    assert errors[0][0] is (RuntimeError if failure == 'gradients' else FloatingPointError)
+
+
 def game(identity, split, actor):
     from gocube_golden import torus9_monolith as core
     from gocube_golden.torus9_m137_5ch import build_m137_five_channel_observation
@@ -100,13 +135,22 @@ def test_legacy_rejected_before_driver_or_workers():
         _default_driver(resolved)
 
 
-def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monkeypatch):
+@pytest.mark.parametrize('sampling', ['uniform', 'policy_surprise'])
+@pytest.mark.parametrize('tree_reuse', [False, True])
+@pytest.mark.parametrize('offline', [False, True])
+def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monkeypatch,tree_reuse,offline,sampling):
+    if sampling == 'policy_surprise' and not offline:
+        pytest.skip('historical surprise is offline only')
     raw=torch.load(parent,weights_only=False)
     actor=raw['metadata']['model_hash']
+    actor_path=tmp_path/'historical-actor.pt'
+    save_torch(actor_path,raw)
+    actor_sha=file_sha256(actor_path)
     buckets=[]
     for i in range(6):
         p=tmp_path/f'old-{i}.pt'
         games=[game(f'old-{i}','train',actor)]
+        games[0]['actor_artifact']=actor_sha
         if i==0:
             games.append(game('heldout','validation',actor))
         save_torch(p,{'contract':FINGERPRINT,'actor_hash':actor,'games':games})
@@ -116,18 +160,44 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     ref=CheckpointRef('torus9','source','update-2400',198,'source.pt',file_sha256(parent))
     source=SimpleNamespace(ref=ref,path=parent,generation=198)
     cfg=EffectiveConfig(topology='torus9',compatibility={'input_channels':5},
-        self_play={'komi':1.5,'games_per_iteration':2,'mcts_simulations':1},
-        training={'batch_size':64,'optimizer':'Adam','weight_decay':0.,'l2_sp':False,
+        self_play={'komi':1.5,'games_per_iteration':2,'mcts_simulations':1,'tree_reuse':tree_reuse},
+        training={'batch_size':128,'optimizer':'Adam','weight_decay':0.,'l2_sp':False,
                   'gradient_clip':1.,'learning_rate':5e-5,'optimizer_steps_per_iteration':2},
         replay={'cap':None,'generations':6},execution={'device':'cpu','workers':1,
                   'training_master_seed':91,'selfplay_master_seed':92},
         extensions={'training_driver':ordinary.SCHEMA,'adaptation_parent':ref.to_dict(),
                     'initial_replay_buckets':buckets,'validation_buckets':[buckets[0]]})
+    if offline:
+        rows = []
+        for g in (199, 200):
+            fresh = {'generation': g, 'shards': buckets[-1]['shards']}
+            rolling = buckets[:5] + [fresh]
+            fp, rp = tmp_path/f'fresh-{g}.json', tmp_path/f'rolling-{g}.jsonl'
+            fp.write_text(json.dumps(fresh))
+            rp.write_text(''.join(json.dumps(b)+'\n' for b in rolling))
+            rows.append({'generation': g, 'fresh_bucket': fresh, 'buckets': rolling,
+                         'fresh_replay': {'path': str(fp), 'sha256': file_sha256(fp)},
+                         'rolling_replay': {'path': str(rp), 'sha256': file_sha256(rp)}})
+        payload = cfg.to_dict()
+        payload['extensions']['offline_ab_replay'] = rows
+        if sampling == 'policy_surprise':
+            from gocube_golden import policy_surprise as ps
+            from gocube_golden.provenance import sha256_fingerprint
+            body={'algorithm':ps.ALGORITHM,'implementation_sha256':file_sha256(ps.__file__),
+                  'weight':.5, 'sources':{actor:{'path':str(actor_path),'checkpoint':{'sha256':actor_sha}}},
+                  'shards':[{**b['shards'][0],'generation':b['generation'],'actor_hashes':[actor]} for b in buckets]}
+            spec={**body,'fingerprint':sha256_fingerprint(body)}
+            cache=ps.build_cache(spec,tmp_path/'experiment-cache',device='cpu')
+            payload['extensions'].update(policy_surprise_spec=spec,policy_surprise_cache=cache)
+            payload['replay']['sampling']={'mode':'policy_surprise','weight':.5}
+        cfg = EffectiveConfig.from_dict(payload)
     runs=tmp_path/'runs'
     root,resolved_cfg=Torus9ProductionLineage(runs).prepare(topology='torus9',lineage_id='test-ordinary',
         parent=source,effective_config=cfg,experiment_id='test',arm_id='test')
     calls=[]
     def fake_selfplay(model,**kwargs):
+        assert not offline, 'offline must never call selfplay'
+        assert kwargs.get('tree_reuse', False) is tree_reuse
         calls.append(kwargs['ids'])
         records=[SimpleNamespace(to_dict=lambda:{}, payload=game(i,'train',model_hash(model))) for i in kwargs['ids']]
         return SimpleNamespace(records=records,telemetry={})
@@ -144,7 +214,7 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     monkeypatch.setattr(ordinary.OrdinaryTrainer,'step',original_step)
     with _test_authority():
         first=ordinary.run_generation(request)
-    assert len(calls)==1
+    assert len(calls)==(0 if offline else 1)
     validate_generation_commit(root=root,lineage_id=root.name,generation=199,reuse_committed_rolling_replay_identity=True)
     resolver=ArtifactResolver(runs)
     child=resolver.checkpoint(first.checkpoint)
@@ -153,10 +223,17 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     validate_generation_commit(root=root,lineage_id=root.name,generation=200,reuse_committed_rolling_replay_identity=True)
     saved=torch.load(root/second.checkpoint.path,weights_only=False)
     assert saved['ordinary_update']==4
-    assert [b['generation'] for b in saved['replay_buckets']]==[2,3,4,5,199,200]
+    assert saved['metadata']['batch_size'] == 128
+    assert [b['generation'] for b in saved['replay_buckets']]==([0,1,2,3,4,200] if offline else [2,3,4,5,199,200])
+    telemetry=json.loads((root/'training/iter-200.json').read_text())['performance']
+    assert telemetry['processed_samples']==256
+    if sampling == 'policy_surprise':
+        assert telemetry['sampling']['sample_draws']==256
+        assert telemetry['sampling']['cache']==cache
+    assert telemetry['training_minutes'] > 0
     train=ordinary.load_replay(saved['replay_buckets'],split='train')
     assert 'heldout' not in {g['game_id'] for g in train}
-    assert len(calls)==2
+    assert len(calls)==(0 if offline else 2)
     from tools.arena_profiles import get_profile
     profile=get_profile('torus9|komi=1.5|simulations=128|cpuct=1.25|fpu=0|watchdog=1000|5ch')
     identity=profile.load_identity(root/second.checkpoint.path)
@@ -173,3 +250,117 @@ def test_two_generations_commit_replay_rollover_and_restart(parent,tmp_path,monk
     shard.write_bytes(b'corruption')
     with pytest.raises(ValueError,match='SHA'):
         ordinary.load_replay(saved['replay_buckets'],split='train')
+
+
+def test_batch128_trains_and_resumes(parent, tmp_path):
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=2.5e-5, seed=91, batch_size=128)
+    games = [game('train', 'train', model_hash(trainer.model))]
+    assert all(value.shape[0] == 128 for value in trainer.batch(games, 1).values())
+    with _test_authority():
+        assert trainer.step(games)['batch_size'] == 128
+    saved = tmp_path / 'batch128.pt'
+    trainer.save(saved, config_hash='cfg', parent={}, replay_buckets=[])
+    resumed = ordinary.OrdinaryTrainer(saved, learning_rate=2.5e-5, seed=91)
+    assert resumed.batch_size == 128
+    with _test_authority():
+        trainer.step(games)
+        resumed.step(games)
+    assert model_hash(trainer.model) == model_hash(resumed.model)
+
+
+def test_profile_spans_preserve_exact_b64_trajectory(parent):
+    from gocube_golden.training_profile import Collector
+    from gocube_golden.b64_perf_audit import exact_equal
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91, batch_size=64)
+    profiled = copy.deepcopy(trainer)
+    games = [game('train-a', 'train', model_hash(trainer.model)),
+             game('train-b', 'train', model_hash(trainer.model))]
+    observer = Collector(timings=False, capture_positions=True)
+    collector = Collector(capture_positions=True)
+    with _test_authority(), observer.activate():
+        plain_metrics = [trainer.step(games) for _ in range(3)]
+    with _test_authority(), collector.activate():
+        profile_metrics = [profiled.step(games) for _ in range(3)]
+    assert observer.rows == []
+    assert observer.positions == collector.positions
+    assert all(len(positions) == 64 for positions in observer.positions)
+    assert plain_metrics == profile_metrics
+    assert trainer.update == profiled.update == 3
+    assert exact_equal(trainer.model.state_dict(), profiled.model.state_dict())
+    assert exact_equal(trainer.optimizer.state_dict(), profiled.optimizer.state_dict())
+    assert {'validate.pre', 'validate.post', 'forward', 'adam', 'scalar.telemetry'} <= collector.finish().keys()
+
+
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA required'))])
+@pytest.mark.parametrize('corruption', ['clock', 'invalid_clock', 'average_nan', 'variance_inf', 'negative', 'shape',
+                                        'missing_step', 'missing_average', 'multiple_errors'])
+def test_packed_adam_validation_preserves_first_error(parent, corruption, device):
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91, device=device)
+    params = list(trainer.model.named_parameters())
+    first = trainer.optimizer.state[params[0][1]]
+    second = trainer.optimizer.state[params[1][1]]
+    if corruption == 'clock':
+        first['step'].add_(1)
+    elif corruption == 'invalid_clock':
+        first['step'] = torch.tensor(float('nan'))
+    elif corruption == 'average_nan':
+        first['exp_avg'].fill_(float('nan'))
+    elif corruption == 'variance_inf':
+        first['exp_avg_sq'].fill_(float('inf'))
+    elif corruption == 'negative':
+        first['exp_avg_sq'].fill_(-1)
+    elif corruption == 'shape':
+        first['exp_avg'] = first['exp_avg'].reshape(-1)[:1]
+    elif corruption == 'missing_step':
+        del first['step']
+    elif corruption == 'missing_average':
+        del first['exp_avg']
+    else:
+        first['exp_avg'].fill_(float('nan'))
+        second['step'].add_(1)
+    with pytest.raises(Exception) as original:
+        trainer._validate_clocks_detailed()
+    with pytest.raises(type(original.value)) as packed:
+        trainer.validate_clocks()
+    assert str(packed.value) == str(original.value)
+
+
+def test_cached_replay_preserves_sampling_and_mutable_callers(parent):
+    from gocube_golden.training_profile import Collector
+    trainer = ordinary.OrdinaryTrainer(parent, learning_rate=5e-5, seed=91)
+    a = game('a', 'train', model_hash(trainer.model))
+    b = game('b', 'train', model_hash(trainer.model))
+    a['score'] = torch.arange(3, dtype=torch.float32)
+    b['score'] = torch.arange(3, dtype=torch.float32) + 100
+    mutable = [a, b]
+    window = ordinary.OrdinaryReplayWindow.from_games(mutable)
+    assert window.games[0] is a  # Targets are referenced, never copied/prepacked.
+    assert copy.deepcopy(window) is window
+    for update in (1,2,31,128,255,1024):
+        left, right = Collector(timings=False,capture_positions=True), Collector(timings=False,capture_positions=True)
+        with left.activate():
+            expected = trainer.batch(mutable,update)
+        with right.activate():
+            actual = trainer.batch(window,update)
+        assert left.positions == right.positions
+        assert all(torch.equal(expected[k],actual[k]) for k in expected)
+    mutable.append(game('c','train',model_hash(trainer.model)))
+    refreshed = ordinary.OrdinaryReplayWindow.from_games(mutable)
+    assert len(window) == 2 and len(refreshed) == 3
+    assert all(torch.equal(v,trainer.batch(refreshed,2)[k]) for k,v in trainer.batch(mutable,2).items())
+
+
+@pytest.mark.parametrize('invalid', [float('nan'), float('inf')])
+def test_packed_weight_check_retains_fail_closed_behavior(parent, monkeypatch, invalid):
+    trainer=ordinary.OrdinaryTrainer(parent,learning_rate=5e-5,seed=91)
+    games=[game('train','train',model_hash(trainer.model))]
+    real_step=trainer.optimizer.step
+    def corrupt_after_update():
+        real_step()
+        with torch.no_grad():
+            next(trainer.model.parameters()).fill_(invalid)
+    monkeypatch.setattr(trainer.optimizer,'step',corrupt_after_update)
+    with _test_authority(), pytest.raises(FloatingPointError,match='Nonfinite ordinary weights'):
+        trainer.step(games)
+    assert trainer.update == 1
