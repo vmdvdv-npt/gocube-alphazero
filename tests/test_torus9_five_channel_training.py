@@ -109,6 +109,21 @@ def test_transition_preserves_moments_and_all_clocks_with_deterministic_resume(p
     assert model_hash(trainer.model)==model_hash(resumed.model)
     with pytest.raises(ValueError,match='seed'):
         ordinary.OrdinaryTrainer(saved,learning_rate=5e-5,seed=92)
+    baseline = ordinary.OrdinaryTrainer(saved, learning_rate=5e-5, seed=91)
+    overridden = ordinary.OrdinaryTrainer(
+        saved, learning_rate=5e-5, seed=92, allow_seed_change=True)
+    assert overridden.update == baseline.update
+    assert overridden.seed == 92
+    assert model_hash(overridden.model) == model_hash(baseline.model)
+    for n, parameter in overridden.model.named_parameters():
+        assert torch.equal(parameter, baseline.model.state_dict()[n])
+        state = overridden.optimizer.state[parameter]
+        original_state = baseline.optimizer.state[dict(baseline.model.named_parameters())[n]]
+        for key in ('step', 'exp_avg', 'exp_avg_sq'):
+            assert torch.equal(state[key], original_state[key])
+    reseeded = tmp_path/'reseeded.pt'
+    overridden.save(reseeded, config_hash='cfg-reseeded', parent={}, replay_buckets=[])
+    ordinary.OrdinaryTrainer(reseeded, learning_rate=5e-5, seed=92)
 
 
 def test_gradient_clip_is_forwarded_to_torch(parent, monkeypatch):

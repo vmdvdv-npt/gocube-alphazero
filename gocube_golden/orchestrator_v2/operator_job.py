@@ -496,6 +496,9 @@ def _offline_effective(base, training, arena, offline, self_play=None, training_
         cfg["extensions"]["offline_ab_replay"] = offline
     if training_seed is not None:
         cfg["execution"]["training_master_seed"] = training_seed
+        # Allow the new learner RNG on the first candidate while retaining
+        # strict seed continuity after that candidate is checkpointed.
+        cfg["extensions"]["offline_training_seed_override"] = True
     return cfg
 
 
