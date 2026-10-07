@@ -1229,12 +1229,14 @@ def _require_operator_workflow_controller(payload: Mapping[str, object]) -> Work
 
 
 def _require_committed_job_code() -> None:
+    from .operator_guide import GUIDE_PATH
+
     dirty = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all", "--", "gocube_golden", "tools"],
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", "gocube_golden", "tools", GUIDE_PATH],
         cwd=_repo_root(), check=True, capture_output=True, text=True,
     ).stdout.strip()
     if dirty:
-        raise ValueError("Operator jobs require committed implementation code; commit/review code changes before launching")
+        raise ValueError("Operator jobs require committed implementation code and launch guide; commit/review changes before launching")
 
 
 def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path | None = None,
@@ -1244,12 +1246,15 @@ def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path 
     from .immutable_runtime import ImmutableRuntimeManager
     from ..notifications.telegram import load_config
 
+    from .operator_guide import announce_guide
+
+    guide = announce_guide()
     normalized = parse_job(payload)
     root = Path(runs_root or RUNS_ROOT).resolve()
     resolved = compile_job(payload, runs_root=root)
     configured = load_config() is not None
     if check_only:
-        return {"state": "VALIDATED", "telegram_configured": configured,
+        return {"state": "VALIDATED", "operator_guide": guide, "telegram_configured": configured,
                 "parameters": normalized, "resolved": resolved}
     if not configured:
         raise ValueError("Telegram is not configured. Configure the standard telegram.env before launching; "
@@ -1270,6 +1275,7 @@ def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path 
                 raise ValueError(f"Operator job {normalized['run_id']!r} already has different parameters; use a new run_id")
         commit = _entrypoint_code_identity()
         pin_path = plan_root / "execution-commit.json"
+        new_registration = not pin_path.exists()
         if pin_path.exists():
             commit = str(load_v2_config(pin_path)["commit"])
         runtime = ImmutableRuntimeManager(_repo_root()).ensure(commit)
@@ -1278,6 +1284,8 @@ def launch_operator_job(payload: Mapping[str, object], *, runs_root: str | Path 
             path = plan_root / name
             if not path.exists():
                 atomic_write_text(path, canonical_json(value) + "\n")
+        if new_registration:
+            atomic_write_text(plan_root / "operator-guide.json", canonical_json(guide) + "\n")
         resolved_spec = _workflow_spec_from_payload(resolved)
         with _authority(
             mode="workflow",
@@ -1412,8 +1420,13 @@ def drain_notifications(root: str | Path, *, timeout: float = 7.0) -> dict[str, 
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    from .operator_guide import GUIDE_PATH, announce_guide, read_guide
+
+    parser = argparse.ArgumentParser(description=__doc__,
+        epilog=f"Read {GUIDE_PATH} before launching. Show it with: production_entrypoint guide")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    guide = subparsers.add_parser("guide", help="show the versioned guide to all supported V2 modes")
+    guide.set_defaults(kind="guide")
     telegram = subparsers.add_parser("telegram-test", help="send one explicit transport test")
     telegram.set_defaults(kind="telegram")
     drain = subparsers.add_parser("notifications-drain", help="retry one saved notification root")
@@ -1439,6 +1452,11 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--startup-ready-fd", type=int, help=argparse.SUPPRESS)
         command.set_defaults(kind=name)
     args = parser.parse_args(argv)
+    if args.kind == "guide":
+        print(read_guide())
+        return 0
+    if args.kind != "job":
+        announce_guide()
     if args.kind == "telegram":
         try:
             telegram_test()

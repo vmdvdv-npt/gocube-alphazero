@@ -229,7 +229,15 @@ class ExperimentConfig:
             raise ValueError("experiment parent topology does not match experiment topology")
         object.__setattr__(self, "parent", parent)
         arms = tuple(self.arms)
-        if len(arms) != 2 or {arm.arm_id for arm in arms} != {"A", "B"}:
+        offline = [arm.effective_config.extensions.get("offline_ab_replay") for arm in arms]
+        if any(offline):
+            if not all(offline) or any(row != offline[0] for row in offline):
+                raise ValueError("offline arms must share identical replay iterations")
+            if len(arms) < 2 or len({arm.arm_id for arm in arms}) != len(arms) or self.stage2 is not None:
+                raise ValueError("offline experiment requires independent arms and no winner-rooted Stage 2")
+            if any(arm.generations != len(offline[0]) for arm in arms):
+                raise ValueError("offline replay budget differs from arm generations")
+        elif len(arms) != 2 or {arm.arm_id for arm in arms} != {"A", "B"}:
             raise ValueError("ExperimentRunner V2 requires exactly the A and B arms")
         for arm in arms:
             if arm.effective_config.topology != self.topology:

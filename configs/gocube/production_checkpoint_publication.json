@@ -36,6 +36,11 @@
       "topology": "torus9",
       "lineage_id": "torus9-post-ab-m80-g128-20260918-v1",
       "checkpoint_ranges": [[84, 93]]
+    },
+    {
+      "topology": "torus9",
+      "lineage_id": "torus9-m240-g768-100-500sims-train640-r3-arena1-20261004-v1",
+      "checkpoint_ranges": [[246, 246]]
     }
   ]
 }

@@ -189,6 +189,7 @@ def test_check_is_read_only_and_missing_telegram_prevents_launch(parent, tmp_pat
     monkeypatch.setattr(entry, "_launch_durable_workflow_controller", lambda *a, **kw: pytest.fail("launched"))
     result = entry.launch_operator_job(parameters(), runs_root=tmp_path, check_only=True)
     assert result["state"] == "VALIDATED" and not result["telegram_configured"]
+    assert result["operator_guide"]["repository_path"].endswith("ORCHESTRATOR_V2_LAUNCH_GUIDE.md")
     assert list(tmp_path.iterdir()) == []
     with pytest.raises(ValueError, match="Telegram is not configured"):
         entry.launch_operator_job(parameters(), runs_root=tmp_path)
@@ -208,9 +209,13 @@ def test_launch_pins_runtime_and_rejects_parameter_drift(parent, tmp_path, monke
     monkeypatch.setattr(entry, "_launch_durable_workflow_controller",
         lambda path, **kw: launches.append((path, kw, json.loads(os.environ[PERMIT_ENV]))) or {"state": "STARTED"})
     entry.launch_operator_job(parameters(), runs_root=tmp_path)
+    guide_path = tmp_path / "torus9/orchestration/jobs/five-iterations/operator-guide.json"
+    initial_guide = guide_path.read_bytes()
+    assert json.loads(initial_guide)["sha256"]
     monkeypatch.setattr(entry, "_entrypoint_code_identity", lambda: "commit-two")
     entry.launch_operator_job(parameters(), runs_root=tmp_path)
     assert pins == ["commit-one", "commit-one"]
+    assert guide_path.read_bytes() == initial_guide
     assert launches[1][1]["runtime"] == "commit-one"
     assert launches[1][2]["action_type"] == "workflow-controller"
     assert launches[1][2]["run_id"] == "five-iterations"
@@ -309,3 +314,39 @@ def test_batch_size_reaches_effective_config(parent, batch_size):
     compiled = job.compile_job(raw, runs_root=".")
     config = compiled["workflow"]["steps"][0]["config"]["effective_config"]
     assert config["training"]["batch_size"] == batch_size
+
+
+def test_offline_named_arms_are_stable_and_experiment_only(parent, monkeypatch):
+    from gocube_golden.orchestrator_v2 import offline_replay
+    raw = parameters()
+    raw['training']['iterations'] = 0
+    raw['ab_tests'] = [{'id': 'batch', 'iterations': 2,
+        'offline_replay': ['source/M199', 'source/M200'],
+        'arms': {f'B{b}': {'batch_size': b, 'updates_per_iteration': 256 // b}
+                 for b in (64, 128, 256)}}]
+    normalized = job.parse_job(raw)
+    assert job.parse_job(normalized) == normalized
+    replay = [{'generation': g, 'buckets': [{}] * 6} for g in (199, 200)]
+    monkeypatch.setattr(offline_replay, 'resolve_offline_replay', lambda *a, **kw: replay)
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    assert len(steps) == 1 and steps[0]['action'] == 'experiment'
+    arms = steps[0]['config']['arms']
+    assert [a['arm_id'] for a in arms] == ['B64', 'B128', 'B256']
+    assert all(a['config']['extensions']['offline_ab_replay'] == replay for a in arms)
+    raw['training']['iterations'] = 1
+    with pytest.raises(ValueError, match='iterations=0'):
+        job.parse_job(raw)
+    raw['training'] = {'offline_replay': ['source/M199']}
+    with pytest.raises(ValueError, match='unknown fields'):
+        job.parse_job(raw)
+
+
+def test_ordinary_job_from_offline_checkpoint_does_not_inherit_offline_mode(parent):
+    config = parent.effective_config.config.to_dict()
+    config['extensions']['offline_ab_replay'] = [{'generation': 199, 'buckets': []}]
+    parent.effective_config.config = EffectiveConfig.from_dict(config)
+    raw = parameters()
+    steps = job.compile_job(raw, resolver=SimpleNamespace())['workflow']['steps']
+    assert 'offline_ab_replay' not in steps[0]['config']['effective_config']['extensions']
+    assert all('offline_ab_replay' not in arm['config']['extensions']
+               for arm in steps[1]['config']['arms'])

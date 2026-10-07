@@ -1,5 +1,13 @@
 # Operator-controlled training
 
+Before every Orchestrator V2 launch, resume, or configuration change, read
+[`ORCHESTRATOR_V2_LAUNCH_GUIDE.md`](docs/orchestrator-v2/ORCHESTRATOR_V2_LAUNCH_GUIDE.md)
+from the code revision that will execute the job. It lists the public modes,
+A/B and offline A/B/C options, limits, and safe validation commands. Run
+`production_entrypoint job <parameters.json> --check` before launching.
+When changing a supported interface, update this tracked guide and its reviewed
+interface fingerprint; the launch boundary and CI check that they agree.
+
 The user owns changes to the training system. A request to launch, resume,
 monitor, stop, or tune a run authorizes editing its declarative configuration and
 using the existing documented Orchestrator V2 commands only. For new Torus9 5CH
@@ -32,3 +40,7 @@ and mocked transports, never production games or unsolicited Telegram messages.
 
 Changes to these rules also require the user's explicit permission.
 AGENTS.md is an instruction, not a security boundary.
+
+For passive training duration, update/example throughput and GPU measurements,
+use the external [training efficiency monitor](docs/diagnostics/training-efficiency-monitor.md)
+(`tools/training_efficiency_monitor.py`); write its outputs outside the live run.
