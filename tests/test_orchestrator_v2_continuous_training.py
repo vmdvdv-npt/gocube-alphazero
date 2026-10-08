@@ -159,7 +159,7 @@ def _node(
     return ResolvedCheckpointNode(
         node=node,
         checkpoint=physical,  # type: ignore[arg-type]
-        effective_config=SimpleNamespace(ref=node.effective_config),  # type: ignore[arg-type]
+        effective_config=SimpleNamespace(ref=node.effective_config, config=config),  # type: ignore[arg-type]
         provenance=SimpleNamespace(),  # type: ignore[arg-type]
         owner_root=root / lineage,
         owner_status="ACTIVE",
@@ -793,3 +793,48 @@ def test_soft_stop_during_arena_stops_before_next_generation_or_completion(
     else:
         assert resumed.state == "SOFT_STOPPED"
         assert train.calls == [21, 22]
+
+
+def test_online_start_preserves_offline_parent_provenance_in_durable_event(tmp_path):
+    from gocube_golden.notifications.formatter import format_event
+
+    class Sink:
+        structured = True
+        def __init__(self):
+            self.events = []
+        def publish(self, event):
+            self.events.append(event)
+
+    runner, _, _, _, parent = _runner(tmp_path, generations=None)
+    parent_config = _config().to_dict()
+    parent_config['execution']['training_master_seed'] = 2026092702
+    parent_config['replay']['sampling'] = {'mode': 'policy_surprise', 'weight': .5}
+    parent.effective_config.config = EffectiveConfig.from_dict(parent_config)
+    parent.owner_root.mkdir(parents=True)
+    (parent.owner_root / 'manifest.json').write_text(json.dumps({'experiment': {'arm': 'C2560'}}))
+    online = _config().to_dict()
+    online['training'].update(learning_rate=.0001, batch_size=64, optimizer_steps_per_iteration=2560, gradient_clip=8)
+    online['self_play'].update(games_per_iteration=1536, search_mode='pcr', tree_reuse=True,
+        pcr={'cheap_simulations': 100, 'full_simulations': 400, 'full_probability': .33})
+    online['replay'] = {'generations': 5, 'cap': None}
+    online['arena']['simulations'] = 200
+    sink = Sink()
+    runner._event_sink = sink
+    runner._launch_id = "test-start"
+    reports = []
+    runner.reporter = lambda message, details: reports.append(message)
+    runner._report_start(parent, SimpleNamespace(config=EffectiveConfig.from_dict(online)))
+    event = sink.events[0]
+    # Formatting the persisted payload, rather than a custom message, must keep provenance.
+    restored = type(event).from_dict(json.loads(json.dumps(event.to_dict())))
+    text = format_event(restored)
+    for message in (reports[0], text):
+        for expected in ('ONLINE TRAINING STARTED', 'Parent: parent-lineage/M20',
+                         f'Parent SHA256: {SHA}', 'Next generation: M21',
+                         'Parent training seed: 2026092702', 'Tree reuse: ON',
+                         'LR=0.0001', 'Steps: 2560', 'Batch: 64', 'Gradient clip: 8',
+                         'replay=5 generations / no position cap', 'MCTS: 200 sims',
+                         'Replay sampling: uniform (online); parent C2560 trained offline with Policy Surprise 0.5',
+                         'Stop: operator request'):
+            assert expected in message
+    assert event.payload['replay'].get('sampling', {'mode': 'uniform'}) == {'mode': 'uniform'}

@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 import logging
+import json
 
 from ..artifact_graph import CheckpointRef, EffectiveConfig
 from . import _continuous_training_core as _core
@@ -290,18 +291,30 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         effective = config.config
         compatibility = effective.compatibility
         network = compatibility.get("network") or compatibility.get("architecture") or compatibility.get("architecture_id")
+        parent_effective = parent.effective_config.config
+        manifest_path = parent.owner_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+        parent_training = {
+            "seed": parent_effective.execution.get("training_master_seed"),
+            "sampling": dict(parent_effective.replay.get("sampling") or {"mode": "uniform"}),
+            "arm": manifest.get("experiment", {}).get("arm"),
+        }
         message = format_training_started(
             topology=self.config.topology,
             lineage_id=self.config.lineage_id,
-            parent_label=parent.checkpoint_id,
+            parent_label=f"{parent.lineage_id}/{parent.checkpoint_id}",
+            parent_checkpoint=parent.ref.to_dict(),
+            parent_training=parent_training,
             network=network,
             effective_config=effective,
             arena_cadence=self.config.arena_cadence,
             arena_config=self.config.arena_config,
         )
+        message += "\nStop: " + (f"after {self.config.generations} iterations" if self.config.generations is not None else "operator request")
         details = {
             "topology": self.config.topology,
             "network": network,
+            "parent_training": parent_training,
             "parent": parent.ref.to_dict(),
             "lineage_id": self.config.lineage_id,
             "resolved_effective_config": effective.to_dict(),
@@ -310,6 +323,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         self._report("started", message, **details)
         serialized = effective.to_dict()
         self._notify_operator("START", message, key_suffix=f"start:{self._launch_id}", payload={
+            "parent_training": parent_training,
             "parent": parent.ref.to_dict(),
             "network": network,
             "self_play": serialized["self_play"],
