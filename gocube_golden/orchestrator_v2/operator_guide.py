@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # updating its contract marker. This is checked by CI and before job launch.
 INTERFACE_PATHS = (
     "gocube_golden/orchestrator_v2/operator_guide.py",
+    "gocube_golden/orchestrator_v2/experiment_summary.py",
     "gocube_golden/orchestrator_v2/operator_job.py",
     "gocube_golden/orchestrator_v2/continuous_training.py",
     "gocube_golden/orchestrator_v2/_continuous_training_core.py",

@@ -1433,6 +1433,11 @@ def main(argv: list[str] | None = None) -> int:
     drain.add_argument("root", type=Path)
     drain.add_argument("--timeout", type=float, default=7.0)
     drain.set_defaults(kind="drain")
+    summary = subparsers.add_parser('experiment-summary', help='publish a saved cross-job conclusion through the standard outbox')
+    summary.add_argument('config', type=Path)
+    summary.add_argument('--runs-root', type=Path, default=RUNS_ROOT)
+    summary.add_argument('--check', action='store_true')
+    summary.set_defaults(kind='experiment-summary')
     command = subparsers.add_parser("run", help="run one declarative Orchestrator V2 run-spec")
     command.add_argument("config", type=Path)
     command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
@@ -1482,7 +1487,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     payload = load_v2_config(args.config)
     result: object
-    if args.kind == "b64-perf-audit":
+    if args.kind == 'experiment-summary':
+        from .experiment_summary import publish_experiment_summary
+        if not args.check:
+            _require_committed_job_code()
+        result = publish_experiment_summary(payload, runs_root=args.runs_root, check_only=args.check)
+    elif args.kind == "b64-perf-audit":
         with _authority(mode="performance-tuning", topology="torus9", run_id="b64-perf-audit"):
             with _child_execution_permit(action_type="training", topology="torus9",
                                          run_id="b64-perf-audit", code_identity=_entrypoint_code_identity()):
