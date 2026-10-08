@@ -93,6 +93,20 @@ def format_event(event: OperatorEvent, *, max_chars: int = DEFAULT_MESSAGE_BUDGE
             arena_config=SimpleNamespace(games=arena.get("games")))
         budget = payload.get("stop_after_iterations")
         text += "\nStop: " + (f"after {budget} iterations" if budget is not None else "operator request")
+    elif event.event_type == 'EXPERIMENT_COMPLETED' and event.payload.get('cross_job_summary'):
+        payload = event.payload
+        lines = [f"EXPERIMENT SUMMARY — {event.owner_id}", '', 'Combination | LR | updates/gen']
+        for row in payload['combinations']:
+            lines.append(f"{row['id']} | {row['learning_rate']:g} | {row['updates_per_generation']}")
+            for seed, result in row['seed_results'].items():
+                lines.append(f"  seed {seed}: {result}")
+        lines.append('')
+        for seed, result in payload['confirmation_results'].items():
+            lines.append(f"Confirmation seed {seed}: {result}")
+        _line(lines, 'Decision', payload['decision'])
+        _line(lines, 'Rationale', payload['rationale'])
+        _line(lines, 'Report', payload['report_ref'])
+        text = '\n'.join(lines)
     elif event.event_type in {"ARENA_STARTED", "ARENA_COMPLETED", "ARENA_FAILED"}:
         text = _format_arena(event)
     elif event.event_type in {"RUN_STOPPED", "RUN_COMPLETED"}:

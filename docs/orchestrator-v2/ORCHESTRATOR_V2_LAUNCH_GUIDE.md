@@ -470,6 +470,48 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 - `telegram-test`: отправляет одно настоящее тестовое сообщение; только если
   пользователь прямо запросил тест транспорта. Не использовать при --check.
 
+### Итоговый отчёт нескольких jobs (AZ-20)
+
+`production_entrypoint experiment-summary CONFIG --runs-root ROOT --check`
+проверяет сохранённый, подготовленный оператором вывод без записи и доставки.
+Затем та же команда без `--check` публикует один `EXPERIMENT_COMPLETED` через
+штатный durable outbox. Это отдельная разрешённая граница итогового lifecycle,
+не ручная отправка текста и не новый training launcher. Она не выбирает parent,
+не запускает игры/обучение и не меняет production или code pin действующих jobs.
+Реальное выполнение требует закоммиченных implementation и guide.
+
+CONFIG имеет ровно поля `schema: "gocube-experiment-summary-v1"`, `summary_id`
+(буквы, цифры, `_`, `-`, `.`, до 128 символов, первый — буква/цифра) и `report`.
+Каждая ссылка `report`/`evidence` содержит ровно абсолютный `path` и `sha256`
+с префиксом `sha256:`. SHA проверяются до публикации.
+
+Сохранённый report имеет ровно поля:
+
+- `schema: "gocube-experiment-conclusion-v1"`, `status: "COMPLETED"`;
+- `combinations`: четыре объекта с уникальным `id` (до 40 символов),
+  `learning_rate` (0 < LR < 1), положительным целым `updates_per_generation`,
+  `seed_results` — объект из двух learner seeds (ключи — десятичные строки),
+  результаты — непустой текст до 160 символов на seed. Одинаковые seeds
+  обязательны для всех четырёх комбинаций;
+- `confirmation_results`: те же два seed, текст до 240 символов на seed;
+- `decision`: один из четырёх id либо `INCONCLUSIVE`;
+- `rationale`: непустой текст до 600 символов;
+- `evidence`: непустой список SHA-ссылок на сохранённые результаты/анализ.
+
+Оператор отвечает за полноту научного анализа и правомерность решения:
+проверка SHA подтверждает неизменность evidence, а не статистическую значимость
+или завершение всех запрошенных экспериментов. В AZ-20 указывайте оба learner
+seed отдельно, W/L/D и интервалы, budget confirmation 1024 × 200 sims на seed,
+а в evidence включайте единый анализ и результаты всех десяти арен.
+
+`ROOT/torus9/orchestration/summaries/<summary_id>/report.json` атомарно
+закрепляет отчёт и исходный SHA; `notifications/` хранит штатные event/delivery.
+Повтор с тем же id/отчётом переиспользует одно событие без повторной доставки
+уже доставленного. Другое содержимое под тем же id отвергается. Отсутствие
+Telegram config сохраняется как стандартный `BLOCKED_CONFIGURATION`; команда
+возвращает delivery state и last_error_code. Применяются прежние правила
+`DELIVERY_UNCERTAIN` и `notifications-drain`, без обхода политики повторов.
+
 ## Как обновлять руководство
 
 Изменяя поддерживаемые параметры, ограничения, defaults, маршрутизацию или режимы,
@@ -487,7 +529,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: cddf1f58f36318f90ee13c2fb4d12e93b681f2a631dba8be48270b340e79dfd5 -->
+<!-- reviewed-interface-sha256: 659a9e1d08775787fc000668951006b428caa982e646f42e42bd75de0322572e -->
 
 ## B64 bounded performance audit
 
