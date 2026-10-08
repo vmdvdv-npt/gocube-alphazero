@@ -512,6 +512,16 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 возвращает delivery state и last_error_code. Применяются прежние правила
 `DELIVERY_UNCERTAIN` и `notifications-drain`, без обхода политики повторов.
 
+## Online startup provenance
+
+Ordinary training reports `ONLINE TRAINING STARTED`, the full parent selector
+and SHA256, inherited parent training seed, next generation, self-play tree reuse,
+learner budget, replay window/sampling, Arena cadence and stop condition.
+The durable startup event retains the parent's sampling mode and experiment arm.
+When continuing an offline Policy Surprise arm, both the startup report and
+Telegram explicitly distinguish uniform online replay from the parent's offline
+Policy Surprise weight. This provenance does not change either sampler or Adam.
+
 ## Как обновлять руководство
 
 Изменяя поддерживаемые параметры, ограничения, defaults, маршрутизацию или режимы,
@@ -529,7 +539,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 659a9e1d08775787fc000668951006b428caa982e646f42e42bd75de0322572e -->
+<!-- reviewed-interface-sha256: 49cd2d27c7e5c676498a64cd8d442b37793fad857f67daf27df96059ccacc77b -->
 
 ## B64 bounded performance audit
 
