@@ -165,6 +165,7 @@ def compile_parameters(job, *, resolver):
         saved = output / 'config.json'
         if not saved.is_file() or json.loads(saved.read_text()) != config:
             raise ValueError('Diagnostic output already exists with a different identity')
+        verify_existing_evidence(config)
     return config
 
 
@@ -310,11 +311,45 @@ def seal_directory(path):
 
 def verify_snapshot(path):
     identities = json.loads((path / 'seal.json').read_text())
+    required = {'checkpoint.pt', 'checkpoint.metadata.json', 'metrics.json', 'row-metrics.pt', 'steps.json'}
+    if set(identities) != required:
+        raise ValueError('Snapshot required file inventory mismatch')
     if set(identities) != {str(p.relative_to(path)) for p in path.rglob('*') if p.is_file() and p.name != 'seal.json'}:
         raise ValueError('Snapshot file inventory mismatch')
     for name, sha in identities.items():
         if file_sha256(path / name) != sha:
             raise ValueError('Immutable diagnostic snapshot changed: ' + str(path / name))
+
+
+def verify_existing_evidence(config):
+    """Preflight checks evidence even when a completed workflow skips its action."""
+    output = Path(config['parameters']['output'])
+    updates = config['parameters']['snapshots']
+    for arm in config['parameters']['arms']:
+        present = [u for u in updates if (output / arm / ('update-%04d' % u)).exists()]
+        if present != updates[:len(present)]:
+            raise ValueError('Snapshot sequence contains a gap')
+        for update in present:
+            verify_snapshot(output / arm / ('update-%04d' % update))
+    report_path = output / 'report.json'
+    if report_path.exists():
+        report = json.loads(report_path.read_text())
+        if report['config_sha256'] != sha256_fingerprint(config):
+            raise ValueError('Diagnostic report config identity mismatch')
+        if file_sha256(output / 'panels.json') != report['panel_sha256']:
+            raise ValueError('Diagnostic panel integrity mismatch')
+        for arm in config['parameters']['arms']:
+            if not all((output / arm / ('update-%04d' % u)).is_dir() for u in updates):
+                raise ValueError('Completed report has missing snapshots')
+    result_path = output / 'runtime/results/learning-curve.json'
+    if result_path.exists():
+        result = json.loads(result_path.read_text())
+        evidence = result['result']
+        if (result.get('schema') != SCHEMA or not report_path.exists()
+                or Path(evidence['report']).resolve() != report_path
+                or file_sha256(report_path) != evidence['sha256']
+                or result['execution_code_commit'] != report['execution_code_commit']):
+            raise ValueError('Diagnostic result/report integrity mismatch')
 
 
 def save_snapshot(trainer, root, update, config, window, panels, origin, trace):

@@ -530,7 +530,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: dc7b4831a565ec20f09ae988d096d730ff796f58ade15d2cbf74c1eb3db8cff8 -->
+<!-- reviewed-interface-sha256: df72890a040f46d9079977203574157d0602b908343a400d1f8a0ab1635fe1e3 -->
 
 ## B64 bounded performance audit
 

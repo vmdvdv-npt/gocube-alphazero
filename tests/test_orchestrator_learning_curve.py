@@ -231,6 +231,18 @@ def test_job_check_is_read_only_and_validates_adam(parent, tmp_path, monkeypatch
     compiled = entry.launch_operator_job(raw, runs_root=tmp_path / 'runs', check_only=True)
     assert compiled['state'] == 'VALIDATED'
     assert not (tmp_path / 'output').exists() and not (tmp_path / 'runs').exists()
+    resolved = compiled['resolved']['workflow']['steps'][0]['config']
+    output = tmp_path / 'output'
+    output.mkdir()
+    (output / 'config.json').write_text(json.dumps(resolved))
+    trainer = OrdinaryTrainer(parent, learning_rate=1e-4, gradient_clip=8, seed=91)
+    window, _, provenance = curve.load_inputs(resolved)
+    panels = curve.make_panels(window, provenance, resolved['parameters'], 2)
+    curve.save_snapshot(trainer, output / 'A', 0, resolved, window, panels['panels'], curve.vector(trainer).clone(), [])
+    assert entry.launch_operator_job(raw, runs_root=tmp_path / 'runs', check_only=True)['state'] == 'VALIDATED'
+    (output / 'A/update-0000/metrics.json').write_text('{}')
+    with pytest.raises(ValueError, match='snapshot changed'):
+        entry.launch_operator_job(raw, runs_root=tmp_path / 'runs', check_only=True)
     broken = torch.load(parent, weights_only=False)
     first = next(iter(broken['optimizer_state_dict']['state'].values()))
     first['step'] += 1

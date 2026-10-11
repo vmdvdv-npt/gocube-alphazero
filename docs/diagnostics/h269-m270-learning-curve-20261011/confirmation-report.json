@@ -1,0 +1,5132 @@
+{
+  "config_sha256": "sha256:6191f91a9f7643c7f357356183af64642b05c89ef537e16e678876ee33242488",
+  "environment": {
+    "cuda": "12.4",
+    "cudnn_benchmark": false,
+    "cudnn_deterministic": false,
+    "deterministic_algorithms": false,
+    "device": "cuda",
+    "device_name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+    "tf32_cudnn": true,
+    "tf32_matmul": false,
+    "threads": 1,
+    "torch": "2.4.1+cu124"
+  },
+  "execution_code_commit": "52e4894050b5b8fb17edafb595481ee6d6c95b3e",
+  "interpretation": "Training-data diagnostic, not independent holdout or playing strength.",
+  "paired_changes": {
+    "A": {
+      "0": {
+        "fresh": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          }
+        },
+        "full": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          }
+        },
+        "heldout-fresh": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          }
+        },
+        "old-266": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          }
+        },
+        "old-267": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          }
+        },
+        "old-268": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          }
+        },
+        "old-269": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          }
+        }
+      },
+      "256": {
+        "fresh": {
+          "brier": {
+            "delta_from_zero": 0.016238426251105158,
+            "game_cluster_ci95": [
+              0.009967761143130985,
+              0.0223457186459495
+            ],
+            "sampled_games": 1228
+          },
+          "ownership": {
+            "delta_from_zero": 0.000539276154299273,
+            "game_cluster_ci95": [
+              -0.00043835164302833334,
+              0.001652654966133802
+            ],
+            "sampled_games": 1228
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.022689938478841154,
+            "game_cluster_ci95": [
+              0.019157782036752585,
+              0.026075046164689437
+            ],
+            "sampled_games": 1228
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.022689938638002727,
+            "game_cluster_ci95": [
+              0.019157781925331113,
+              0.02607504616835041
+            ],
+            "sampled_games": 1228
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.15525943558969857,
+            "game_cluster_ci95": [
+              0.01332998467926425,
+              0.29674090287699423
+            ],
+            "sampled_games": 1228
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0010682661594705817,
+            "game_cluster_ci95": [
+              -2.3320217983351185e-05,
+              0.002213209638790712
+            ],
+            "sampled_games": 1228
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "total_loss": {
+            "delta_from_zero": 0.04374503383087358,
+            "game_cluster_ci95": [
+              0.033832469041708585,
+              0.05358563069268766
+            ],
+            "sampled_games": 1228
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.01944755150293356,
+            "game_cluster_ci95": [
+              0.012125833751895463,
+              0.026545569157263464
+            ],
+            "sampled_games": 1228
+          }
+        },
+        "full": {
+          "brier": {
+            "delta_from_zero": 0.020751495164604873,
+            "game_cluster_ci95": [
+              0.016500794309858687,
+              0.02471049763008578
+            ],
+            "sampled_games": 6578
+          },
+          "ownership": {
+            "delta_from_zero": 0.0010495386540441132,
+            "game_cluster_ci95": [
+              0.00042658322601379337,
+              0.0017304598051414478
+            ],
+            "sampled_games": 6578
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.009609822475946217,
+            "game_cluster_ci95": [
+              0.007183729637565098,
+              0.012071182400323793
+            ],
+            "sampled_games": 6578
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.009609822433654713,
+            "game_cluster_ci95": [
+              0.007183729729376797,
+              0.012071182529601815
+            ],
+            "sampled_games": 6578
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.20095756878970406,
+            "game_cluster_ci95": [
+              0.11085544376747122,
+              0.3038952815027089
+            ],
+            "sampled_games": 6578
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0018058851123711282,
+            "game_cluster_ci95": [
+              0.0010467555919564308,
+              0.002617451551665513
+            ],
+            "sampled_games": 6578
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "total_loss": {
+            "delta_from_zero": 0.03776371721005489,
+            "game_cluster_ci95": [
+              0.031148639724084718,
+              0.044572206533301156
+            ],
+            "sampled_games": 6578
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.025298470216790284,
+            "game_cluster_ci95": [
+              0.020117469050616243,
+              0.03010591768940946
+            ],
+            "sampled_games": 6578
+          }
+        },
+        "heldout-fresh": {
+          "brier": {
+            "delta_from_zero": 0.023380836221100865,
+            "game_cluster_ci95": [
+              0.017306119496395912,
+              0.02890078858816152
+            ],
+            "sampled_games": 308
+          },
+          "ownership": {
+            "delta_from_zero": 0.001494764628674261,
+            "game_cluster_ci95": [
+              0.00019997615773407112,
+              0.002721523800159721
+            ],
+            "sampled_games": 308
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.02579160866487573,
+            "game_cluster_ci95": [
+              0.021876577476128187,
+              0.0298795701041595
+            ],
+            "sampled_games": 308
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.02579160832381522,
+            "game_cluster_ci95": [
+              0.021876577199641402,
+              0.02987956987278755
+            ],
+            "sampled_games": 308
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.18265098175578487,
+            "game_cluster_ci95": [
+              0.053553331338017124,
+              0.3182191248795644
+            ],
+            "sampled_games": 308
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0022723329312403363,
+            "game_cluster_ci95": [
+              0.0013387315708046645,
+              0.0032993216720568685
+            ],
+            "sampled_games": 308
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "total_loss": {
+            "delta_from_zero": 0.057687633410751005,
+            "game_cluster_ci95": [
+              0.04802662049798116,
+              0.06742768470513863
+            ],
+            "sampled_games": 308
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.028128929217542634,
+            "game_cluster_ci95": [
+              0.021073730443853987,
+              0.03537360795163069
+            ],
+            "sampled_games": 308
+          }
+        },
+        "old-266": {
+          "brier": {
+            "delta_from_zero": 0.030451087876578048,
+            "game_cluster_ci95": [
+              0.0220152974112445,
+              0.038754525525408604
+            ],
+            "sampled_games": 1430
+          },
+          "ownership": {
+            "delta_from_zero": 0.0033779034521330686,
+            "game_cluster_ci95": [
+              0.0019148999042156597,
+              0.0047977674295572965
+            ],
+            "sampled_games": 1430
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.008000863001143443,
+            "game_cluster_ci95": [
+              0.0036453539988663165,
+              0.012434003724664322
+            ],
+            "sampled_games": 1430
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.008000862952940224,
+            "game_cluster_ci95": [
+              0.003645354046985118,
+              0.012434003803433185
+            ],
+            "sampled_games": 1430
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.43058127083781983,
+            "game_cluster_ci95": [
+              0.2176975065755788,
+              0.6188521696779501
+            ],
+            "sampled_games": 1430
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0035293853537892426,
+            "game_cluster_ci95": [
+              0.0019323816596022885,
+              0.0050349508101317055
+            ],
+            "sampled_games": 1430
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "total_loss": {
+            "delta_from_zero": 0.05103525381855434,
+            "game_cluster_ci95": [
+              0.03733621120942202,
+              0.06413987577449776
+            ],
+            "sampled_games": 1430
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.036127101173850984,
+            "game_cluster_ci95": [
+              0.026115302483837498,
+              0.04605165397374659
+            ],
+            "sampled_games": 1430
+          }
+        },
+        "old-267": {
+          "brier": {
+            "delta_from_zero": 0.02336097801406687,
+            "game_cluster_ci95": [
+              0.015378920741272752,
+              0.03192861590131342
+            ],
+            "sampled_games": 1415
+          },
+          "ownership": {
+            "delta_from_zero": 0.0012093710716953865,
+            "game_cluster_ci95": [
+              -9.338340082460702e-05,
+              0.002528556463119608
+            ],
+            "sampled_games": 1415
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.013513680173673492,
+            "game_cluster_ci95": [
+              0.008923031125301753,
+              0.018171800534592032
+            ],
+            "sampled_games": 1415
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.013513680104551895,
+            "game_cluster_ci95": [
+              0.008923030944162464,
+              0.01817180023167104
+            ],
+            "sampled_games": 1415
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.33690990105503715,
+            "game_cluster_ci95": [
+              0.1549926139258295,
+              0.531642825885404
+            ],
+            "sampled_games": 1415
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0028011347713771794,
+            "game_cluster_ci95": [
+              0.0013888938006100177,
+              0.004369477010945292
+            ],
+            "sampled_games": 1415
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "total_loss": {
+            "delta_from_zero": 0.04489676407320076,
+            "game_cluster_ci95": [
+              0.03252936185064646,
+              0.057698358931425456
+            ],
+            "sampled_games": 1415
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.027372570965349653,
+            "game_cluster_ci95": [
+              0.01801421166304663,
+              0.036885080497691874
+            ],
+            "sampled_games": 1415
+          }
+        },
+        "old-268": {
+          "brier": {
+            "delta_from_zero": 0.029873306180398393,
+            "game_cluster_ci95": [
+              0.021873091360082315,
+              0.038552022676292284
+            ],
+            "sampled_games": 1416
+          },
+          "ownership": {
+            "delta_from_zero": 0.0011469590150454678,
+            "game_cluster_ci95": [
+              -0.00016841384455428533,
+              0.0024072555553181956
+            ],
+            "sampled_games": 1416
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.010647690502082696,
+            "game_cluster_ci95": [
+              0.0054802008205592796,
+              0.016003885713977754
+            ],
+            "sampled_games": 1416
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.010647690587575198,
+            "game_cluster_ci95": [
+              0.0054802009047449,
+              0.016003885367159996
+            ],
+            "sampled_games": 1416
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.41068850271517476,
+            "game_cluster_ci95": [
+              0.2305835865369983,
+              0.6080909784143339
+            ],
+            "sampled_games": 1416
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0034526634389549452,
+            "game_cluster_ci95": [
+              0.0018709959167658684,
+              0.004903787550042566
+            ],
+            "sampled_games": 1416
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "total_loss": {
+            "delta_from_zero": 0.050339498549874406,
+            "game_cluster_ci95": [
+              0.03563161208161761,
+              0.06434178879210847
+            ],
+            "sampled_games": 1416
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.035092180697143864,
+            "game_cluster_ci95": [
+              0.025003999171402575,
+              0.04523465891252549
+            ],
+            "sampled_games": 1416
+          }
+        },
+        "old-269": {
+          "brier": {
+            "delta_from_zero": 0.012022000428252865,
+            "game_cluster_ci95": [
+              0.004640566144285286,
+              0.019166321817666063
+            ],
+            "sampled_games": 1429
+          },
+          "ownership": {
+            "delta_from_zero": 0.0006919507044358397,
+            "game_cluster_ci95": [
+              -0.0004974481129304427,
+              0.002024971860198895
+            ],
+            "sampled_games": 1429
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0025969327842538803,
+            "game_cluster_ci95": [
+              -0.002459321356859695,
+              0.00791193769387495
+            ],
+            "sampled_games": 1429
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.002596932927954043,
+            "game_cluster_ci95": [
+              -0.002459321167579003,
+              0.007911938164850911
+            ],
+            "sampled_games": 1429
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.09499373309768089,
+            "game_cluster_ci95": [
+              -0.08203549780081837,
+              0.27618669512255467
+            ],
+            "sampled_games": 1429
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0012680382682505455,
+            "game_cluster_ci95": [
+              -1.3196745753248892e-05,
+              0.0026016448384449465
+            ],
+            "sampled_games": 1429
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "total_loss": {
+            "delta_from_zero": 0.017569456703313335,
+            "game_cluster_ci95": [
+              0.00566557147590409,
+              0.029103170181238553
+            ],
+            "sampled_games": 1429
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.013012529384533183,
+            "game_cluster_ci95": [
+              0.004386558490639949,
+              0.021420273433943076
+            ],
+            "sampled_games": 1429
+          }
+        }
+      },
+      "64": {
+        "fresh": {
+          "brier": {
+            "delta_from_zero": 0.0046502927254305215,
+            "game_cluster_ci95": [
+              0.0011884139691830996,
+              0.007904196283899573
+            ],
+            "sampled_games": 1228
+          },
+          "ownership": {
+            "delta_from_zero": 0.0005236206794734244,
+            "game_cluster_ci95": [
+              3.0672264476486014e-05,
+              0.0010242503014027788
+            ],
+            "sampled_games": 1228
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.017570935922477826,
+            "game_cluster_ci95": [
+              0.014859992557972384,
+              0.02035829417232892
+            ],
+            "sampled_games": 1228
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.01757093616895089,
+            "game_cluster_ci95": [
+              0.014859992717118185,
+              0.020358294288195924
+            ],
+            "sampled_games": 1228
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.10048595180978737,
+            "game_cluster_ci95": [
+              -0.17656907687695783,
+              -0.025834753797757973
+            ],
+            "sampled_games": 1228
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0003273763189176867,
+            "game_cluster_ci95": [
+              -0.0008272565377635318,
+              0.00015799493689306064
+            ],
+            "sampled_games": 1228
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "total_loss": {
+            "delta_from_zero": 0.023534154906883487,
+            "game_cluster_ci95": [
+              0.018069911479496176,
+              0.02854047293096922
+            ],
+            "sampled_games": 1228
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.005766970923170188,
+            "game_cluster_ci95": [
+              0.0015961591217260559,
+              0.009689994806443355
+            ],
+            "sampled_games": 1228
+          }
+        },
+        "full": {
+          "brier": {
+            "delta_from_zero": 0.0043700393585386545,
+            "game_cluster_ci95": [
+              0.0021884808133788088,
+              0.0067533054026434015
+            ],
+            "sampled_games": 6578
+          },
+          "ownership": {
+            "delta_from_zero": 0.0002359558859765798,
+            "game_cluster_ci95": [
+              -5.268518089003526e-05,
+              0.0005343590833969409
+            ],
+            "sampled_games": 6578
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.006909960393110537,
+            "game_cluster_ci95": [
+              0.0049665341759268155,
+              0.008808056885170074
+            ],
+            "sampled_games": 6578
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.006909960328422726,
+            "game_cluster_ci95": [
+              0.004966534066212951,
+              0.008808056861059309
+            ],
+            "sampled_games": 6578
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.14181984453992413,
+            "game_cluster_ci95": [
+              -0.18660712098147011,
+              -0.09336533834087755
+            ],
+            "sampled_games": 6578
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0005234872078237564,
+            "game_cluster_ci95": [
+              -0.0008337991570191765,
+              -0.00017290581984285387
+            ],
+            "sampled_games": 6578
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "total_loss": {
+            "delta_from_zero": 0.011578710845469686,
+            "game_cluster_ci95": [
+              0.008140253252432865,
+              0.01515328106288129
+            ],
+            "sampled_games": 6578
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.004956281391290297,
+            "game_cluster_ci95": [
+              0.0022143251832487548,
+              0.007875117527091843
+            ],
+            "sampled_games": 6578
+          }
+        },
+        "heldout-fresh": {
+          "brier": {
+            "delta_from_zero": 0.0011994300259674728,
+            "game_cluster_ci95": [
+              -0.0029150547489006583,
+              0.004795039234242965
+            ],
+            "sampled_games": 308
+          },
+          "ownership": {
+            "delta_from_zero": -0.00022882525313150381,
+            "game_cluster_ci95": [
+              -0.0008954601707013004,
+              0.00044318598283181666
+            ],
+            "sampled_games": 308
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.01602240633469232,
+            "game_cluster_ci95": [
+              0.012558241982056538,
+              0.019029652864701093
+            ],
+            "sampled_games": 308
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.016022406209636797,
+            "game_cluster_ci95": [
+              0.012558241928759777,
+              0.01902965262903689
+            ],
+            "sampled_games": 308
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.2192213813139574,
+            "game_cluster_ci95": [
+              -0.31020134302652014,
+              -0.13117120029454807
+            ],
+            "sampled_games": 308
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0006459857975607028,
+            "game_cluster_ci95": [
+              -0.0012676623749927507,
+              -6.191736515123324e-05
+            ],
+            "sampled_games": 308
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "total_loss": {
+            "delta_from_zero": 0.016338700845381027,
+            "game_cluster_ci95": [
+              0.009206977691309936,
+              0.022367558135878155
+            ],
+            "sampled_games": 308
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.001191106092687401,
+            "game_cluster_ci95": [
+              -0.0041613391551381315,
+              0.005932468336352836
+            ],
+            "sampled_games": 308
+          }
+        },
+        "old-266": {
+          "brier": {
+            "delta_from_zero": 0.003170110989381119,
+            "game_cluster_ci95": [
+              -0.0010282197235103447,
+              0.007257623795118466
+            ],
+            "sampled_games": 1430
+          },
+          "ownership": {
+            "delta_from_zero": 0.00013150436583941882,
+            "game_cluster_ci95": [
+              -0.00044119211268753256,
+              0.0006590632377998231
+            ],
+            "sampled_games": 1430
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.009520301127849962,
+            "game_cluster_ci95": [
+              0.005742743529981528,
+              0.013611272568519156
+            ],
+            "sampled_games": 1430
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.00952030128610204,
+            "game_cluster_ci95": [
+              0.0057427431148579155,
+              0.013611272753829633
+            ],
+            "sampled_games": 1430
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.07975137464995896,
+            "game_cluster_ci95": [
+              -0.17662919271150904,
+              0.008209726330831403
+            ],
+            "sampled_games": 1430
+          },
+          "score_mse": {
+            "delta_from_zero": 9.483869488683734e-05,
+            "game_cluster_ci95": [
+              -0.0005560669253822602,
+              0.0006922653755124452
+            ],
+            "sampled_games": 1430
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "total_loss": {
+            "delta_from_zero": 0.013532331780879758,
+            "game_cluster_ci95": [
+              0.006501937296325377,
+              0.020262037417968
+            ],
+            "sampled_games": 1430
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0037856876323146757,
+            "game_cluster_ci95": [
+              -0.0015276068314527683,
+              0.008519558385286159
+            ],
+            "sampled_games": 1430
+          }
+        },
+        "old-267": {
+          "brier": {
+            "delta_from_zero": 0.003699462146977626,
+            "game_cluster_ci95": [
+              -0.000530233892649764,
+              0.007983432559983027
+            ],
+            "sampled_games": 1415
+          },
+          "ownership": {
+            "delta_from_zero": 0.0003208849238944822,
+            "game_cluster_ci95": [
+              -0.00024076086134414295,
+              0.0009131806785851367
+            ],
+            "sampled_games": 1415
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.012900679770609713,
+            "game_cluster_ci95": [
+              0.0091013597983791,
+              0.016603575659463514
+            ],
+            "sampled_games": 1415
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.01290067953777907,
+            "game_cluster_ci95": [
+              0.009101359396282269,
+              0.016603575348411954
+            ],
+            "sampled_games": 1415
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.1487093356265632,
+            "game_cluster_ci95": [
+              -0.23980999828270994,
+              -0.05789623804575518
+            ],
+            "sampled_games": 1415
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0005898808995710502,
+            "game_cluster_ci95": [
+              -0.0011816878963771718,
+              3.0085347525830837e-05
+            ],
+            "sampled_games": 1415
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "total_loss": {
+            "delta_from_zero": 0.015553032284515211,
+            "game_cluster_ci95": [
+              0.008906604603622494,
+              0.022600246637541024
+            ],
+            "sampled_games": 1415
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0029213426431338747,
+            "game_cluster_ci95": [
+              -0.0021080598249951423,
+              0.007882556724109879
+            ],
+            "sampled_games": 1415
+          }
+        },
+        "old-268": {
+          "brier": {
+            "delta_from_zero": 0.005288158194042615,
+            "game_cluster_ci95": [
+              0.0010021101702299593,
+              0.009937100210334384
+            ],
+            "sampled_games": 1416
+          },
+          "ownership": {
+            "delta_from_zero": 0.0002472545444334173,
+            "game_cluster_ci95": [
+              -0.00030040586349374933,
+              0.0008145136348396177
+            ],
+            "sampled_games": 1416
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.004642605719709536,
+            "game_cluster_ci95": [
+              0.0006135591079539651,
+              0.008774447470811363
+            ],
+            "sampled_games": 1416
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.004642605841581826,
+            "game_cluster_ci95": [
+              0.0006135592640791652,
+              0.008774447268277486
+            ],
+            "sampled_games": 1416
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.12984813143089013,
+            "game_cluster_ci95": [
+              -0.22153761919355852,
+              -0.03488790506803938
+            ],
+            "sampled_games": 1416
+          },
+          "score_mse": {
+            "delta_from_zero": -7.455718203205302e-05,
+            "game_cluster_ci95": [
+              -0.0006968228599199769,
+              0.0005284075668299005
+            ],
+            "sampled_games": 1416
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "total_loss": {
+            "delta_from_zero": 0.01064453404978849,
+            "game_cluster_ci95": [
+              0.004386386321246838,
+              0.017890041944101518
+            ],
+            "sampled_games": 1416
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.005829226225295105,
+            "game_cluster_ci95": [
+              0.0006285089230599475,
+              0.011088196567235566
+            ],
+            "sampled_games": 1416
+          }
+        },
+        "old-269": {
+          "brier": {
+            "delta_from_zero": 0.007693317560114506,
+            "game_cluster_ci95": [
+              0.003482047602168469,
+              0.011697375088068796
+            ],
+            "sampled_games": 1429
+          },
+          "ownership": {
+            "delta_from_zero": 0.0008770821678467655,
+            "game_cluster_ci95": [
+              0.000306664552442407,
+              0.0014254341599515094
+            ],
+            "sampled_games": 1429
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.0062295099592368786,
+            "game_cluster_ci95": [
+              -0.010708830136154483,
+              -0.00233548263308125
+            ],
+            "sampled_games": 1429
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.006229509897391239,
+            "game_cluster_ci95": [
+              -0.01070882978554124,
+              -0.0023354823711238346
+            ],
+            "sampled_games": 1429
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.08853935195520535,
+            "game_cluster_ci95": [
+              -0.17426911784032992,
+              0.005775928920643283
+            ],
+            "sampled_games": 1429
+          },
+          "score_mse": {
+            "delta_from_zero": -3.529067142389613e-05,
+            "game_cluster_ci95": [
+              -0.0005970100681705971,
+              0.0005391018906375214
+            ],
+            "sampled_games": 1429
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0037306308677216293,
+            "game_cluster_ci95": [
+              -0.0038212343901779535,
+              0.010999508856748426
+            ],
+            "sampled_games": 1429
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.009118348536514774,
+            "game_cluster_ci95": [
+              0.0038239160818107727,
+              0.014171032753312229
+            ],
+            "sampled_games": 1429
+          }
+        }
+      },
+      "640": {
+        "fresh": {
+          "brier": {
+            "delta_from_zero": -0.0003042596042456499,
+            "game_cluster_ci95": [
+              -0.0030389870279515104,
+              0.002256279490947771
+            ],
+            "sampled_games": 1228
+          },
+          "ownership": {
+            "delta_from_zero": 6.548614410917253e-05,
+            "game_cluster_ci95": [
+              -0.00048807990937992503,
+              0.0006246843180688383
+            ],
+            "sampled_games": 1228
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.011729101640087114,
+            "game_cluster_ci95": [
+              0.008831595468824447,
+              0.014496670040138685
+            ],
+            "sampled_games": 1228
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.011729101713756185,
+            "game_cluster_ci95": [
+              0.00883159547018834,
+              0.014496670155816481
+            ],
+            "sampled_games": 1228
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.0986328587476919,
+            "game_cluster_ci95": [
+              -0.1463044629734758,
+              -0.05147780834910226
+            ],
+            "sampled_games": 1228
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0001554838943171528,
+            "game_cluster_ci95": [
+              -0.0004803213013853399,
+              0.00018797063044152185
+            ],
+            "sampled_games": 1228
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "total_loss": {
+            "delta_from_zero": 0.011033803846657975,
+            "game_cluster_ci95": [
+              0.0062186848265022325,
+              0.01563855179322329
+            ],
+            "sampled_games": 1228
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0006053005375618028,
+            "game_cluster_ci95": [
+              -0.003919070391297159,
+              0.002545696757874266
+            ],
+            "sampled_games": 1228
+          }
+        },
+        "full": {
+          "brier": {
+            "delta_from_zero": 5.169219450845458e-05,
+            "game_cluster_ci95": [
+              -0.0016280432898302664,
+              0.0016312235801283805
+            ],
+            "sampled_games": 6578
+          },
+          "ownership": {
+            "delta_from_zero": 0.00019467688553120865,
+            "game_cluster_ci95": [
+              -0.00017373699564224684,
+              0.0005564994992857365
+            ],
+            "sampled_games": 6578
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.001196726325327635,
+            "game_cluster_ci95": [
+              -0.0005160496775926732,
+              0.0031651402368176873
+            ],
+            "sampled_games": 6578
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.001196726199248932,
+            "game_cluster_ci95": [
+              -0.0005160498666830341,
+              0.0031651402554750347
+            ],
+            "sampled_games": 6578
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.1162746766858902,
+            "game_cluster_ci95": [
+              -0.14759624653392464,
+              -0.08723815582042742
+            ],
+            "sampled_games": 6578
+          },
+          "score_mse": {
+            "delta_from_zero": -0.00015854083973991618,
+            "game_cluster_ci95": [
+              -0.0003753417680737029,
+              4.947020985178585e-05
+            ],
+            "sampled_games": 6578
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "total_loss": {
+            "delta_from_zero": 0.001247557057922677,
+            "game_cluster_ci95": [
+              -0.001782171947939061,
+              0.004048238373545048
+            ],
+            "sampled_games": 6578
+          },
+          "wdl_ce": {
+            "delta_from_zero": 1.4694822939159517e-05,
+            "game_cluster_ci95": [
+              -0.0020332096991914584,
+              0.001918108529196634
+            ],
+            "sampled_games": 6578
+          }
+        },
+        "heldout-fresh": {
+          "brier": {
+            "delta_from_zero": -0.0011426205651434973,
+            "game_cluster_ci95": [
+              -0.004077798911859715,
+              0.0016790092812083326
+            ],
+            "sampled_games": 308
+          },
+          "ownership": {
+            "delta_from_zero": -0.00022986917582556998,
+            "game_cluster_ci95": [
+              -0.0011216427516665861,
+              0.0005992872905668011
+            ],
+            "sampled_games": 308
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.014378421081009174,
+            "game_cluster_ci95": [
+              0.011671007333908343,
+              0.017008440920710563
+            ],
+            "sampled_games": 308
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.014378420767233502,
+            "game_cluster_ci95": [
+              0.011671007074282546,
+              0.017008440905068936
+            ],
+            "sampled_games": 308
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.18058636543270268,
+            "game_cluster_ci95": [
+              -0.23531991389462745,
+              -0.1272952644370639
+            ],
+            "sampled_games": 308
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0003225317673332251,
+            "game_cluster_ci95": [
+              -0.0006334761324949383,
+              -5.79646855388608e-06
+            ],
+            "sampled_games": 308
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "total_loss": {
+            "delta_from_zero": 0.012208130995077227,
+            "game_cluster_ci95": [
+              0.00756704512222399,
+              0.016573289500941665
+            ],
+            "sampled_games": 308
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0016178864664889662,
+            "game_cluster_ci95": [
+              -0.005155091464256996,
+              0.0015826208839782527
+            ],
+            "sampled_games": 308
+          }
+        },
+        "old-266": {
+          "brier": {
+            "delta_from_zero": 0.00046701378876638116,
+            "game_cluster_ci95": [
+              -0.0025095658331573912,
+              0.0035406809487181774
+            ],
+            "sampled_games": 1430
+          },
+          "ownership": {
+            "delta_from_zero": 2.4110336568128332e-05,
+            "game_cluster_ci95": [
+              -0.0006514589146909256,
+              0.000657383024285157
+            ],
+            "sampled_games": 1430
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.006993099648752832,
+            "game_cluster_ci95": [
+              0.0033126719956348017,
+              0.01095116480529696
+            ],
+            "sampled_games": 1430
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.006993099697865546,
+            "game_cluster_ci95": [
+              0.0033126718473461604,
+              0.010951164631803215
+            ],
+            "sampled_games": 1430
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.10017085081472032,
+            "game_cluster_ci95": [
+              -0.16449461326009698,
+              -0.039387287254792694
+            ],
+            "sampled_games": 1430
+          },
+          "score_mse": {
+            "delta_from_zero": 0.00013446527033343707,
+            "game_cluster_ci95": [
+              -0.0003002403379169299,
+              0.0005466405801634121
+            ],
+            "sampled_games": 1430
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "total_loss": {
+            "delta_from_zero": 0.008568951197958086,
+            "game_cluster_ci95": [
+              0.0031781173857010057,
+              0.013939284978728862
+            ],
+            "sampled_games": 1430
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.001417276350719721,
+            "game_cluster_ci95": [
+              -0.0023792982601172526,
+              0.00495758043156961
+            ],
+            "sampled_games": 1430
+          }
+        },
+        "old-267": {
+          "brier": {
+            "delta_from_zero": -0.003240899660161388,
+            "game_cluster_ci95": [
+              -0.006060005628974105,
+              -0.00023760368623718225
+            ],
+            "sampled_games": 1415
+          },
+          "ownership": {
+            "delta_from_zero": 0.00011451801276507467,
+            "game_cluster_ci95": [
+              -0.0006194787547523215,
+              0.0007696932303934718
+            ],
+            "sampled_games": 1415
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.006534620892125531,
+            "game_cluster_ci95": [
+              0.0033053596536321375,
+              0.009964778729894394
+            ],
+            "sampled_games": 1415
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.006534620821184944,
+            "game_cluster_ci95": [
+              0.0033053595174702384,
+              0.009964778994734903
+            ],
+            "sampled_games": 1415
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.13382207713016214,
+            "game_cluster_ci95": [
+              -0.19444090194635227,
+              -0.07591473068713077
+            ],
+            "sampled_games": 1415
+          },
+          "score_mse": {
+            "delta_from_zero": -0.00029743766605839226,
+            "game_cluster_ci95": [
+              -0.0007022702411122307,
+              0.00010488058586869405
+            ],
+            "sampled_games": 1415
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0025104733067564666,
+            "game_cluster_ci95": [
+              -0.0026953704790506146,
+              0.007441191343863069
+            ],
+            "sampled_games": 1415
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.003841234260248353,
+            "game_cluster_ci95": [
+              -0.0072051400882025525,
+              -0.0004256617404125977
+            ],
+            "sampled_games": 1415
+          }
+        },
+        "old-268": {
+          "brier": {
+            "delta_from_zero": -0.0005159566205849482,
+            "game_cluster_ci95": [
+              -0.0037935060183261027,
+              0.002623317901114949
+            ],
+            "sampled_games": 1416
+          },
+          "ownership": {
+            "delta_from_zero": -9.25386918879667e-05,
+            "game_cluster_ci95": [
+              -0.0007278448419060848,
+              0.0006075736553849859
+            ],
+            "sampled_games": 1416
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.0024931657699198695,
+            "game_cluster_ci95": [
+              -0.006449417836451705,
+              0.0013743319807412158
+            ],
+            "sampled_games": 1416
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.002493165707164735,
+            "game_cluster_ci95": [
+              -0.006449417404437345,
+              0.0013743322950660415
+            ],
+            "sampled_games": 1416
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.1304033660674122,
+            "game_cluster_ci95": [
+              -0.1940970475923752,
+              -0.07313758406277397
+            ],
+            "sampled_games": 1416
+          },
+          "score_mse": {
+            "delta_from_zero": 3.3673096411606767e-06,
+            "game_cluster_ci95": [
+              -0.000404852026114062,
+              0.0004072121603438307
+            ],
+            "sampled_games": 1416
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "total_loss": {
+            "delta_from_zero": -0.0041986682917922735,
+            "game_cluster_ci95": [
+              -0.010189977968318165,
+              0.0015118035208231356
+            ],
+            "sampled_games": 1416
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0016163403952843096,
+            "game_cluster_ci95": [
+              -0.005734130686609096,
+              0.0019550979773601223
+            ],
+            "sampled_games": 1416
+          }
+        },
+        "old-269": {
+          "brier": {
+            "delta_from_zero": -0.0014539672483854433,
+            "game_cluster_ci95": [
+              -0.004747730024494615,
+              0.001741768224731888
+            ],
+            "sampled_games": 1429
+          },
+          "ownership": {
+            "delta_from_zero": 0.0005460813411559684,
+            "game_cluster_ci95": [
+              -0.00014167396960360274,
+              0.0012069171290686408
+            ],
+            "sampled_games": 1429
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.001404689388472491,
+            "game_cluster_ci95": [
+              -0.005452071561498861,
+              0.002722059187525367
+            ],
+            "sampled_games": 1429
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.0014046889901138115,
+            "game_cluster_ci95": [
+              -0.0054520713276013525,
+              0.002722059201460182
+            ],
+            "sampled_games": 1429
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.12020317720771345,
+            "game_cluster_ci95": [
+              -0.17921564848405203,
+              -0.0611394937383263
+            ],
+            "sampled_games": 1429
+          },
+          "score_mse": {
+            "delta_from_zero": -0.00012254511770836053,
+            "game_cluster_ci95": [
+              -0.0005408376560479049,
+              0.0002610909377688597
+            ],
+            "sampled_games": 1429
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "total_loss": {
+            "delta_from_zero": -0.0018582402626634575,
+            "game_cluster_ci95": [
+              -0.0077542445040756445,
+              0.004043454942191288
+            ],
+            "sampled_games": 1429
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0008770901799171355,
+            "game_cluster_ci95": [
+              -0.004940384873420268,
+              0.002813760660089576
+            ],
+            "sampled_games": 1429
+          }
+        }
+      }
+    },
+    "B": {
+      "0": {
+        "fresh": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          }
+        },
+        "full": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          }
+        },
+        "heldout-fresh": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          }
+        },
+        "old-266": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          }
+        },
+        "old-267": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          }
+        },
+        "old-268": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          }
+        },
+        "old-269": {
+          "brier": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "ownership": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          }
+        }
+      },
+      "256": {
+        "fresh": {
+          "brier": {
+            "delta_from_zero": -0.00038439943802927193,
+            "game_cluster_ci95": [
+              -0.003968691679918266,
+              0.0033359181508646803
+            ],
+            "sampled_games": 1228
+          },
+          "ownership": {
+            "delta_from_zero": -0.00023771397613359113,
+            "game_cluster_ci95": [
+              -0.0009828432273108524,
+              0.0005756118104589669
+            ],
+            "sampled_games": 1228
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0026950347075278547,
+            "game_cluster_ci95": [
+              0.0005186555936649005,
+              0.005021089479676409
+            ],
+            "sampled_games": 1228
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0026950348148482295,
+            "game_cluster_ci95": [
+              0.0005186554955048453,
+              0.005021089719932588
+            ],
+            "sampled_games": 1228
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.13764777467770273,
+            "game_cluster_ci95": [
+              -0.250239021226315,
+              -0.03434915795977947
+            ],
+            "sampled_games": 1228
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0006012746288975408,
+            "game_cluster_ci95": [
+              -0.0013976929225457619,
+              0.00022242859964109355
+            ],
+            "sampled_games": 1228
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0016428811518380826,
+            "game_cluster_ci95": [
+              -0.0046392466081863915,
+              0.007723730284177158
+            ],
+            "sampled_games": 1228
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.00021316772974981288,
+            "game_cluster_ci95": [
+              -0.004526845473156939,
+              0.0041844285378571325
+            ],
+            "sampled_games": 1228
+          }
+        },
+        "full": {
+          "brier": {
+            "delta_from_zero": 0.0012146853475552204,
+            "game_cluster_ci95": [
+              -0.001481075392487133,
+              0.003730067705748327
+            ],
+            "sampled_games": 6578
+          },
+          "ownership": {
+            "delta_from_zero": -0.00020350742524755105,
+            "game_cluster_ci95": [
+              -0.0006901665403339579,
+              0.0002991860739270281
+            ],
+            "sampled_games": 6578
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.005396135093506671,
+            "game_cluster_ci95": [
+              -0.006868979061195181,
+              -0.0038887607367530507
+            ],
+            "sampled_games": 6578
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.005396135197871188,
+            "game_cluster_ci95": [
+              -0.006868979068969575,
+              -0.0038887608793766117
+            ],
+            "sampled_games": 6578
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.11896918607422435,
+            "game_cluster_ci95": [
+              -0.18820484268270166,
+              -0.04007509731974317
+            ],
+            "sampled_games": 6578
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0001967990723935297,
+            "game_cluster_ci95": [
+              -0.000790349452953236,
+              0.0004118437997150961
+            ],
+            "sampled_games": 6578
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "total_loss": {
+            "delta_from_zero": -0.0040042658811216825,
+            "game_cluster_ci95": [
+              -0.008255454337306184,
+              0.00017306074690189184
+            ],
+            "sampled_games": 6578
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.001792175477976637,
+            "game_cluster_ci95": [
+              -0.0014478113902864503,
+              0.0048693158435673695
+            ],
+            "sampled_games": 6578
+          }
+        },
+        "heldout-fresh": {
+          "brier": {
+            "delta_from_zero": 0.004535115746921836,
+            "game_cluster_ci95": [
+              0.0009222475495321634,
+              0.007948718341469412
+            ],
+            "sampled_games": 308
+          },
+          "ownership": {
+            "delta_from_zero": 0.000289295184728644,
+            "game_cluster_ci95": [
+              -0.0006413344063196002,
+              0.0012329777001236929
+            ],
+            "sampled_games": 308
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.005305259646094074,
+            "game_cluster_ci95": [
+              0.0027633184477781052,
+              0.007711448358050234
+            ],
+            "sampled_games": 308
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.005305259671559925,
+            "game_cluster_ci95": [
+              0.002763318434087075,
+              0.00771144855388432
+            ],
+            "sampled_games": 308
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.1143795569392978,
+            "game_cluster_ci95": [
+              -0.220241119173632,
+              -0.009428091381202585
+            ],
+            "sampled_games": 308
+          },
+          "score_mse": {
+            "delta_from_zero": 0.00021281758249501023,
+            "game_cluster_ci95": [
+              -0.0004918119291424676,
+              0.0009695286111749079
+            ],
+            "sampled_games": 308
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "total_loss": {
+            "delta_from_zero": 0.010412007934974099,
+            "game_cluster_ci95": [
+              0.0042395824881257815,
+              0.016488267018198808
+            ],
+            "sampled_games": 308
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.004604637767882351,
+            "game_cluster_ci95": [
+              1.15816509337288e-05,
+              0.008894998808393227
+            ],
+            "sampled_games": 308
+          }
+        },
+        "old-266": {
+          "brier": {
+            "delta_from_zero": 0.006199933072281212,
+            "game_cluster_ci95": [
+              0.0009060597479076794,
+              0.01136342060244748
+            ],
+            "sampled_games": 1430
+          },
+          "ownership": {
+            "delta_from_zero": 0.0016162535162038694,
+            "game_cluster_ci95": [
+              0.0005362420466980285,
+              0.0027255055874437517
+            ],
+            "sampled_games": 1430
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.003756502271244244,
+            "game_cluster_ci95": [
+              -0.0067827679716038255,
+              -0.0007334303961850988
+            ],
+            "sampled_games": 1430
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.0037565021730188164,
+            "game_cluster_ci95": [
+              -0.006782767786520831,
+              -0.0007334301875582827
+            ],
+            "sampled_games": 1430
+          },
+          "score_mae_points": {
+            "delta_from_zero": 0.03991394384343039,
+            "game_cluster_ci95": [
+              -0.11120471226696589,
+              0.18240413424655666
+            ],
+            "sampled_games": 1430
+          },
+          "score_mse": {
+            "delta_from_zero": 0.000899390398452715,
+            "game_cluster_ci95": [
+              -0.0002604724926108565,
+              0.0020192316249116743
+            ],
+            "sampled_games": 1430
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "total_loss": {
+            "delta_from_zero": 0.00624937450629659,
+            "game_cluster_ci95": [
+              -0.0022329045705790163,
+              0.014126894290538379
+            ],
+            "sampled_games": 1430
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.007490232698024428,
+            "game_cluster_ci95": [
+              0.0015201661777575499,
+              0.013466385587233388
+            ],
+            "sampled_games": 1430
+          }
+        },
+        "old-267": {
+          "brier": {
+            "delta_from_zero": 0.0032754663039103542,
+            "game_cluster_ci95": [
+              -0.0015625091157025325,
+              0.008205058970167827
+            ],
+            "sampled_games": 1415
+          },
+          "ownership": {
+            "delta_from_zero": -5.3953220060520835e-05,
+            "game_cluster_ci95": [
+              -0.0009770798308878048,
+              0.0009239732463630269
+            ],
+            "sampled_games": 1415
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.0013072555784674478,
+            "game_cluster_ci95": [
+              -0.0040986985611532155,
+              0.00168732754150054
+            ],
+            "sampled_games": 1415
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.001307255733081547,
+            "game_cluster_ci95": [
+              -0.004098698834491124,
+              0.0016873271534333738
+            ],
+            "sampled_games": 1415
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.037108240501879663,
+            "game_cluster_ci95": [
+              -0.17740020905257317,
+              0.1041603765292093
+            ],
+            "sampled_games": 1415
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0002542148387117551,
+            "game_cluster_ci95": [
+              -0.00078080183887798,
+              0.0013597862769215128
+            ],
+            "sampled_games": 1415
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "total_loss": {
+            "delta_from_zero": 0.0024556533608119935,
+            "game_cluster_ci95": [
+              -0.005096252996682328,
+              0.010381886167313451
+            ],
+            "sampled_games": 1415
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.0035626372516046473,
+            "game_cluster_ci95": [
+              -0.0021922618385253113,
+              0.009282101798731665
+            ],
+            "sampled_games": 1415
+          }
+        },
+        "old-268": {
+          "brier": {
+            "delta_from_zero": 0.005004669192404346,
+            "game_cluster_ci95": [
+              -5.852827775088042e-05,
+              0.010176212680360864
+            ],
+            "sampled_games": 1416
+          },
+          "ownership": {
+            "delta_from_zero": -0.00024210947924530046,
+            "game_cluster_ci95": [
+              -0.0011967228148931806,
+              0.0006630329066308933
+            ],
+            "sampled_games": 1416
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.007530684193625348,
+            "game_cluster_ci95": [
+              -0.010519364793117505,
+              -0.004433887745155141
+            ],
+            "sampled_games": 1416
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.007530684165431012,
+            "game_cluster_ci95": [
+              -0.010519364623192378,
+              -0.0044338876048017
+            ],
+            "sampled_games": 1416
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.02809170628256652,
+            "game_cluster_ci95": [
+              -0.16695630155878688,
+              0.117558163758305
+            ],
+            "sampled_games": 1416
+          },
+          "score_mse": {
+            "delta_from_zero": 0.0007110546654574223,
+            "game_cluster_ci95": [
+              -0.0004220567858317995,
+              0.0017618409434625017
+            ],
+            "sampled_games": 1416
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "total_loss": {
+            "delta_from_zero": -0.002086129956296645,
+            "game_cluster_ci95": [
+              -0.010453505731334842,
+              0.006216740214324525
+            ],
+            "sampled_games": 1416
+          },
+          "wdl_ce": {
+            "delta_from_zero": 0.004975602639088137,
+            "game_cluster_ci95": [
+              -0.0011283207571557916,
+              0.011030847561740295
+            ],
+            "sampled_games": 1416
+          }
+        },
+        "old-269": {
+          "brier": {
+            "delta_from_zero": -0.0018733762582292361,
+            "game_cluster_ci95": [
+              -0.0064200465913003815,
+              0.0029281596549343572
+            ],
+            "sampled_games": 1429
+          },
+          "ownership": {
+            "delta_from_zero": -0.0002754551680368422,
+            "game_cluster_ci95": [
+              -0.0011673314164958558,
+              0.0007871343040320623
+            ],
+            "sampled_games": 1429
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.007348165040617971,
+            "game_cluster_ci95": [
+              -0.010735613422599833,
+              -0.004177621827298204
+            ],
+            "sampled_games": 1429
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.007348164780502486,
+            "game_cluster_ci95": [
+              -0.010735613467361595,
+              -0.004177621828099192
+            ],
+            "sampled_games": 1429
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.17428828958463782,
+            "game_cluster_ci95": [
+              -0.3036962480286406,
+              -0.030579246366957975
+            ],
+            "sampled_games": 1429
+          },
+          "score_mse": {
+            "delta_from_zero": -0.00027034638965616186,
+            "game_cluster_ci95": [
+              -0.001200909496969165,
+              0.0007294304157771834
+            ],
+            "sampled_games": 1429
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "total_loss": {
+            "delta_from_zero": -0.010433922228003212,
+            "game_cluster_ci95": [
+              -0.018261256732621862,
+              -0.0026894966317775265
+            ],
+            "sampled_games": 1429
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0025399581864552715,
+            "game_cluster_ci95": [
+              -0.007879721861486938,
+              0.003064309174308337
+            ],
+            "sampled_games": 1429
+          }
+        }
+      },
+      "64": {
+        "fresh": {
+          "brier": {
+            "delta_from_zero": -0.0020817072242075756,
+            "game_cluster_ci95": [
+              -0.003929111717159986,
+              -0.000172008605402294
+            ],
+            "sampled_games": 1228
+          },
+          "ownership": {
+            "delta_from_zero": -0.00031198440362345536,
+            "game_cluster_ci95": [
+              -0.000521438045388788,
+              -0.00011733471515752998
+            ],
+            "sampled_games": 1228
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.0012593016132997903,
+            "game_cluster_ci95": [
+              7.934817870437825e-05,
+              0.002501541399933775
+            ],
+            "sampled_games": 1228
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0012593015751010128,
+            "game_cluster_ci95": [
+              7.934817452312361e-05,
+              0.0025015413129251362
+            ],
+            "sampled_games": 1228
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.1676782627976081,
+            "game_cluster_ci95": [
+              -0.2193198601375538,
+              -0.11731741692075953
+            ],
+            "sampled_games": 1228
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0009620712267280728,
+            "game_cluster_ci95": [
+              -0.001302776853447875,
+              -0.0006359211374771104
+            ],
+            "sampled_games": 1228
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "total_loss": {
+            "delta_from_zero": -0.0023503611614614783,
+            "game_cluster_ci95": [
+              -0.005333688968985488,
+              0.0007662472659193439
+            ],
+            "sampled_games": 1228
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0023356142476904807,
+            "game_cluster_ci95": [
+              -0.004576435246580621,
+              -3.8812514860071346e-05
+            ],
+            "sampled_games": 1228
+          }
+        },
+        "full": {
+          "brier": {
+            "delta_from_zero": -0.0013131111827700175,
+            "game_cluster_ci95": [
+              -0.0027405195735233636,
+              2.567007303637552e-06
+            ],
+            "sampled_games": 6578
+          },
+          "ownership": {
+            "delta_from_zero": -0.00029445661520099975,
+            "game_cluster_ci95": [
+              -0.00043393886301899365,
+              -0.00016388797225190855
+            ],
+            "sampled_games": 6578
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.005032324272917554,
+            "game_cluster_ci95": [
+              -0.006008392801204573,
+              -0.004134158102821512
+            ],
+            "sampled_games": 6578
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.0050323243625027825,
+            "game_cluster_ci95": [
+              -0.0060083928054428595,
+              -0.00413415826544645
+            ],
+            "sampled_games": 6578
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.16675382221532686,
+            "game_cluster_ci95": [
+              -0.20010013893272424,
+              -0.13207539477251168
+            ],
+            "sampled_games": 6578
+          },
+          "score_mse": {
+            "delta_from_zero": -0.000906513483189201,
+            "game_cluster_ci95": [
+              -0.0011380586318803256,
+              -0.0006655656565039841
+            ],
+            "sampled_games": 6578
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "total_loss": {
+            "delta_from_zero": -0.007916184107443769,
+            "game_cluster_ci95": [
+              -0.009834356772794,
+              -0.005977750273013648
+            ],
+            "sampled_games": 6578
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0016828927083027642,
+            "game_cluster_ci95": [
+              -0.0033916470878661504,
+              -7.003891189750082e-05
+            ],
+            "sampled_games": 6578
+          }
+        },
+        "heldout-fresh": {
+          "brier": {
+            "delta_from_zero": -0.0028936722973294787,
+            "game_cluster_ci95": [
+              -0.0049964342152757696,
+              -0.000891589174729701
+            ],
+            "sampled_games": 308
+          },
+          "ownership": {
+            "delta_from_zero": -0.000592916658220588,
+            "game_cluster_ci95": [
+              -0.0008842775963902571,
+              -0.000293299993439862
+            ],
+            "sampled_games": 308
+          },
+          "policy_ce": {
+            "delta_from_zero": 0.000700659747810306,
+            "game_cluster_ci95": [
+              -0.0008702331519476671,
+              0.00225246666988393
+            ],
+            "sampled_games": 308
+          },
+          "policy_kl": {
+            "delta_from_zero": 0.0007006595518141978,
+            "game_cluster_ci95": [
+              -0.0008702331754164794,
+              0.0022524664627920766
+            ],
+            "sampled_games": 308
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.20649908086818414,
+            "game_cluster_ci95": [
+              -0.26114224786554086,
+              -0.1555723448167604
+            ],
+            "sampled_games": 308
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0009882784896655266,
+            "game_cluster_ci95": [
+              -0.0013138768545421491,
+              -0.0006635405290645992
+            ],
+            "sampled_games": 308
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "total_loss": {
+            "delta_from_zero": -0.005161600231531338,
+            "game_cluster_ci95": [
+              -0.008337810067325762,
+              -0.002175350054933512
+            ],
+            "sampled_games": 308
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.004281066863637054,
+            "game_cluster_ci95": [
+              -0.006732291025311568,
+              -0.001907221600402787
+            ],
+            "sampled_games": 308
+          }
+        },
+        "old-266": {
+          "brier": {
+            "delta_from_zero": -0.0014212139992379421,
+            "game_cluster_ci95": [
+              -0.004065507530881796,
+              0.0010573206709169486
+            ],
+            "sampled_games": 1430
+          },
+          "ownership": {
+            "delta_from_zero": -0.0003866622101043049,
+            "game_cluster_ci95": [
+              -0.000637751016329348,
+              -0.00016442299711572707
+            ],
+            "sampled_games": 1430
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.004607484366715653,
+            "game_cluster_ci95": [
+              -0.006361825182233928,
+              -0.002780059291553231
+            ],
+            "sampled_games": 1430
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.00460748434488778,
+            "game_cluster_ci95": [
+              -0.0063618252143885475,
+              -0.0027800589575704077
+            ],
+            "sampled_games": 1430
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.1388410211155815,
+            "game_cluster_ci95": [
+              -0.21079158067114312,
+              -0.07360107065898804
+            ],
+            "sampled_games": 1430
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0005763679934082737,
+            "game_cluster_ci95": [
+              -0.001065844269975062,
+              -0.00011482519176156976
+            ],
+            "sampled_games": 1430
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "total_loss": {
+            "delta_from_zero": -0.006935346165846568,
+            "game_cluster_ci95": [
+              -0.010964225739542007,
+              -0.003005500562913702
+            ],
+            "sampled_games": 1430
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0013648357620286572,
+            "game_cluster_ci95": [
+              -0.0045791991289641535,
+              0.001668131439676214
+            ],
+            "sampled_games": 1430
+          }
+        },
+        "old-267": {
+          "brier": {
+            "delta_from_zero": -0.0023576949272081813,
+            "game_cluster_ci95": [
+              -0.005012990221334453,
+              0.0002559816427223413
+            ],
+            "sampled_games": 1415
+          },
+          "ownership": {
+            "delta_from_zero": -0.0003839241647938252,
+            "game_cluster_ci95": [
+              -0.0006439616651586965,
+              -0.00012425276523804187
+            ],
+            "sampled_games": 1415
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.0038561265246244147,
+            "game_cluster_ci95": [
+              -0.005608671154707885,
+              -0.0021159399652892017
+            ],
+            "sampled_games": 1415
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.003856126648315694,
+            "game_cluster_ci95": [
+              -0.005608671295972289,
+              -0.0021159401449582413
+            ],
+            "sampled_games": 1415
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.17011762555443966,
+            "game_cluster_ci95": [
+              -0.23047647525685652,
+              -0.10725069019067182
+            ],
+            "sampled_games": 1415
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0009270099003734584,
+            "game_cluster_ci95": [
+              -0.0013526099915663642,
+              -0.00048438446577362456
+            ],
+            "sampled_games": 1415
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "total_loss": {
+            "delta_from_zero": -0.008389244681893615,
+            "game_cluster_ci95": [
+              -0.012084899299098293,
+              -0.004601370556366507
+            ],
+            "sampled_games": 1415
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0032221933429624518,
+            "game_cluster_ci95": [
+              -0.006447902691787665,
+              -0.00024499272211148446
+            ],
+            "sampled_games": 1415
+          }
+        },
+        "old-268": {
+          "brier": {
+            "delta_from_zero": -0.000965567038638009,
+            "game_cluster_ci95": [
+              -0.003505539581891009,
+              0.001551458521579395
+            ],
+            "sampled_games": 1416
+          },
+          "ownership": {
+            "delta_from_zero": -0.00034575927924151983,
+            "game_cluster_ci95": [
+              -0.0005806837766125262,
+              -9.625614903076136e-05
+            ],
+            "sampled_games": 1416
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.004260572581188171,
+            "game_cluster_ci95": [
+              -0.006210498595686106,
+              -0.0023694101853683224
+            ],
+            "sampled_games": 1416
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.004260572678504104,
+            "game_cluster_ci95": [
+              -0.006210498387478753,
+              -0.0023694101285107005
+            ],
+            "sampled_games": 1416
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.16947451292651294,
+            "game_cluster_ci95": [
+              -0.24146555784044058,
+              -0.10575709272684936
+            ],
+            "sampled_games": 1416
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0005826058602244873,
+            "game_cluster_ci95": [
+              -0.0010275345955355706,
+              -0.000170811637984295
+            ],
+            "sampled_games": 1416
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "total_loss": {
+            "delta_from_zero": -0.006557497436006088,
+            "game_cluster_ci95": [
+              -0.010150323253907804,
+              -0.00272206269950949
+            ],
+            "sampled_games": 1416
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0013685681634348391,
+            "game_cluster_ci95": [
+              -0.004334602163225181,
+              0.0018850322193084232
+            ],
+            "sampled_games": 1416
+          }
+        },
+        "old-269": {
+          "brier": {
+            "delta_from_zero": 0.0004488347451926104,
+            "game_cluster_ci95": [
+              -0.0022296231540224806,
+              0.003043003631071607
+            ],
+            "sampled_games": 1429
+          },
+          "ownership": {
+            "delta_from_zero": -3.7109658080680674e-05,
+            "game_cluster_ci95": [
+              -0.00027838060768404284,
+              0.0002039386303974016
+            ],
+            "sampled_games": 1429
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.012650976730586905,
+            "game_cluster_ci95": [
+              -0.01479322121021751,
+              -0.010735799301043106
+            ],
+            "sampled_games": 1429
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.0126509763194953,
+            "game_cluster_ci95": [
+              -0.014793220668989599,
+              -0.010735798837209673
+            ],
+            "sampled_games": 1429
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.16492186679533916,
+            "game_cluster_ci95": [
+              -0.22265520026288826,
+              -0.09808298461953356
+            ],
+            "sampled_games": 1429
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0006742370589166598,
+            "game_cluster_ci95": [
+              -0.0010852512234759942,
+              -0.0002437985138536624
+            ],
+            "sampled_games": 1429
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "total_loss": {
+            "delta_from_zero": -0.013392136025686341,
+            "game_cluster_ci95": [
+              -0.017903128446231893,
+              -0.009335424907692515
+            ],
+            "sampled_games": 1429
+          },
+          "wdl_ce": {
+            "delta_from_zero": -2.9818017815297013e-05,
+            "game_cluster_ci95": [
+              -0.003233423010566047,
+              0.0030716063101766267
+            ],
+            "sampled_games": 1429
+          }
+        }
+      },
+      "640": {
+        "fresh": {
+          "brier": {
+            "delta_from_zero": -0.0031966183936415985,
+            "game_cluster_ci95": [
+              -0.005264888590436143,
+              -0.0010559320928448192
+            ],
+            "sampled_games": 1228
+          },
+          "ownership": {
+            "delta_from_zero": -0.0004592852907947531,
+            "game_cluster_ci95": [
+              -0.0009638057960252807,
+              6.322905623712456e-05
+            ],
+            "sampled_games": 1228
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.0007405208771333882,
+            "game_cluster_ci95": [
+              -0.0023637868066242866,
+              0.0008251300892708021
+            ],
+            "sampled_games": 1228
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.000740520941707512,
+            "game_cluster_ci95": [
+              -0.0023637869782694586,
+              0.0008251301831927573
+            ],
+            "sampled_games": 1228
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.23872018483984903,
+            "game_cluster_ci95": [
+              -0.29549360593025703,
+              -0.18157163479810173
+            ],
+            "sampled_games": 1228
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0009633385621978241,
+            "game_cluster_ci95": [
+              -0.001333612381154649,
+              -0.0006004413540590628
+            ],
+            "sampled_games": 1228
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1228
+          },
+          "total_loss": {
+            "delta_from_zero": -0.0057580480583965254,
+            "game_cluster_ci95": [
+              -0.00929230837690276,
+              -0.0023009191594259254
+            ],
+            "sampled_games": 1228
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.003594904311940112,
+            "game_cluster_ci95": [
+              -0.006135952895991083,
+              -0.0010906221058431611
+            ],
+            "sampled_games": 1228
+          }
+        },
+        "full": {
+          "brier": {
+            "delta_from_zero": -0.0032958097523212546,
+            "game_cluster_ci95": [
+              -0.004765314134583596,
+              -0.0019296799121430264
+            ],
+            "sampled_games": 6578
+          },
+          "ownership": {
+            "delta_from_zero": -0.0006597275380642031,
+            "game_cluster_ci95": [
+              -0.0009348919850724807,
+              -0.0003743063176383011
+            ],
+            "sampled_games": 6578
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.008641802139702559,
+            "game_cluster_ci95": [
+              -0.009719320873610436,
+              -0.007504602630138541
+            ],
+            "sampled_games": 6578
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.008641802250433539,
+            "game_cluster_ci95": [
+              -0.009719321091085956,
+              -0.007504602756353205
+            ],
+            "sampled_games": 6578
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.24792970401210823,
+            "game_cluster_ci95": [
+              -0.2836445715563582,
+              -0.21216506884892272
+            ],
+            "sampled_games": 6578
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0009911240038044087,
+            "game_cluster_ci95": [
+              -0.0012585473585715451,
+              -0.0007311074345206718
+            ],
+            "sampled_games": 6578
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 6578
+          },
+          "total_loss": {
+            "delta_from_zero": -0.013995695700259603,
+            "game_cluster_ci95": [
+              -0.01633404881847362,
+              -0.011922444132211146
+            ],
+            "sampled_games": 6578
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.003703043276756088,
+            "game_cluster_ci95": [
+              -0.005494803508955606,
+              -0.0020628361233161773
+            ],
+            "sampled_games": 6578
+          }
+        },
+        "heldout-fresh": {
+          "brier": {
+            "delta_from_zero": -0.001653970174111299,
+            "game_cluster_ci95": [
+              -0.004272292388327044,
+              0.00074721017085558
+            ],
+            "sampled_games": 308
+          },
+          "ownership": {
+            "delta_from_zero": -0.0008047416323506695,
+            "game_cluster_ci95": [
+              -0.0015020136782393295,
+              -8.771735703350474e-05
+            ],
+            "sampled_games": 308
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.00025864220214644185,
+            "game_cluster_ci95": [
+              -0.0021705007132845995,
+              0.0017622658777494517
+            ],
+            "sampled_games": 308
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.00025864229673389083,
+            "game_cluster_ci95": [
+              -0.002170500824756441,
+              0.0017622659450554426
+            ],
+            "sampled_games": 308
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.26073099990532,
+            "game_cluster_ci95": [
+              -0.3316015326866415,
+              -0.19878004653693623
+            ],
+            "sampled_games": 308
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0008358598450159474,
+            "game_cluster_ci95": [
+              -0.0011869028868242706,
+              -0.0004679418088921747
+            ],
+            "sampled_games": 308
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 308
+          },
+          "total_loss": {
+            "delta_from_zero": -0.003966136436702072,
+            "game_cluster_ci95": [
+              -0.007963426944667349,
+              0.0002602914370059446
+            ],
+            "sampled_games": 308
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.0020668891053518233,
+            "game_cluster_ci95": [
+              -0.00532841889689787,
+              0.0008150910297713993
+            ],
+            "sampled_games": 308
+          }
+        },
+        "old-266": {
+          "brier": {
+            "delta_from_zero": -0.002513164544335763,
+            "game_cluster_ci95": [
+              -0.005177124165893966,
+              -0.00014687971116469486
+            ],
+            "sampled_games": 1430
+          },
+          "ownership": {
+            "delta_from_zero": -0.0004164673638911154,
+            "game_cluster_ci95": [
+              -0.0010164046808521525,
+              0.00019855433871105336
+            ],
+            "sampled_games": 1430
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.006446028347454558,
+            "game_cluster_ci95": [
+              -0.008661017959717427,
+              -0.004037663139960263
+            ],
+            "sampled_games": 1430
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.0064460281710125855,
+            "game_cluster_ci95": [
+              -0.008661017563510306,
+              -0.004037662772132428
+            ],
+            "sampled_games": 1430
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.20080361321481632,
+            "game_cluster_ci95": [
+              -0.2757620027372806,
+              -0.13065352933805516
+            ],
+            "sampled_games": 1430
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0006294912337194596,
+            "game_cluster_ci95": [
+              -0.0011522356813519089,
+              -0.00012623970298788226
+            ],
+            "sampled_games": 1430
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1430
+          },
+          "total_loss": {
+            "delta_from_zero": -0.009922682234901004,
+            "game_cluster_ci95": [
+              -0.014261326569356818,
+              -0.005793107233094677
+            ],
+            "sampled_games": 1430
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.002430695308077057,
+            "game_cluster_ci95": [
+              -0.005746329870777815,
+              0.0006358393554945613
+            ],
+            "sampled_games": 1430
+          }
+        },
+        "old-267": {
+          "brier": {
+            "delta_from_zero": -0.004794802498053659,
+            "game_cluster_ci95": [
+              -0.00746705132699237,
+              -0.0022692351644283144
+            ],
+            "sampled_games": 1415
+          },
+          "ownership": {
+            "delta_from_zero": -0.0006540566024568761,
+            "game_cluster_ci95": [
+              -0.0011987151076417817,
+              -0.00012609165118088793
+            ],
+            "sampled_games": 1415
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.005982118948850257,
+            "game_cluster_ci95": [
+              -0.007959052179555505,
+              -0.003944775665488535
+            ],
+            "sampled_games": 1415
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.005982118977954087,
+            "game_cluster_ci95": [
+              -0.00795905241684906,
+              -0.003944775652211393
+            ],
+            "sampled_games": 1415
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.24865625603047192,
+            "game_cluster_ci95": [
+              -0.31798870147753316,
+              -0.17978776238134545
+            ],
+            "sampled_games": 1415
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0010452806409484293,
+            "game_cluster_ci95": [
+              -0.0015293737542717819,
+              -0.0005297122266877593
+            ],
+            "sampled_games": 1415
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1415
+          },
+          "total_loss": {
+            "delta_from_zero": -0.01333682731637964,
+            "game_cluster_ci95": [
+              -0.017342131991175225,
+              -0.00921608500466661
+            ],
+            "sampled_games": 1415
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.00565537536777126,
+            "game_cluster_ci95": [
+              -0.009029145549001392,
+              -0.002659283538281333
+            ],
+            "sampled_games": 1415
+          }
+        },
+        "old-268": {
+          "brier": {
+            "delta_from_zero": -0.0030484594892305874,
+            "game_cluster_ci95": [
+              -0.005776582985175399,
+              -0.00037044758553650664
+            ],
+            "sampled_games": 1416
+          },
+          "ownership": {
+            "delta_from_zero": -0.0007886972829851402,
+            "game_cluster_ci95": [
+              -0.0013188373340866269,
+              -0.00024860345404827426
+            ],
+            "sampled_games": 1416
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.009378787965033553,
+            "game_cluster_ci95": [
+              -0.011664621218340531,
+              -0.007011840358849302
+            ],
+            "sampled_games": 1416
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.009378787837704294,
+            "game_cluster_ci95": [
+              -0.011664620944291626,
+              -0.007011840105904484
+            ],
+            "sampled_games": 1416
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.23708089893693796,
+            "game_cluster_ci95": [
+              -0.30885831592454194,
+              -0.16900874730205273
+            ],
+            "sampled_games": 1416
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0006171762102083905,
+            "game_cluster_ci95": [
+              -0.001114649444125631,
+              -0.00014858797834415037
+            ],
+            "sampled_games": 1416
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1416
+          },
+          "total_loss": {
+            "delta_from_zero": -0.014983358931203838,
+            "game_cluster_ci95": [
+              -0.0193069622731505,
+              -0.01076523909565927
+            ],
+            "sampled_games": 1416
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.004198703246690491,
+            "game_cluster_ci95": [
+              -0.007443546012813971,
+              -0.001005040746452876
+            ],
+            "sampled_games": 1416
+          }
+        },
+        "old-269": {
+          "brier": {
+            "delta_from_zero": -0.00384686587154868,
+            "game_cluster_ci95": [
+              -0.006331931223866413,
+              -0.0011959370482002008
+            ],
+            "sampled_games": 1429
+          },
+          "ownership": {
+            "delta_from_zero": -0.000501255068172668,
+            "game_cluster_ci95": [
+              -0.000999357346829198,
+              6.726851817659996e-05
+            ],
+            "sampled_games": 1429
+          },
+          "policy_ce": {
+            "delta_from_zero": -0.01349068311280277,
+            "game_cluster_ci95": [
+              -0.015900333183516913,
+              -0.011118337371867147
+            ],
+            "sampled_games": 1429
+          },
+          "policy_kl": {
+            "delta_from_zero": -0.013490682799936593,
+            "game_cluster_ci95": [
+              -0.015900332847986653,
+              -0.01111833698357839
+            ],
+            "sampled_games": 1429
+          },
+          "score_mae_points": {
+            "delta_from_zero": -0.2604494270747182,
+            "game_cluster_ci95": [
+              -0.3247569759431806,
+              -0.18867658302761953
+            ],
+            "sampled_games": 1429
+          },
+          "score_mse": {
+            "delta_from_zero": -0.0008522941911081633,
+            "game_cluster_ci95": [
+              -0.0012854603141097935,
+              -0.00040671793366098616
+            ],
+            "sampled_games": 1429
+          },
+          "target_entropy": {
+            "delta_from_zero": 0.0,
+            "game_cluster_ci95": [
+              0.0,
+              0.0
+            ],
+            "sampled_games": 1429
+          },
+          "total_loss": {
+            "delta_from_zero": -0.01882173886133387,
+            "game_cluster_ci95": [
+              -0.023232521234201366,
+              -0.014217965334090832
+            ],
+            "sampled_games": 1429
+          },
+          "wdl_ce": {
+            "delta_from_zero": -0.003977510893637308,
+            "game_cluster_ci95": [
+              -0.007114690993038503,
+              -0.0009201934273477117
+            ],
+            "sampled_games": 1429
+          }
+        }
+      }
+    }
+  },
+  "panel_sha256": "sha256:eb07a3c27692d3f06bb174782125d102fcf263c67238785750bbe2ff90767156",
+  "same_ordered_samples": true,
+  "sample_draws_per_arm": 40960,
+  "schema": "gocube-learning-curve-v1",
+  "source_sha256": {
+    "/home/codex/diagnostics/h269-m270-learning-curve-20261011/confirmation-exclusions.json": "sha256:e336fc7499c85b3cfbccb5d36904a5158638f97641bd13e0d6796736e6903dfd",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/checkpoints/M269.pt": "sha256:f03c1d9b13adbf696b476d9dcc904c207c7ac72c5ac51855e9dc2e09ea7d939f",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-0000.pt": "sha256:5c6eb0178659da297aa01c26c19124480c905825bf5e980fc2f02772f8e6541e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-0128.pt": "sha256:57f360d9d26e1ae8316204a435bacd9b4f8dfd780161649fb2e0b01471db7630",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-0256.pt": "sha256:90ab4ec5b8260b151c5aa7638aff02cf20284414b8b2300500d27db2b7289d48",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-0384.pt": "sha256:d12c9d550a70c673c37e9d08475f86b2d38bd3a43e71a6728957f7cb64f0db22",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-0512.pt": "sha256:091bba278d4e6c9a62596e952a70576c10ee882615cd138b1a1ce6cb9e32481f",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-0640.pt": "sha256:f873d070cabcae89c0df2de377619b5ea2e713370b86b6c95da8cd44dc733d66",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-0768.pt": "sha256:8673aea19c4e1f02f700b1e35922d0b0aa71c53cf0f12577b148ce9bc5876660",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-0896.pt": "sha256:cff1f6ee7eaf0460878db64f35df6247680ea264d4af7f3fd75c8b0f4eb70a8f",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-1024.pt": "sha256:656aca4ab27a78201d63c69d5bea08d222a21e4c01fca128b92a35669ce01e74",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-1152.pt": "sha256:955454635c903a902c51a51f2575025991a63046a457885346f7b01d71d156c7",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-1280.pt": "sha256:62175f330c56b61462f6149b503429e3f34a7a50720db7673ee9c5dee488000e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0266-1408.pt": "sha256:e8fd4c302d32b0fbb2f61e5996688c53c4aff7c2ae34e796d2343f25f1d79654",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-0000.pt": "sha256:f168261f44348b7187463f26c508a22343480bb05d27fae4dc02f08ad4665873",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-0128.pt": "sha256:50026024346fee51dc1fcd31e1038543af0e79d553276376002b87962bc25df5",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-0256.pt": "sha256:c4d3393a81d58276ea8bb6f848219492da62f874fed12b64610356a4d70d9946",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-0384.pt": "sha256:5c04e06992b55796f30a9e9cc2cdde767cee930a811199142b17019726258d88",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-0512.pt": "sha256:3fdd2b656a1b26e8bfc3310c387f8f4e0e82d2f009148ab804d52528afac771c",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-0640.pt": "sha256:78f116ad3a6eeb31c2f490e13be5d79a6a34aa12018e4fa4d3d28114480372cf",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-0768.pt": "sha256:8ad8702c32ec90ed85e04dc7c4dc7229c1c41714c5ef37076772b6b6118787b9",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-0896.pt": "sha256:bc065f8e88c3ff3e9e2c785fa494e7efb1b3dc340c3fa32a1cdb07252f6875ba",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-1024.pt": "sha256:a0a7d80b321b6c59ce14a6a66e8b46ab7fa7df78b3cda2b86612cc63743dd429",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-1152.pt": "sha256:2ccd67564b47e41c5aeb83eff1eaceca087b9f6145c5b2e70854c11aef340218",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-1280.pt": "sha256:bd66679ab3467a04d2e1290acbe4e908afe5da37eb4bedbd216fb75297f06814",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0267-1408.pt": "sha256:749e48ea72ab08d3e30137e8180cd2a0d90ad8f2e0ac3518d4186434a4d23aff",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-0000.pt": "sha256:64ec3e2f8d6d81b9d06209da9e456b2568a4c84333a746403ed21caf92c5822b",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-0128.pt": "sha256:8fbcbc8f240a7044ff1c66ef5fb8ea45a7d5f1001d9e0e0c19b9457aaa01dc57",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-0256.pt": "sha256:f0f5f5b84e9f7351718fe91a8ee3f2b11bb6cf8b11a45cfcb667802b873380c5",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-0384.pt": "sha256:4f4e980e941a9157ee0837b932e8fb57f77f61148ddf0ecf1d0e5b0a1388e60e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-0512.pt": "sha256:d61f7f171a8373828ee480eb0d0e64880d224c78f11464918c8673b6120d09ea",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-0640.pt": "sha256:6ade85f835647871c78155fd3e626d301b5d3127066d9e087380511cf7dfcebe",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-0768.pt": "sha256:398817f4d2f94a0ffce57aa406298fe9aec605c6c95b868218b45afe48c728d8",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-0896.pt": "sha256:9c00be2dc2fd64ece60b777e5002e752781e68dd4f0a2a2748cf9bb4c88ee224",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-1024.pt": "sha256:7245e909a2bda2d8984e9eb747928afe7ed1ca9cf3352a24d919d63360c7beae",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-1152.pt": "sha256:180279794258de61adae87e8df1d4c627de97713e758a16c254fb941922f9b93",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-1280.pt": "sha256:1193d021c74364dfb5f2d90f9ae3bbd26d204220042e5b5a00f0cc57eb9b4dab",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0268-1408.pt": "sha256:cf578c88daf6b8dddc587bf6fc789e48d12a4032719c8e5920dd5d9f174b4004",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-0000.pt": "sha256:2ac7248048d664a002ccc2782949fdf1ccb6565bff2acfeb549207b8f1dcc92f",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-0128.pt": "sha256:86a5468d5fd2048a820d31d6bf2b78f6f797ec2cc5bf6488bae42bff5b3d2935",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-0256.pt": "sha256:37390302f2518480a8014685b20bbbcb0f96d0e544e480cbd27f245971529986",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-0384.pt": "sha256:4a3ee15789bc8d1495103eab09de3489705448432ea45863266134c9df071759",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-0512.pt": "sha256:20a9ef3253064f63af6b386551e10ee4453b054949116aaf18ae192ace872031",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-0640.pt": "sha256:74a59af087c2b6c9aafe47f58f97667307c28fff956a8ae9447baf6f4ad7e179",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-0768.pt": "sha256:89997a22678301fc64cf2f9281e0e8e70a271beec7ccbb3a232626f2d8d76f91",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-0896.pt": "sha256:92d8e857f5efc13eeb0551381389b16a17aa2dd5004d14d186d07091b5713c55",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-1024.pt": "sha256:b605a7ba28ca8d7986c49c0ac0fe13f874e9f23e5af1e7d90fff618592d7eaf5",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-1152.pt": "sha256:e621a617f35a6d5b6a5f2e02b367aae785d39492caa164538f149c69bf8b6af4",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-1280.pt": "sha256:64511b8de74494dbb8a87842b0f8b9bd06e0670b9a6ffd7a7e5828efce8340f9",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0269-1408.pt": "sha256:0892ac972b112c59ee0ad19d3b06f1896a0677089e1fafcee2b33f8701d80288",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-0000.pt": "sha256:f31148ec4838e0846f3119c72ee73565d16a3336cf8198e245c3f3314e639173",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-0128.pt": "sha256:eba140c2c8cb9763f8edbc7223142ae4e7a99595f7adab7d3753e5cbfb45136e",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-0256.pt": "sha256:5a88ec4bff3492e3adb2eaec85460fd82e5b76f8f4ec50378209c1ffd6ac2a24",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-0384.pt": "sha256:61ab3873144667568432e0f9384a055e2d7ab6c896be0ebaf4da48bec3d2da42",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-0512.pt": "sha256:b22ad4b9b0292a5094925b5d5a3d9ea011cc98cb3a871ddb424b44aabf54125d",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-0640.pt": "sha256:eb3bf4695fb7e9f4ed5336a93a6a1c3a1bb14a2be7e67c6eb3297caae2012bf5",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-0768.pt": "sha256:ba85fd50536ae8ac56221caeef7bdec52ca753fe61a0a5099a962d4f5d16c150",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-0896.pt": "sha256:786ea128c91bec7f2399704892f308232ba124727d639929ef7f671659713113",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-1024.pt": "sha256:cae0f7cc01f96c2d1f4e3edfaac685e501d135f38077886921d6dc02e191e986",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-1152.pt": "sha256:e654549ddc28d2ff0ab0f75b7387e2492d03553c15f5e022afb91a02b082d0ce",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-1280.pt": "sha256:3da77059435fdbdb8d7d35d456e45260316380deb3b06768789a08ceaa08086c",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/g0270-1408.pt": "sha256:e1d41ddf36fca56d92886d96d12263c82b63c12af5dd93b5cc513ab24c996127",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/iter-270-fresh.json": "sha256:5e7ab776401913e8ed7b4fffa587375f3bdae4778806407fffc0fe6e955e6950",
+    "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/rolling-after-270.jsonl": "sha256:f2574af2c0142a147c6adfa0ad06e9ccf2b448ab3747f95d7e088f5737af4456"
+  },
+  "summaries": {
+    "A": [
+      {
+        "evaluations": {
+          "fresh": {
+            "brier": 0.3462258408736346,
+            "ownership": 0.7050426588059793,
+            "policy_ce": 2.3070751293576355,
+            "policy_kl": 0.5044263102818509,
+            "score_mae_points": 15.015548316486843,
+            "score_mse": 0.0645801895212162,
+            "target_entropy": 1.8026488190604368,
+            "total_loss": 3.575895494338056,
+            "wdl_ce": 0.4991975212391427
+          },
+          "full": {
+            "brier": 0.34795426046392425,
+            "ownership": 0.6939773612647784,
+            "policy_ce": 2.314381183588448,
+            "policy_kl": 0.5030319404182637,
+            "score_mae_points": 14.677729232932876,
+            "score_mse": 0.06182868974639753,
+            "target_entropy": 1.8113492432158864,
+            "total_loss": 3.5727375581684555,
+            "wdl_ce": 0.5025503271373715
+          },
+          "heldout-fresh": {
+            "brier": 0.355725833385948,
+            "ownership": 0.6924398493778625,
+            "policy_ce": 2.2951427308533914,
+            "policy_kl": 0.5043897890276332,
+            "score_mae_points": 14.71822237882617,
+            "score_mse": 0.06146547300922083,
+            "target_entropy": 1.7907529419328512,
+            "total_loss": 3.5584282863519547,
+            "wdl_ce": 0.5093802343888343
+          },
+          "old-266": {
+            "brier": 0.3466701013999282,
+            "ownership": 0.7177919190263538,
+            "policy_ce": 2.332679407290925,
+            "policy_kl": 0.5111062533178483,
+            "score_mae_points": 15.69523694486611,
+            "score_mse": 0.06673339782405345,
+            "target_entropy": 1.821573153827103,
+            "total_loss": 3.6218148308907985,
+            "wdl_ce": 0.5046101084716061
+          },
+          "old-267": {
+            "brier": 0.3316161889504063,
+            "ownership": 0.6810178056633731,
+            "policy_ce": 2.3054819060671434,
+            "policy_kl": 0.4960005376387926,
+            "score_mae_points": 14.376435001501477,
+            "score_mse": 0.05779533114807295,
+            "target_entropy": 1.8094813685015652,
+            "total_loss": 3.5273331500902714,
+            "wdl_ce": 0.4830381161005388
+          },
+          "old-268": {
+            "brier": 0.3606048693424967,
+            "ownership": 0.6845149132520874,
+            "policy_ce": 2.3207825441113528,
+            "policy_kl": 0.4991311561770999,
+            "score_mae_points": 13.99619853457557,
+            "score_mse": 0.05835013193113553,
+            "target_entropy": 1.8216513879547165,
+            "total_loss": 3.582442753628129,
+            "wdl_ce": 0.5187951718847532
+          },
+          "old-269": {
+            "brier": 0.3418718636783885,
+            "ownership": 0.6855900585242694,
+            "policy_ce": 2.3056140421647022,
+            "policy_kl": 0.5131775171473372,
+            "score_mae_points": 14.25878740340977,
+            "score_mse": 0.05931634918499204,
+            "target_entropy": 1.7924365247927199,
+            "total_loss": 3.543680657305231,
+            "wdl_ce": 0.4931602136035604
+          }
+        },
+        "ordinary_update": 91040,
+        "parameter_change": {
+          "all": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "ownership": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "policy": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "score": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "trunk": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "value": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          }
+        },
+        "updates": 0
+      },
+      {
+        "evaluations": {
+          "fresh": {
+            "brier": 0.3508761335990652,
+            "ownership": 0.7055662794854527,
+            "policy_ce": 2.3246460652801133,
+            "policy_kl": 0.5219972464508018,
+            "score_mae_points": 14.915062364677055,
+            "score_mse": 0.0642528132022985,
+            "target_entropy": 1.8026488190604368,
+            "total_loss": 3.5994296492449394,
+            "wdl_ce": 0.5049644921623129
+          },
+          "full": {
+            "brier": 0.3523242998224629,
+            "ownership": 0.694213317150755,
+            "policy_ce": 2.3212911439815587,
+            "policy_kl": 0.5099419007466864,
+            "score_mae_points": 14.535909388392952,
+            "score_mse": 0.061305202538573786,
+            "target_entropy": 1.8113492432158864,
+            "total_loss": 3.584316269013925,
+            "wdl_ce": 0.5075066085286619
+          },
+          "heldout-fresh": {
+            "brier": 0.35692526341191544,
+            "ownership": 0.692211024124731,
+            "policy_ce": 2.311165137188084,
+            "policy_kl": 0.52041219523727,
+            "score_mae_points": 14.499000997512212,
+            "score_mse": 0.06081948721166013,
+            "target_entropy": 1.7907529419328512,
+            "total_loss": 3.5747669871973358,
+            "wdl_ce": 0.5105713404815216
+          },
+          "old-266": {
+            "brier": 0.3498402123893094,
+            "ownership": 0.7179234233921932,
+            "policy_ce": 2.342199708418775,
+            "policy_kl": 0.5206265546039504,
+            "score_mae_points": 15.615485570216151,
+            "score_mse": 0.06682823651894028,
+            "target_entropy": 1.821573153827103,
+            "total_loss": 3.6353471626716782,
+            "wdl_ce": 0.5083957961039208
+          },
+          "old-267": {
+            "brier": 0.3353156510973839,
+            "ownership": 0.6813386905872676,
+            "policy_ce": 2.318382585837753,
+            "policy_kl": 0.5089012171765717,
+            "score_mae_points": 14.227725665874914,
+            "score_mse": 0.0572054502485019,
+            "target_entropy": 1.8094813685015652,
+            "total_loss": 3.5428861823747866,
+            "wdl_ce": 0.48595945874367263
+          },
+          "old-268": {
+            "brier": 0.3658930275365393,
+            "ownership": 0.6847621677965208,
+            "policy_ce": 2.3254251498310623,
+            "policy_kl": 0.5037737620186817,
+            "score_mae_points": 13.86635040314468,
+            "score_mse": 0.05827557474910347,
+            "target_entropy": 1.8216513879547165,
+            "total_loss": 3.5930872876779176,
+            "wdl_ce": 0.5246243981100482
+          },
+          "old-269": {
+            "brier": 0.349565181238503,
+            "ownership": 0.6864671406921161,
+            "policy_ce": 2.2993845322054653,
+            "policy_kl": 0.5069480072499459,
+            "score_mae_points": 14.170248051454564,
+            "score_mse": 0.059281058513568144,
+            "target_entropy": 1.7924365247927199,
+            "total_loss": 3.5474112881729525,
+            "wdl_ce": 0.5022785621400752
+          }
+        },
+        "ordinary_update": 91104,
+        "parameter_change": {
+          "all": {
+            "change_l2": 0.19408492602748845,
+            "relative_change_l2": 0.0036568390390824663
+          },
+          "ownership": {
+            "change_l2": 0.056645069072041115,
+            "relative_change_l2": 0.004760397014638606
+          },
+          "policy": {
+            "change_l2": 0.006641539848348175,
+            "relative_change_l2": 0.001188115977497184
+          },
+          "score": {
+            "change_l2": 0.03023411409598598,
+            "relative_change_l2": 0.004427510024284891
+          },
+          "trunk": {
+            "change_l2": 0.1817864419259437,
+            "relative_change_l2": 0.0036564867150568033
+          },
+          "value": {
+            "change_l2": 0.021348828682121047,
+            "relative_change_l2": 0.0019038928225071795
+          }
+        },
+        "updates": 64
+      },
+      {
+        "evaluations": {
+          "fresh": {
+            "brier": 0.3624642671247398,
+            "ownership": 0.7055819349602785,
+            "policy_ce": 2.3297650678364765,
+            "policy_kl": 0.5271162489198536,
+            "score_mae_points": 15.170807752076541,
+            "score_mse": 0.06564845568068678,
+            "target_entropy": 1.8026488190604368,
+            "total_loss": 3.6196405281689294,
+            "wdl_ce": 0.5186450727420763
+          },
+          "full": {
+            "brier": 0.3687057556285291,
+            "ownership": 0.6950268999188225,
+            "policy_ce": 2.3239910060643942,
+            "policy_kl": 0.5126417628519184,
+            "score_mae_points": 14.87868680172258,
+            "score_mse": 0.06363457485876865,
+            "target_entropy": 1.8113492432158864,
+            "total_loss": 3.6105012753785104,
+            "wdl_ce": 0.5278487973541619
+          },
+          "heldout-fresh": {
+            "brier": 0.3791066696070488,
+            "ownership": 0.6939346140065368,
+            "policy_ce": 2.320934339518267,
+            "policy_kl": 0.5301813973514484,
+            "score_mae_points": 14.900873360581954,
+            "score_mse": 0.06373780594046119,
+            "target_entropy": 1.7907529419328512,
+            "total_loss": 3.6161159197627057,
+            "wdl_ce": 0.5375091636063769
+          },
+          "old-266": {
+            "brier": 0.3771211892765063,
+            "ownership": 0.7211698224784868,
+            "policy_ce": 2.3406802702920686,
+            "policy_kl": 0.5191071162707885,
+            "score_mae_points": 16.12581821570393,
+            "score_mse": 0.0702627831778427,
+            "target_entropy": 1.821573153827103,
+            "total_loss": 3.672850084709353,
+            "wdl_ce": 0.540737209645457
+          },
+          "old-267": {
+            "brier": 0.3549771669644732,
+            "ownership": 0.6822271767350685,
+            "policy_ce": 2.318995586240817,
+            "policy_kl": 0.5095142177433445,
+            "score_mae_points": 14.713344902556514,
+            "score_mse": 0.06059646591945012,
+            "target_entropy": 1.8094813685015652,
+            "total_loss": 3.572229914163472,
+            "wdl_ce": 0.5104106870658885
+          },
+          "old-268": {
+            "brier": 0.3904781755228951,
+            "ownership": 0.6856618722671328,
+            "policy_ce": 2.3314302346134355,
+            "policy_kl": 0.5097788467646751,
+            "score_mae_points": 14.406887037290744,
+            "score_mse": 0.06180279537009047,
+            "target_entropy": 1.8216513879547165,
+            "total_loss": 3.6327822521780035,
+            "wdl_ce": 0.553887352581897
+          },
+          "old-269": {
+            "brier": 0.35389386410664136,
+            "ownership": 0.6862820092287052,
+            "policy_ce": 2.308210974948956,
+            "policy_kl": 0.5157744500752912,
+            "score_mae_points": 14.35378113650745,
+            "score_mse": 0.06058438745324258,
+            "target_entropy": 1.7924365247927199,
+            "total_loss": 3.561250114008544,
+            "wdl_ce": 0.5061727429880936
+          }
+        },
+        "ordinary_update": 91296,
+        "parameter_change": {
+          "all": {
+            "change_l2": 0.3474058421349839,
+            "relative_change_l2": 0.006545625525521752
+          },
+          "ownership": {
+            "change_l2": 0.10794629593036913,
+            "relative_change_l2": 0.009071702679622283
+          },
+          "policy": {
+            "change_l2": 0.01139667230359268,
+            "relative_change_l2": 0.0020387694365134
+          },
+          "score": {
+            "change_l2": 0.059806006802510935,
+            "relative_change_l2": 0.008758043771017009
+          },
+          "trunk": {
+            "change_l2": 0.3199379762768855,
+            "relative_change_l2": 0.0064352926846720756
+          },
+          "value": {
+            "change_l2": 0.054511146484219994,
+            "relative_change_l2": 0.004861314973446723
+          }
+        },
+        "updates": 256
+      },
+      {
+        "evaluations": {
+          "fresh": {
+            "brier": 0.34592158126938904,
+            "ownership": 0.7051081449500884,
+            "policy_ce": 2.3188042309977224,
+            "policy_kl": 0.5161554119956071,
+            "score_mae_points": 14.916915457739151,
+            "score_mse": 0.06442470562689903,
+            "target_entropy": 1.8026488190604368,
+            "total_loss": 3.586929298184714,
+            "wdl_ce": 0.4985922207015808
+          },
+          "full": {
+            "brier": 0.34800595265843265,
+            "ownership": 0.6941720381503096,
+            "policy_ce": 2.3155779099137757,
+            "policy_kl": 0.5042286666175126,
+            "score_mae_points": 14.561454556246986,
+            "score_mse": 0.06167014890665762,
+            "target_entropy": 1.8113492432158864,
+            "total_loss": 3.573985115226378,
+            "wdl_ce": 0.5025650219603107
+          },
+          "heldout-fresh": {
+            "brier": 0.3545832128208045,
+            "ownership": 0.692209980202037,
+            "policy_ce": 2.3095211519344003,
+            "policy_kl": 0.5187682097948667,
+            "score_mae_points": 14.537636013393467,
+            "score_mse": 0.06114294124188761,
+            "target_entropy": 1.7907529419328512,
+            "total_loss": 3.570636417347032,
+            "wdl_ce": 0.5077623479223452
+          },
+          "old-266": {
+            "brier": 0.3471371151886946,
+            "ownership": 0.7178160293629219,
+            "policy_ce": 2.339672506939678,
+            "policy_kl": 0.5180993530157139,
+            "score_mae_points": 15.59506609405139,
+            "score_mse": 0.06686786309438689,
+            "target_entropy": 1.821573153827103,
+            "total_loss": 3.6303837820887566,
+            "wdl_ce": 0.5060273848223258
+          },
+          "old-267": {
+            "brier": 0.3283752892902449,
+            "ownership": 0.6811323236761382,
+            "policy_ce": 2.312016526959269,
+            "policy_kl": 0.5025351584599775,
+            "score_mae_points": 14.242612924371315,
+            "score_mse": 0.05749789348201456,
+            "target_entropy": 1.8094813685015652,
+            "total_loss": 3.529843623397028,
+            "wdl_ce": 0.4791968818402905
+          },
+          "old-268": {
+            "brier": 0.36008891272191174,
+            "ownership": 0.6844223745601994,
+            "policy_ce": 2.318289378341433,
+            "policy_kl": 0.4966379904699352,
+            "score_mae_points": 13.865795168508157,
+            "score_mse": 0.058353499240776686,
+            "target_entropy": 1.8216513879547165,
+            "total_loss": 3.578244085336337,
+            "wdl_ce": 0.5171788314894689
+          },
+          "old-269": {
+            "brier": 0.34041789643000303,
+            "ownership": 0.6861361398654253,
+            "policy_ce": 2.3042093527762297,
+            "policy_kl": 0.5117728281572234,
+            "score_mae_points": 14.138584226202056,
+            "score_mse": 0.05919380406728368,
+            "target_entropy": 1.7924365247927199,
+            "total_loss": 3.5418224170425674,
+            "wdl_ce": 0.4922831234236432
+          }
+        },
+        "ordinary_update": 91680,
+        "parameter_change": {
+          "all": {
+            "change_l2": 0.493349343627213,
+            "relative_change_l2": 0.009295410914221059
+          },
+          "ownership": {
+            "change_l2": 0.14375163686499443,
+            "relative_change_l2": 0.012080749025325077
+          },
+          "policy": {
+            "change_l2": 0.01890228308303477,
+            "relative_change_l2": 0.0033814604827996204
+          },
+          "score": {
+            "change_l2": 0.07517219643614015,
+            "relative_change_l2": 0.011008281976177066
+          },
+          "trunk": {
+            "change_l2": 0.45781833642979813,
+            "relative_change_l2": 0.009208644205418361
+          },
+          "value": {
+            "change_l2": 0.08439939076737453,
+            "relative_change_l2": 0.007526754591485086
+          }
+        },
+        "updates": 640
+      }
+    ],
+    "B": [
+      {
+        "evaluations": {
+          "fresh": {
+            "brier": 0.3462258408736346,
+            "ownership": 0.7050426588059793,
+            "policy_ce": 2.3070751293576355,
+            "policy_kl": 0.5044263102818509,
+            "score_mae_points": 15.015548316486843,
+            "score_mse": 0.0645801895212162,
+            "target_entropy": 1.8026488190604368,
+            "total_loss": 3.575895494338056,
+            "wdl_ce": 0.4991975212391427
+          },
+          "full": {
+            "brier": 0.34795426046392425,
+            "ownership": 0.6939773612647784,
+            "policy_ce": 2.314381183588448,
+            "policy_kl": 0.5030319404182637,
+            "score_mae_points": 14.677729232932876,
+            "score_mse": 0.06182868974639753,
+            "target_entropy": 1.8113492432158864,
+            "total_loss": 3.5727375581684555,
+            "wdl_ce": 0.5025503271373715
+          },
+          "heldout-fresh": {
+            "brier": 0.355725833385948,
+            "ownership": 0.6924398493778625,
+            "policy_ce": 2.2951427308533914,
+            "policy_kl": 0.5043897890276332,
+            "score_mae_points": 14.71822237882617,
+            "score_mse": 0.06146547300922083,
+            "target_entropy": 1.7907529419328512,
+            "total_loss": 3.5584282863519547,
+            "wdl_ce": 0.5093802343888343
+          },
+          "old-266": {
+            "brier": 0.3466701013999282,
+            "ownership": 0.7177919190263538,
+            "policy_ce": 2.332679407290925,
+            "policy_kl": 0.5111062533178483,
+            "score_mae_points": 15.69523694486611,
+            "score_mse": 0.06673339782405345,
+            "target_entropy": 1.821573153827103,
+            "total_loss": 3.6218148308907985,
+            "wdl_ce": 0.5046101084716061
+          },
+          "old-267": {
+            "brier": 0.3316161889504063,
+            "ownership": 0.6810178056633731,
+            "policy_ce": 2.3054819060671434,
+            "policy_kl": 0.4960005376387926,
+            "score_mae_points": 14.376435001501477,
+            "score_mse": 0.05779533114807295,
+            "target_entropy": 1.8094813685015652,
+            "total_loss": 3.5273331500902714,
+            "wdl_ce": 0.4830381161005388
+          },
+          "old-268": {
+            "brier": 0.3606048693424967,
+            "ownership": 0.6845149132520874,
+            "policy_ce": 2.3207825441113528,
+            "policy_kl": 0.4991311561770999,
+            "score_mae_points": 13.99619853457557,
+            "score_mse": 0.05835013193113553,
+            "target_entropy": 1.8216513879547165,
+            "total_loss": 3.582442753628129,
+            "wdl_ce": 0.5187951718847532
+          },
+          "old-269": {
+            "brier": 0.3418718636783885,
+            "ownership": 0.6855900585242694,
+            "policy_ce": 2.3056140421647022,
+            "policy_kl": 0.5131775171473372,
+            "score_mae_points": 14.25878740340977,
+            "score_mse": 0.05931634918499204,
+            "target_entropy": 1.7924365247927199,
+            "total_loss": 3.543680657305231,
+            "wdl_ce": 0.4931602136035604
+          }
+        },
+        "ordinary_update": 91040,
+        "parameter_change": {
+          "all": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "ownership": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "policy": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "score": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "trunk": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          },
+          "value": {
+            "change_l2": 0.0,
+            "relative_change_l2": 0.0
+          }
+        },
+        "updates": 0
+      },
+      {
+        "evaluations": {
+          "fresh": {
+            "brier": 0.3441441336494271,
+            "ownership": 0.7047306744023558,
+            "policy_ce": 2.3083344309709353,
+            "policy_kl": 0.5056856118569519,
+            "score_mae_points": 14.847870053689235,
+            "score_mse": 0.06361811829448813,
+            "target_entropy": 1.8026488190604368,
+            "total_loss": 3.5735451331765944,
+            "wdl_ce": 0.49686190699145216
+          },
+          "full": {
+            "brier": 0.3466411492811542,
+            "ownership": 0.6936829046495774,
+            "policy_ce": 2.3093488593155307,
+            "policy_kl": 0.49799961605576093,
+            "score_mae_points": 14.510975410717549,
+            "score_mse": 0.06092217626320834,
+            "target_entropy": 1.8113492432158864,
+            "total_loss": 3.5648213740610117,
+            "wdl_ce": 0.5008674344290688
+          },
+          "heldout-fresh": {
+            "brier": 0.3528321610886185,
+            "ownership": 0.6918469327196419,
+            "policy_ce": 2.2958433906012017,
+            "policy_kl": 0.5050904485794474,
+            "score_mae_points": 14.511723297957985,
+            "score_mse": 0.06047719451955531,
+            "target_entropy": 1.7907529419328512,
+            "total_loss": 3.5532666861204234,
+            "wdl_ce": 0.5050991675251971
+          },
+          "old-266": {
+            "brier": 0.3452488874006903,
+            "ownership": 0.7174052568162494,
+            "policy_ce": 2.3280719229242095,
+            "policy_kl": 0.5064987689729605,
+            "score_mae_points": 15.556395923750529,
+            "score_mse": 0.06615702983064517,
+            "target_entropy": 1.821573153827103,
+            "total_loss": 3.614879484724952,
+            "wdl_ce": 0.5032452727095774
+          },
+          "old-267": {
+            "brier": 0.3292584940231981,
+            "ownership": 0.6806338814985793,
+            "policy_ce": 2.301625779542519,
+            "policy_kl": 0.4921444109904769,
+            "score_mae_points": 14.206317375947037,
+            "score_mse": 0.05686832124769949,
+            "target_entropy": 1.8094813685015652,
+            "total_loss": 3.5189439054083778,
+            "wdl_ce": 0.47981592275757645
+          },
+          "old-268": {
+            "brier": 0.35963930230385865,
+            "ownership": 0.6841691539728458,
+            "policy_ce": 2.3165219715301646,
+            "policy_kl": 0.4948705834985958,
+            "score_mae_points": 13.826724021649056,
+            "score_mse": 0.057767526070911034,
+            "target_entropy": 1.8216513879547165,
+            "total_loss": 3.575885256192123,
+            "wdl_ce": 0.5174266037213183
+          },
+          "old-269": {
+            "brier": 0.34232069842358115,
+            "ownership": 0.6855529488661887,
+            "policy_ce": 2.2929630654341153,
+            "policy_kl": 0.5005265408278419,
+            "score_mae_points": 14.09386553661443,
+            "score_mse": 0.058642112126075376,
+            "target_entropy": 1.7924365247927199,
+            "total_loss": 3.5302885212795445,
+            "wdl_ce": 0.4931303955857451
+          }
+        },
+        "ordinary_update": 91104,
+        "parameter_change": {
+          "all": {
+            "change_l2": 0.06267694578602716,
+            "relative_change_l2": 0.0011809237682288507
+          },
+          "ownership": {
+            "change_l2": 0.016906753431177323,
+            "relative_change_l2": 0.001420827264923087
+          },
+          "policy": {
+            "change_l2": 0.0021905017502432157,
+            "relative_change_l2": 0.0003918624577471742
+          },
+          "score": {
+            "change_l2": 0.013860412320126027,
+            "relative_change_l2": 0.0020297308627351897
+          },
+          "trunk": {
+            "change_l2": 0.05819547083144077,
+            "relative_change_l2": 0.0011705546558765138
+          },
+          "value": {
+            "change_l2": 0.007677178426164697,
+            "relative_change_l2": 0.0006846523113899358
+          }
+        },
+        "updates": 64
+      },
+      {
+        "evaluations": {
+          "fresh": {
+            "brier": 0.34584144143560536,
+            "ownership": 0.7048049448298457,
+            "policy_ce": 2.3097701640651636,
+            "policy_kl": 0.5071213450966991,
+            "score_mae_points": 14.87790054180914,
+            "score_mse": 0.06397891489231866,
+            "target_entropy": 1.8026488190604368,
+            "total_loss": 3.577538375489894,
+            "wdl_ce": 0.4989843535093929
+          },
+          "full": {
+            "brier": 0.34916894581147945,
+            "ownership": 0.6937738538395308,
+            "policy_ce": 2.3089850484949412,
+            "policy_kl": 0.4976358052203925,
+            "score_mae_points": 14.558760046858652,
+            "score_mse": 0.06163189067400401,
+            "target_entropy": 1.8113492432158864,
+            "total_loss": 3.568733292287334,
+            "wdl_ce": 0.5043425026153482
+          },
+          "heldout-fresh": {
+            "brier": 0.3602609491328698,
+            "ownership": 0.6927291445625912,
+            "policy_ce": 2.3004479904994852,
+            "policy_kl": 0.5096950486991931,
+            "score_mae_points": 14.603842821886872,
+            "score_mse": 0.06167829059171585,
+            "target_entropy": 1.7907529419328512,
+            "total_loss": 3.568840294286929,
+            "wdl_ce": 0.5139848721567165
+          },
+          "old-266": {
+            "brier": 0.35287003447220944,
+            "ownership": 0.7194081725425576,
+            "policy_ce": 2.328922905019681,
+            "policy_kl": 0.5073497511448295,
+            "score_mae_points": 15.73515088870954,
+            "score_mse": 0.06763278822250617,
+            "target_entropy": 1.821573153827103,
+            "total_loss": 3.628064205397095,
+            "wdl_ce": 0.5121003411696305
+          },
+          "old-267": {
+            "brier": 0.33489165525431663,
+            "ownership": 0.6809638524433126,
+            "policy_ce": 2.304174650488676,
+            "policy_kl": 0.49469328190571105,
+            "score_mae_points": 14.339326760999597,
+            "score_mse": 0.058049545986784704,
+            "target_entropy": 1.8094813685015652,
+            "total_loss": 3.5297888034510834,
+            "wdl_ce": 0.4866007533521435
+          },
+          "old-268": {
+            "brier": 0.365609538534901,
+            "ownership": 0.684272803772842,
+            "policy_ce": 2.3132518599177274,
+            "policy_kl": 0.4916004720116689,
+            "score_mae_points": 13.968106828293003,
+            "score_mse": 0.05906118659659295,
+            "target_entropy": 1.8216513879547165,
+            "total_loss": 3.5803566236718325,
+            "wdl_ce": 0.5237707745238414
+          },
+          "old-269": {
+            "brier": 0.33999848742015926,
+            "ownership": 0.6853146033562325,
+            "policy_ce": 2.2982658771240843,
+            "policy_kl": 0.5058293523668347,
+            "score_mae_points": 14.084499113825132,
+            "score_mse": 0.059046002795335874,
+            "target_entropy": 1.7924365247927199,
+            "total_loss": 3.5332467350772276,
+            "wdl_ce": 0.4906202554171051
+          }
+        },
+        "ordinary_update": 91296,
+        "parameter_change": {
+          "all": {
+            "change_l2": 0.12685951890093158,
+            "relative_change_l2": 0.0023902157199495407
+          },
+          "ownership": {
+            "change_l2": 0.04070734742588097,
+            "relative_change_l2": 0.0034210062470498037
+          },
+          "policy": {
+            "change_l2": 0.00433220945903904,
+            "relative_change_l2": 0.0007749960692366957
+          },
+          "score": {
+            "change_l2": 0.02590774835742428,
+            "relative_change_l2": 0.0037939532540950294
+          },
+          "trunk": {
+            "change_l2": 0.11454146665151684,
+            "relative_change_l2": 0.0023039086232020103
+          },
+          "value": {
+            "change_l2": 0.02503042857993621,
+            "relative_change_l2": 0.002232218639588825
+          }
+        },
+        "updates": 256
+      },
+      {
+        "evaluations": {
+          "fresh": {
+            "brier": 0.34302922247999307,
+            "ownership": 0.7045833735151845,
+            "policy_ce": 2.306334608480502,
+            "policy_kl": 0.5036857893401434,
+            "score_mae_points": 14.776828131646994,
+            "score_mse": 0.06361685095901838,
+            "target_entropy": 1.8026488190604368,
+            "total_loss": 3.5701374462796593,
+            "wdl_ce": 0.49560261692720253
+          },
+          "full": {
+            "brier": 0.34465845071160295,
+            "ownership": 0.6933176337267142,
+            "policy_ce": 2.3057393814487455,
+            "policy_kl": 0.4943901381678302,
+            "score_mae_points": 14.429799528920768,
+            "score_mse": 0.060837565742593136,
+            "target_entropy": 1.8113492432158864,
+            "total_loss": 3.558741862468196,
+            "wdl_ce": 0.4988472838606155
+          },
+          "heldout-fresh": {
+            "brier": 0.35407186321183665,
+            "ownership": 0.6916351077455118,
+            "policy_ce": 2.294884088651245,
+            "policy_kl": 0.5041311467308993,
+            "score_mae_points": 14.45749137892085,
+            "score_mse": 0.06062961316420489,
+            "target_entropy": 1.7907529419328512,
+            "total_loss": 3.5544621499152527,
+            "wdl_ce": 0.5073133452834824
+          },
+          "old-266": {
+            "brier": 0.34415693685559245,
+            "ownership": 0.7173754516624626,
+            "policy_ce": 2.3262333789434706,
+            "policy_kl": 0.5046602251468357,
+            "score_mae_points": 15.494433331651294,
+            "score_mse": 0.066103906590334,
+            "target_entropy": 1.821573153827103,
+            "total_loss": 3.6118921486558975,
+            "wdl_ce": 0.5021794131635291
+          },
+          "old-267": {
+            "brier": 0.32682138645235265,
+            "ownership": 0.6803637490609162,
+            "policy_ce": 2.299499787118293,
+            "policy_kl": 0.4900184186608385,
+            "score_mae_points": 14.127778745471005,
+            "score_mse": 0.05675005050712452,
+            "target_entropy": 1.8094813685015652,
+            "total_loss": 3.5139963227738917,
+            "wdl_ce": 0.47738274073276754
+          },
+          "old-268": {
+            "brier": 0.3575564098532661,
+            "ownership": 0.6837262159691022,
+            "policy_ce": 2.311403756146319,
+            "policy_kl": 0.4897523683393956,
+            "score_mae_points": 13.759117635638631,
+            "score_mse": 0.05773295572092713,
+            "target_entropy": 1.8216513879547165,
+            "total_loss": 3.5674593946969253,
+            "wdl_ce": 0.5145964686380626
+          },
+          "old-269": {
+            "brier": 0.3380249978068398,
+            "ownership": 0.6850888034560967,
+            "policy_ce": 2.2921233590518995,
+            "policy_kl": 0.4996868343474006,
+            "score_mae_points": 13.998337976335051,
+            "score_mse": 0.05846405499388387,
+            "target_entropy": 1.7924365247927199,
+            "total_loss": 3.524858918443897,
+            "wdl_ce": 0.48918270270992303
+          }
+        },
+        "ordinary_update": 91680,
+        "parameter_change": {
+          "all": {
+            "change_l2": 0.18496367719583126,
+            "relative_change_l2": 0.003484981597623745
+          },
+          "ownership": {
+            "change_l2": 0.062340627047584404,
+            "relative_change_l2": 0.005239046217961051
+          },
+          "policy": {
+            "change_l2": 0.00821463722873438,
+            "relative_change_l2": 0.0014695299529415475
+          },
+          "score": {
+            "change_l2": 0.029343657372667465,
+            "relative_change_l2": 0.004297110765481802
+          },
+          "trunk": {
+            "change_l2": 0.1682728411353717,
+            "relative_change_l2": 0.0033846716047559082
+          },
+          "value": {
+            "change_l2": 0.03287747777040395,
+            "relative_change_l2": 0.0029320200597999497
+          }
+        },
+        "updates": 640
+      }
+    ]
+  },
+  "training_positions": 207097
+}
