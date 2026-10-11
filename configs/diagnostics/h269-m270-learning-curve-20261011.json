@@ -1,0 +1,17 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "h269-m270-learning-curve-20261011-v1",
+  "parent": "torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/M269",
+  "learning_curve": {
+    "source": "torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/M270",
+    "output": "/home/codex/diagnostics/h269-m270-learning-curve-20261011-v1",
+    "arms": {"A": 0.0001, "B": 0.000025},
+    "batch_size": 64,
+    "gradient_clip": 8,
+    "snapshots": [0, 64, 256, 640, 1280, 2560],
+    "evaluation_seed": 2026101101,
+    "full_positions": 16384,
+    "fresh_positions": 8192,
+    "old_positions": 4096
+  }
+}

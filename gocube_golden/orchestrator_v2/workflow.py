@@ -29,7 +29,7 @@ from ..provenance import sha256_fingerprint
 WORKFLOW_SCHEMA = "gocube-orchestrator-v2-workflow-v1"
 WORKFLOW_STATE_SCHEMA = "gocube-orchestrator-v2-workflow-state-v1"
 WORKFLOW_ACTIONS = frozenset(
-    {"arena", "calibration", "continuous_training", "experiment", "adaptation_phase", "select", "stop"}
+    {"arena", "calibration", "continuous_training", "experiment", "adaptation_phase", "learning_curve", "select", "stop"}
 )
 WORKFLOW_STATUSES = frozenset({"PENDING", "RUNNING", "COMPLETED", "FAILED", "SKIPPED"})
 WORKFLOW_STATES = frozenset({"RUNNING", "COMPLETED", "FAILED", "STOPPED"})
@@ -898,7 +898,7 @@ class WorkflowRunner:
                 if not unresolved:
                     if any(
                         str(steps_state[step.step_id].get("status")) == "SKIPPED"
-                        and step.action in {"select", "continuous_training", "experiment"}
+                        and step.action in {"select", "continuous_training", "experiment", "learning_curve"}
                         for step in self.spec.steps
                     ):
                         state["state"] = "FAILED"

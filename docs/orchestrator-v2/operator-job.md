@@ -333,3 +333,13 @@ with the same JSON to resume. Completed generations and Arenas are reused.
 Training, replay-cache inference and Arena games run in supervised workers;
 Telegram events describe the actual offline execution rather than inherited
 self-play settings. See the launch guide for the full configuration and paths.
+
+## Learning curve on frozen historical replay
+
+The exclusive opt-in `learning_curve` section routes through the same `job`
+command and durable workflow. It accepts parent/source checkpoint selectors,
+external output, two LR arms and update snapshots; no Arena/self-play/MCTS runs.
+See [learning-curve.md](learning-curve.md) and the tracked launch guide for the
+strict schema, inherited Adam, position-weighted objective, immutable snapshots,
+resume and whole-game exclusion interface. Example:
+`configs/diagnostics/h269-m270-learning-curve-20261011.json`.

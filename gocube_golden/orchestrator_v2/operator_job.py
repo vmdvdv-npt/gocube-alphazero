@@ -153,6 +153,7 @@ def parse_job(value):
         {
             "schema", "run_id", "topology", "parent", "training", "arena",
             "execution", "ab_tests", "arenas", "self_play", "winner_selection",
+            "learning_curve",
         },
         "job",
     )
@@ -164,6 +165,15 @@ def parse_job(value):
             "The simple operator job currently supports Torus9 5CH; "
             "other topologies use the existing V2 run-spec"
         )
+
+    if "learning_curve" in raw:
+        from .learning_curve import parse_parameters
+        forbidden = set(raw) & {"training", "arena", "execution", "ab_tests", "arenas", "self_play", "winner_selection"}
+        if forbidden:
+            raise ValueError("learning_curve is an exclusive diagnostic mode; remove " + ", ".join(sorted(forbidden)))
+        return {"schema": SCHEMA, "run_id": raw["run_id"], "topology": "torus9",
+                "parent": _selector(raw.get("parent"), "parent"),
+                "learning_curve": parse_parameters(raw["learning_curve"])}
 
     self_play = None
     if 'self_play' in raw:
@@ -570,6 +580,14 @@ def compile_job(value, *, runs_root=None, resolver=None):
     """Read/verify input identities and return a deterministic standard workflow."""
     job = parse_job(value)
     resolver = resolver or ArtifactResolver(runs_root)
+    if "learning_curve" in job:
+        from .learning_curve import compile_parameters
+        config = compile_parameters(job, resolver=resolver)
+        result = {"schema": "gocube-orchestrator-v2-run-spec-v1", "mode": "workflow",
+                  "workflow": {"workflow_id": job["run_id"], "topology": "torus9",
+                               "steps": [{"step_id": "learning-curve", "action": "learning_curve", "config": config}]}}
+        WorkflowSpec.from_dict(result["workflow"])
+        return result
     steps = []
     previous = None
 
