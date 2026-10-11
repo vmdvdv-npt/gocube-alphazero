@@ -372,11 +372,15 @@ def paired_changes(root, panels, window, updates, seed):
     return result
 
 
-def notify(dispatcher, config, kind, action, message, payload=None):
+def execution_commit():
     authority = active_authority()
+    return authority.code_identity if authority else os.environ.get('AZ_ORCHESTRATOR_RUNTIME_COMMIT')
+
+
+def notify(dispatcher, config, kind, action, message, payload=None):
     dispatcher.publish(operator_event(kind, topology='torus9', owner_type='experiment',
         owner_id=config['run_id'], action_id=action, message=message,
-        execution_code_commit=authority.code_identity if authority else None,
+        execution_code_commit=execution_commit(),
         payload={'experiment_id': config['run_id'], **(payload or {})}))
     dispatcher.flush(timeout=7)
 
@@ -422,8 +426,6 @@ def _run_locked(config, output, identities, dispatcher, trainer_factory):
     updates = parameters['snapshots']
     generation = config['replay']['generation']
     heartbeat = TrainingHeartbeat(output / ('runtime/heartbeats/generation-%04d.json' % generation), generation)
-    atomic_write_json(output / 'runtime/active-child.json', {'pid': os.getpid(), 'started_at': time.time(),
-                                                          'action': 'learning_curve'})
     heartbeat.start()
     summaries = {}
     try:
@@ -487,9 +489,8 @@ def _run_locked(config, output, identities, dispatcher, trainer_factory):
         if [r['sample_sha256'] for r in traces['A']] != [r['sample_sha256'] for r in traces['B']]:
             raise ValueError('A/B actual ordered samples differ')
         verify_sources(config)
-        authority = active_authority()
         report = {'schema': SCHEMA, 'config_sha256': sha256_fingerprint(config),
-                  'execution_code_commit': authority.code_identity if authority else None,
+                  'execution_code_commit': execution_commit(),
                   'source_sha256': identities, 'panel_sha256': file_sha256(panel_path),
                   'same_ordered_samples': True, 'sample_draws_per_arm': 64 * updates[-1],
                   'training_positions': training.positions, 'summaries': summaries,
@@ -513,3 +514,106 @@ def _run_locked(config, output, identities, dispatcher, trainer_factory):
         return {'report': str(report_path), 'sha256': file_sha256(report_path), 'same_ordered_samples': True}
     finally:
         heartbeat.close()
+
+
+def run_supervised(config):
+    """Controller adapter: use the existing process supervisor and child permit."""
+    import subprocess
+    import sys
+    from ..process_supervision import start_owned_child
+    from .execution_permit import _child_execution_permit
+    from .immutable_runtime import ImmutableRuntimeManager
+    from .supervisor import SupervisorV2
+
+    require_engine_execution(__name__, action='training', topology='torus9')
+    authority = active_authority()
+    if authority is None:
+        raise RuntimeError('Learning curve supervision requires the V2 controller authority')
+    output = Path(config['parameters']['output'])
+    verify_sources(config)
+    output.mkdir(parents=True, exist_ok=True)
+    config_path = output / 'config.json'
+    if config_path.exists():
+        if json.loads(config_path.read_text()) != config:
+            raise ValueError('Diagnostic config identity changed')
+    else:
+        if list(output.iterdir()):
+            raise ValueError('Output is not an exclusive diagnostic directory')
+        atomic_write_json(config_path, config)
+    runtime = ImmutableRuntimeManager(Path(__file__).resolve().parents[2]).ensure(authority.code_identity)
+    request = {'schema': SCHEMA, 'config': config, 'execution_code_commit': runtime.commit}
+    request_path = output / 'runtime/requests/learning-curve.json'
+    result_path = output / 'runtime/results/learning-curve.json'
+    if request_path.exists():
+        if json.loads(request_path.read_text()) != request:
+            raise ValueError('Learning curve worker request changed')
+    else:
+        atomic_write_json(request_path, request)
+    command = [sys.executable, '-m', 'gocube_golden.orchestrator_v2.learning_curve',
+               '--request', str(request_path), '--result', str(result_path)]
+    heartbeat = output / ('runtime/heartbeats/generation-%04d.json' % config['replay']['generation'])
+
+    def launch(child_request):
+        with _child_execution_permit(action_type='training', topology='torus9', run_id=config['run_id'],
+                                     code_identity=runtime.commit, attempt=int(child_request.attempt)):
+            env = runtime.environment(os.environ)
+            with (output / 'worker.log').open('ab') as log:
+                def popen(*args, **kwargs):
+                    return subprocess.Popen(*args, stdout=log, stderr=subprocess.STDOUT, **kwargs)
+                return start_owned_child(command, cwd=runtime.path, env=env, popen=popen)
+
+    supervisor = SupervisorV2(output, execution_id=config['run_id'] + ':learning-curve',
+        liveness_path=heartbeat, progress_path=heartbeat, launcher=launch,
+        command=command, cwd=runtime.path)
+
+    def verified_result():
+        result = json.loads(result_path.read_text())
+        if result.get('schema') != SCHEMA or result.get('execution_code_commit') != runtime.commit:
+            raise ValueError('Learning curve worker result identity mismatch')
+        evidence = result['result']
+        if Path(evidence['report']).resolve() != output / 'report.json' or file_sha256(output / 'report.json') != evidence['sha256']:
+            raise ValueError('Learning curve report integrity mismatch')
+        report = json.loads((output / 'report.json').read_text())
+        if report['config_sha256'] != sha256_fingerprint(config) or report['execution_code_commit'] != runtime.commit:
+            raise ValueError('Learning curve report identity mismatch')
+        if file_sha256(output / 'panels.json') != report['panel_sha256']:
+            raise ValueError('Learning curve panel integrity mismatch')
+        for arm in config['parameters']['arms']:
+            for update in config['parameters']['snapshots']:
+                verify_snapshot(output / arm / ('update-%04d' % update))
+        verify_sources(config)
+        return evidence
+
+    if result_path.exists():
+        result = verified_result()
+        supervised = supervisor.reconcile_completed_execution()
+    else:
+        supervised = supervisor.run_once()
+        if not supervised.success:
+            raise RuntimeError('Learning curve worker stopped: ' + str(supervised.reason))
+        result = verified_result()
+    if not supervised.success:
+        raise RuntimeError('Learning curve reconciliation failed: ' + str(supervised.reason))
+    return result
+
+
+def run_worker(request_path, result_path):
+    from .execution_permit import require_child_execution_permit
+    from .immutable_runtime import validate_runtime_head
+    request = json.loads(Path(request_path).read_text())
+    if request.get('schema') != SCHEMA:
+        raise ValueError('Expected learning curve worker request')
+    require_child_execution_permit(__name__, action_type='training', topology='torus9',
+        run_id=request['config']['run_id'], code_identity=request['execution_code_commit'])
+    validate_runtime_head(Path.cwd(), request['execution_code_commit'])
+    result = run(request['config'])
+    atomic_write_json(Path(result_path), {'schema': SCHEMA, 'execution_code_commit': request['execution_code_commit'], 'result': result})
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Internal signed learning curve worker; launch with operator job.')
+    parser.add_argument('--request', required=True)
+    parser.add_argument('--result', required=True)
+    args = parser.parse_args()
+    run_worker(args.request, args.result)

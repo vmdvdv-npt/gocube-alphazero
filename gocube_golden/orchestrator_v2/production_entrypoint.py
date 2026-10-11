@@ -1361,8 +1361,8 @@ def run_workflow_from_config(
 
     handlers.setdefault("adaptation_phase", adaptation_action)
     def learning_curve_action(*, config, **_):
-        from .learning_curve import run
-        return run(config)
+        from .learning_curve import run_supervised
+        return run_supervised(config)
 
     handlers.setdefault("learning_curve", learning_curve_action)
     # These adapters intentionally call the already-existing entrypoints.  A

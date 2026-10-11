@@ -2,6 +2,7 @@
 import copy
 import json
 import math
+import os
 import random
 from pathlib import Path
 from types import SimpleNamespace
@@ -237,3 +238,44 @@ def test_job_check_is_read_only_and_validates_adam(parent, tmp_path, monkeypatch
     config['parent']['sha256'] = file_sha256(parent)
     with pytest.raises(ValueError, match='clock'):
         entry.launch_operator_job(raw, runs_root=tmp_path / 'runs', check_only=True)
+
+
+def test_supervised_adapter_uses_signed_owned_worker(parent, tmp_path, monkeypatch):
+    from gocube_golden.orchestrator_v2 import immutable_runtime, supervisor, execution_permit
+    from gocube_golden import process_supervision
+    config = input_config(tmp_path, parent)
+    calls = []
+    runtime = SimpleNamespace(commit='test', path=tmp_path, environment=lambda env: dict(env))
+    monkeypatch.setattr(immutable_runtime.ImmutableRuntimeManager, 'ensure', lambda *a: runtime)
+    def spawn(command, **kwargs):
+        permit = execution_permit.require_child_execution_permit('synthetic-spawn', action_type='training',
+            topology='torus9', run_id='synthetic', code_identity='test', environ=kwargs['env'], parent_pid=os.getpid())
+        calls.append((command, kwargs, permit['attempt']))
+        return object()
+    monkeypatch.setattr(process_supervision, 'start_owned_child', spawn)
+    class Supervisor:
+        def __init__(self, root, **kwargs):
+            self.kwargs = kwargs
+        def run_once(self):
+            self.kwargs['launcher'](SimpleNamespace(attempt=1))
+            assert self.kwargs['liveness_path'] == self.kwargs['progress_path']
+            assert self.kwargs['execution_id'] == 'synthetic:learning-curve'
+            raise RuntimeError('mock supervised boundary reached')
+    monkeypatch.setattr(supervisor, 'SupervisorV2', Supervisor)
+    monkeypatch.setattr(OrdinaryTrainer, 'step', lambda *a: pytest.fail('controller trained'))
+    with _test_authority(), pytest.raises(RuntimeError, match='boundary reached'):
+        curve.run_supervised(config)
+    assert len(calls) == 1
+    assert calls[0][0][1:3] == ['-m', 'gocube_golden.orchestrator_v2.learning_curve']
+    assert calls[0][2] == 1
+    assert json.loads((tmp_path / 'output/runtime/requests/learning-curve.json').read_text())['execution_code_commit'] == 'test'
+
+
+def test_worker_rejects_missing_permit_before_computation(parent, tmp_path, monkeypatch):
+    config = input_config(tmp_path, parent)
+    request = tmp_path / 'request.json'
+    request.write_text(json.dumps({'schema': curve.SCHEMA, 'config': config, 'execution_code_commit': 'test'}))
+    monkeypatch.setattr(curve, 'run', lambda *a: pytest.fail('unauthorized computation'))
+    with pytest.raises(RuntimeError, match='permit|Orchestrator'):
+        curve.run_worker(request, tmp_path / 'result.json')
+    assert not (tmp_path / 'result.json').exists()

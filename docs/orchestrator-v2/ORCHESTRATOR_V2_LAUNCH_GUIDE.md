@@ -530,7 +530,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 36e215998d301a7bed7990eb51302f01d6feac415f17c1fb38ca27025b08dd65 -->
+<!-- reviewed-interface-sha256: dc7b4831a565ec20f09ae988d096d730ff796f58ade15d2cbf74c1eb3db8cff8 -->
 
 ## B64 bounded performance audit
 
@@ -617,6 +617,10 @@ It runs through `production_entrypoint job CONFIG --runs-root ROOT --check`
 and then the same command without `--check`, using the normal immutable runtime,
 durable workflow controller/lease and standard lifecycle outbox. No self-play,
 Arena or MCTS occurs. No production checkpoint/lineage/winner is registered.
+The controller launches a signed training worker through the existing SupervisorV2
+with its default policy; model inference and optimizer steps stay in that worker.
+The internal worker command is not a public launch interface. Its runtime HEAD,
+training permit, run ID and code identity must match the sealed request.
 
 See `configs/diagnostics/h269-m270-learning-curve-20261011.json` and
 [learning-curve.md](learning-curve.md). `source` is the consecutive registered
