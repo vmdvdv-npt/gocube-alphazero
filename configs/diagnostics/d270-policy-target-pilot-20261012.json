@@ -1,0 +1,13 @@
+{
+  "schema": "gocube-d270-policy-target-pilot-v1",
+  "runs_root": "/home/codex/projects/gocube-alphazero/runs",
+  "output": "/home/codex/diagnostics/gocube-d270-policy-target-pilot-20261012-r2",
+  "parent_checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/active/az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/checkpoints/M269.pt",
+  "parent_checkpoint_sha256": "sha256:f16af6c473cd5c3d89687f9edc99ba94ec0bf4d7e3da00166368fccae41609f7",
+  "parent_metadata": "/home/codex/projects/gocube-alphazero/runs/torus9/active/az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/checkpoints/M269.metadata.json",
+  "parent_provenance": "/home/codex/projects/gocube-alphazero/runs/torus9/active/az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/metadata/provenance-v2/M269.json",
+  "parent_rolling_replay": "/home/codex/projects/gocube-alphazero/runs/torus9/active/az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/replay/rolling-after-269.jsonl",
+  "source_fresh_replay": "/home/codex/projects/gocube-alphazero/runs/torus9/active/torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/replay/iter-270-fresh.json",
+  "source_fresh_sha256": "sha256:5e7ab776401913e8ed7b4fffa587375f3bdae4778806407fffc0fe6e955e6950",
+  "device": "cuda"
+}

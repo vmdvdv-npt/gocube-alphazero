@@ -529,7 +529,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 659a9e1d08775787fc000668951006b428caa982e646f42e42bd75de0322572e -->
+<!-- reviewed-interface-sha256: 64cad11750fb68ddbb8f5d72584b638fe5797ab08d3c5716b5b714d4d72eae2b -->
 
 ## B64 bounded performance audit
 
@@ -606,3 +606,60 @@ PyTorch functional Adam path. Named singleton groups, order, options, unequal
 CPU clocks and serialized state remain intact. Unsupported execution options,
 heterogeneous groups and aliased parameters retain ordinary Adam dispatch.
 `configs/diagnostics/b64-next-speedup-nsys-20261007.json` selects its short trace.
+
+## D270 policy-target transfer pilot
+
+The reanalysis/transfer diagnostic is available only through
+`production_entrypoint d270-policy-target-pilot CONFIG`. Read this section and
+run the same command with `--check` before execution. The check verifies the
+AZ23 B/M269 checkpoint and complete Adam state, confirms D270 is absent from
+the parent's replay, verifies D270 shard/raw-game SHA identities and actor
+hashes, freezes the split and selected positions, and validates the selected
+raw full states against saved observations, legal masks, and original targets.
+It does not write output or run search/training. The configured output must be a new directory outside
+`runs_root`.
+
+The pilot splits whole D270 games into train/validation/test at 70/15/15 with
+seed `2026101207`, then selects 512/128/128 eligible positions, at most one per
+game and balanced across four ply phases (plies 1–8, 9–24, 25–64, 65+) and both
+colors. It records the full selection before search. A 16-train-position,
+1,600-simulation timing pilot is included in the frozen train sample. Compute
+is uncapped; the timing estimate does not reduce or otherwise change the
+sample.
+
+Each selected position is reconstructed from its saved full state, including
+positional-superko history, and checked against the saved observation and legal
+mask. Search uses fixed AZ23 B/M269, a fresh tree, root noise off, and 1,600
+simulations. It saves prior, visits, Q, final policy, actual visit budget, and
+the original policy/WDL/ownership/score targets. No new complete games are
+played.
+
+Both learner branches start from the same M269 model and full Adam state, use
+the same seed and sample order, and run exactly 128 updates at LR `2.5e-5`,
+batch 64, clip 8. A trains on the stored policy; B trains on the reanalyzed
+policy. WDL, ownership, and score targets remain the original D270 values.
+Test metrics are read only after both branches finish their fixed 128 updates.
+Diagnostic checkpoints and targets are written outside the production
+lineage. There is no Arena, self-play, or automatic promotion.
+
+The report compares parent/A/B policy CE and KL to original and new targets on
+the same positions, plus WDL CE/Brier, ownership CE, score MSE/MAE, and policy
+change from the parent. Its primary B−A test KL to new targets uses 5,000
+paired game-cluster bootstrap draws with a fixed seed. This measures target
+transfer, not target quality or playing strength. The teacher model, search
+budget, root noise, and tree state all differ from historical targets; D270
+has prior investigative exposure and is not fully independent. Other-head
+deltas are reported as paired B−A game-cluster intervals; only a clear test
+deterioration in those heads blocks the separate-usefulness candidate rule.
+
+The command does not resume an existing output directory. If interrupted,
+preserve that partial directory and use a new empty output path for a fresh
+run. Example configuration:
+`configs/diagnostics/d270-policy-target-pilot-20261012.json`.
+
+```bash
+.venv/bin/python -m gocube_golden.orchestrator_v2.production_entrypoint \
+  d270-policy-target-pilot configs/diagnostics/d270-policy-target-pilot-20261012.json --check
+.venv/bin/python -m gocube_golden.orchestrator_v2.production_entrypoint \
+  d270-policy-target-pilot configs/diagnostics/d270-policy-target-pilot-20261012.json
+```
