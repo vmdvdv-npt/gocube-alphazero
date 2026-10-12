@@ -86,6 +86,8 @@ def format_event(event: OperatorEvent, *, max_chars: int = DEFAULT_MESSAGE_BUDGE
         text = format_training_started(
             topology=event.topology, lineage_id=payload.get("lineage_id", event.owner_id),
             parent_label=_ref(payload.get("parent")) or "unknown",
+            parent_checkpoint=payload.get("parent"),
+            parent_training=payload.get("parent_training"),
             network=payload.get("network"), effective_config=config,
             arena_cadence=int(arena["every_iterations"]) if arena.get("every_iterations") is not None else None,
             arena_enabled=arena.get("enabled", True),

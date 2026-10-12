@@ -17,7 +17,7 @@ def _line(lines: list[str], label: str, value: object | None, suffix: str = "") 
         lines.append(f"{label}: {value}{suffix}")
 
 
-def format_training_started(*, topology: str, lineage_id: str, parent_label: str, network: object | None, effective_config: object, arena_cadence: int | None, arena_config: object, arena_enabled: bool = True, execution_mode: str = "online") -> str:
+def format_training_started(*, topology: str, lineage_id: str, parent_label: str, network: object | None, effective_config: object, arena_cadence: int | None, arena_config: object, arena_enabled: bool = True, execution_mode: str = "online", parent_checkpoint: object = None, parent_training: object = None) -> str:
     self_play = getattr(effective_config, "self_play", {})
     training = getattr(effective_config, "training", {})
     replay = getattr(effective_config, "replay", {})
@@ -37,13 +37,19 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     replay_generations = _pick(replay, "generations", "window")
     replay_cap = _pick(replay, "cap", "positions_cap", "max_positions")
     arena_sims = _pick(arena, "simulations", "mcts_simulations")
-    lines = ["🎬 TRAINING STARTED — GoCube AlphaZero", ""]
+    offline = execution_mode == "offline" or bool(getattr(effective_config, "extensions", {}).get("offline_ab_replay"))
+    title = "TRAINING STARTED" if offline else "ONLINE TRAINING STARTED"
+    lines = [f"🎬 {title} — GoCube AlphaZero", ""]
     _line(lines, "Topology", topology)
     _line(lines, "Lineage", lineage_id)
     _line(lines, "Parent", parent_label)
+    _line(lines, "Parent SHA256", _pick(parent_checkpoint, "sha256"))
+    generation = _pick(parent_checkpoint, "generation")
+    if generation is not None:
+        _line(lines, "Next generation", f"M{int(generation) + 1}")
+    _line(lines, "Parent training seed", _pick(parent_training, "seed"))
     _line(lines, "Network", network)
     _line(lines, "Komi", _pick(self_play, "komi"))
-    offline = execution_mode == "offline" or bool(getattr(effective_config, "extensions", {}).get("offline_ab_replay"))
     _line(lines, "Mode", "offline replay" if offline else "online training")
     lines.extend(["", "Self-play:"])
     if offline:
@@ -53,6 +59,7 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
             lines.append(f"games/generation={games}")
         if selfplay_sims is not None or self_play.get('search_mode') == 'pcr':
             lines.append(search_description(self_play))
+        _line(lines, "Tree reuse", "ON" if self_play.get("tree_reuse", False) else "OFF")
         _line(lines, "Contexts", contexts)
     lines.extend(["", "Training:"])
     if lr is not None:
@@ -66,6 +73,13 @@ def format_training_started(*, topology: str, lineage_id: str, parent_label: str
     elif replay_generations is not None or replay_cap is not None:
         cap_text = "no position cap" if replay_cap is None else f"{replay_cap} positions"
         lines.append(f"replay={replay_generations} generations / {cap_text}")
+    sampling = dict(replay.get("sampling") or {"mode": "uniform"})
+    sampling_text = str(sampling["mode"]) + (" (offline)" if offline else " (online)")
+    parent_sampling = _pick(parent_training, "sampling")
+    if not offline and parent_sampling and parent_sampling.get("mode") == "policy_surprise":
+        label = _pick(parent_training, "arm") or parent_label
+        sampling_text += f"; parent {label} trained offline with Policy Surprise {parent_sampling['weight']:g}"
+    _line(lines, "Replay sampling", sampling_text)
     lines.extend(["", "Arena:"])
     if not arena_enabled:
         lines.append("Periodic Arena disabled; final comparisons belong to the experiment")
