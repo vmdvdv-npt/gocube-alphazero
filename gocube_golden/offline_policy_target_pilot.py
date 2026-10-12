@@ -740,6 +740,8 @@ def _write_targets(output: Path, targets: Mapping[str, Sequence[Mapping[str, Any
                     "simulations_completed": search["simulations_completed"],
                     "actual_root_visit_sum": search["actual_root_visit_sum"],
                     "evaluator_calls": search["evaluator_calls"],
+                    "root_noise": search["root_noise"],
+                    "fresh_tree": search["fresh_tree"],
                     "search_implementation_fingerprint": search["search_implementation_fingerprint"],
                     "historical_search_mode": row["historical_search_mode"],
                     "historical_search_simulations": row["historical_search_simulations"],
@@ -955,6 +957,18 @@ def run(payload: Mapping[str, object], *, config_path: Path | None = None) -> di
                 b = model_metrics["B"]["per_game"][game_id]
                 differences[game_id] = float(b["policy"]["new_pi"]["kl"] - row["policy"]["new_pi"]["kl"])
             split_metrics["primary_B_minus_A_policy_kl_to_new_targets"] = _bootstrap_cluster(differences)
+            side_head_bootstraps = {}
+            for offset, metric in enumerate(("wdl_ce", "wdl_brier", "ownership_ce", "score_mse_points", "score_mae_points"), 1):
+                side_differences = {
+                    game_id: float(model_metrics["B"]["per_game"][game_id][metric]
+                                   - model_metrics["A"]["per_game"][game_id][metric])
+                    for game_id in model_metrics["A"]["per_game"]
+                }
+                result = _bootstrap_cluster(side_differences, seed=BOOTSTRAP_SEED + offset)
+                side_head_bootstraps[metric] = {
+                    key: result[key] for key in ("method", "replicates", "seed", "clusters", "mean", "ci95")
+                }
+            split_metrics["other_head_B_minus_A_paired_game_cluster_bootstrap"] = side_head_bootstraps
         metrics["splits"][split] = split_metrics
 
     test_metrics = metrics["splits"]["test"]
@@ -964,23 +978,22 @@ def run(payload: Mapping[str, object], *, config_path: Path | None = None) -> di
         - test_metrics["parent"]["policy_to_new_pi"]["policy_kl_raw"]
     )
     side_heads = ("wdl_ce", "wdl_brier", "ownership_ce", "score_mse_points", "score_mae_points")
-    no_observed_mean_side_head_worsening = all(
-        test_metrics["B_minus_parent_metric_deltas"][metric] <= 0
-        and test_metrics["B_minus_parent_metric_deltas"][metric]
-            <= test_metrics["A_minus_parent_metric_deltas"][metric]
-        for metric in side_heads
+    side_head_bootstraps = test_metrics["other_head_B_minus_A_paired_game_cluster_bootstrap"]
+    no_clear_side_head_worsening = all(
+        side_head_bootstraps[metric]["ci95"][0] <= 0 for metric in side_heads
     )
     primary_clear_gain = primary["mean"] < 0 and primary["ci95"][1] < 0
     train_b_minus_a = (
         metrics["splits"]["train"]["B"]["policy_to_new_pi"]["policy_kl_raw"]
         - metrics["splits"]["train"]["A"]["policy_to_new_pi"]["policy_kl_raw"]
     )
-    if primary_clear_gain and b_parent_new_kl < 0 and no_observed_mean_side_head_worsening:
+    if primary_clear_gain and b_parent_new_kl < 0 and no_clear_side_head_worsening:
         decision = "candidate_for_separate_game_usefulness_check"
         decision_text = (
             "B has a clear test policy-KL gain over A, lower test KL than the parent, "
-            "and no observed mean worsening in the other heads. This is only a candidate "
-            "for a separate playing-strength/usefulness evaluation."
+            "and no clear B-versus-A deterioration in the other heads under paired "
+            "game-cluster 95% intervals. This is only a candidate for a separate "
+            "playing-strength/usefulness evaluation."
         )
     elif train_b_minus_a < 0 and not primary_clear_gain:
         decision = "train_gain_without_clear_test_generalization"
@@ -996,7 +1009,7 @@ def run(payload: Mapping[str, object], *, config_path: Path | None = None) -> di
         "text": decision_text,
         "primary_test_B_minus_A_ci_upper": primary["ci95"][1],
         "test_B_minus_parent_policy_kl_to_new_targets": b_parent_new_kl,
-        "test_other_heads_no_observed_mean_worsening": no_observed_mean_side_head_worsening,
+        "test_other_heads_no_clear_worsening_vs_A": no_clear_side_head_worsening,
         "train_B_minus_A_policy_kl_to_new_targets": train_b_minus_a,
         "target_quality_or_playing_strength_established": False,
     }
@@ -1012,6 +1025,8 @@ def run(payload: Mapping[str, object], *, config_path: Path | None = None) -> di
                 stream.write(json.dumps(item, sort_keys=True) + "\n")
     metrics["search"] = {
         "simulations_per_position": SEARCH_SIMULATIONS,
+        "teacher_model_hash": prepared["sources"]["parent_model_hash"],
+        "root_noise": False, "fresh_tree": True,
         "requested_positions": {key: len(value) for key, value in selected.items()},
         "actual_simulations": sum(len(value) for value in selected.values()) * SEARCH_SIMULATIONS,
         "pilot_positions": len(pilot_records), "pilot_seconds": pilot_seconds,
@@ -1110,6 +1125,16 @@ def _write_markdown(path: Path, report: Mapping[str, Any], report_sha: str) -> N
         f"| Ownership CE | {report['splits']['test']['B_minus_parent_metric_deltas']['ownership_ce']:.8f} |",
         f"| Score MSE (points²) | {report['splits']['test']['B_minus_parent_metric_deltas']['score_mse_points']:.8f} |",
         f"| Score MAE (points) | {report['splits']['test']['B_minus_parent_metric_deltas']['score_mae_points']:.8f} |",
+        "", "## Test other-head B − A intervals", "",
+        "| Metric | B − A mean | Paired game-cluster 95% CI |",
+        "|---|---:|---:|",
+    ]
+    for metric, result in report["splits"]["test"]["other_head_B_minus_A_paired_game_cluster_bootstrap"].items():
+        lines.append(
+            f"| {metric} | {result['mean']:.8f} "
+            f"| [{result['ci95'][0]:.8f}, {result['ci95'][1]:.8f}] |"
+        )
+    lines += [
         "", "## Decision", "",
         report["decision"]["text"],
         "",
@@ -1119,7 +1144,7 @@ def _write_markdown(path: Path, report: Mapping[str, Any], report_sha: str) -> N
         "", "## Reproducibility", "",
         f"- Selection SHA-256: `{report['selection_sha256']}`.",
         f"- Parent: AZ23 B/M269 `{report['common_parent']['model_hash']}` with full Adam, update {report['common_parent']['ordinary_update']}.",
-        f"- Search: {report['search']['simulations_per_position']} fresh-tree simulations, root noise off; {report['search']['actual_simulations']} total simulations.",
+        f"- Search: teacher `{report['search']['teacher_model_hash']}`, {report['search']['simulations_per_position']} fresh-tree simulations, root noise off; {report['search']['actual_simulations']} total simulations.",
         f"- Source and artifact SHAs: see `report.json` and `manifest.json`.",
         "- No Arena, new self-play, automatic model promotion, or production replay/checkpoint modification.",
     ]

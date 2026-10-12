@@ -529,7 +529,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: c1ba46fc0d828e04b666859b4bc92b74e05002a51f6f78bd91b9c95ffaec270e -->
+<!-- reviewed-interface-sha256: 64cad11750fb68ddbb8f5d72584b638fe5797ab08d3c5716b5b714d4d72eae2b -->
 
 ## B64 bounded performance audit
 
@@ -648,7 +648,9 @@ change from the parent. Its primary B−A test KL to new targets uses 5,000
 paired game-cluster bootstrap draws with a fixed seed. This measures target
 transfer, not target quality or playing strength. The teacher model, search
 budget, root noise, and tree state all differ from historical targets; D270
-has prior investigative exposure and is not fully independent.
+has prior investigative exposure and is not fully independent. Other-head
+deltas are reported as paired B−A game-cluster intervals; only a clear test
+deterioration in those heads blocks the separate-usefulness candidate rule.
 
 The command does not resume an existing output directory. If interrupted,
 preserve that partial directory and use a new empty output path for a fresh
