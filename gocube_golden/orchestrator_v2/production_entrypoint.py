@@ -1360,6 +1360,11 @@ def run_workflow_from_config(
         return run_workflow_phase(config, runs_root=runs_root or RUNS_ROOT)
 
     handlers.setdefault("adaptation_phase", adaptation_action)
+    def learning_curve_action(*, config, **_):
+        from .learning_curve import run_supervised
+        return run_supervised(config)
+
+    handlers.setdefault("learning_curve", learning_curve_action)
     # These adapters intentionally call the already-existing entrypoints.  A
     # workflow is not a second implementation of Arena/training/calibration.
     handlers.setdefault("arena", arena_action)

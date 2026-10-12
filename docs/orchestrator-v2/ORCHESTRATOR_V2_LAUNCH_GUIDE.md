@@ -54,6 +54,7 @@ Telegram config блокирует запуск. Не отправляйте т�
 | Только обычный A/B | `training.iterations: 0`, `ab_tests` с `A`/`B` | Да, в каждой ветке | Две независимые ветки и итоговая арена |
 | Offline A/B | `training.iterations: 0`, `offline_replay`, `A`/`B` | **Нет** | Обучение на историческом replay, арена финалов либо каждого финала против reference |
 | Offline A/B/C и больше | То же, `arms` с ≥2 именами | **Нет** | Все ветки и round-robin каждой пары либо арены против reference |
+| Диагностическая learning curve | Отдельная секция `learning_curve`, без training/A/B/arena | **Нет** | Две непрерывные траектории, snapshots и оценка loss; без игр и поиска |
 | Только арены | `arenas`; training и ab_tests отсутствуют либо iterations=0 | **Нет** | Сравнение уже зарегистрированных checkpoint |
 | Выбор победителя → training | `winner_selection`, без `parent`/A/B; iterations>0 либо null | После выбора — да | Арена выбирает родителя новой lineage |
 | Явные дополнительные арены | `arenas` вместе с конечным training/A/B | По основному режиму | Дополнительные арены известных checkpoint после основных действий |
@@ -66,7 +67,7 @@ Telegram config блокирует запуск. Не отправляйте т�
 ## Параметры и наследование
 
 Верхний уровень: `schema`, `run_id`, `topology`, `parent`, `training`, `arena`,
-`execution`, `ab_tests`, `arenas`, `self_play`, `winner_selection`. Неизвестные поля
+`execution`, `ab_tests`, `arenas`, `self_play`, `winner_selection`, `learning_curve`. Неизвестные поля
 отвергаются. `run_id`, id теста/арены и имена arms: буквы, цифры, `_`, `-`, `.`,
 первый символ — буква или цифра. Один run_id нельзя перепрофилировать изменением JSON.
 `topology` по умолчанию `torus9`; остальные значения этим публичным job не поддерживаются.
@@ -434,7 +435,7 @@ SOFT_STOPPED. При возобновлении тем же job запрос п�
 
 RunMode перечисляет continuous, performance_tuning, arena, evaluation, experiment,
 calibration, workflow, scenario. Workflow actions: continuous_training, experiment,
-arena, calibration, adaptation_phase, select, stop. Эти runner/action interfaces
+arena, calibration, adaptation_phase, learning_curve, select, stop. Эти runner/action interfaces
 существуют в движке, но **не являются альтернативной публичной границей запуска**.
 
 | Внутренний режим / интерфейс | Доступность оператору |
@@ -529,7 +530,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 659a9e1d08775787fc000668951006b428caa982e646f42e42bd75de0322572e -->
+<!-- reviewed-interface-sha256: df72890a040f46d9079977203574157d0602b908343a400d1f8a0ab1635fe1e3 -->
 
 ## B64 bounded performance audit
 
@@ -606,3 +607,75 @@ PyTorch functional Adam path. Named singleton groups, order, options, unequal
 CPU clocks and serialized state remain intact. Unsupported execution options,
 heterogeneous groups and aliased parameters retain ordinary Adam dispatch.
 `configs/diagnostics/b64-next-speedup-nsys-20261007.json` selects its short trace.
+
+## Frozen replay learning curve (opt-in diagnostic)
+
+`gocube-operator-job-v1` accepts an exclusive `learning_curve` section, with
+`parent`, `run_id` and optional `topology: torus9`. Do not combine it with
+training, execution, self_play, arena, arenas, ab_tests or winner_selection.
+It runs through `production_entrypoint job CONFIG --runs-root ROOT --check`
+and then the same command without `--check`, using the normal immutable runtime,
+durable workflow controller/lease and standard lifecycle outbox. No self-play,
+Arena or MCTS occurs. No production checkpoint/lineage/winner is registered.
+The controller launches a signed training worker through the existing SupervisorV2
+with its default policy; model inference and optimizer steps stay in that worker.
+The internal worker command is not a public launch interface. Its runtime HEAD,
+training permit, run ID and code identity must match the sealed request.
+
+See `configs/diagnostics/h269-m270-learning-curve-20261011.json` and
+[learning-curve.md](learning-curve.md). `source` is the consecutive registered
+checkpoint describing the historical full rolling replay after `parent`.
+Resolver verifies the source/parent graph, manifests, every shard SHA, compatible
+5CH targets and the complete inherited Adam/model/clocks. The historical **train
+split** is used, exactly as the ordinary learner; historical validation rows do
+not become training rows. No replay window is synthesized.
+
+Required diagnostic fields: `source` (lineage/checkpoint selector), `output`
+(absolute exclusive directory outside and not containing runs_root).
+Defaults: `batch_size:64` (only 64 supported), `gradient_clip:8`,
+`arms:{A:0.0001,B:0.000025}`, `snapshots:[0,64,256,640,1280,2560]`,
+`evaluation_seed:2026101101`, `full_positions:16384`, `fresh_positions:8192`,
+`old_positions:4096`. Exactly A/B with finite positive LR below 1; clip finite
+positive; snapshots unique increasing integers starting at zero, at least two,
+ending at at most 2560. Panel counts integers 1–65536; seed nonnegative integer.
+Each branch loads the same parent Adam once and continues its own trajectory.
+There is no warmup and no automatic optimizer reset. Ordered sampled game/row
+hashes are collected on actual ordinary steps and must match between branches.
+
+All evaluations use fixed uniform position samples without replacement and
+**equal position weights**. The full panel estimates the learner distribution;
+separate fresh/old panels are never averaged to replace it. Persisted panels
+identify shard SHA/game/row, generation sizes and seed. Raw training logits and
+original targets/reductions define policy CE/KL, WDL CE, ownership CE, normalized
+score MSE, original total loss, Brier and score MAE in points. Row metrics and
+paired game-cluster bootstrap intervals are saved; these training-data curves
+are not holdout or strength measurements.
+
+Each update records parameter step norm, relative norm, clip factor and gradient
+norms. Before steps 1 and each interior snapshot+1, plus the final step, the
+full fixed-panel gradient is compared to the actual Adam parameter displacement;
+`fixed_gradient_at_update` identifies the pre-step location. A negative dot
+means a locally descending direction. The last comparison uses theta at
+max_updates-1 and the last step, with no extra update. Diagnostics preserve
+model mode, gradients and RNG; Adam moments/clocks are untouched. Snapshots
+record parameter change from parent by trunk/head and retain the complete Adam.
+
+Snapshots use sealed exclusive directories and atomic publication. Re-entry
+with the exact same config/code pin verifies every saved snapshot and panel,
+then continues from the last complete snapshot. Interrupted, unpublished work
+may be recomputed; sealed evidence is never overwritten. Completed re-entry
+performs no updates. Do not edit registered parameters, sources or snapshots.
+Outputs include config.json, panels.json, A/B/update-NNNN/{checkpoint.pt,
+metrics.json,row-metrics.pt,steps.json,seal.json}, report.json, runtime heartbeats
+and standard notifications. Passive throughput/GPU measurement uses the external
+training efficiency monitor, with its output outside this diagnostic directory.
+
+For a **separate** confirmation job only, `exclude_games:{path:ABSOLUTE,
+sha256:"sha256:..."}` selects a frozen manifest containing exactly
+`schema:"gocube-learning-curve-exclusions-v1"` and nonempty unique `game_ids`.
+All excluded games must be fresh training games of the source generation.
+Their whole games are removed from every training bucket and training evaluation
+panel; a separate `heldout-fresh` panel evaluates them. Both control/candidate
+must share this exclusion set and start from the pre-fresh parent. Never label
+existing models that trained on these games as holdout models. Freeze the
+confirmation split and short budget before running that second job.
