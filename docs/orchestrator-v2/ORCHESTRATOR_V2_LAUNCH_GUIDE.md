@@ -529,7 +529,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 659a9e1d08775787fc000668951006b428caa982e646f42e42bd75de0322572e -->
+<!-- reviewed-interface-sha256: 097ad6e722c5c0cca9812f0cbebd819b6135c1e73063b4e360edac13af28dd7b -->
 
 ## B64 bounded performance audit
 
@@ -606,3 +606,41 @@ PyTorch functional Adam path. Named singleton groups, order, options, unequal
 CPU clocks and serialized state remain intact. Unsupported execution options,
 heterogeneous groups and aliased parameters retain ordinary Adam dispatch.
 `configs/diagnostics/b64-next-speedup-nsys-20261007.json` selects its short trace.
+
+
+## Diagnostic checkpoints for Arena
+
+Permanent public registration interface (Torus9 5CH):
+
+```bash
+.venv/bin/python -m gocube_golden.orchestrator_v2.production_entrypoint register-diagnostic-checkpoint CONFIG --runs-root ROOT --check
+.venv/bin/python -m gocube_golden.orchestrator_v2.production_entrypoint register-diagnostic-checkpoint CONFIG --runs-root ROOT
+```
+
+CONFIG has exactly `schema: "gocube-diagnostic-checkpoint-registration-v1"`,
+`lineage_id`, `parent` (registered selector), `report` (`path` absolute and
+`sha256` prefixed digest), `arm` and nonnegative integer `updates`.
+The completed report must contain its exact registered `parent` reference and
+`snapshots[arm][str(updates)]` with `path`, `sha256`, `model_hash`. The snapshot
+must reside inside the report directory, contain `diagnostic_only: true`,
+matching `parent`, `arm`, `updates_from_parent`, `model_hash`, and
+`model_state_dict` compatible with the parent's current 5CH adaptation model.
+This contract supports future diagnostic producers using the same report/payload
+fields; arbitrary checkpoint formats are rejected. CPU tensor loading, shape,
+finiteness and model hash checks run before publication; there is no inference.
+
+Registration copies checkpoint bytes unchanged into a new archived evaluation-only
+owner. It generates minimal Arena metadata from the verified parent architecture,
+records source report/snapshot SHA and actual source parent in provenance, and
+publishes the prepared directory atomically. No source artifact is edited.
+Its graph node is an evaluation root, without invented fresh replay. Repeating
+identical registration is idempotent; conflicting lineage IDs are rejected.
+`--check` writes nothing. Registration is not a training/game lifecycle event.
+
+Use the returned `lineage_id/arm-uUPDATE` selector in ordinary `job.arenas`
+(candidate or reference), then run `job --check` and `job` as usual. Arena retains
+standard notifications, pinned runtime, integrity checks, paired starts and
+supervision. Registration does not promote a model: ordinary training, A/B parent
+and winner-selection continuation reject these evaluation-only checkpoints.
+A future training promotion requires an explicit replay/optimizer continuation
+contract. Existing production checkpoint handling is unchanged.

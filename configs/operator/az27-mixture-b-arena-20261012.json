@@ -1,0 +1,15 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "az27-mixture-b-vs-az23-b269-arena384-s64-20261012-v1",
+  "arenas": [
+    {
+      "id": "mixture-vs-parent",
+      "candidate": "az27-mixture-B-u640-evaluation/B-u640",
+      "reference": "az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/M269",
+      "games": 384,
+      "mcts_simulations": 64,
+      "master_seed": 2026101210,
+      "tree_reuse": true
+    }
+  ]
+}
