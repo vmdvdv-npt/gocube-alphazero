@@ -1442,6 +1442,11 @@ def main(argv: list[str] | None = None) -> int:
     command.add_argument("config", type=Path)
     command.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     command.set_defaults(kind="run")
+    diagnostic = subparsers.add_parser("register-diagnostic-checkpoint", help="register a pinned diagnostic snapshot for Arena only")
+    diagnostic.add_argument("config", type=Path)
+    diagnostic.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
+    diagnostic.add_argument("--check", action="store_true")
+    diagnostic.set_defaults(kind="register-diagnostic-checkpoint")
     job = subparsers.add_parser("job", help="launch a strict, simple operator parameter file")
     job.add_argument("config", type=Path)
     job.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
@@ -1465,6 +1470,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.kind != "job":
         announce_guide()
+    if args.kind == "register-diagnostic-checkpoint":
+        from .diagnostic_checkpoint import register_diagnostic_checkpoint
+        if not args.check:
+            _require_committed_job_code()
+        result = register_diagnostic_checkpoint(
+            json.loads(args.config.read_text()), runs_root=args.runs_root, check_only=args.check)
+        print(json.dumps(result, indent=2))
+        return 0
     if args.kind == "telegram":
         try:
             telegram_test()

@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Changes to these launch/mode interfaces require reviewing the guide and
 # updating its contract marker. This is checked by CI and before job launch.
 INTERFACE_PATHS = (
+    "gocube_golden/orchestrator_v2/diagnostic_checkpoint.py",
     "gocube_golden/orchestrator_v2/operator_guide.py",
     "gocube_golden/orchestrator_v2/experiment_summary.py",
     "gocube_golden/orchestrator_v2/operator_job.py",

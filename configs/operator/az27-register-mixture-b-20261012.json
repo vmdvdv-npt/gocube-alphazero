@@ -1,0 +1,11 @@
+{
+  "schema": "gocube-diagnostic-checkpoint-registration-v1",
+  "lineage_id": "az27-mixture-B-u640-evaluation",
+  "parent": "az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/M269",
+  "report": {
+    "path": "/home/codex/projects/gocube-alphazero/runs/torus9/diagnostics/az23-r2-policy-target-mixture-20261012-v1/report.json",
+    "sha256": "sha256:fc309e4fe2e97b40980f48cb81923550f6f932abacb306c427da919416836afa"
+  },
+  "arm": "B",
+  "updates": 640
+}
