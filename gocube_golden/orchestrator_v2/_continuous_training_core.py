@@ -254,6 +254,7 @@ class ContinuousTrainingConfig:
     arena_execution_contract: Mapping[str, object] | None = None
     arena_workload: Mapping[str, object] = field(default_factory=dict)
     arena_reference_gap: int | None = None
+    arena_reference_parent: bool = False
     allow_code_rollover: bool = False
     self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None
 
@@ -288,6 +289,8 @@ class ContinuousTrainingConfig:
         if type(gap) is not int or gap <= 0:
             raise ValueError("arena_reference_gap must be a positive integer")
         object.__setattr__(self, "arena_reference_gap", gap)
+        if type(self.arena_reference_parent) is not bool:
+            raise ValueError("arena_reference_parent must be a boolean")
         if isinstance(self.arena_master_seed, bool):
             raise ValueError("arena_master_seed must be an integer")
         object.__setattr__(self, "arena_master_seed", int(self.arena_master_seed))
@@ -368,6 +371,7 @@ class ContinuousTrainingRunnerV2:
         arena_execution_contract: Mapping[str, object] | None = None,
         arena_workload: Mapping[str, object] | None = None,
         arena_reference_gap: int | None = None,
+        arena_reference_parent: bool | None = None,
         allow_code_rollover: bool | None = None,
         self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None,
         resolver: ArtifactResolver | None = None,
@@ -402,6 +406,7 @@ class ContinuousTrainingRunnerV2:
                 arena_execution_contract=arena_execution_contract,
                 arena_workload={} if arena_workload is None else arena_workload,
                 arena_reference_gap=arena_reference_gap,
+                arena_reference_parent=False if arena_reference_parent is None else arena_reference_parent,
                 allow_code_rollover=False if allow_code_rollover is None else allow_code_rollover,
                 self_play_concurrency_sweep=self_play_concurrency_sweep,
             )
@@ -413,6 +418,7 @@ class ContinuousTrainingRunnerV2:
                 effective_config,
                 arena_cadence,
                 arena_config,
+                arena_reference_parent,
             )
             if any(value is not None for value in direct_override):
                 raise TypeError("pass either config or direct ContinuousTrainingRunnerV2 inputs, not both")
@@ -771,6 +777,7 @@ class ContinuousTrainingRunnerV2:
                 "games_per_iteration", self_play.get("games")
             ),
             "arena_every_generations": self.config.arena_cadence,
+            "arena_compare_to_parent": self.config.arena_reference_parent,
         }
         continuous = {
             "schema": CONTINUOUS_TRAINING_SCHEMA,
@@ -779,6 +786,8 @@ class ContinuousTrainingRunnerV2:
             "arena_reference_gap": self.config.arena_reference_gap,
             "target_generation": self.config.target_generation,
         }
+        if self.config.arena_reference_parent:
+            continuous["arena_reference_parent"] = True
         if self.config.self_play_concurrency_sweep is not None:
             continuous["self_play_concurrency_sweep"] = (
                 self.config.self_play_concurrency_sweep.to_dict()
@@ -789,8 +798,10 @@ class ContinuousTrainingRunnerV2:
         if manifest.get("continuous_training") not in (None, continuous):
             previous = manifest.get("continuous_training")
             if isinstance(previous, Mapping):
-                for key in ("parent_checkpoint", "arena_cadence", "arena_reference_gap"):
-                    if previous.get(key) != continuous[key]:
+                for key in ("parent_checkpoint", "arena_cadence", "arena_reference_gap", "arena_reference_parent"):
+                    previous_value = previous.get(key, False) if key == "arena_reference_parent" else previous.get(key)
+                    current_value = continuous.get(key, False) if key == "arena_reference_parent" else continuous.get(key)
+                    if previous_value != current_value:
                         raise RuntimeError(f"continuous lineage {key} changed during resume")
                 previous_sweep = previous.get("self_play_concurrency_sweep")
                 current_sweep = continuous.get("self_play_concurrency_sweep")
@@ -839,6 +850,7 @@ class ContinuousTrainingRunnerV2:
             "effective_config_fingerprint": self.config.effective_config.fingerprint,
             "arena_cadence": self.config.arena_cadence,
             "arena_reference_gap": self.config.arena_reference_gap,
+            "arena_reference_parent": self.config.arena_reference_parent,
             "arena_config_fingerprint": self._arena_config_fingerprint(),
             "arena_generations": [],
             "arena_results": [],
@@ -866,11 +878,13 @@ class ContinuousTrainingRunnerV2:
             "effective_config_fingerprint": self.config.effective_config.fingerprint,
             "arena_cadence": self.config.arena_cadence,
             "arena_reference_gap": self.config.arena_reference_gap,
+            "arena_reference_parent": self.config.arena_reference_parent,
             "arena_config_fingerprint": self._arena_config_fingerprint(),
             "target_generation": self.config.target_generation,
         }
         for key, value in expected.items():
-            if state.get(key) != value:
+            actual = state.get(key, False) if key == "arena_reference_parent" else state.get(key)
+            if actual != value:
                 raise RuntimeError(f"continuous state {key} changed during resume")
         configured_sweep = self.config.self_play_concurrency_sweep
         persisted_sweep = state.get("performance_sweep")
@@ -1202,6 +1216,8 @@ class ContinuousTrainingRunnerV2:
         parent: ResolvedCheckpointNode,
         current: ResolvedCheckpointNode,
     ) -> ResolvedCheckpointNode:
+        if self.config.arena_reference_parent:
+            return parent
         gap = int(self.config.arena_reference_gap or 1)
         distance = current.generation - parent.generation
         if gap <= distance:
@@ -1417,6 +1433,7 @@ class ContinuousTrainingRunnerV2:
             f"self-play MCTS={self_play.get('mcts_simulations', self_play.get('simulations', '-'))} sims; "
             f"games/generation={self_play.get('games_per_iteration', self_play.get('games', '-'))}; "
             f"Arena cadence=every {self.config.arena_cadence} generations; "
+            f"{'Arena reference=fixed job parent; ' if self.config.arena_reference_parent else ''}"
             f"execution={execution_commit[:12]}; initial={initial_commit[:12]}; "
             f"rollover={rollover}"
         )
@@ -1433,6 +1450,7 @@ class ContinuousTrainingRunnerV2:
                 "games_per_iteration", self_play.get("games")
             ),
             "arena_cadence": self.config.arena_cadence,
+            "arena_reference_parent": self.config.arena_reference_parent,
             "execution_code_commit": execution_commit,
             "initial_lineage_code_commit": initial_commit,
             "rollover": rollover,

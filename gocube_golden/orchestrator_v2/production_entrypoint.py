@@ -176,6 +176,7 @@ def _continuous_config(payload: Mapping[str, object]) -> ContinuousTrainingConfi
         arena_execution_contract=raw.get("arena_execution_contract"),  # type: ignore[arg-type]
         arena_workload=dict(raw.get("arena_workload", {})),  # type: ignore[arg-type]
         arena_reference_gap=None if raw.get("arena_reference_gap") is None else int(raw["arena_reference_gap"]),
+        arena_reference_parent=raw.get("arena_reference_parent", False),  # type: ignore[arg-type]
         allow_code_rollover=raw.get("allow_code_rollover", False),  # type: ignore[arg-type]
         self_play_concurrency_sweep=raw.get("self_play_concurrency_sweep"),  # type: ignore[arg-type]
         supervision=dict(raw.get("supervision", {})),  # type: ignore[arg-type]

@@ -42,6 +42,7 @@ class ContinuousTrainingConfig:
     arena_execution_contract: Mapping[str, object] | None = None
     arena_workload: Mapping[str, object] = field(default_factory=dict)
     arena_reference_gap: int | None = None
+    arena_reference_parent: bool = False
     allow_code_rollover: bool = False
     self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None
     supervision: Mapping[str, object] = field(default_factory=dict)
@@ -83,6 +84,8 @@ class ContinuousTrainingConfig:
         if type(gap) is not int or gap <= 0:
             raise ValueError("arena_reference_gap must be a positive integer")
         object.__setattr__(self, "arena_reference_gap", gap)
+        if type(self.arena_reference_parent) is not bool:
+            raise ValueError("arena_reference_parent must be a boolean")
         if isinstance(self.arena_master_seed, bool):
             raise ValueError("arena_master_seed must be an integer")
         object.__setattr__(self, "arena_master_seed", int(self.arena_master_seed))
@@ -143,6 +146,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
         arena_execution_contract: Mapping[str, object] | None = None,
         arena_workload: Mapping[str, object] | None = None,
         arena_reference_gap: int | None = None,
+        arena_reference_parent: bool | None = None,
         allow_code_rollover: bool | None = None,
         self_play_concurrency_sweep: SelfPlayConcurrencySweep | Mapping[str, object] | None = None,
         supervision: Mapping[str, object] | None = None,
@@ -176,13 +180,14 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
                 arena_execution_contract=arena_execution_contract,
                 arena_workload={} if arena_workload is None else arena_workload,
                 arena_reference_gap=arena_reference_gap,
+                arena_reference_parent=False if arena_reference_parent is None else arena_reference_parent,
                 allow_code_rollover=False if allow_code_rollover is None else allow_code_rollover,
                 self_play_concurrency_sweep=self_play_concurrency_sweep,
                 supervision={} if supervision is None else supervision,
                 execution_profile=execution_profile,
             )
         else:
-            direct_override = (parent_checkpoint, parent, lineage_id, effective_config, arena_cadence, arena_config)
+            direct_override = (parent_checkpoint, parent, lineage_id, effective_config, arena_cadence, arena_config, arena_reference_parent)
             if any(value is not None for value in direct_override):
                 raise TypeError("pass either config or direct ContinuousTrainingRunnerV2 inputs, not both")
             if allow_code_rollover is not None:
@@ -298,6 +303,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             effective_config=effective,
             arena_cadence=self.config.arena_cadence,
             arena_config=self.config.arena_config,
+            arena_reference="fixed job parent" if self.config.arena_reference_parent else None,
         )
         details = {
             "topology": self.config.topology,
@@ -306,6 +312,7 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             "lineage_id": self.config.lineage_id,
             "resolved_effective_config": effective.to_dict(),
             "arena_cadence": self.config.arena_cadence,
+            "arena_reference_parent": self.config.arena_reference_parent,
         }
         self._report("started", message, **details)
         serialized = effective.to_dict()
@@ -317,7 +324,8 @@ class ContinuousTrainingRunnerV2(_core.ContinuousTrainingRunnerV2):
             "replay": serialized["replay"],
             "execution": serialized["execution"],
             "arena": {**serialized["arena"], "games": self.config.arena_config.games,
-                      "every_iterations": self.config.arena_cadence},
+                      "every_iterations": self.config.arena_cadence,
+                      "compare_to_parent": self.config.arena_reference_parent},
             "stop_after_iterations": self.config.generations,
         })
 
