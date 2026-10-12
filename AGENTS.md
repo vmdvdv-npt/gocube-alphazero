@@ -1,46 +1,27 @@
 # Operator-controlled training
 
-Before every Orchestrator V2 launch, resume, or configuration change, read
-[`ORCHESTRATOR_V2_LAUNCH_GUIDE.md`](docs/orchestrator-v2/ORCHESTRATOR_V2_LAUNCH_GUIDE.md)
-from the code revision that will execute the job. It lists the public modes,
-A/B and offline A/B/C options, limits, and safe validation commands. Run
-`production_entrypoint job <parameters.json> --check` before launching.
-When changing a supported interface, update this tracked guide and its reviewed
-interface fingerprint; the launch boundary and CI check that they agree.
+Before launching, resuming, or reconfiguring Orchestrator V2, read `docs/orchestrator-v2/ORCHESTRATOR_V2_LAUNCH_GUIDE.md` from the executing revision. Follow documented interfaces and run `production_entrypoint job <parameters.json> --check` before launch.
 
-The user owns changes to the training system. A request to launch, resume,
-monitor, stop, or tune a run authorizes editing its declarative configuration and
-using the existing documented Orchestrator V2 commands only. For new Torus9 5CH
-jobs, use the simple `gocube-operator-job-v1` JSON and the `production_entrypoint
-job` command documented in `docs/orchestrator-v2/operator-job.md`. Do not invent
-a low-level plan, launcher, or service as a substitute for a missing parameter.
+For new Torus9 5CH jobs, prefer `gocube-operator-job-v1` as documented in `docs/orchestrator-v2/operator-job.md`.
 
-Do not change orchestrator, engine, model, replay, artifact, supervision,
-notification, launcher or service code/settings without the user's explicit
-permission for that specific code change. This includes
-`gocube_golden/orchestrator_v2/`, `gocube_golden/notifications/`, training and
-self-play adapters, `training_engine.py`, `selfplay_engine.py`, `tools/`, systemd
-units, environment overrides and scripts outside the repository. Moving code
-elsewhere, monkey-patching, or writing a one-off launcher is not an exception.
-A previous permission applies only to its stated task, not future launches.
+## Code changes
 
-If a requested parameter is unsupported, report the exact limitation and ask
-for a separate code-change instruction. Never silently patch the implementation
-in order to make a training request work.
+Requests to launch, resume, monitor, stop, or tune training authorize necessary configuration changes **and modifications to `gocube_golden/orchestrator_v2/`**, including fixing bugs or implementing missing orchestrator functionality.
 
-Notifications are part of the standard orchestrator lifecycle. Preserve their
-configured defaults; do not suppress credentials, disable delivery, manually
-send lifecycle messages or add a parallel notification loop. If notifications
-are unavailable, diagnose and report the problem without changing policy.
+Other subsystems (engine, model, replay, adapters, notifications, tools, services, environment) require explicit permission before modification. Do not bypass supported interfaces with temporary launchers or monkey-patches.
 
-Do not restart, stop, migrate, change a code pin, modify an immutable artifact,
-or change the working tree/HEAD used by a live run without explicit permission.
-Develop authorized fixes in a separate worktree. Tests must use isolated data
-and mocked transports, never production games or unsolicited Telegram messages.
+When changing public interfaces, update the launch guide and its reviewed interface fingerprint.
 
-Changes to these rules also require the user's explicit permission.
-AGENTS.md is an instruction, not a security boundary.
+For repository changes: commit, push the branch, and create or update a PR. Batch related changes and run CI only after the final push.
 
-For passive training duration, update/example throughput and GPU measurements,
-use the external [training efficiency monitor](docs/diagnostics/training-efficiency-monitor.md)
-(`tools/training_efficiency_monitor.py`); write its outputs outside the live run.
+## Runtime safety
+
+Never modify immutable artifacts, checkpoints, replay, or evaluation results. Do not restart, migrate, change the code pin, or modify the working tree of a live run unless explicitly requested.
+
+Develop fixes in a separate worktree. Use isolated test data and mocked transports; never use production games for tests.
+
+Preserve standard orchestrator notifications. Do not disable delivery, suppress credentials, or send unsolicited lifecycle messages.
+
+For passive throughput/GPU monitoring, use `tools/training_efficiency_monitor.py` and write outputs outside the live run.
+
+Changes to these rules require explicit user permission.
