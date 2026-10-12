@@ -156,7 +156,7 @@ def parse_job(value):
         value,
         {
             "schema", "run_id", "topology", "parent", "training", "arena",
-            "execution", "ab_tests", "arenas", "self_play", "winner_selection", "replay_budget",
+            "execution", "ab_tests", "arenas", "self_play", "winner_selection", "replay_budget", "final_arena",
         },
         "job",
     )
@@ -318,6 +318,12 @@ def parse_job(value):
             "Job has no work: specify training iterations, A/B tests, or arenas"
         )
 
+    final_arena = None
+    if 'final_arena' in raw:
+        if not isinstance(training['iterations'], int) or training['iterations'] <= 0 or normalized_tests or winner_selection or raw.get('replay_budget'):
+            raise ValueError('final_arena requires finite ordinary training without A/B, selection or replay_budget')
+        item = _object(raw['final_arena'], {'reference', 'games', 'mcts_simulations', 'master_seed', 'tree_reuse'}, 'final_arena')
+        final_arena = {k: v for k, v in _arena_runs([{'id': 'final', 'candidate': parent, **item}], defaults=arena)[0].items() if k not in ('id', 'candidate')}
     budget = None
     if 'replay_budget' in raw:
         from .replay_budget import parameters
@@ -331,6 +337,7 @@ def parse_job(value):
            if winner_selection is not None else {}),
         **({"self_play": self_play} if self_play is not None else {}),
         **({"replay_budget": budget} if budget is not None else {}),
+        **({"final_arena": final_arena} if final_arena is not None else {}),
         "schema": SCHEMA,
         "run_id": raw["run_id"],
         "topology": "torus9",
@@ -744,6 +751,16 @@ def compile_job(value, *, runs_root=None, resolver=None):
             step['config']['candidate_label'] = 'updates-'+str(update)
             steps.append(step)
             previous = step['step_id']
+
+    if job.get('final_arena'):
+        item = {'id': 'final', **job['final_arena']}
+        reference = resolve_checkpoint(item['reference'], resolver=resolver)
+        _require_five_channel_checkpoint(reference, 'Final Arena reference')
+        step = _arena_step(job, item, parent, reference, previous)
+        step['config']['candidate_checkpoint'] = {'$ref': 'training.outputs.checkpoint'}
+        step['config']['candidate_label'] = 'training-final'
+        steps.append(step)
+        previous = step['step_id']
 
     # Arena-only (or post-training) comparisons are compiled into ordinary V2
     # workflow Arena actions. The operator plan stores immutable checkpoint

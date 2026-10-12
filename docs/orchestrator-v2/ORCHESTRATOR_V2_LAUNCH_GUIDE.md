@@ -534,7 +534,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: d515a27688bdf0d2939553889159e9dd3949595f9d8775ea603ed57530caa839 -->
+<!-- reviewed-interface-sha256: f7f435e3563af3ffa9771c136349e0969cd2ef435cf6b84839d851a98eb12b7b -->
 
 ## B64 bounded performance audit
 
@@ -663,3 +663,16 @@ apply Holm correction to the two paired sign-tests, require complete valid arena
 and >50% candidate score for a positive claim. A larger numerical win rate alone
 does not establish superiority of 5120 over 2560. Analysis is performed from saved
 Arena evidence after completion; the job never changes its plan based on results.
+
+
+## Final ordinary-training Arena against an explicit reference
+
+Optional top-level `final_arena` accepts `reference` (registered selector), `games`,
+`mcts_simulations`, `master_seed`, and `tree_reuse`. It requires positive finite
+ordinary training, no A/B, winner_selection or replay_budget. The compiler pins the
+reference before launch and appends one standard Arena action using the actual
+final checkpoint from training outputs. Normal paired starts, notifications and
+supervision apply. It does not select/promote a model or extend training.
+Periodic Arena settings remain independent: set `arena.every_iterations` above the
+number of training iterations when only this final comparison is wanted.
+Concrete two-generation continuation: configs/operator/az30-online-two-generations-20261013-v1.json.
