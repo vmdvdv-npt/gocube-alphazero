@@ -93,10 +93,14 @@ def _training(value, *, defaults=TRAINING_DEFAULTS, allow_iterations=True):
 
 
 def _arena(value, *, defaults=ARENA_DEFAULTS):
-    result = {**defaults, **_object(value, {*ARENA_DEFAULTS, "tree_reuse"}, "arena")}
+    result = {**defaults, **_object(value, {*ARENA_DEFAULTS, "tree_reuse", "compare_to_parent"}, "arena")}
     for key, number in result.items():
         if key == "tree_reuse":
             _tree_reuse(number, "arena.tree_reuse")
+            continue
+        if key == "compare_to_parent":
+            if type(number) is not bool:
+                raise ValueError("arena.compare_to_parent must be a boolean")
             continue
         _integer(number, "arena." + key)
     if result["games"] % 2 or result["games"] < 64:
@@ -296,6 +300,10 @@ def parse_job(value):
 
     if training["iterations"] is None and normalized_tests:
         raise ValueError("Unbounded training cannot be followed by A/B tests")
+    if arena.get("compare_to_parent") and training["iterations"] == 0:
+        raise ValueError("arena.compare_to_parent requires continuous training")
+    if arena.get("compare_to_parent") and normalized_tests:
+        raise ValueError("arena.compare_to_parent cannot be combined with A/B tests")
 
     parent = raw.get("parent")
     training_requested = training["iterations"] != 0
@@ -623,6 +631,7 @@ def compile_job(value, *, runs_root=None, resolver=None):
                 "generations": job["training"]["iterations"],
                 "arena_cadence": arena["every_iterations"],
                 "arena_reference_gap": arena["every_iterations"],
+                "arena_reference_parent": arena.get("compare_to_parent", False),
                 "arena_config": _arena_execution(arena),
                 "arena_profile": _arena_profile(arena),
                 "arena_master_seed": ARENA_RUN_MASTER_SEED,

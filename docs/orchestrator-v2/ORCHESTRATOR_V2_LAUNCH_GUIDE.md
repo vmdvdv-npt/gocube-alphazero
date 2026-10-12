@@ -96,12 +96,17 @@ Samples = batch_size × updates_per_iteration, с выборкой позици�
 64 / wait 1 ms; публичных переключателей этих лимитов нет.
 
 `arena`: `every_iterations`=5, `games`=192, `mcts_simulations`=128,
-необязательный boolean `tree_reuse`. Games — чётное число ≥64; budgets положительные.
+необязательные boolean `tree_reuse` и `compare_to_parent`. Games — чётное число ≥64; budgets положительные.
 Arena использует paired starts/color swap, noise off, temperature 0,
 cpuct 1.25, FPU 0, watchdog 1000, komi 1.5; resignation/fast search отключены.
-Это не поля свободной настройки operator JSON. `tree_reuse` включайте явно и
-одинаково для сравниваемых сетей. Для A/B arena доступны games, mcts_simulations, tree_reuse и общий master_seed.
-Offline дополнительно принимает reference для сравнений всех финалов с одной
+`compare_to_parent: true` доступен для ordinary continuous training: каждая
+плановая арена сравнивает новое поколение с исходным parent job. Так можно
+сравнивать все поколения с фиксированным чемпионом. Арена остаётся диагностической:
+она не останавливает обучение и не выбирает нового parent. Без этого поля
+сохраняется сравнение с checkpoint на `every_iterations` поколений раньше.
+`tree_reuse` включайте явно и одинаково для сравниваемых сетей. Для A/B arena
+доступны games, mcts_simulations, tree_reuse и общий master_seed. Offline
+дополнительно принимает reference для сравнений всех финалов с одной
 зарегистрированной моделью. Публичного arm-specific arena seed нет.
 
 `self_play` доступен ordinary training и обычным A/B веткам:
@@ -529,7 +534,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 659a9e1d08775787fc000668951006b428caa982e646f42e42bd75de0322572e -->
+<!-- reviewed-interface-sha256: a2336e5050dc53eecef45821e639944798944d4d28adc6ffb437a883553a1b04 -->
 
 ## B64 bounded performance audit
 

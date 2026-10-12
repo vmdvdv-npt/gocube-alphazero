@@ -29,6 +29,10 @@ Arena output is owned by the lineage under `arena/generation-NNNN/`; a
 cross-lineage comparison uses the canonical `evaluations/` namespace. No
 checkpoint is copied between lineages.
 
+The public operator job can set `arena.compare_to_parent: true` to use the
+supplied parent as a fixed Arena reference for every due generation. Arena
+results remain diagnostic and do not promote a child or stop training.
+
 Telegram is an explicit production concern. Both runners accept an optional
 injected object implementing the existing `send_now(key, text)` boundary;
 `None` performs no Telegram work. `production_entrypoint` is the V2 wiring
