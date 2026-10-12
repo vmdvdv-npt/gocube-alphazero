@@ -1371,6 +1371,18 @@ def run_workflow_from_config(
             {"experiment": action_config(config)}, runs_root=runs_root, **runner_kwargs
         ),
     )
+
+    def policy_target_mixture_action(*, config, **_):
+        from .policy_target_mixture import run
+        run_id = str(config["run_id"])
+        with _authority(mode="performance-tuning", topology="torus9", run_id=run_id):
+            with _child_execution_permit(
+                action_type="training", topology="torus9", run_id=run_id,
+                code_identity=_entrypoint_code_identity(),
+            ):
+                return run(config, runs_root=runs_root or RUNS_ROOT)
+
+    handlers.setdefault("policy_target_mixture", policy_target_mixture_action)
     try:
         with _authority(mode="workflow", topology=spec.topology, run_id=spec.workflow_id):
             return WorkflowRunner(spec, root=root, handlers=handlers).run()

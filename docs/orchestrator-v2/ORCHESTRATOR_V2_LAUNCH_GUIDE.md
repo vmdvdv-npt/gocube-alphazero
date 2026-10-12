@@ -54,6 +54,7 @@ Telegram config блокирует запуск. Не отправляйте т�
 | Только обычный A/B | `training.iterations: 0`, `ab_tests` с `A`/`B` | Да, в каждой ветке | Две независимые ветки и итоговая арена |
 | Offline A/B | `training.iterations: 0`, `offline_replay`, `A`/`B` | **Нет** | Обучение на историческом replay, арена финалов |
 | Offline A/B/C и больше | То же, `arms` с ≥2 именами | **Нет** | Все ветки и round-robin каждой пары |
+| Policy-target mixture diagnostic | `training.iterations: 0`, `policy_target_mix` | **Нет** | Фиксированная смесь 56/8, два paired arms, test только на endpoint; без Arena |
 | Только арены | `arenas`; training и ab_tests отсутствуют либо iterations=0 | **Нет** | Сравнение уже зарегистрированных checkpoint |
 | Выбор победителя → training | `winner_selection`, без `parent`/A/B; iterations>0 либо null | После выбора — да | Арена выбирает родителя новой lineage |
 | Явные дополнительные арены | `arenas` вместе с конечным training/A/B | По основному режиму | Дополнительные арены известных checkpoint после основных действий |
@@ -66,7 +67,7 @@ Telegram config блокирует запуск. Не отправляйте т�
 ## Параметры и наследование
 
 Верхний уровень: `schema`, `run_id`, `topology`, `parent`, `training`, `arena`,
-`execution`, `ab_tests`, `arenas`, `self_play`, `winner_selection`. Неизвестные поля
+`execution`, `ab_tests`, `arenas`, `self_play`, `winner_selection`, `policy_target_mix`. Неизвестные поля
 отвергаются. `run_id`, id теста/арены и имена arms: буквы, цифры, `_`, `-`, `.`,
 первый символ — буква или цифра. Один run_id нельзя перепрофилировать изменением JSON.
 `topology` по умолчанию `torus9`; остальные значения этим публичным job не поддерживаются.
@@ -236,6 +237,49 @@ semantics inherit normally. No setting changes the existing uniform RNG path;
 weight zero also uses that exact path. Validation stays on its fixed sampler.
 There is no importance correction or per-sample loss scaling.
 
+### Fixed-mixture policy-target transfer diagnostic
+
+`policy_target_mix` is a bounded, no-Arena diagnostic for transferring an
+already saved set of changed policy targets. It is a standalone
+`gocube-operator-job-v1` action; do not combine it with ordinary training,
+`ab_tests`, `arenas`, or winner selection. A concrete job uses
+`training.iterations: 0`, `learning_rate: 0.000025`, `batch_size: 64`,
+`updates_per_iteration: 640`, `gradient_clip: 8`, and `replay_generations: 5`.
+The parent is an ordinary compatible 5CH checkpoint with full Adam state. The
+registered D270 selector describes replay inputs only and may come from a
+different lineage than the parent.
+
+The input object contains only `offline_replay` (one registered D270 selector),
+`pilot_root` (the existing immutable pilot artifact directory), and
+`pilot_manifest_sha256`. The preflight verifies the pilot manifest and all
+target files, the exact D266–D270 rolling manifests and shard hashes, panel
+identity and original target alignment, and that every r2 validation/test game
+is absent from the filtered training replay. It removes the 512 selected r2
+train rows from the main replay. The training sampler draws 56 positions
+uniformly from the remaining replay and 8 uniformly from the 512-row panel in
+each batch. Both arms use the same game/row order hash; A uses original policy
+targets and B uses the saved new policy targets. All other targets and the
+inherited Adam/loss setup match.
+
+Snapshots are fixed at 0, 128, 256, and 640 updates. Train, validation, and a
+fixed 512-row filtered-replay panel are evaluated at those snapshots. The
+replay panel is training data, not an independent holdout. Test positions are
+evaluated only for the parent and both arms after update 640; test outcomes
+cannot select a snapshot. Reports include row metrics and paired 5,000-repeat
+game-cluster intervals. A confidence interval that crosses zero does not show
+non-inferiority or absence of harm. The output and diagnostic snapshots live
+under `torus9/diagnostics/<run_id>` and are not registered or promoted as
+production checkpoints. No self-play, search, or Arena runs in this mode.
+
+Before launch, run the normal operator preflight and inspect its resolved split,
+source hashes, mixture, and budgets:
+
+```sh
+.venv/bin/python -m gocube_golden.orchestrator_v2.production_entrypoint job \
+  configs/operator/az23-r2-policy-target-mixture-20261012-v1.json \
+  --runs-root /absolute/path/runs --check
+```
+
 The compiler resolves each training row's actor model hash and exact actor
 checkpoint SHA through the canonical historical parent graph. Missing or
 ambiguous actors fail closed. The experiment builds one derived, content-addressed
@@ -380,7 +424,7 @@ Legacy CLI `run`, `continuous`, `performance-tuning`, `experiment`,
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: 52b449ecf2a8ec763783570c4b524d1fa4f0b7b53cc11def5d1d3e684fab093d -->
+<!-- reviewed-interface-sha256: d3dd84d0097dfd6ef4b9074897d359110f06c4032015c52c83d51c919ca5bac5 -->
 
 ## B64 bounded performance audit
 

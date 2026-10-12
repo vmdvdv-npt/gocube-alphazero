@@ -153,6 +153,7 @@ def parse_job(value):
         {
             "schema", "run_id", "topology", "parent", "training", "arena",
             "execution", "ab_tests", "arenas", "self_play", "winner_selection",
+            "policy_target_mix",
         },
         "job",
     )
@@ -267,13 +268,19 @@ def parse_job(value):
 
     parent = raw.get("parent")
     training_requested = training["iterations"] != 0
-    needs_parent = training_requested or bool(normalized_tests)
+    policy_mix = None
+    if raw.get("policy_target_mix") is not None:
+        from .policy_target_mixture import validate_operator_payload
+        policy_mix = validate_operator_payload(raw["policy_target_mix"], training=training)
+        if training_requested or normalized_tests or arenas or winner_selection is not None:
+            raise ValueError("policy_target_mix is a standalone diagnostic job")
+    needs_parent = training_requested or bool(normalized_tests) or policy_mix is not None
     if needs_parent and winner_selection is None:
         parent = _selector(parent, "parent")
     elif parent is not None:
         parent = _selector(parent, "parent")
 
-    if not training_requested and not normalized_tests and not arenas:
+    if not training_requested and not normalized_tests and not arenas and policy_mix is None:
         raise ValueError(
             "Job has no work: specify training iterations, A/B tests, or arenas"
         )
@@ -291,6 +298,7 @@ def parse_job(value):
         "execution": execution,
         "ab_tests": normalized_tests,
         "arenas": arenas,
+        **({"policy_target_mix": policy_mix} if policy_mix is not None else {}),
     }
 
 
@@ -538,6 +546,35 @@ def compile_job(value, *, runs_root=None, resolver=None):
 
     parent = None
     base = None
+    if job.get("policy_target_mix") is not None:
+        from .policy_target_mixture import resolve_source_window
+        parent = resolve_parent(job["parent"], resolver=resolver)
+        base = _base_config(parent)
+        offline = [resolve_source_window(job["policy_target_mix"]["offline_replay"][0], resolver=resolver)]
+        effective = _offline_effective(
+            base, job["training"], job["arena"], offline, job.get("self_play")
+        )
+        from .policy_target_mixture import check_artifacts
+        checked = check_artifacts(
+            job["policy_target_mix"], offline=offline,
+            parent_path=parent.path, training_seed=int(effective["execution"]["training_master_seed"]),
+        )
+        steps.append({
+            "step_id": "policy-target-mixture",
+            "action": "policy_target_mixture",
+            "config": {
+                "run_id": job["run_id"], "parent": parent.ref.to_dict(),
+                "parent_path": str(parent.path), "offline_replay": offline,
+                "effective_config": effective, "policy_target_mix": job["policy_target_mix"],
+                "preflight": checked,
+            },
+        })
+        result = {
+            "schema": "gocube-orchestrator-v2-run-spec-v1", "mode": "workflow",
+            "workflow": {"workflow_id": job["run_id"], "topology": "torus9", "steps": steps},
+        }
+        WorkflowSpec.from_dict(result["workflow"])
+        return result
     selection = job.get("winner_selection")
     if selection is not None:
         item = {"id": "winner-selection", **selection}

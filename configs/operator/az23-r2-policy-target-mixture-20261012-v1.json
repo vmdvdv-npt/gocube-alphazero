@@ -1,0 +1,20 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "az23-r2-policy-target-mixture-20261012-v1",
+  "parent": "az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/M269",
+  "training": {
+    "iterations": 0,
+    "learning_rate": 0.000025,
+    "batch_size": 64,
+    "updates_per_iteration": 640,
+    "gradient_clip": 8.0,
+    "replay_generations": 5
+  },
+  "policy_target_mix": {
+    "offline_replay": [
+      "torus9-c2560-seed2-online-m262-arena1-s64-20261008-v1/M270"
+    ],
+    "pilot_root": "/home/codex/diagnostics/gocube-d270-policy-target-pilot-20261012-r2",
+    "pilot_manifest_sha256": "sha256:fcb25f4227a171d664d604035655d88d7dab2d8558dd3771dc5495e7c3c7689a"
+  }
+}

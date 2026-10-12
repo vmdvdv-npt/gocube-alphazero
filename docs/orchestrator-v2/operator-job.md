@@ -26,6 +26,10 @@ python -m gocube_golden.orchestrator_v2.production_entrypoint job job.json
 `workflow --controller` также отклоняется. Поэтому lifecycle-уведомления принадлежат
 одному операторскому запуску и проходят через стандартный durable outbox.
 
+Для bounded policy-target mixture есть отдельное поле `policy_target_mix` в этом же
+JSON. Оно запускается только отдельно от обычных training/Arena действий; подробный
+контракт, фиксированные бюджеты и preflight см. в [руководстве запуска](ORCHESTRATOR_V2_LAUNCH_GUIDE.md#fixed-mixture-policy-target-transfer-diagnostic).
+
 ```json
 {
   "schema": "gocube-operator-job-v1",
