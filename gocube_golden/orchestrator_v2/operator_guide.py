@@ -26,6 +26,7 @@ INTERFACE_PATHS = (
     "gocube_golden/orchestrator_v2/operator_messages.py",
     "gocube_golden/notifications/formatter.py",
     "gocube_golden/orchestrator_v2/offline_replay.py",
+    "gocube_golden/offline_policy_target_pilot.py",
     "gocube_golden/orchestrator_v2/run_spec.py",
     "gocube_golden/orchestrator_v2/workflow.py",
     "gocube_golden/scenarios/experiment/runner.py",

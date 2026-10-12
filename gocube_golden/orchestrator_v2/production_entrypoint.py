@@ -1450,6 +1450,13 @@ def main(argv: list[str] | None = None) -> int:
     audit = subparsers.add_parser("b64-perf-audit", help="bounded in-memory B64 diagnostic; no artifact publication")
     audit.add_argument("config", type=Path)
     audit.set_defaults(kind="b64-perf-audit")
+    pilot = subparsers.add_parser(
+        "d270-policy-target-pilot",
+        help="bounded offline reanalysis and policy-target transfer diagnostic",
+    )
+    pilot.add_argument("config", type=Path)
+    pilot.add_argument("--check", action="store_true", help="verify provenance, target alignment, and frozen sample plan without writing, search, or training")
+    pilot.set_defaults(kind="d270-policy-target-pilot")
     for name in ("continuous", "performance-tuning", "experiment", "komi-calibration", "workflow"):
         command = subparsers.add_parser(name, help=f"legacy-compatible V2 {name} JSON plan")
         command.add_argument("config", type=Path)
@@ -1492,6 +1499,18 @@ def main(argv: list[str] | None = None) -> int:
         if not args.check:
             _require_committed_job_code()
         result = publish_experiment_summary(payload, runs_root=args.runs_root, check_only=args.check)
+    elif args.kind == "d270-policy-target-pilot":
+        from ..offline_policy_target_pilot import check as check_policy_target_pilot
+        if args.check:
+            result = check_policy_target_pilot(payload)
+        else:
+            _require_committed_job_code()
+            with _authority(mode="performance-tuning", topology="torus9", run_id="d270-policy-target-pilot"):
+                with _child_execution_permit(action_type="training", topology="torus9",
+                                             run_id="d270-policy-target-pilot", code_identity=_entrypoint_code_identity()):
+                    subprocess.run([sys.executable, "-m", "gocube_golden.offline_policy_target_pilot",
+                                    str(args.config.resolve())], check=True)
+            result = {"output": payload["output"]}
     elif args.kind == "b64-perf-audit":
         with _authority(mode="performance-tuning", topology="torus9", run_id="b64-perf-audit"):
             with _child_execution_permit(action_type="training", topology="torus9",
