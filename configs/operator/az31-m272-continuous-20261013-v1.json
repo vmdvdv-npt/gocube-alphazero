@@ -1,0 +1,32 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "az31-m272-continuous-20261013-v1",
+  "parent": "az30-online-two-generations-20261013-v1/M272",
+  "training": {
+    "iterations": null,
+    "games_per_iteration": 1536,
+    "mcts_simulations": 400,
+    "learning_rate": 2.5e-05,
+    "batch_size": 64,
+    "updates_per_iteration": 2560,
+    "gradient_clip": 8,
+    "replay_generations": 5
+  },
+  "self_play": {
+    "search_mode": "pcr",
+    "pcr": {
+      "cheap_simulations": 100,
+      "full_simulations": 400,
+      "full_probability": 0.33
+    },
+    "master_seed": 2026101303,
+    "tree_reuse": true
+  },
+  "arena": {
+    "every_iterations": 3,
+    "games": 768,
+    "mcts_simulations": 64,
+    "tree_reuse": true,
+    "compare_to_parent": true
+  }
+}
