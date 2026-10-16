@@ -1,0 +1,39 @@
+{
+  "ab_tests": [],
+  "arena": {
+    "compare_to_parent": true,
+    "every_iterations": 3,
+    "games": 768,
+    "mcts_simulations": 64,
+    "tree_reuse": true
+  },
+  "arenas": [],
+  "execution": {
+    "device": "cuda",
+    "workers": 16
+  },
+  "parent": "az31-m272-continuous-20261013-v1/M285",
+  "run_id": "az32-m285-one-iteration-20261016-v1",
+  "schema": "gocube-operator-job-v1",
+  "self_play": {
+    "master_seed": 2026101303,
+    "pcr": {
+      "cheap_simulations": 100,
+      "full_probability": 0.33,
+      "full_simulations": 400
+    },
+    "search_mode": "pcr",
+    "tree_reuse": true
+  },
+  "topology": "torus9",
+  "training": {
+    "batch_size": 64,
+    "games_per_iteration": 1536,
+    "gradient_clip": 8,
+    "iterations": 1,
+    "learning_rate": 2.5e-05,
+    "mcts_simulations": 400,
+    "replay_generations": 5,
+    "updates_per_iteration": 2560
+  }
+}
