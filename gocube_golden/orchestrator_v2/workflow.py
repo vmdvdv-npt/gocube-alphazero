@@ -720,7 +720,61 @@ class WorkflowRunner:
         with self._exclusive_lock():
             state = self._load_or_create()
             if state.get("state") in {"STOPPED", "COMPLETED"}:
-                return state
+                steps_state = state.get("steps")
+                resumed_steps: list[str] = []
+                if isinstance(steps_state, dict):
+                    for step in self.spec.steps:
+                        if step.action != "continuous_training":
+                            continue
+                        record = steps_state.get(step.step_id)
+                        if not isinstance(record, dict) or record.get("status") != "COMPLETED":
+                            continue
+                        outputs = record.get("outputs")
+                        if not isinstance(outputs, Mapping) or outputs.get("state") != "SOFT_STOPPED":
+                            continue
+                        resumed_steps.append(step.step_id)
+                if resumed_steps:
+                    # A continuous-training soft stop is resumable even though
+                    # older workflow records marked the action COMPLETED. Clear
+                    # it and any downstream results so the same job can resume
+                    # from the runner's committed checkpoint.
+                    invalidated = set(resumed_steps)
+                    changed = True
+                    while changed:
+                        changed = False
+                        for step in self.spec.steps:
+                            if step.step_id in invalidated:
+                                continue
+                            if any(dependency in invalidated for dependency in step.dependencies):
+                                invalidated.add(step.step_id)
+                                changed = True
+                    for step_id in invalidated:
+                        record = steps_state.get(step_id)
+                        if not isinstance(record, dict):
+                            continue
+                        record["status"] = "PENDING"
+                        record["outputs"] = {}
+                        record.pop("completed_at", None)
+                        timestamps = record.get("timestamps")
+                        if isinstance(timestamps, dict):
+                            timestamps.pop("completed_at", None)
+                    state["state"] = "RUNNING"
+                    state.pop("completed_at", None)
+                    state.pop("stopped_at", None)
+                    state.pop("stop_reason", None)
+                    events = state.setdefault("events", [])
+                    if isinstance(events, list):
+                        events.append(
+                            {
+                                "at": _now(),
+                                "action": "resume_soft_stopped_training",
+                                "step_ids": resumed_steps,
+                                "reset_step_ids": sorted(invalidated),
+                            }
+                        )
+                    self._persist(state)
+                else:
+                    return state
             if state.get("state") == "FAILED":
                 raise WorkflowError(str(state.get("failure", "workflow is durably failed")))
             state["state"] = "RUNNING"
@@ -832,6 +886,15 @@ class WorkflowRunner:
                             )
                         self._persist(state)
                         progressed = True
+                        if step.action == "continuous_training" and (
+                            isinstance(result, Mapping)
+                            and result.get("state") == "SOFT_STOPPED"
+                        ):
+                            state["state"] = "STOPPED"
+                            state["stop_reason"] = "continuous training reached a resumable soft stop"
+                            state["stopped_at"] = completed_at
+                            self._persist(state)
+                            return state
                         if step.action == "stop":
                             state["state"] = "STOPPED"
                             state["stop_reason"] = str(result.get("reason", "workflow stop"))  # type: ignore[union-attr]
