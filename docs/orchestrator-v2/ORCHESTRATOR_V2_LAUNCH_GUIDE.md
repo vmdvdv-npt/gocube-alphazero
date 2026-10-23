@@ -534,7 +534,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: a2336e5050dc53eecef45821e639944798944d4d28adc6ffb437a883553a1b04 -->
+<!-- reviewed-interface-sha256: d515a27688bdf0d2939553889159e9dd3949595f9d8775ea603ed57530caa839 -->
 
 ## B64 bounded performance audit
 
@@ -611,3 +611,55 @@ PyTorch functional Adam path. Named singleton groups, order, options, unequal
 CPU clocks and serialized state remain intact. Unsupported execution options,
 heterogeneous groups and aliased parameters retain ordinary Adam dispatch.
 `configs/diagnostics/b64-next-speedup-nsys-20261007.json` selects its short trace.
+
+## One fresh self-play package: replay-budget snapshots
+
+`job.replay_budget` is an opt-in one-generation experiment with exactly these fields:
+
+```json
+{"snapshots": [2560, 5120], "holdout_fraction": 0.1,
+ "split_seed": 2026101211, "arena_seed": 2026101212}
+```
+
+Use `training.iterations: 1`, `updates_per_iteration: 5120` and explicit ordinary
+self-play parameters. Exactly two positive increasing snapshots are required;
+the last must equal updates_per_iteration. No ab_tests, arenas or winner_selection
+may be supplied. Set `arena.every_iterations > 1` to disable the ordinary
+periodic arena for this one-generation job. `arena.games`, simulations and tree
+reuse apply to both snapshot arenas. The compiler appends two standard Arena
+actions referencing the saved training outputs and the original registered parent.
+Both use the explicit arena_seed, paired starts/color swap and standard outbox.
+No winner is automatically promoted. The job ends after the second Arena.
+
+Before generating games the adapter freezes ceil(fraction * games) whole game IDs
+using split_seed. Those games are saved with split=validation in the newly created
+shards; they are excluded from training in this generation AND from inherited
+training replay. No existing shard is edited. The holdout is a selection/diagnostic
+panel, not a fresh independent test after model selection. Actual eligible game and
+position counts are recorded (games with no eligible targets cannot enter a panel).
+
+One Adam trajectory trains on the same rolling window throughout. Each snapshot
+has full optimizer/counter state, metadata, hashes, accumulated step metrics and
+fixed evaluation panels (32 batches each: fresh holdout, old validation, training
+window). The metadata records actual processed updates; snapshot effective config
+retains the full planned generation budget. Snapshot labels are M<generation>-u<N>.
+They are sibling candidates sharing the actual parent and new generation replay;
+they are not additional self-play generations. Normal later training drops the
+one-shot replay_budget extension when inheriting a parent.
+
+Completed snapshots are atomically published and immutable. An interrupted
+unfinished generation can reuse completed self-play shards and continue from its
+last sealed snapshot; a completed generation is reused by the standard generation
+runner. Snapshot reload verifies model and full Adam tensors. Registration of
+snapshot graph nodes completes before the generation commit fence. Runtime remains
+under the standard generation worker permits, heartbeat, supervisor and controller.
+The standard terminal FAILED/STOPPED policy is unchanged; this is not a force-restart
+interface. For this mode training wall time includes snapshot evaluation/save and,
+after interruption, covers only the current attempt; see replay_budget timing note.
+
+Concrete job: `configs/operator/az29-fresh-replay-budget-20261012-v1.json`.
+Predeclared interpretation: compare both candidates against the original parent,
+apply Holm correction to the two paired sign-tests, require complete valid arenas
+and >50% candidate score for a positive claim. A larger numerical win rate alone
+does not establish superiority of 5120 over 2560. Analysis is performed from saved
+Arena evidence after completion; the job never changes its plan based on results.

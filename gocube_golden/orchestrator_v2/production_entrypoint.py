@@ -931,11 +931,16 @@ def _workflow_training_result(result: object) -> dict[str, object]:
             }
         )
     checkpoint = _workflow_checkpoint_ref(final_checkpoint)
+    snapshots = {}
+    if effective_config.extensions.get('replay_budget'):
+        path = Path(result.lineage_root) / 'training' / 'replay-budget-snapshots.json'
+        snapshots = json.loads(path.read_text())
     return {
         "schema": "gocube-orchestrator-v2-training-result-v1",
         "state": str(getattr(result, "state", "UNKNOWN")),
         "checkpoint": checkpoint,
         "final_checkpoint": checkpoint,
+        **({"snapshots": snapshots} if snapshots else {}),
         "effective_config": effective_config.to_dict(),
         "lineage_root": str(getattr(result, "lineage_root", "")),
         "soft_stop_requested": bool(getattr(result, "soft_stop_requested", False)),
