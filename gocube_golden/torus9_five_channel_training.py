@@ -390,6 +390,10 @@ def run_generation(resolved):
     require_engine_execution(__name__, action='training', topology='torus9')
     cfg = resolved.effective_config.config
     validate_config(cfg)
+    budget = cfg.to_dict()['extensions'].get('replay_budget')
+    if budget:
+        from .orchestrator_v2.replay_budget import parameters, frozen_split, read_snapshot, save_snapshot, publish_snapshots
+        budget = parameters(dict(budget), cfg.training['optimizer_steps_per_iteration'])
     if resolved.execution_overrides:
         raise ValueError('5CH execution overrides are not supported')
     caps = resolve_search_mode(cfg.self_play)
@@ -436,6 +440,11 @@ def run_generation(resolved):
         fresh_shards = []
         shard_telemetry = []
         games_count = int(cfg.self_play['games_per_iteration'])
+        heldout_ids = set()
+        if budget:
+            if offline is not None:
+                raise ValueError('replay_budget requires fresh self-play')
+            heldout_ids = frozen_split(root, generation, games_count, budget)
         if offline is None:
             for offset in range(0, games_count, 128):
                 number = min(128, games_count-offset)
@@ -472,7 +481,7 @@ def run_generation(resolved):
                     game = game_targets(record)
                     if game is None:
                         continue
-                    game['split'] = 'train'
+                    game['split'] = 'validation' if game['game_id'] in heldout_ids else 'train'
                     validate_game(game)
                     games.append(game)
                 if len(result.records) != number:
@@ -518,20 +527,70 @@ def run_generation(resolved):
             trainer.sampling_telemetry = SamplingTelemetry(games, evidence, cache_ref, spec['weight'], trainer.replay_sampling['mode'])
         updates = int(cfg.training['optimizer_steps_per_iteration'])
         metrics = []
+        start_update = 0
+        evaluations = {}
+        origin_update = trainer.update
+        if budget:
+            holdout = load_replay([fresh_bucket], split='validation')
+            actual_heldout = {g['game_id'] for g in holdout}
+            if not actual_heldout <= heldout_ids or actual_heldout & {g['game_id'] for g in games}:
+                raise ValueError('Whole-game holdout leaked or changed')
+            present = [u for u in budget['snapshots'] if (root/'snapshots'/f'u{u}').exists()]
+            if present != budget['snapshots'][:len(present)]:
+                raise ValueError('Replay-budget snapshots contain a gap')
+            for update in budget['snapshots']:
+                path = root/'snapshots'/f'u{update}'
+                if not path.exists():
+                    break
+                evidence = read_snapshot(path)
+                if (evidence['parent'] != parent.ref.to_dict() or evidence['config'] != cfg.fingerprint
+                        or evidence['update'] != update or evidence['ordinary_update'] != origin_update + update):
+                    raise ValueError('Snapshot resume identity mismatch')
+                trainer = OrdinaryTrainer(path/'checkpoint.pt', learning_rate=cfg.training['learning_rate'],
+                    gradient_clip=cfg.training.get('gradient_clip', 1.0), batch_size=cfg.training['batch_size'],
+                    seed=seed, device=device)
+                if trainer.update != origin_update + update:
+                    raise ValueError('Snapshot resume Adam clock mismatch')
+                start_update, metrics, evaluations = update, evidence['metrics'], evidence['evaluations']
+            if not start_update:
+                evaluations['0'] = {'heldout_fresh': trainer.evaluate(holdout),
+                                     'historical_validation': baseline, 'train_window': trainer.evaluate(games)}
+            atomic_write_json(root/'training'/'replay-budget-data.json', {
+                'planned_holdout_games': len(heldout_ids), 'actual_holdout_games': len(actual_heldout),
+                'holdout_positions': holdout.positions, 'training_positions': games.positions,
+                'fresh_generation': generation, 'holdout_game_ids': sorted(actual_heldout),
+                'sampling': 'uniform-over-positions', 'validation_sampling': '32 fixed batches per panel'})
+
         if device.startswith('cuda'):
             torch.cuda.synchronize()
             torch.cuda.reset_peak_memory_stats()
         training_started = time.perf_counter()
-        for i in range(updates):
+        for i in range(start_update, updates):
             metrics.append(trainer.step(games))
             mark('training',i+1,updates)
+            if budget and i+1 in budget['snapshots']:
+                evaluations[str(i+1)] = {'heldout_fresh': trainer.evaluate(holdout),
+                    'historical_validation': trainer.evaluate(validation), 'train_window': trainer.evaluate(games)}
+                saved = save_snapshot(trainer, root, i+1, cfg, parent, buckets, metrics, evaluations)
+                checked = OrdinaryTrainer(saved/'checkpoint.pt', learning_rate=cfg.training['learning_rate'],
+                    gradient_clip=cfg.training.get('gradient_clip', 1.0), batch_size=cfg.training['batch_size'],
+                    seed=seed, device='cpu')
+                if model_hash(checked.model) != model_hash(trainer.model):
+                    raise ValueError('Budget snapshot reload changed model')
+                for name, parameter in trainer.model.named_parameters():
+                    restored = dict(checked.model.named_parameters())[name]
+                    for key in ('step', 'exp_avg', 'exp_avg_sq'):
+                        if not torch.equal(trainer.optimizer.state[parameter][key].cpu(), checked.optimizer.state[restored][key].cpu()):
+                            raise ValueError('Budget snapshot reload changed Adam')
+                del checked
+
         if device.startswith('cuda'):
             torch.cuda.synchronize()
         training_wall = time.perf_counter() - training_started
         performance = {'training_wall_time_sec': training_wall,
                        'training_minutes': training_wall / 60,
-                       'optimizer_updates_per_sec': updates / training_wall,
-                       'samples_per_sec': updates * trainer.batch_size / training_wall,
+                       'optimizer_updates_per_sec': (updates-start_update) / training_wall,
+                       'samples_per_sec': (updates-start_update) * trainer.batch_size / training_wall,
                        'processed_samples': updates * trainer.batch_size,
                        'peak_allocated_vram_bytes': torch.cuda.max_memory_allocated() if device.startswith('cuda') else None,
                        'peak_reserved_vram_bytes': torch.cuda.max_memory_reserved() if device.startswith('cuda') else None}
@@ -559,6 +618,10 @@ def run_generation(resolved):
             if trainer.sampling_telemetry.draws != updates * trainer.batch_size:
                 raise ValueError('Replay sampling draw budget drift')
             performance['sampling'] = trainer.sampling_telemetry.report()
+        if budget:
+            performance['replay_budget'] = {'evaluations': evaluations, 'snapshots': budget['snapshots'],
+                'resumed_at_update': start_update, 'updates_this_attempt': updates-start_update,
+                'timing_note': 'This attempt includes snapshot evaluation/save; not isolated optimizer time.'}
         performance['mean_losses'] = mean_losses
         performance['mean_total_loss'] = sum(mean_losses.values())
         atomic_write_json(training_path, {'updates': metrics,'baseline_validation': baseline,'validation': result_validation, 'performance': performance})
@@ -597,6 +660,8 @@ def run_generation(resolved):
         publish_checkpoint_graph(root=root,parent=parent.ref,checkpoint=checkpoint_ref,fresh_replay=fresh_ref,
             effective_config=resolved.effective_config.ref,generation_commit=marker_ref,
             artifact_identities=identities,checkpoint_reload_verified=True)
+        if budget:
+            publish_snapshots(root, generation, parent, resolved.effective_config.ref, fresh_ref, budget)
         atomic_write_text(marker_path,marker_text)
         mark('committed',updates,updates)
         return GenerationExecutionResult(generation,True,checkpoint_ref,marker_ref,fresh_ref)
