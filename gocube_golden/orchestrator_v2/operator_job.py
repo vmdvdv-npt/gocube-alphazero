@@ -115,7 +115,7 @@ def _arena_runs(value, *, defaults):
         raise ValueError("arenas must be a list")
     normalized = []
     names = set()
-    allowed = {"id", "candidate", "reference", "games", "mcts_simulations", "master_seed", "tree_reuse"}
+    allowed = {"id", "candidate", "reference", "games", "mcts_simulations", "master_seed", "tree_reuse", "small_diagnostic"}
     for index, raw_item in enumerate(value):
         item = _object(raw_item, allowed, f"arenas[{index}]")
         arena_id = _name(item.get("id"), f"arenas[{index}].id")
@@ -125,8 +125,11 @@ def _arena_runs(value, *, defaults):
         candidate = _selector(item.get("candidate"), f"arenas[{index}].candidate")
         reference = _selector(item.get("reference"), f"arenas[{index}].reference")
         games = _integer(item.get("games", defaults["games"]), f"arenas[{index}].games")
-        if games % 2 or games < 64:
-            raise ValueError(f"arenas[{index}].games must be an even integer >= 64")
+        small = item.get("small_diagnostic", False)
+        if type(small) is not bool:
+            raise ValueError("small_diagnostic must be a boolean")
+        if games % 2 or games < (2 if small else 64):
+            raise ValueError(f"arenas[{index}].games must be even and meet the minimum")
         simulations = _integer(
             item.get("mcts_simulations", defaults["mcts_simulations"]),
             f"arenas[{index}].mcts_simulations",
@@ -145,6 +148,7 @@ def _arena_runs(value, *, defaults):
                 "games": games,
                 "mcts_simulations": simulations,
                 "master_seed": seed,
+                **({"small_diagnostic": True} if small else {}),
                 **({"tree_reuse": reuse} if "tree_reuse" in item or "tree_reuse" in defaults else {}),
             }
         )
@@ -204,6 +208,10 @@ def parse_job(value):
     training = _training(raw.get("training", {}), defaults=training_defaults)
     if "replay_sampling" in training:
         raise ValueError("replay_sampling must be an offline arm setting")
+    if any(item.get("small_diagnostic") for item in arenas) and (
+        training["iterations"] != 0 or raw.get("ab_tests") or winner_selection is not None
+    ):
+        raise ValueError("small_diagnostic requires an Arena-only job")
     if winner_selection is not None and training["iterations"] == 0:
         raise ValueError("winner_selection requires positive training iterations or null")
 
@@ -527,7 +535,7 @@ def _arena_execution(arena):
         "inference_batch_rows": 64,
         "inference_batch_wait_ms": 1.0,
         "device": "cuda",
-        "strict_production": True,
+        "strict_production": not arena.get("small_diagnostic", False),
         "monitoring_acceptance": False,
         "min_mean_inference_batch_rows": 0.0,
         "min_effective_cpu_cores": 0.0,
@@ -547,6 +555,7 @@ def _arena_step(job, item, candidate, reference, previous):
     arena = {
         "games": item["games"],
         "mcts_simulations": item["mcts_simulations"],
+        **({"small_diagnostic": True} if item.get("small_diagnostic") else {}),
         **({"tree_reuse": item["tree_reuse"]} if "tree_reuse" in item else {}),
     }
     step_id = "arena-" + item["id"]

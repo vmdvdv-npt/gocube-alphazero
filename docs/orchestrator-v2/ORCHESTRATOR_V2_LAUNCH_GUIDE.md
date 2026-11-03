@@ -390,6 +390,12 @@ schedule as the first Policy Surprise comparison:
 разрешаемые до запуска; нельзя ссылаться этим списком на ещё не созданный candidate.
 Для будущих финалов используйте встроенные training/A/B арены.
 
+Для небольшого диагностического матча явно задайте в `arenas[]`
+`"small_diagnostic": true` и чётное число партий от 2. Такой job допускает
+только Arena без training, A/B и winner_selection. Используются те же GPU,
+16 workers и правила, но `strict_production` выключен: результат не является
+production Arena; малая выборка даёт лишь ограниченный игровой сигнал.
+
 Экспериментальный model-only Torus9 GraphNet 8×120 можно зарегистрировать только
 для Arena отдельным новым lineage, не изменяя исходный checkpoint:
 
@@ -399,7 +405,7 @@ schedule as the first Policy Surprise comparison:
 ```
 
 Команда проверяет sidecar, SHA, тензоры и топологию; селектор для `arenas` —
-`experiment-eval/v001`. Это genesis без replay и optimizer, его нельзя использовать
+`experiment-eval/v001`. Для другого имени задайте `--checkpoint-id` явно. Это genesis без replay и optimizer, его нельзя использовать
 как training parent или в winner_selection. Для Arena обязателен обычный `job --check`.
 
 
@@ -547,7 +553,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: f65a4e68c46d3f84539058c85b2163a2f2c2a874566183007e6d3ac96a3b65a7 -->
+<!-- reviewed-interface-sha256: 3cd7e4d972060e721c4af3a56976e5b13e930cc4f35cfdcfc4900f3950fe72cb -->
 
 ## B64 bounded performance audit
 

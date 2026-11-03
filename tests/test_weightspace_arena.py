@@ -33,8 +33,8 @@ def _source(tmp_path):
 def test_registration_and_profile(tmp_path):
     source, meta = _source(tmp_path)
     runs = tmp_path / 'runs'
-    register(source, runs, 'experimental', 'test-revision')
-    node = resolve_checkpoint('experimental/v001', resolver=ArtifactResolver(runs))
+    register(source, runs, 'experimental', 'test-revision', 'v000')
+    node = resolve_checkpoint('experimental/v000', resolver=ArtifactResolver(runs))
     assert node.effective_config.config.compatibility['evaluation_only'] is True
     with pytest.raises(ValueError, match='cannot be training parents'):
         _base_config(node)
