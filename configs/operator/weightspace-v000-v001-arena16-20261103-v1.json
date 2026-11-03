@@ -1,0 +1,14 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "weightspace-v000-v001-arena16-20261103-v1",
+  "arenas": [{
+    "id": "v000-vs-v001",
+    "candidate": "weightspace-v000-arena-20261103-v1/v000",
+    "reference": "weightspace-v001-arena-20261103-v1/v001",
+    "games": 16,
+    "small_diagnostic": true,
+    "mcts_simulations": 64,
+    "master_seed": 2026092902,
+    "tree_reuse": true
+  }]
+}

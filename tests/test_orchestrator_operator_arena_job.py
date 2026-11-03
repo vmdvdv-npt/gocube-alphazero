@@ -205,3 +205,25 @@ def test_cross_lineage_arena_keeps_checkpoint_references_not_copies(monkeypatch)
     assert config["reference_checkpoint"]["lineage_id"] == "reference-line"
     assert config["master_seed"] == 12345
     assert "output_dir" not in config
+
+
+def test_small_arena_is_explicit_and_cannot_train(monkeypatch):
+    raw = _ladder()
+    raw['arenas'] = [{**raw['arenas'][0], 'games': 16, 'small_diagnostic': True}]
+    nodes = {
+        raw['arenas'][0]['candidate']: _node('torus9-m203-learner-recovery-20260929-v3', 'M206', 206, 'a'),
+        raw['arenas'][0]['reference']: _node('torus9-m203-learner-recovery-20260929-v3', 'M204', 204, 'b'),
+    }
+    monkeypatch.setattr(job, 'resolve_checkpoint', lambda selector, *, resolver: nodes[selector])
+    plan = job.compile_job(raw, resolver=SimpleNamespace())
+    config = plan['workflow']['steps'][0]['config']['arena_config']
+    assert config['games'] == 16 and config['workers'] == 16
+    assert config['device'] == 'cuda' and config['strict_production'] is False
+    assert job.parse_job(job.parse_job(raw)) == job.parse_job(raw)
+    raw['training'] = {'iterations': 1}
+    raw['parent'] = raw['arenas'][0]['candidate']
+    with pytest.raises(ValueError, match='Arena-only'):
+        job.parse_job(raw)
+    del raw['training'], raw['parent'], raw['arenas'][0]['small_diagnostic']
+    with pytest.raises(ValueError, match='minimum'):
+        job.parse_job(raw)
