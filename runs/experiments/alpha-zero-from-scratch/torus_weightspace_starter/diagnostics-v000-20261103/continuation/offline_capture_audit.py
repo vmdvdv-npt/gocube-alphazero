@@ -18,5 +18,3 @@ for x in d['positions']:
  for i,v in enumerate((tp,fp,fn,tn)):totals[i]+=len(v)
  print(x['id'],'TP',tp,'FP',fp,'FN',fn,'TN',len(tn))
 print('TOTAL TP FP FN TN',totals)
-a=json.load(open('diagnostics-v000-20261103/session/rounds/006/report.json'))
-print('ROUND006',{k:a.get(k) for k in ['mode','round','wins','losses','draws','technical_terminations','status']})
