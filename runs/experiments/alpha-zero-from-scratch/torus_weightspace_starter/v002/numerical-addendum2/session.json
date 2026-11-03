@@ -1,0 +1,12 @@
+{
+  "allocation": {
+    "development": 0,
+    "diagnostic": 2,
+    "holdout": 0
+  },
+  "budget": 2,
+  "parent": "../session64/session.json",
+  "parent_sha256": "7390f1957c9d23e3806b0a0371b9e578e9f546e9d4e750343bc4fa9a986448a0",
+  "reason": "CPU/CUDA logit parity exceeded predeclared 0.002; repeat arithmetic and parity after algebraically equivalent output offset change. No game-result tuning. Aggregate budget 66; original manifest and failed round untouched.",
+  "schema": "weightspace-session-v002"
+}

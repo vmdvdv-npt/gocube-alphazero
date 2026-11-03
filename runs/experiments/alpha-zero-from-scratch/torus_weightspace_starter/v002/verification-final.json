@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "lossless_reports": 66,
+  "preserved_original_hashes": 58,
+  "original_protocol_unchanged": true,
+  "frozen_sources_unchanged": true,
+  "phase_counts": {
+    "development": 8,
+    "diagnostic": 8,
+    "holdout": 48
+  },
+  "addendum_diagnostics": 2,
+  "live_training_modified": false
+}

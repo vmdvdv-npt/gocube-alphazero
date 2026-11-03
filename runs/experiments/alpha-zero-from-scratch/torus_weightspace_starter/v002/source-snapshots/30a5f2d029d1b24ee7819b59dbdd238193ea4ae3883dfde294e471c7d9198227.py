@@ -1,0 +1,647 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+import hashlib
+import json
+import math
+from numbers import Real
+import random
+from typing import Any, Callable, Mapping, Protocol, Sequence
+
+from .arena_contract import SEARCH_IMPLEMENTATION_ID, SearchSettings
+from .diagnostics import increment
+from .rules import LegalActionContext
+from .search_adapter import GoldenSearchAdapter
+from .state import GoldenState
+
+WDL_SEMANTICS = "side-to-move:[WIN,DRAW,LOSS]"
+INTERNAL_Q_CONVENTION = "edge-Q-from-parent-side-to-move"
+SEARCH_SEMANTICS = {
+    "implementation": SEARCH_IMPLEMENTATION_ID,
+    "value_input": WDL_SEMANTICS,
+    "scalar_boundary": "u=P(WIN)-P(LOSS)",
+    "q_convention": INTERNAL_Q_CONVENTION,
+    "backup": "one-ply side-to-move sign flip",
+    "terminal": "exact-golden-result",
+    "tree_reuse": False,
+    "transpositions": False,
+    "virtual_loss": False,
+    "batching": False,
+}
+SEARCH_IMPLEMENTATION_FINGERPRINT = "sha256:" + hashlib.sha256(
+    json.dumps(SEARCH_SEMANTICS, sort_keys=True, separators=(",", ":")).encode("utf-8")
+).hexdigest()
+
+
+def search_semantics(tree_reuse: bool = False) -> dict[str, object]:
+    """Effective semantics; the module-level constants describe default OFF."""
+    if type(tree_reuse) is not bool:
+        raise ValueError("tree_reuse must be a boolean")
+    return {**SEARCH_SEMANTICS, "tree_reuse": tree_reuse}
+
+
+def search_implementation_fingerprint(tree_reuse: bool = False) -> str:
+    return "sha256:" + hashlib.sha256(
+        json.dumps(search_semantics(tree_reuse), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+class SearchError(RuntimeError):
+    pass
+
+
+class SearchPosition(Protocol):
+    """Minimal immutable position surface required by the PUCT core.
+
+    Rules and neural history deliberately stay outside this protocol.  A
+    topology adapter may wrap a rules state when the model needs bounded
+    observation history, while the search algorithm continues to operate on
+    the same position/adapter boundary.
+    """
+
+    @property
+    def state_key(self) -> object:
+        ...
+
+    @property
+    def is_terminal(self) -> bool:
+        ...
+
+
+class SearchAdapter(Protocol):
+    """Structural adapter contract consumed by the shared PUCT algorithm."""
+
+    def prepare_legal_actions(self, state: SearchPosition) -> LegalActionContext:
+        ...
+
+    def apply_action(self, state: SearchPosition, action: int | str) -> SearchPosition:
+        ...
+
+    def is_terminal(self, state: SearchPosition) -> bool:
+        ...
+
+    def terminal_utility(self, state: SearchPosition) -> float:
+        ...
+
+    def action_index(self, state: SearchPosition, action: int | str) -> int:
+        ...
+
+    def action_space(self, state: SearchPosition) -> tuple[int | str, ...]:
+        ...
+
+
+@dataclass(frozen=True)
+class Evaluation:
+    policy: Mapping[int | str, float] | Sequence[float]
+    wdl: tuple[float, float, float]
+
+
+class Evaluator(Protocol):
+    def evaluate(self, state: SearchPosition) -> Evaluation:
+        ...
+
+
+@dataclass
+class _Edge:
+    prior: float
+    visits: int = 0
+    value_sum: float = 0.0
+    child: "_Node | None" = None
+
+    @property
+    def q(self) -> float:
+        return self.value_sum / self.visits if self.visits else 0.0
+
+
+@dataclass
+class _Node:
+    state: SearchPosition
+    expanded: bool = False
+    edges: dict[int | str, _Edge] = field(default_factory=dict)
+    legal_context: LegalActionContext | None = None
+    evaluation: Evaluation | None = None
+
+
+class SearchTree:
+    """One game and one evaluator's tree. Call reset when starting a new game.
+
+    Only explicit real actions advance the root. No descendant lookup or
+    transposition matching can accidentally reuse another game's position.
+    """
+
+    def __init__(self, tree_reuse: bool = False) -> None:
+        search_semantics(tree_reuse)  # Strict boolean validation.
+        self.tree_reuse = tree_reuse
+        self.root: _Node | None = None
+
+    def reset(self) -> None:
+        self.root = None
+
+    def prepare_root(self, state: SearchPosition) -> _Node:
+        if not self.tree_reuse:
+            self.reset()
+            return _Node(state)
+        if self.root is None or self.root.state.state_key != state.state_key:
+            self.root = _Node(state)
+        return self.root
+
+    def advance(self, action: int | str, state: SearchPosition) -> bool:
+        """Reroot after a real move, checking the complete rules/history key.
+
+        Missing children or mismatched states fall back to an unexpanded root.
+        The boolean reports whether an existing subtree was retained.
+        """
+        edge = self.root.edges.get(action) if self.root is not None else None
+        child = edge.child if edge is not None else None
+        if self.tree_reuse and child is not None and child.state.state_key == state.state_key:
+            self.root = child
+            return True
+        self.root = _Node(state) if self.tree_reuse else None
+        return False
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    action: int | str
+    legal_actions: tuple[int | str, ...]
+    root_visits: tuple[int, ...]
+    pi: tuple[float, ...]
+    simulations: int
+    evaluator_calls: int
+    implementation_id: str = SEARCH_IMPLEMENTATION_ID
+    implementation_fingerprint: str = SEARCH_IMPLEMENTATION_FINGERPRINT
+    root_q: tuple[float | None, ...] = ()
+    legal_action_mask: tuple[bool, ...] = ()
+
+
+def wdl_to_side_to_move_utility(wdl: Sequence[float]) -> float:
+    """The one model-value semantic boundary used by Stage-2 search."""
+    if len(wdl) != 3:
+        raise SearchError("Golden evaluator WDL must be exactly [WIN, DRAW, LOSS]")
+    try:
+        win, draw, loss = (float(value) for value in wdl)
+    except (TypeError, ValueError) as exc:
+        raise SearchError("Golden evaluator WDL must contain numeric values") from exc
+    values = (win, draw, loss)
+    if any(not math.isfinite(value) or value < 0.0 for value in values):
+        raise SearchError("Golden evaluator WDL must be finite and non-negative")
+    total = sum(values)
+    if total <= 0.0:
+        raise SearchError("Golden evaluator WDL must have positive total probability")
+    return (win - loss) / total
+
+
+def _child_to_parent_utility(child_utility: float) -> float:
+    """The only turn-boundary sign conversion in Stage-2 search/solver."""
+    return -float(child_utility)
+
+
+def _validated_policy_weight(value: object, *, label: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise SearchError(f"Non-numeric policy weight for action {label!r}")
+    weight = float(value)
+    if not math.isfinite(weight) or weight < 0.0:
+        raise SearchError(f"Invalid policy weight for action {label!r}")
+    return weight
+
+
+def _validated_policy_vector(
+    evaluation: Evaluation,
+    state: SearchPosition,
+    adapter: SearchAdapter,
+) -> dict[int | str, float]:
+    """Validate the entire evaluator policy before any legal masking.
+
+    Both sequence and mapping policies must exactly match the Golden action
+    space. Every value is validated before legal masking, including values in
+    actions that are illegal in the current state.
+    """
+    action_space = adapter.action_space(state)
+    expected = len(action_space)
+    raw = evaluation.policy
+
+    if isinstance(raw, Mapping):
+        if len(raw) != expected:
+            raise SearchError(f"Golden policy length {len(raw)} != action size {expected}")
+        weights: dict[int | str, float] = {}
+        for action, value in raw.items():
+            try:
+                index = adapter.action_index(state, action)
+            except Exception as exc:
+                raise SearchError(f"Invalid policy action key {action!r}") from exc
+            canonical_action = action_space[index]
+            weights[canonical_action] = _validated_policy_weight(value, label=action)
+        if set(weights) != set(action_space):
+            raise SearchError("Golden policy mapping must contain every action exactly once")
+        return weights
+
+    try:
+        seq = tuple(raw)
+    except TypeError as exc:
+        raise SearchError("Golden evaluator policy must be a mapping or sequence") from exc
+    if len(seq) != expected:
+        raise SearchError(f"Golden policy length {len(seq)} != action size {expected}")
+    return {
+        action: _validated_policy_weight(seq[index], label=action)
+        for index, action in enumerate(action_space)
+    }
+
+
+def _policy_for_legal(
+    evaluation: Evaluation,
+    state: SearchPosition,
+    legal: tuple[int | str, ...],
+    adapter: SearchAdapter,
+) -> dict[int | str, float]:
+    full_weights = _validated_policy_vector(evaluation, state, adapter)
+    weights = {action: full_weights[action] for action in legal}
+    total = sum(weights.values())
+    if total <= 0.0:
+        uniform = 1.0 / len(legal)
+        return {action: uniform for action in legal}
+    return {action: weight / total for action, weight in weights.items()}
+
+
+class _PUCTCore:
+    """Canonical scientific PUCT core shared by sync and cooperative fronts."""
+
+    def __init__(
+        self,
+        settings: SearchSettings | None = None,
+        *,
+        adapter: SearchAdapter | None = None,
+        trace: list[dict[str, object]] | None = None,
+        tree: SearchTree | None = None,
+    ) -> None:
+        self.settings = settings or SearchSettings()
+        self.adapter: SearchAdapter = adapter or GoldenSearchAdapter()
+        self.trace = trace
+        self.tree = tree if tree is not None else SearchTree(self.settings.tree_reuse)
+        if self.tree.tree_reuse != self.settings.tree_reuse:
+            raise ValueError("Search settings and tree reuse mode must match")
+        self._evaluator: Evaluator | None = None
+        self._evaluator_calls = 0
+        self._rng = random.Random(0)
+
+    def _prepare_leaf(self, node: _Node) -> LegalActionContext | None:
+        if self.adapter.is_terminal(node.state):
+            return None
+        context = self.adapter.prepare_legal_actions(node.state)
+        increment("leaf_expansions")
+        return context
+
+    def _expand(
+        self, node: _Node, evaluation: Evaluation, context: LegalActionContext,
+        transform: Callable[[Evaluation, SearchPosition, LegalActionContext], Evaluation] | None = None,
+    ) -> float:
+        if self.adapter.is_terminal(node.state):
+            return self.adapter.terminal_utility(node.state)
+        if self.settings.tree_reuse:
+            node.evaluation = evaluation
+        if transform is not None:
+            evaluation = transform(evaluation, node.state, context)
+        utility = wdl_to_side_to_move_utility(evaluation.wdl)
+        legal = context.actions
+        if not legal:
+            raise SearchError("Nonterminal Golden state exposed no legal actions")
+        priors = _policy_for_legal(evaluation, node.state, legal, self.adapter)
+        node.edges = {action: _Edge(prior=priors[action]) for action in legal}
+        node.legal_context = context
+        node.expanded = True
+        if self.trace is not None:
+            self.trace.append({
+                "event": "expanded",
+                "state": node.state.state_key,
+                "legal_actions": legal,
+            })
+        return utility
+
+    def advance_root(self, action: int | str, state: SearchPosition) -> bool:
+        return self.tree.advance(action, state)
+
+    def reset_tree(self) -> None:
+        self.tree.reset()
+
+    def _evaluate_and_expand(self, node: _Node) -> float:
+        context = self._prepare_leaf(node)
+        if context is None:
+            return self.adapter.terminal_utility(node.state)
+        if self._evaluator is None:
+            raise SearchError("Search evaluator was not installed")
+        prepared_evaluate = getattr(self._evaluator, "evaluate_prepared", None)
+        if callable(prepared_evaluate):
+            evaluation = prepared_evaluate(node.state, context)
+        else:
+            evaluation = self._evaluator.evaluate(node.state)
+        self._evaluator_calls += 1
+        return self._expand(node, evaluation, context)
+
+    def _tie_key(self, state: SearchPosition, action: int | str) -> int:
+        return self.adapter.action_index(state, action)
+
+    def _select(self, node: _Node) -> tuple[int | str, _Edge]:
+        total_visits = sum(edge.visits for edge in node.edges.values())
+        scale = math.sqrt(total_visits + 1.0)
+        best_value = -float("inf")
+        candidates: list[tuple[int | str, _Edge]] = []
+        for action, edge in node.edges.items():
+            q = edge.q if edge.visits else float(self.settings.fpu)
+            score = q + float(self.settings.cpuct) * edge.prior * scale / (1.0 + edge.visits)
+            if score > best_value + 1e-15:
+                best_value = score
+                candidates = [(action, edge)]
+            elif abs(score - best_value) <= 1e-15:
+                candidates.append((action, edge))
+        if not candidates:
+            raise SearchError("PUCT could not select a legal edge")
+        if self.settings.deterministic_tie_break:
+            return min(candidates, key=lambda item: self._tie_key(node.state, item[0]))
+        return self._rng.choice(candidates)
+
+    def _traverse(self, root: _Node) -> tuple[list[tuple[_Node, int | str, _Edge]], _Node]:
+        node = root
+        path: list[tuple[_Node, int | str, _Edge]] = []
+        while node.expanded:
+            action, edge = self._select(node)
+            if edge.child is None:
+                edge.child = _Node(self.adapter.apply_action(node.state, action))
+            path.append((node, action, edge))
+            node = edge.child
+        return path, node
+
+    def _backup(self, path: Sequence[tuple[_Node, int | str, _Edge]], utility: float) -> float:
+        for parent, action, edge in reversed(path):
+            utility = _child_to_parent_utility(utility)
+            edge.visits += 1
+            edge.value_sum += utility
+            if self.trace is not None:
+                self.trace.append({
+                    "event": "selected_edge",
+                    "state": parent.state.state_key,
+                    "action": action,
+                    "edge_visits": edge.visits,
+                    "backup_utility": utility,
+                })
+        return utility
+
+    def _simulate(self, node: _Node) -> float:
+        path, leaf = self._traverse(node)
+        utility = self._evaluate_and_expand(leaf)
+        return self._backup(path, utility)
+
+    def _finalize(self, state: SearchPosition, root: _Node, evaluator_calls: int) -> SearchResult:
+        if root.legal_context is None:
+            raise SearchError("Golden search root has no prepared legal context")
+        legal = root.legal_context.actions
+        action_space = self.adapter.action_space(state)
+        visit_map = {action: root.edges[action].visits for action in legal}
+        root_visits = tuple(visit_map.get(action, 0) for action in action_space)
+        total = sum(root_visits)
+        if total <= 0:
+            raise SearchError("Golden search produced zero root visits")
+        root_q = tuple(
+            root.edges[action].q if action in root.edges and root.edges[action].visits else None
+            for action in action_space
+        )
+        pi = tuple(count / total for count in root_visits)
+        max_visits = max(visit_map.values())
+        candidates = [action for action, visits in visit_map.items() if visits == max_visits]
+        if self.settings.deterministic_tie_break:
+            selected = min(candidates, key=lambda action: self._tie_key(state, action))
+        else:
+            selected = self._rng.choice(candidates)
+        if selected not in legal:
+            raise SearchError("Search selected an illegal action")
+        if self.trace is not None:
+            self.trace.append({
+                "event": "final_root",
+                "root_visits": root_visits,
+                "selected_action": selected,
+            })
+        return SearchResult(
+            action=selected,
+            legal_actions=legal,
+            root_visits=root_visits,
+            pi=pi,
+            simulations=self.settings.simulations,
+            evaluator_calls=evaluator_calls,
+            root_q=root_q,
+            legal_action_mask=root.legal_context.action_mask,
+            implementation_fingerprint=search_implementation_fingerprint(self.settings.tree_reuse),
+        )
+
+    def search(
+        self,
+        state: SearchPosition,
+        evaluator: Evaluator,
+        *,
+        seed: int = 0,
+    ) -> SearchResult:
+        if state.is_terminal:
+            raise SearchError("Search cannot be started from a terminal Golden state")
+        before = state.state_key
+        increment("searches")
+        self._evaluator = evaluator
+        self._evaluator_calls = 0
+        self._rng = random.Random(int(seed))
+        root = self.tree.prepare_root(state)
+        if not root.expanded:
+            self._evaluate_and_expand(root)
+        for _ in range(self.settings.simulations):
+            increment("simulations")
+            self._simulate(root)
+        if state.state_key != before:
+            raise SearchError("Golden search mutated its parent state")
+        return self._finalize(state, root, self._evaluator_calls)
+
+
+class SequentialPUCT(_PUCTCore):
+    """Synchronous frontend over the canonical PUCT core."""
+
+
+@dataclass(frozen=True)
+class SearchEvaluationRequest:
+    """Execution boundary for one suspended Golden leaf evaluation.
+
+    The request contains scientific state/context objects only inside the
+    worker process.  An execution adapter may encode them into a shared slot
+    and resume the session with the resulting ``Evaluation``.
+    """
+
+    state: SearchPosition
+    legal_context: LegalActionContext
+
+
+class SequentialPUCTSession(_PUCTCore):
+    """Cooperative frontend over the canonical PUCT core.
+
+    A session performs ordinary single-tree simulations.  It yields only at
+    neural evaluations, allowing a process-local scheduler to interleave
+    independent games without virtual loss, parallel simulations, or a second
+    search implementation.
+    """
+
+    def __init__(
+        self,
+        state: SearchPosition,
+        settings: SearchSettings | None = None,
+        *,
+        adapter: SearchAdapter | None = None,
+        seed: int = 0,
+        trace: list[dict[str, object]] | None = None,
+        evaluation_transform: Callable[[Evaluation, SearchPosition, LegalActionContext], Evaluation] | None = None,
+        tree: SearchTree | None = None,
+    ) -> None:
+        if state.is_terminal:
+            raise SearchError("Search cannot be started from a terminal Golden state")
+        super().__init__(settings, adapter=adapter, trace=trace, tree=tree)
+        self._seed = int(seed)
+        self._transform = evaluation_transform
+        self._pending: SearchEvaluationRequest | None = None
+        self._result: SearchResult | None = None
+        self._generator = self._run(state)
+        try:
+            self._read_yield(next(self._generator))
+        except StopIteration as stopped:
+            self._read_yield(stopped.value)
+
+    @property
+    def result(self) -> SearchResult | None:
+        return self._result
+
+    @property
+    def pending(self) -> SearchEvaluationRequest | None:
+        return self._pending
+
+    def _run(self, state: SearchPosition):
+        before = state.state_key
+        increment("searches")
+        rng = random.Random(self._seed)
+        self._rng = rng
+        root = self.tree.prepare_root(state)
+        evaluator_calls = 0
+        if not root.expanded:
+            root_context = self._prepare_leaf(root)
+            if root_context is None:
+                raise SearchError("Search cannot be started from a terminal Golden state")
+            evaluation = yield SearchEvaluationRequest(state, root_context)
+            self._expand(root, evaluation, root_context, self._transform)
+            evaluator_calls += 1
+        else:
+            # Fresh root noise uses the original neural policy, never an
+            # already noisy prior. Keep all visits/Q/children/expansions.
+            if root.evaluation is None or root.legal_context is None:
+                raise SearchError("Reused root lacks its evaluation/context")
+            evaluation = root.evaluation
+            if self._transform is not None:
+                evaluation = self._transform(evaluation, state, root.legal_context)
+            priors = _policy_for_legal(evaluation, state, root.legal_context.actions, self.adapter)
+            for action, edge in root.edges.items():
+                edge.prior = priors[action]
+        for _ in range(self.settings.simulations):
+            increment("simulations")
+            path, leaf = self._traverse(root)
+            context = self._prepare_leaf(leaf)
+            if context is None:
+                utility = self.adapter.terminal_utility(leaf.state)
+            else:
+                evaluation = yield SearchEvaluationRequest(leaf.state, context)
+                utility = self._expand(leaf, evaluation, context, self._transform)
+                evaluator_calls += 1
+            self._backup(path, utility)
+        if state.state_key != before:
+            raise SearchError("Golden search mutated its parent state")
+        return self._finalize(state, root, evaluator_calls)
+
+    def _read_yield(self, value: object) -> None:
+        if isinstance(value, SearchEvaluationRequest):
+            self._pending = value
+            return
+        if isinstance(value, SearchResult):
+            self._result = value
+            self._pending = None
+            return
+        raise SearchError(f"Golden search session yielded {type(value).__name__}")
+
+    def advance(self) -> SearchEvaluationRequest | SearchResult:
+        if self._pending is not None:
+            return self._pending
+        if self._result is not None:
+            return self._result
+        raise SearchError("Golden search session is not suspended at an evaluation")
+
+    def resume(self, evaluation: Evaluation) -> SearchEvaluationRequest | SearchResult:
+        if self._pending is None:
+            raise SearchError("Golden search session is not waiting for an evaluation")
+        self._pending = None
+        try:
+            value = self._generator.send(evaluation)
+        except StopIteration as stopped:
+            self._read_yield(stopped.value)
+        else:
+            self._read_yield(value)
+        return self.advance()
+
+
+class SolveStatus(str, Enum):
+    EXACT = "EXACT"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class ExactSolveResult:
+    status: SolveStatus
+    utility: float | None
+    best_actions: tuple[int | str, ...]
+    nodes: int
+
+
+def solve_exact(
+    state: GoldenState,
+    *,
+    adapter: GoldenSearchAdapter | None = None,
+    node_limit: int = 100_000,
+) -> ExactSolveResult:
+    """Exhaust tiny Golden research trees or explicitly return UNKNOWN."""
+    if node_limit <= 0:
+        raise ValueError("node_limit must be positive")
+    adapter = adapter or GoldenSearchAdapter()
+    cache: dict[tuple[object, ...], tuple[float, tuple[int | str, ...]]] = {}
+    nodes = 0
+    exhausted = False
+
+    def visit(current: GoldenState) -> tuple[float, tuple[int | str, ...]] | None:
+        nonlocal nodes, exhausted
+        key = current.state_key
+        if key in cache:
+            return cache[key]
+        if nodes >= node_limit:
+            exhausted = True
+            return None
+        nodes += 1
+        if adapter.is_terminal(current):
+            solved = (adapter.terminal_utility(current), ())
+            cache[key] = solved
+            return solved
+        best = -float("inf")
+        best_actions: list[int | str] = []
+        for action in adapter.legal_actions(current):
+            child = adapter.apply_action(current, action)
+            child_solved = visit(child)
+            if child_solved is None:
+                return None
+            value = _child_to_parent_utility(child_solved[0])
+            if value > best + 1e-12:
+                best = value
+                best_actions = [action]
+            elif abs(value - best) <= 1e-12:
+                best_actions.append(action)
+        solved = (best, tuple(best_actions))
+        cache[key] = solved
+        return solved
+
+    solved = visit(state)
+    if solved is None or exhausted:
+        return ExactSolveResult(SolveStatus.UNKNOWN, None, (), nodes)
+    return ExactSolveResult(SolveStatus.EXACT, solved[0], solved[1], nodes)

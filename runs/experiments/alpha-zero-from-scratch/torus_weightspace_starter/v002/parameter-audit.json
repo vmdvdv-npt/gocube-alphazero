@@ -1,0 +1,70 @@
+{
+  "v001": {
+    "input_projection": [
+      720,
+      18
+    ],
+    "trunk": [
+      350400,
+      1682
+    ],
+    "output_norm": [
+      240,
+      236
+    ],
+    "point_policy": [
+      121,
+      31
+    ],
+    "pass_policy": [
+      121,
+      17
+    ],
+    "value_head": [
+      14883,
+      67
+    ],
+    "ownership_head": [
+      14883,
+      11
+    ],
+    "score_head": [
+      14641,
+      30
+    ]
+  },
+  "v002": {
+    "input_projection": [
+      720,
+      14
+    ],
+    "trunk": [
+      350400,
+      4722
+    ],
+    "output_norm": [
+      240,
+      236
+    ],
+    "point_policy": [
+      121,
+      30
+    ],
+    "pass_policy": [
+      121,
+      9
+    ],
+    "value_head": [
+      14883,
+      145
+    ],
+    "ownership_head": [
+      14883,
+      9
+    ],
+    "score_head": [
+      14641,
+      30
+    ]
+  }
+}

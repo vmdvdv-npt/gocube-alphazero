@@ -1,0 +1,42 @@
+{
+  "v002-v001-policy": {
+    "paired_won_split_lost": [
+      10,
+      49,
+      37
+    ],
+    "exact_two_sided_sign_p": 9.848878492846325e-05,
+    "paired_bootstrap_score_95": [
+      0.296875,
+      0.421875
+    ],
+    "same_state_brier_difference": -0.018548879074205986,
+    "paired_bootstrap_brier_difference_95": [
+      -0.025189333990557488,
+      -0.011864139451592988
+    ],
+    "resamples": 100000,
+    "seed": 2026110366,
+    "status": "SUPPLEMENTARY_POST_EVALUATION_NOT_PRIMARY_ACCEPTANCE"
+  },
+  "v002-v001-s64": {
+    "paired_won_split_lost": [
+      24,
+      54,
+      18
+    ],
+    "exact_two_sided_sign_p": 0.44079906734259566,
+    "paired_bootstrap_score_95": [
+      0.4635416666666667,
+      0.5989583333333334
+    ],
+    "same_state_brier_difference": -0.021295065920771516,
+    "paired_bootstrap_brier_difference_95": [
+      -0.02948393116307465,
+      -0.01321121598637084
+    ],
+    "resamples": 100000,
+    "seed": 2026110366,
+    "status": "SUPPLEMENTARY_POST_EVALUATION_NOT_PRIMARY_ACCEPTANCE"
+  }
+}
