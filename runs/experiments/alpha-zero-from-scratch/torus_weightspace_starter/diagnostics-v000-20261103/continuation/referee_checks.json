@@ -1,0 +1,1009 @@
+[
+  {
+    "id": "wrap_capture",
+    "moves": [
+      40,
+      0,
+      72,
+      42,
+      8,
+      44,
+      9,
+      46
+    ],
+    "side_to_move": 1,
+    "target": 1,
+    "target_legal": true,
+    "legal_alternatives": 73,
+    "groups_before": {
+      "0": {
+        "stones": [
+          0
+        ],
+        "liberties": [
+          1
+        ],
+        "color": 2
+      },
+      "8": {
+        "stones": [
+          8
+        ],
+        "liberties": [
+          7,
+          17,
+          80
+        ],
+        "color": 1
+      },
+      "9": {
+        "stones": [
+          9
+        ],
+        "liberties": [
+          10,
+          17,
+          18
+        ],
+        "color": 1
+      },
+      "40": {
+        "stones": [
+          40
+        ],
+        "liberties": [
+          31,
+          39,
+          41,
+          49
+        ],
+        "color": 1
+      },
+      "42": {
+        "stones": [
+          42
+        ],
+        "liberties": [
+          33,
+          41,
+          43,
+          51
+        ],
+        "color": 2
+      },
+      "44": {
+        "stones": [
+          44
+        ],
+        "liberties": [
+          35,
+          36,
+          43,
+          53
+        ],
+        "color": 2
+      },
+      "46": {
+        "stones": [
+          46
+        ],
+        "liberties": [
+          37,
+          45,
+          47,
+          55
+        ],
+        "color": 2
+      },
+      "72": {
+        "stones": [
+          72
+        ],
+        "liberties": [
+          63,
+          73,
+          80
+        ],
+        "color": 1
+      }
+    },
+    "target_capture": [
+      0
+    ],
+    "target_group_after": {
+      "stones": [
+        1
+      ],
+      "liberties": [
+        0,
+        2,
+        10,
+        73
+      ]
+    }
+  },
+  {
+    "id": "ordinary_capture",
+    "moves": [
+      80,
+      40,
+      31,
+      73,
+      39,
+      75,
+      49,
+      5
+    ],
+    "side_to_move": 1,
+    "target": 41,
+    "target_legal": true,
+    "legal_alternatives": 73,
+    "groups_before": {
+      "5": {
+        "stones": [
+          5
+        ],
+        "liberties": [
+          4,
+          6,
+          14,
+          77
+        ],
+        "color": 2
+      },
+      "31": {
+        "stones": [
+          31
+        ],
+        "liberties": [
+          22,
+          30,
+          32
+        ],
+        "color": 1
+      },
+      "39": {
+        "stones": [
+          39
+        ],
+        "liberties": [
+          30,
+          38,
+          48
+        ],
+        "color": 1
+      },
+      "40": {
+        "stones": [
+          40
+        ],
+        "liberties": [
+          41
+        ],
+        "color": 2
+      },
+      "49": {
+        "stones": [
+          49
+        ],
+        "liberties": [
+          48,
+          50,
+          58
+        ],
+        "color": 1
+      },
+      "73": {
+        "stones": [
+          73
+        ],
+        "liberties": [
+          1,
+          64,
+          72,
+          74
+        ],
+        "color": 2
+      },
+      "75": {
+        "stones": [
+          75
+        ],
+        "liberties": [
+          3,
+          66,
+          74,
+          76
+        ],
+        "color": 2
+      },
+      "80": {
+        "stones": [
+          80
+        ],
+        "liberties": [
+          8,
+          71,
+          72,
+          79
+        ],
+        "color": 1
+      }
+    },
+    "target_capture": [
+      40
+    ],
+    "target_group_after": {
+      "stones": [
+        41
+      ],
+      "liberties": [
+        32,
+        40,
+        42,
+        50
+      ]
+    }
+  },
+  {
+    "id": "futile_atari",
+    "moves": [
+      0,
+      72,
+      40,
+      8,
+      42,
+      9,
+      44,
+      2,
+      46,
+      10,
+      48,
+      73
+    ],
+    "side_to_move": 1,
+    "target": 1,
+    "target_legal": false,
+    "legal_alternatives": 68,
+    "groups_before": {
+      "0": {
+        "stones": [
+          0
+        ],
+        "liberties": [
+          1
+        ],
+        "color": 1
+      },
+      "2": {
+        "stones": [
+          2
+        ],
+        "liberties": [
+          1,
+          3,
+          11,
+          74
+        ],
+        "color": 2
+      },
+      "8": {
+        "stones": [
+          8
+        ],
+        "liberties": [
+          7,
+          17,
+          80
+        ],
+        "color": 2
+      },
+      "9": {
+        "stones": [
+          9,
+          10
+        ],
+        "liberties": [
+          1,
+          11,
+          17,
+          18,
+          19
+        ],
+        "color": 2
+      },
+      "40": {
+        "stones": [
+          40
+        ],
+        "liberties": [
+          31,
+          39,
+          41,
+          49
+        ],
+        "color": 1
+      },
+      "42": {
+        "stones": [
+          42
+        ],
+        "liberties": [
+          33,
+          41,
+          43,
+          51
+        ],
+        "color": 1
+      },
+      "44": {
+        "stones": [
+          44
+        ],
+        "liberties": [
+          35,
+          36,
+          43,
+          53
+        ],
+        "color": 1
+      },
+      "46": {
+        "stones": [
+          46
+        ],
+        "liberties": [
+          37,
+          45,
+          47,
+          55
+        ],
+        "color": 1
+      },
+      "48": {
+        "stones": [
+          48
+        ],
+        "liberties": [
+          39,
+          47,
+          49,
+          57
+        ],
+        "color": 1
+      },
+      "72": {
+        "stones": [
+          72,
+          73
+        ],
+        "liberties": [
+          1,
+          63,
+          64,
+          74,
+          80
+        ],
+        "color": 2
+      }
+    },
+    "target_capture": null,
+    "target_group_after": null
+  },
+  {
+    "id": "connect_weak",
+    "moves": [
+      39,
+      30,
+      41,
+      38,
+      0,
+      48,
+      2,
+      32,
+      4,
+      42,
+      6,
+      50
+    ],
+    "side_to_move": 1,
+    "target": 40,
+    "target_legal": true,
+    "legal_alternatives": 69,
+    "groups_before": {
+      "0": {
+        "stones": [
+          0
+        ],
+        "liberties": [
+          1,
+          8,
+          9,
+          72
+        ],
+        "color": 1
+      },
+      "2": {
+        "stones": [
+          2
+        ],
+        "liberties": [
+          1,
+          3,
+          11,
+          74
+        ],
+        "color": 1
+      },
+      "4": {
+        "stones": [
+          4
+        ],
+        "liberties": [
+          3,
+          5,
+          13,
+          76
+        ],
+        "color": 1
+      },
+      "6": {
+        "stones": [
+          6
+        ],
+        "liberties": [
+          5,
+          7,
+          15,
+          78
+        ],
+        "color": 1
+      },
+      "30": {
+        "stones": [
+          30
+        ],
+        "liberties": [
+          21,
+          29,
+          31
+        ],
+        "color": 2
+      },
+      "32": {
+        "stones": [
+          32
+        ],
+        "liberties": [
+          23,
+          31,
+          33
+        ],
+        "color": 2
+      },
+      "38": {
+        "stones": [
+          38
+        ],
+        "liberties": [
+          29,
+          37,
+          47
+        ],
+        "color": 2
+      },
+      "39": {
+        "stones": [
+          39
+        ],
+        "liberties": [
+          40
+        ],
+        "color": 1
+      },
+      "41": {
+        "stones": [
+          41
+        ],
+        "liberties": [
+          40
+        ],
+        "color": 1
+      },
+      "42": {
+        "stones": [
+          42
+        ],
+        "liberties": [
+          33,
+          43,
+          51
+        ],
+        "color": 2
+      },
+      "48": {
+        "stones": [
+          48
+        ],
+        "liberties": [
+          47,
+          49,
+          57
+        ],
+        "color": 2
+      },
+      "50": {
+        "stones": [
+          50
+        ],
+        "liberties": [
+          49,
+          51,
+          59
+        ],
+        "color": 2
+      }
+    },
+    "target_capture": [],
+    "target_group_after": {
+      "stones": [
+        39,
+        40,
+        41
+      ],
+      "liberties": [
+        31,
+        49
+      ]
+    }
+  },
+  {
+    "id": "false_eye",
+    "moves": [
+      39,
+      30,
+      41,
+      32,
+      31,
+      0,
+      49,
+      2
+    ],
+    "side_to_move": 1,
+    "target": 40,
+    "target_legal": true,
+    "legal_alternatives": 73,
+    "groups_before": {
+      "0": {
+        "stones": [
+          0
+        ],
+        "liberties": [
+          1,
+          8,
+          9,
+          72
+        ],
+        "color": 2
+      },
+      "2": {
+        "stones": [
+          2
+        ],
+        "liberties": [
+          1,
+          3,
+          11,
+          74
+        ],
+        "color": 2
+      },
+      "30": {
+        "stones": [
+          30
+        ],
+        "liberties": [
+          21,
+          29
+        ],
+        "color": 2
+      },
+      "31": {
+        "stones": [
+          31
+        ],
+        "liberties": [
+          22,
+          40
+        ],
+        "color": 1
+      },
+      "32": {
+        "stones": [
+          32
+        ],
+        "liberties": [
+          23,
+          33
+        ],
+        "color": 2
+      },
+      "39": {
+        "stones": [
+          39
+        ],
+        "liberties": [
+          38,
+          40,
+          48
+        ],
+        "color": 1
+      },
+      "41": {
+        "stones": [
+          41
+        ],
+        "liberties": [
+          40,
+          42,
+          50
+        ],
+        "color": 1
+      },
+      "49": {
+        "stones": [
+          49
+        ],
+        "liberties": [
+          40,
+          48,
+          50,
+          58
+        ],
+        "color": 1
+      }
+    },
+    "target_capture": [],
+    "target_group_after": {
+      "stones": [
+        31,
+        39,
+        40,
+        41,
+        49
+      ],
+      "liberties": [
+        22,
+        38,
+        42,
+        48,
+        50,
+        58
+      ]
+    }
+  },
+  {
+    "id": "profitable_capture",
+    "moves": [
+      39,
+      40,
+      41,
+      49,
+      31,
+      60,
+      48,
+      62,
+      58,
+      64,
+      0,
+      66
+    ],
+    "side_to_move": 1,
+    "target": 50,
+    "target_legal": true,
+    "legal_alternatives": 69,
+    "groups_before": {
+      "0": {
+        "stones": [
+          0
+        ],
+        "liberties": [
+          1,
+          8,
+          9,
+          72
+        ],
+        "color": 1
+      },
+      "31": {
+        "stones": [
+          31
+        ],
+        "liberties": [
+          22,
+          30,
+          32
+        ],
+        "color": 1
+      },
+      "39": {
+        "stones": [
+          39,
+          48
+        ],
+        "liberties": [
+          30,
+          38,
+          47,
+          57
+        ],
+        "color": 1
+      },
+      "40": {
+        "stones": [
+          40,
+          49
+        ],
+        "liberties": [
+          50
+        ],
+        "color": 2
+      },
+      "41": {
+        "stones": [
+          41
+        ],
+        "liberties": [
+          32,
+          42,
+          50
+        ],
+        "color": 1
+      },
+      "58": {
+        "stones": [
+          58
+        ],
+        "liberties": [
+          57,
+          59,
+          67
+        ],
+        "color": 1
+      },
+      "60": {
+        "stones": [
+          60
+        ],
+        "liberties": [
+          51,
+          59,
+          61,
+          69
+        ],
+        "color": 2
+      },
+      "62": {
+        "stones": [
+          62
+        ],
+        "liberties": [
+          53,
+          54,
+          61,
+          71
+        ],
+        "color": 2
+      },
+      "64": {
+        "stones": [
+          64
+        ],
+        "liberties": [
+          55,
+          63,
+          65,
+          73
+        ],
+        "color": 2
+      },
+      "66": {
+        "stones": [
+          66
+        ],
+        "liberties": [
+          57,
+          65,
+          67,
+          75
+        ],
+        "color": 2
+      }
+    },
+    "target_capture": [
+      40,
+      49
+    ],
+    "target_group_after": {
+      "stones": [
+        41,
+        50
+      ],
+      "liberties": [
+        32,
+        40,
+        42,
+        49,
+        51,
+        59
+      ]
+    }
+  },
+  {
+    "id": "long_distributed",
+    "moves": [
+      0,
+      10,
+      1,
+      11,
+      2,
+      12,
+      3,
+      13,
+      4,
+      14,
+      5,
+      15,
+      6,
+      16,
+      7,
+      17,
+      8,
+      72,
+      36,
+      73,
+      37,
+      74,
+      38,
+      75,
+      39,
+      77,
+      40,
+      78,
+      41,
+      79,
+      42,
+      80,
+      43
+    ],
+    "side_to_move": 2,
+    "target": 9,
+    "target_legal": true,
+    "legal_alternatives": 48,
+    "groups_before": {
+      "0": {
+        "stones": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "liberties": [
+          9,
+          76
+        ],
+        "color": 1
+      },
+      "10": {
+        "stones": [
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ],
+        "liberties": [
+          9,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26
+        ],
+        "color": 2
+      },
+      "36": {
+        "stones": [
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43
+        ],
+        "liberties": [
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52
+        ],
+        "color": 1
+      },
+      "72": {
+        "stones": [
+          72,
+          73,
+          74,
+          75,
+          77,
+          78,
+          79,
+          80
+        ],
+        "liberties": [
+          63,
+          64,
+          65,
+          66,
+          68,
+          69,
+          70,
+          71,
+          76
+        ],
+        "color": 2
+      }
+    },
+    "target_capture": [],
+    "target_group_after": {
+      "stones": [
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17
+      ],
+      "liberties": [
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26
+      ]
+    }
+  }
+]
