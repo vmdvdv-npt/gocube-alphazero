@@ -1,0 +1,13 @@
+{
+  "command": "/home/codex/projects/gocube-alphazero/.venv/bin/python experiment_cli.py zero-pass --writer v002/compiler.py --output v002/candidates/space",
+  "cwd": "/home/codex/projects/gocube-weightspace-v002/runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter",
+  "source_sha256": {
+    "design_weights.py": "9255f0917099ad50fbd00134d5ad4b247c28f0a032a303f044801cfbf01ff022",
+    "diagnostics.py": "35c26e34af63885e289d15518b7b3ee4514e426122faa5b34b43edb332bffd51",
+    "experiment_cli.py": "3a9e91ac6d3424896f09b0f53aadcd745552adc603e3c665290c93ef8d1c05e5",
+    "lock_reference.py": "753f0733e250c3dc94689f5337cc310a8c8f3777371684d09c7184ff77407c23",
+    "make_checkpoint.py": "ced7f3e06fba1288810805da0a01c88a7218464f9cebbb6eea765ec03b405c66",
+    "model.py": "f8fb13801989f115ece7c3d8bf28660928bdd6ac99228f604d5c0c5a048431b6",
+    "weights.py": "7c85d907f3ca07c21ed0533fe13cf2eae6dd09510babba5cf829e6849664cc66"
+  }
+}

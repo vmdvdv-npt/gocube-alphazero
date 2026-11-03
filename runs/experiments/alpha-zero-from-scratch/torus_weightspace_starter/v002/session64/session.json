@@ -1,0 +1,50 @@
+{
+  "allocation": {
+    "development": 8,
+    "diagnostic": 8,
+    "holdout": 48
+  },
+  "budget": 64,
+  "cpuct": 1.25,
+  "created_utc": "2026-11-03T08:55:57Z",
+  "dev_seed": 2026110302,
+  "development_sha256": "fcd6d89a5d6e60165f51e2472ada2487d567e49129f0ac2b5b34c9dc7d809476",
+  "fpu": 0,
+  "games_per_comparison": 192,
+  "holdout_comparisons": [
+    "v002-v001-policy",
+    "v002-M269-policy",
+    "v001-M269-policy",
+    "v002-v001-s64",
+    "v002-M269-s64",
+    "v001-M269-s64"
+  ],
+  "holdout_seed": 2026110399,
+  "holdout_sha256": "9c741719822b881e5dc040a416d83d1a9e4b5f8a67a99a0d77ea48c97971ce97",
+  "komi": 1.5,
+  "pairs_per_round": 12,
+  "policy": "greedy legal argmax",
+  "schema": "weightspace-session-v002",
+  "selection": "at most 8 development batches; one frozen candidate; no holdout tuning",
+  "simulations": [
+    0,
+    64
+  ],
+  "sources": {
+    "gocube_golden/rules.py": "f46728b87f43f5e663cedd88a4e5b5b349c2e968c979c2b6d77225d7d23415fe",
+    "gocube_golden/search.py": "30a5f2d029d1b24ee7819b59dbdd238193ea4ae3883dfde294e471c7d9198227",
+    "gocube_golden/torus9_m137_5ch.py": "9f5736f60bed56d6e935891ae8c3857e8ad85fbe758624e107e272e69abdb7be",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/design_weights.py": "9255f0917099ad50fbd00134d5ad4b247c28f0a032a303f044801cfbf01ff022",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/diagnostics.py": "35c26e34af63885e289d15518b7b3ee4514e426122faa5b34b43edb332bffd51",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/experiment_cli.py": "3a9e91ac6d3424896f09b0f53aadcd745552adc603e3c665290c93ef8d1c05e5",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/lock_reference.py": "753f0733e250c3dc94689f5337cc310a8c8f3777371684d09c7184ff77407c23",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/make_checkpoint.py": "ced7f3e06fba1288810805da0a01c88a7218464f9cebbb6eea765ec03b405c66",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/model.py": "f8fb13801989f115ece7c3d8bf28660928bdd6ac99228f604d5c0c5a048431b6",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/v002/compiler.py": "c68731c3b93a70cb0514023a4b652128c0f9c977f6d60fc7569ce33d2cd587ae",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/v002/session.py": "dec57d2ff51853c03aa9d433d9de16631d9d2feafc5ea3670db84fd1d1c9e873",
+    "runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/weights.py": "7c85d907f3ca07c21ed0533fe13cf2eae6dd09510babba5cf829e6849664cc66"
+  },
+  "success": "v002-v001 paired 95% CI lower bound > 0.5; report M269 and multiplicity",
+  "tree_reuse": true,
+  "watchdog": 1000
+}

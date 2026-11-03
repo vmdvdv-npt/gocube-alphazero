@@ -1,0 +1,32 @@
+{
+  "architecture": {
+    "architecture_id": "experimental-torus9-graphnet8x120-direct-weights-v0",
+    "blocks": 8,
+    "board": [
+      9,
+      9
+    ],
+    "input_channels": 5,
+    "parameter_count": 396009,
+    "policy_actions": 82,
+    "topology": "torus",
+    "value_classes": 3,
+    "width": 120
+  },
+  "artifact_sha256": "ad3c5e4e70678d9fbf2ec08e8be81b2948dc6f7bdf72c0b61be9534c8abd1a9a",
+  "design": "programmed",
+  "finite": true,
+  "game_evaluation_status": "NOT_EVALUATED",
+  "parameter_count": 396009,
+  "runtime": {
+    "numpy": "1.24.4",
+    "python": "3.9.25",
+    "torch": "2.4.1+cu124"
+  },
+  "schema": "weightspace-torus9-experiment-v1",
+  "state_sha256": "3f27352d46966115212e95340df2baea98a09e4230072a37a393092551efaff8",
+  "tensor_count": 92,
+  "training": "none",
+  "wdl_semantics": "side-to-move:[WIN,DRAW,LOSS]",
+  "writer_sha256": "80e8567e4a92ca2d0ce58093564e3db6b33ee53a665a1d4a939d50a77ad875ce"
+}

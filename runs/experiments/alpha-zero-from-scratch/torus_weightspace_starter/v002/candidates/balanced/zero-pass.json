@@ -1,0 +1,40 @@
+{
+  "checkpoint": "/home/codex/projects/gocube-weightspace-v002/runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter/v002/candidates/balanced/checkpoint.pt",
+  "forward_calls": 0,
+  "genesis_sha256": "49e849b12fa7e4c549a9aa80e1bd46abcf164265f806c0581b8c9394ecb32ac0",
+  "metadata": {
+    "architecture": {
+      "architecture_id": "experimental-torus9-graphnet8x120-direct-weights-v0",
+      "blocks": 8,
+      "board": [
+        9,
+        9
+      ],
+      "input_channels": 5,
+      "parameter_count": 396009,
+      "policy_actions": 82,
+      "topology": "torus",
+      "value_classes": 3,
+      "width": 120
+    },
+    "artifact_sha256": "17195093a8a065a619e99ad4847ac3af82d4748d5c8b7257194a572b561ece0b",
+    "design": "programmed",
+    "finite": true,
+    "game_evaluation_status": "NOT_EVALUATED",
+    "parameter_count": 396009,
+    "runtime": {
+      "numpy": "1.24.4",
+      "python": "3.9.25",
+      "torch": "2.4.1+cu124"
+    },
+    "schema": "weightspace-torus9-experiment-v1",
+    "state_sha256": "0075096074574bc8bdeea155aca54ab0a23a4e32c0b349914245baf6f17c8554",
+    "tensor_count": 92,
+    "training": "none",
+    "wdl_semantics": "side-to-move:[WIN,DRAW,LOSS]",
+    "writer_sha256": "e5d12a4b70b10c91eead14b9aa1f21fffdb0544354a826d33e879370f8b7a709"
+  },
+  "mode": "zero-pass",
+  "reproducible": true,
+  "status": "PASS"
+}
