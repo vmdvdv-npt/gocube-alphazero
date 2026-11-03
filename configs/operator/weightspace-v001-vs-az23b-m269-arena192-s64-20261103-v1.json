@@ -1,0 +1,13 @@
+{
+  "schema": "gocube-operator-job-v1",
+  "run_id": "weightspace-v001-vs-az23b-m269-arena192-s64-20261103-v1",
+  "arenas": [{
+    "id": "v001-vs-az23b-m269",
+    "candidate": "weightspace-v001-arena-20261103-v1/v001",
+    "reference": "az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/M269",
+    "games": 192,
+    "mcts_simulations": 64,
+    "master_seed": 2026092902,
+    "tree_reuse": true
+  }]
+}
