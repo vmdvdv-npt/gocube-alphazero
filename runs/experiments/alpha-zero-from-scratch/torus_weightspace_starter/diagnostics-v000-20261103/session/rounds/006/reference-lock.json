@@ -1,0 +1,74 @@
+{
+  "architecture": {
+    "architecture_id": "GoldenGraphNetV2-Torus9-M137-5CH",
+    "auxiliary_variant": "wdl+ownership+score",
+    "blocks": 8,
+    "conversion": "linear-input-komi-fold-v1",
+    "explicit_symmetry_augmentation": false,
+    "heads": {
+      "ownership": [
+        81,
+        3
+      ],
+      "policy": [
+        82
+      ],
+      "score": [
+        1
+      ],
+      "value": [
+        3
+      ]
+    },
+    "hidden": 80,
+    "input_channels": 5,
+    "point_count": 81,
+    "source_architecture_id": "GoldenGraphNetV2-Torus9",
+    "source_checkpoint": "M137",
+    "topology_fingerprint": "sha256:a417b6d4e3da67ead03240361976a6f412c89403077bec0ac0c0a68ca9665ed1",
+    "topology_id": "torus-9x9-row-major-v1",
+    "training_contract": "sha256:068f8a4b98190e8bf84529a774499592dc5203d533c11f0dd346c125e16de9b8",
+    "training_ready": true
+  },
+  "architecture_id": "GoldenGraphNetV2-Torus9-M137-5CH",
+  "arena_champion_verified": true,
+  "arena_evidence": [
+    {
+      "draws": 0,
+      "games": 384,
+      "losses": 154,
+      "path": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/az26-h266-m267-m270-offline-lr-ab-20261012-v1-ab-m267-m270-lr-A-M0270-vs-az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B-M0269-c24603c36fda/summary.json",
+      "role": "reference",
+      "sha256": "1864a0f986bcb0fe1cd3629758084844ba19eeb48bb65da74e92f00516fdd070",
+      "wins": 230
+    },
+    {
+      "draws": 0,
+      "games": 384,
+      "losses": 185,
+      "path": "/home/codex/projects/gocube-alphazero/runs/torus9/evaluations/az26-h266-m267-m270-offline-lr-ab-20261012-v1-ab-m267-m270-lr-B-M0270-vs-az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B-M0269-19dc8ba8b1e4/summary.json",
+      "role": "reference",
+      "sha256": "6f158965f6d9e24e6f2084fa6a9b45deba677c2143815ad1a48fa847ed641b59",
+      "wins": 199
+    }
+  ],
+  "artifact_sha256": "f16af6c473cd5c3d89687f9edc99ba94ec0bf4d7e3da00166368fccae41609f7",
+  "checkpoint": "/home/codex/projects/gocube-alphazero/runs/torus9/active/az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/checkpoints/M269.pt",
+  "input_channels": 5,
+  "komi": 1.5,
+  "model_hash": "sha256:a51b5c1f971d51c8337559f888ad96372892d3a2143d4a0456134b44bc6ef9ba",
+  "rules_fingerprint": "sha256:1f982c35a1c21b1e4f2f90b4b41bc1f04e7ffd83078a58bce12aefbb7a562a74",
+  "rules_fingerprint_source": "engine-derived from canonical topology and metadata komi",
+  "search": {
+    "cpuct": 1.25,
+    "fpu": 0.0,
+    "simulations": 64,
+    "tree_reuse": true,
+    "watchdog": 1000
+  },
+  "selection_rationale": "AZ23 B/M269 remains the reference in the latest completed local direct comparisons (AZ26): 230:154 vs A/M270 and 199:185 vs B/M270; both VALID, 384 games, zero technical outcomes. Later training generations do not establish a stronger champion. The starter claim 252:132 vs H266 is not used without located primary evidence.",
+  "selection_scope": "latest verified reference in inspected local Arena records; no global-strength claim",
+  "sidecar": "/home/codex/projects/gocube-alphazero/runs/torus9/active/az23-m266-m269-offline-lr-ab-20261010-v1-ab-m267-m269-lr-B/checkpoints/M269.metadata.json",
+  "sidecar_sha256": "67f066611fe10fa0d263934466e21cd27a1ac2413c3b116f7fa361cc3ba8a71c",
+  "topology_fingerprint": "sha256:a417b6d4e3da67ead03240361976a6f412c89403077bec0ac0c0a68ca9665ed1"
+}
