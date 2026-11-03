@@ -1,0 +1,23 @@
+{
+  "activations": true,
+  "checkpoint": "versions/v000/checkpoint.pt",
+  "checkpoint_sha256": "5095d39b05435c5880f1e20362b3cc73c17ab02d11d4cd65b143e0266b9d64e1",
+  "command": "/home/codex/projects/gocube-alphazero/.venv/bin/python experiment_cli.py positions --session /tmp/torus9-v000-diagnostic-20261103/session --checkpoint versions/v000/checkpoint.pt --komi 1.5 --positions /tmp/torus9-v000-diagnostic-2/positions.json --top-k 82 --activations",
+  "cwd": "/home/codex/projects/gocube-weightspace-prep/runs/experiments/alpha-zero-from-scratch/torus_weightspace_starter",
+  "komi": 1.5,
+  "mode": "positions",
+  "positions": "/tmp/torus9-v000-diagnostic-2/positions.json",
+  "repository_revision": "ca326c139617f55c2ebde262c83f6a31255b93e8",
+  "session": "/tmp/torus9-v000-diagnostic-20261103/session",
+  "source_sha256": {
+    "design_weights.py": "b994526c665ce3696df90d0af6caa4620377dc77f29b02c84a5a81d021fbcfbd",
+    "diagnostics.py": "35c26e34af63885e289d15518b7b3ee4514e426122faa5b34b43edb332bffd51",
+    "experiment_cli.py": "3a9e91ac6d3424896f09b0f53aadcd745552adc603e3c665290c93ef8d1c05e5",
+    "lock_reference.py": "753f0733e250c3dc94689f5337cc310a8c8f3777371684d09c7184ff77407c23",
+    "make_checkpoint.py": "ced7f3e06fba1288810805da0a01c88a7218464f9cebbb6eea765ec03b405c66",
+    "model.py": "f8fb13801989f115ece7c3d8bf28660928bdd6ac99228f604d5c0c5a048431b6",
+    "weights.py": "7c85d907f3ca07c21ed0533fe13cf2eae6dd09510babba5cf829e6849664cc66"
+  },
+  "threads": 1,
+  "top_k": 82
+}
