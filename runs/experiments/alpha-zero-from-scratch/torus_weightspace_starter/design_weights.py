@@ -1,7 +1,7 @@
-"""Torus9 WSP v000: compile a bounded graph circuit into zero FP32 weights.
+"""Torus9 WSP v001: positive capture proofs and separate uncertain pressure.
 
 No observations, inference, external data, random numbers, fitting or training.
-See CIRCUITS_V000.md for equations, assumptions and diagnostic limitations.
+See CIRCUITS_V001.md for equations, proofs and diagnostic limitations.
 All linear matrices use PyTorch's [output, input] convention.
 """
 import json
@@ -100,28 +100,29 @@ def program(weights):
     for block in range(8):
         weights[f'blocks.{block}.norm.weight'][:118] = LN_SCALE
 
-    # Block 0: counts, color-gated direct liberties, integer-margin flags.
+    # Block 0: preserve direct liberties; seed zero-liberty leaf peeling.
+    # n_empty is derived as 4-n_own-n_opp, freeing a residual register.
     c.begin(0)
-    for color in ('own', 'opp', 'empty'):
+    for color in ('own', 'opp'):
         c.relu(c.new('n_' + color, 4.0), neighbors={color: 1.0})
     for color in ('own', 'opp'):
         c.relu(c.new('lib_' + color, 4.0), {color: 4.0}, {'empty': 1.0}, -4.0)
-        for liberties in (2, 3):
-            c.ramp(c.new(f'direct{liberties}_{color}'), {color: 8.0}, {'empty': 1.0},
-                   low=8.0 + liberties - 0.75, high=8.0 + liberties - 0.25)
+        c.ramp(c.new(f'peeled_{color}_0'), {color: 8.0},
+               {'empty': -5.0, color: -1.0}, low=6.25, high=6.75)
 
-    # Block 1: certificates over the same-color star (center + adjacent stones).
-    # Any EMPTY point touches at most two vertices of this star on the 9x9 torus.
-    # Thus S >= 3 certifies >=2 distinct liberties; S >= 5 certifies >=3.
+    # Block 1: weighted star certificates S=2*L(center)+sum L(neighbors).
+    # Each distinct liberty contributes at most 2, also when directly adjacent
+    # to the center. This subsumes the old separate direct2/direct3 flags.
     c.begin(1)
     for color in ('own', 'opp'):
-        for liberties, threshold, boost in ((2, 3, 4.0), (3, 5, 8.0)):
+        for liberties, threshold in ((2, 3), (3, 5)):
             c.ramp(c.new(f'cert{liberties}_{color}_1'),
-                   {color: 24.0, 'lib_' + color: 1.0,
-                    f'direct{liberties}_{color}': boost},
+                   {color: 24.0, 'lib_' + color: 2.0},
                    {'lib_' + color: 1.0},
                    low=24.0 + threshold - 0.75, high=24.0 + threshold - 0.25)
-    c.relu(c.new('two_step_opp', 16.0), neighbors={'n_opp': 1.0})
+        c.ramp(c.new(f'peeled_{color}_1'),
+               {color: 8.0, 'lib_' + color: -5.0, 'n_' + color: -1.0},
+               {f'peeled_{color}_0': 1.0}, low=6.25, high=6.75)
     for color in ('own', 'opp'):
         c.relu(c.new(f'influence_{color}_1'), {'n_' + color: 0.125},
                {'n_' + color: 0.03125})
@@ -131,6 +132,17 @@ def program(weights):
     for block in range(2, 5):
         c.begin(block)
         for color in ('own', 'opp'):
+            if block == 2:
+                c.ramp(c.new(f'peeled_{color}_2'),
+                       {color: 8.0, 'lib_' + color: -5.0, 'n_' + color: -1.0},
+                       {f'peeled_{color}_1': 1.0}, low=6.25, high=6.75)
+            elif block == 3:
+                # Every same-color neighbor was peeled with ZERO liberties.
+                # At a stone adjacent to the candidate empty point, L<=1 then
+                # proves exactly one liberty for the ENTIRE connected group.
+                c.ramp(c.new('closed_atari_' + color),
+                       {color: 8.0, 'lib_' + color: -1.0, 'n_' + color: -4.0},
+                       {f'peeled_{color}_2': 4.0}, low=6.25, high=6.75)
             for liberties in (2, 3):
                 source = f'cert{liberties}_{color}_{block - 1}'
                 c.ramp(c.new(f'cert{liberties}_{color}_{block}'),
@@ -150,28 +162,38 @@ def program(weights):
         c.ramp(c.new('territory_' + color),
                {f'influence_{color}_4': 2.0, f'influence_{other}_4': -2.0,
                 'empty': 2.0}, bias=-2.25)
+    # Local connected mass exposed to uncertain <3-liberty risk. This is a
+    # bounded adjacency count, NOT a count of distinct stones in the group.
+    c.relu(c.new('risk_degree_own', 4.0),
+           {'n_own': 1.0, 'own': 4.0, 'cert3_own_4': -4.0},
+           {'cert3_own_4': -4.0}, bias=-4.0)
 
-    # Block 6: move-level tactics. Legal gating makes pooled threats useful to
-    # PASS as well. Occupancy alone is not treated as a legal mask.
+    # Block 6: only a positive closed-group proof earns the full capture bonus
+    # and the capture exception to self-atari. Unknown groups remain separate.
     c.begin(6)
     for name, color in (('capture', 'opp'), ('rescue', 'own')):
-        c.ramp(c.new(name), {'legal': 8.0}, {f'weak2_{color}': 2.0}, bias=-8.5)
-    c.relu(c.new('self_atari', 1.5), {'n_empty': -1.0, 'n_own': -2.0},
-           {'weak3_own': 2.0, 'weak2_opp': -2.0}, bias=1.5)
-    c.relu(c.new('eye'), {'n_own': 1.0, 'two_step_opp': -0.25},
-           {'weak2_own': -1.0}, bias=-3.0)
+        c.ramp(c.new(name), {'legal': 8.0}, {'closed_atari_' + color: 2.0}, bias=-8.5)
+    c.relu(c.new('self_atari', 1.5), {'n_own': -1.0, 'n_opp': 1.0},
+           {'weak3_own': 2.0, 'closed_atari_opp': -2.0}, bias=-2.5)
+    # The second opponent neighborhood is read directly; no stored A^2 plane.
+    c.relu(c.new('eye'), {'n_own': 1.0},
+           {'n_opp': -0.25, 'weak2_own': -1.0}, bias=-3.0)
     c.relu(c.new('unsupported_contact', 4.0), {'n_opp': 1.0, 'n_own': -2.0},
            {'weak3_own': 2.0})
-    c.ramp(c.new('attack_two'), {'legal': 8.0},
-           {'weak3_opp': 2.0, 'weak2_opp': -2.0}, bias=-8.5)
+    # U3=1,U2=0: potential two-liberty attack. U3=U2=1: unknown, lower
+    # pressure. A proven immediate capture has its own independent register.
+    c.ramp(c.new('attack_pressure'), {'legal': 8.0},
+           {'weak3_opp': 2.0, 'weak2_opp': -1.5, 'closed_atari_opp': -2.0}, bias=-8.0)
+    c.ramp(c.new('defense_pressure'), {'legal': 4.0},
+           {'weak3_own': 0.5, 'risk_degree_own': 0.125}, bias=-4.0)
 
-    # Block 7: remove futile rescue/attack bonuses and summarize useful moves.
-    # This does not simulate the board after a move.
+    # Block 7: both urgent rescue and earlier defense need a locally safe move.
+    # Even this does not prove survival against the opponent's next reply.
     c.begin(7)
     c.relu(c.new('safe_rescue'), {'rescue': 1.0, 'self_atari': -2.0})
-    c.relu(c.new('safe_attack'), {'attack_two': 1.0, 'self_atari': -2.0})
+    c.relu(c.new('early_defense'), {'defense_pressure': 1.0, 'self_atari': -2.0})
     c.ramp(c.new('useful_move'), {'legal': 1.0, 'eye': -1.0, 'self_atari': -1.0,
-                                'territory_own': -1.0, 'territory_opp': -1.0})
+                                'territory_own': -0.25, 'territory_opp': -0.25})
 
     # A positive offset keeps BOTH rails above the model's final ReLU.
     # Paired readers cancel the offset and LayerNorm mean in real arithmetic,
@@ -181,38 +203,47 @@ def program(weights):
     weights['output_norm.bias'][:lanes] = OUTPUT_OFFSET
     c.block = 8
     c.read(weights['point_policy.weight'], 0, {
-        'legal': 32.0, 'capture': 8.0, 'safe_rescue': 5.0, 'safe_attack': 1.25,
+        'legal': 32.0, 'capture': 8.0, 'safe_rescue': 5.0, 'early_defense': 3.0,
+        'attack_pressure': 0.75,
         'self_atari': -7.0, 'eye': -12.0, 'unsupported_contact': -0.8,
-        'n_empty': 0.15, 'n_own': 0.15, 'n_opp': 0.35,
-        'influence_own_4': 0.8, 'influence_opp_4': -0.2,
-        'territory_own': -2.0, 'territory_opp': -1.3,
+        # Equivalent to +0.2*n_empty -0.15*n_own +0.1*n_opp with bias +0.8.
+        'n_own': -0.35, 'n_opp': -0.1,
+        # Short-range crowding versus broader support: no coordinate prior.
+        'influence_own_1': -2.0, 'influence_own_4': 1.0, 'influence_opp_4': -1.0,
+        'territory_own': -1.0, 'territory_opp': -0.75,
     })
-    weights['point_policy.bias'][0] = -32.0
+    weights['point_policy.bias'][0] = -31.2
     c.read(weights['pass_policy.weight'], 0, {
-        'own': 2.0, 'opp': 2.0, 'previous_pass': 0.75, 'useful_move': -4.0,
+        'own': 2.0, 'opp': 2.0, 'previous_pass': 0.25, 'useful_move': -4.0,
         # One legal capture reduces PASS by 2 logit units after mean pooling.
-        'capture': -162.0, 'safe_rescue': -121.5, 'safe_attack': -40.5,
-        'territory_own': 0.5, 'territory_opp': -0.5,
+        'capture': -162.0, 'safe_rescue': -121.5,
+        'early_defense': -81.0, 'attack_pressure': -20.25,
     })
-    weights['pass_policy.bias'][0] = -2.0
+    weights['pass_policy.bias'][0] = -2.5
 
-    # Mover-relative approximate area margin. Undo mean pooling with 81.
-    # Weak stones are discounted by half; territory is only a local estimate.
+    # Reduce soft territory to quarter weight; absence of a safety certificate
+    # no longer removes half a stone. Only positive atari roots get a small
+    # discount, which is not a claim that the whole group is dead.
     margin = {'own': 81.0, 'opp': -81.0,
-              'territory_own': 81.0, 'territory_opp': -81.0,
-              'weak2_own': -40.5, 'weak2_opp': 40.5, 'side': -KOMI}
+              'territory_own': 20.25, 'territory_opp': -20.25,
+              'closed_atari_own': -20.25, 'closed_atari_opp': 20.25, 'side': -KOMI}
     for head in ('value_head', 'score_head'):
         c.read(weights[head + '.0.weight'], 0, margin)
         c.read(weights[head + '.0.weight'], 1, margin, factor=-1.0)
-    weights['value_head.2.weight'][0, :2] = (1.0 / 12.0, -1.0 / 12.0)
-    weights['value_head.2.weight'][2, :2] = (-1.0 / 12.0, 1.0 / 12.0)
+    # WIN/LOSS logits ±clip(m/24, -1.5, 1.5), a symmetric confidence ceiling.
+    # This is an analytic restraint, not statistical calibration.
+    c.read(weights['value_head.0.weight'], 2, margin)
+    c.read(weights['value_head.0.weight'], 3, margin, factor=-1.0)
+    weights['value_head.0.bias'][2:4] = -36.0
+    weights['value_head.2.weight'][0, :4] = np.array([1, -1, -1, 1], np.float32) / 24.0
+    weights['value_head.2.weight'][2, :4] = -weights['value_head.2.weight'][0, :4]
     weights['value_head.2.bias'][1] = -6.0
     weights['score_head.2.weight'][0, :2] = (1.0, -1.0)
 
     # Auxiliary convention of this artifact: [own, neutral, opponent].
     for row, color in ((0, 'own'), (1, 'opp')):
         c.read(weights['ownership_head.0.weight'], row,
-               {color: 1.0, 'territory_' + color: 1.0})
+               {color: 1.0, 'territory_' + color: 0.25})
     weights['ownership_head.2.weight'][0, 0] = 4.0
     weights['ownership_head.2.weight'][2, 1] = 4.0
     weights['ownership_head.2.bias'][1] = 1.0
@@ -223,7 +254,7 @@ def program(weights):
     assert energy_bound < 512.0 and max(c.bounds.values()) < OUTPUT_OFFSET
     assert all(np.isfinite(value).all() for value in weights.values())
     print(json.dumps({
-        'design': 'torus9-paired-register-graph-circuit-v000',
+        'design': 'torus9-positive-capture-graph-circuit-v001',
         'parameters': sum(value.size for value in weights.values()),
         'nonzero_parameters': sum(int(np.count_nonzero(value)) for value in weights.values()),
         'registers': c.registers, 'register_ideal_abs_bounds': c.bounds,
