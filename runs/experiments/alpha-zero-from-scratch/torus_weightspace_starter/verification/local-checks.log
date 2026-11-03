@@ -1,0 +1,29 @@
+test_budgets_and_failed_round_consumption (test_infrastructure.DiagnosticTests) ... ok
+test_different_widths_use_same_mcts (test_infrastructure.DiagnosticTests) ... ok
+test_example_histories_legal (test_infrastructure.DiagnosticTests) ... ok
+test_paired_pass_games_and_watchdog (test_infrastructure.DiagnosticTests) ... ok
+test_positions_mask_activations_and_wdl (test_infrastructure.DiagnosticTests) ... ok
+test_freeze_rejects_missing_evidence_and_wrong_identity (test_infrastructure.ReferenceLockTests) ... ok
+test_all_81_neighbors_equal_referee (test_infrastructure.RulesTests) ... ok
+test_ko_and_superko (test_infrastructure.RulesTests) ... ok
+test_pass_terminal_scoring_dame_komi (test_infrastructure.RulesTests) ... ok
+test_suicide (test_infrastructure.RulesTests) ... ok
+test_wrap_capture_and_liberties (test_infrastructure.RulesTests) ... ok
+test_numpy_writes_and_rejection (test_infrastructure.WeightTests) ... ok
+test_program_snapshot_repeatability_and_bad_writers (test_infrastructure.WeightTests) ... ok
+test_roundtrip_hash_and_no_overwrite (test_infrastructure.WeightTests) ... ok
+test_zero_constructor_and_schema (test_infrastructure.WeightTests) ... ok
+test_zero_pass_never_forwards (test_infrastructure.WeightTests) ... ok
+test_demo_mechanics (test_model.TorusExperimentTests) ... ok
+test_torus_translation_equivariance (test_model.TorusExperimentTests) ... ok
+test_torus_wrap (test_model.TorusExperimentTests) ... ok
+test_zero_genesis (test_model.TorusExperimentTests) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.786s
+
+OK
+{"budget": 10, "session": "/tmp/torus-weightspace-verify.u36iTf/session10"}
+{"budget": 10, "report": "/tmp/torus-weightspace-verify.u36iTf/session10/rounds/001/report.json", "round": 1, "status": "PASS"}
+{"budget": 10, "report": "/tmp/torus-weightspace-verify.u36iTf/session10/rounds/002/report.json", "round": 2, "status": "INVALID"}
+{"status": "PASS", "scope": "infrastructure fixtures only", "output": "/tmp/torus-weightspace-verify.u36iTf"}

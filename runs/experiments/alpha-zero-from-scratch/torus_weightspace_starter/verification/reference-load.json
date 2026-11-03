@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "reference_loaded": true,
+  "reference_parameter_count": 177609,
+  "candidate_tensor_count": 92,
+  "reference_forward_calls": 0,
+  "model_hash": "sha256:a51b5c1f971d51c8337559f888ad96372892d3a2143d4a0456134b44bc6ef9ba",
+  "reproduce": "WSP_PY=/home/codex/projects/gocube-alphazero/.venv/bin/python; use diagnostics.load_reference('reference-lock.json') from experiment cwd"
+}

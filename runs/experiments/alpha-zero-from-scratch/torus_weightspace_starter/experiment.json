@@ -1,0 +1,47 @@
+{
+  "experiment_id": "torus9-weightspace-graph8x120-v0",
+  "topology": "torus9",
+  "board": [
+    9,
+    9
+  ],
+  "candidate": {
+    "depth": 8,
+    "width": 120,
+    "initial_weights": "programmed-from-zero",
+    "input_channels": 5,
+    "heads": [
+      "policy",
+      "wdl",
+      "ownership",
+      "score"
+    ]
+  },
+  "reference": {
+    "selector": "latest-verified-local-arena-reference",
+    "lock": "reference-lock.json",
+    "resolved": "AZ23 lr-B/M269",
+    "komi": 1.5
+  },
+  "evaluation": {
+    "game_budget": 128,
+    "color_swap": true,
+    "start_positions": "same-paired-starts",
+    "mcts_simulations": 64,
+    "search_settings": "reference-lock.json:search",
+    "production_arena_adapter_required": false,
+    "execution": "isolated-cpu-sequential-adapter"
+  },
+  "separation": {
+    "touch_existing_training": false,
+    "modify_golden_checkpoint": false,
+    "experiment_only": true
+  },
+  "pass_budget": [
+    0,
+    10,
+    25,
+    50
+  ],
+  "api_cost_cap_usd": 30
+}
