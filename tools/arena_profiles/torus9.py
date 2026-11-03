@@ -290,7 +290,10 @@ class Torus9ArenaProfile:
             and topology_fingerprint == TORUS9_TOPOLOGY_FINGERPRINT
             and metadata.get("observation_shape") == [5, TORUS9_POINT_COUNT]
         )
-        return legacy or five_channel
+        experimental = (metadata.get("schema") == "weightspace-torus9-experiment-v1"
+                        and metadata.get("architecture", {}).get("architecture_id")
+                        == "experimental-torus9-graphnet8x120-direct-weights-v0")
+        return legacy or five_channel or experimental
 
     def validate_execution_config(self, config: ArenaExecutionConfig) -> None:
         if config.strict_production:
@@ -314,6 +317,15 @@ class Torus9ArenaProfile:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         if not self.matches_metadata(metadata):
             raise ValueError("Checkpoint does not match Torus9 Arena profile")
+        if metadata.get("schema") == "weightspace-torus9-experiment-v1":
+            if not self._five_channel:
+                raise ValueError("Experimental model requires 5CH Arena")
+            from tools.arena_profiles.weightspace import load_weightspace
+            model = load_weightspace(path, metadata)
+            return CheckpointIdentity(path=path, model_hash=model_hash(model),
+                                      artifact_sha256=file_sha256(path),
+                                      architecture_config=dict(metadata["architecture"]),
+                                      metadata=dict(metadata))
         architecture = metadata.get("architecture_config")
         if not isinstance(architecture, Mapping):
             raise ValueError("Torus9 checkpoint architecture metadata is malformed")
@@ -348,6 +360,12 @@ class Torus9ArenaProfile:
         identity: CheckpointIdentity,
         device: torch.device,
     ) -> torch.nn.Module:
+        if identity.metadata.get("schema") == "weightspace-torus9-experiment-v1":
+            from tools.arena_profiles.weightspace import load_weightspace
+            model = load_weightspace(identity.path, identity.metadata)
+            if model_hash(model) != identity.model_hash:
+                raise RuntimeError("Experimental model identity changed")
+            return model.to(device).eval()
         if identity.metadata.get("architecture_id") == M137_FIVE_CHANNEL_ARCHITECTURE_ID:
             try:
                 payload = torch.load(identity.path, map_location=device, weights_only=False)

@@ -372,6 +372,8 @@ def _require_five_channel_checkpoint(node, label):
 def _base_config(parent):
     """Inherit ordinary config, or bind the completed adaptation's replay."""
     effective = parent.effective_config.config
+    if effective.compatibility.get("evaluation_only"):
+        raise ValueError("Evaluation-only checkpoints cannot be training parents")
     if effective.extensions.get("training_driver") == DRIVER:
         config = effective.to_dict()
         # Offline replay is an experiment input, never an inherited training mode.

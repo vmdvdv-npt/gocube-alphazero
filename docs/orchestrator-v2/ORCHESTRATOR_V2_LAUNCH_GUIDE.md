@@ -390,6 +390,19 @@ schedule as the first Policy Surprise comparison:
 разрешаемые до запуска; нельзя ссылаться этим списком на ещё не созданный candidate.
 Для будущих финалов используйте встроенные training/A/B арены.
 
+Экспериментальный model-only Torus9 GraphNet 8×120 можно зарегистрировать только
+для Arena отдельным новым lineage, не изменяя исходный checkpoint:
+
+```bash
+.venv/bin/python -m tools.import_weightspace_arena --checkpoint /absolute/checkpoint.pt \
+  --runs-root /absolute/path/runs --lineage experiment-eval
+```
+
+Команда проверяет sidecar, SHA, тензоры и топологию; селектор для `arenas` —
+`experiment-eval/v001`. Это genesis без replay и optimizer, его нельзя использовать
+как training parent или в winner_selection. Для Arena обязателен обычный `job --check`.
+
+
 ```json
 {
   "schema": "gocube-operator-job-v1",
@@ -534,7 +547,7 @@ Telegram config сохраняется как стандартный `BLOCKED_CO
 маркера ломают contract test и блокируют новый запуск. Старые job продолжают
 исполняться на своём прежнем commit; новую инструкцию читайте вместе с этим pin.
 
-<!-- reviewed-interface-sha256: a2336e5050dc53eecef45821e639944798944d4d28adc6ffb437a883553a1b04 -->
+<!-- reviewed-interface-sha256: f65a4e68c46d3f84539058c85b2163a2f2c2a874566183007e6d3ac96a3b65a7 -->
 
 ## B64 bounded performance audit
 
